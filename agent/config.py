@@ -444,12 +444,6 @@ ENV.var(
     aliases=("ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",),
 )
 ENV.var(
-    "WORKSPACE_SANDBOX_UPDATE_TIMEOUT_SECONDS",
-    "Deadline for the update script when it runs in a run's own sandbox, before the first "
-    "model call. Tighter than the builder's on purpose.",
-    aliases=("ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",),
-)
-ENV.var(
     "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",
     "Deadline for capturing a builder sandbox as a workspace's snapshot.",
     aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),

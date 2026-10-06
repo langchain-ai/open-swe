@@ -12,9 +12,11 @@ import {
   CircleAlert as CircleAlertIcon,
   GitMerge as GitMergeIcon,
   Laptop as LaptopIcon,
+  TriangleAlert as TriangleAlertIcon,
 } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
+import { formatRelativeTime } from "@/lib/utils"
 
 import type {
   AgentPullRequest,
@@ -119,6 +121,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
+  const [dismissedWarning, setDismissedWarning] = useState("")
+  const workspaceWarningKey = JSON.stringify([
+    thread.id,
+    source.kind === "transcript" ? source.workspaceStale : null,
+  ])
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -672,6 +679,36 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   </a>
                 </AlertAction>
               )}
+            </Alert>
+          </div>
+        )}
+        {source.kind === "transcript" && source.workspaceStale && (
+          <div
+            hidden={dismissedWarning === workspaceWarningKey}
+            className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
+          >
+            <Alert variant="warning">
+              <TriangleAlertIcon />
+              <AlertDescription>
+                <span>
+                  The {source.workspaceStale.workspaceName} workspace image this
+                  sandbox started from{" "}
+                  {source.workspaceStale.capturedAt
+                    ? `was captured ${formatRelativeTime(Date.parse(source.workspaceStale.capturedAt))}`
+                    : "has never been refreshed"}
+                  , so its repositories may be out of date. Open SWE continued
+                  anyway and is refreshing the image in the background.
+                </span>
+              </AlertDescription>
+              <AlertAction>
+                <button
+                  type="button"
+                  onClick={() => setDismissedWarning(workspaceWarningKey)}
+                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  Dismiss
+                </button>
+              </AlertAction>
             </Alert>
           </div>
         )}
