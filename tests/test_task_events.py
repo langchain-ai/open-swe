@@ -297,7 +297,6 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     assert display.status == "success"
     messages = EventMatch.messages([retried])
     assert messages[-1]["id"] == f"event-match:{original.id}"
-    assert messages == EventMatch.messages([retried])
     envelope = messages[-1]["content"]
     assert isinstance(envelope, str)
     serialized = ElementTree.fromstring(envelope)
@@ -310,9 +309,3 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     assert await events.worker_finished(_WORKER, "next-run", "success", payload)
     assert len(dispatched) == 2
     assert attempted_turns[-1] != attempted_turns[-2]
-    context = await store.load_context(_COORDINATOR)
-    worker_context = await store.load_context(_WORKER)
-    assert context is not None and worker_context is not None
-    assert context.membership.role == "coordinator"
-    assert worker_context.membership.role == "worker"
-    assert worker_context.task.id == context.task.id

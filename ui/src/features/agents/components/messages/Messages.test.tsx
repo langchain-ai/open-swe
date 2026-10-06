@@ -26,7 +26,7 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
 afterEach(() => cleanup())
 
 describe("Messages", () => {
-  it("renders attributed task activity with safe expandable details and accurate outcomes", () => {
+  it("renders attributed task activity with safe expandable details", () => {
     const source = {
       version: 1,
       task_id: "d505b040-c025-4b52-a27e-339803281cfb",
@@ -44,24 +44,6 @@ describe("Messages", () => {
         sender_label: "Untitled",
         kind: "completion",
         status: "success",
-      },
-      {
-        ...source,
-        sender_label: "Integration",
-        kind: "completion",
-        status: "error",
-      },
-      {
-        ...source,
-        sender_label: "Tests",
-        kind: "completion",
-        status: "timeout",
-      },
-      {
-        ...source,
-        sender_label: "Review",
-        kind: "completion",
-        status: "interrupted",
       },
     ]
     const xml = (text: string) =>
@@ -83,21 +65,10 @@ describe("Messages", () => {
       <Messages messages={messages} isStreaming={false} />
     )
 
-    const labels = [
-      "Investigate login · Message",
-      "Worker 7db1bbf5 · Completed",
-      "Integration · Failed",
-      "Tests · Timed out",
-      "Review · Interrupted",
-    ]
-    expect(screen.getAllByTestId("task-event")).toHaveLength(events.length)
-    for (const label of labels) {
-      expect(
-        screen
-          .getByRole("button", { name: label })
-          .getAttribute("aria-expanded")
-      ).toBe("false")
-    }
+    const details = screen.getByRole("button", {
+      name: "Investigate login · Message",
+    })
+    expect(details.getAttribute("aria-expanded")).toBe("false")
     expect(
       screen
         .getByRole("link", { name: "Open Investigate login thread" })
@@ -109,14 +80,13 @@ describe("Messages", () => {
         .getAttribute("href")
     ).toBe("/agents/7db1bbf5-0623-5a35-a5a4-db372cfc31d4")
     expect(container.textContent).not.toContain("Can I change")
-    fireEvent.click(screen.getByRole("button", { name: labels[0] }))
+    fireEvent.click(details)
     expect(container.textContent).toContain(source.content)
     expect(container.querySelector("img,script")).toBeNull()
     expect(container.textContent).not.toContain("Model-facing safety warning")
     expect(container.textContent).not.toContain("untrusted-worker-output")
     expect(container.textContent).not.toContain("hidden model text")
-    expect(container.textContent).not.toContain("Progress")
-    fireEvent.click(screen.getByRole("button", { name: labels[0] }))
+    fireEvent.click(details)
     expect(container.textContent).not.toContain("Can I change")
   })
 

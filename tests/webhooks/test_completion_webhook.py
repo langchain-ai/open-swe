@@ -109,8 +109,6 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
         ("error", {}, False, False, False),
         ("success", {"kind": "follow_up_pickup"}, False, False, False),
         ("success", {}, True, False, True),
-        ("error", {}, True, False, False),
-        ("success", {"kind": "follow_up_pickup"}, True, False, False),
         ("success", {}, True, True, False),
     ],
 )

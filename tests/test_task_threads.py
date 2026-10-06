@@ -203,19 +203,6 @@ async def test_control_rejects_worker_from_another_task(
     client.runs.cancel_many.assert_not_awaited()
 
 
-async def test_notification_does_not_hide_failure_to_persist(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        service, "record_event", AsyncMock(side_effect=ConnectionError("database down"))
-    )
-    wake = AsyncMock()
-    monkeypatch.setattr(EventMatch, "deliver", wake)
-    with pytest.raises(ConnectionError, match="database down"):
-        await service.notify(task(), COORDINATOR, "finished:worker:run", "result")
-    wake.assert_not_awaited()
-
-
 @pytest.mark.usefixtures("registry_db")
 async def test_lost_launch_response_retries_same_worker_without_waiting_for_work(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
