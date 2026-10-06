@@ -50,10 +50,8 @@ const TITLES = {
   pinnedRepo: "E2E Workspace Pinned repository chat",
 } as const;
 
-const SCHEDULE_IDS = {
-  daily: "e2e-daily-health",
-  weekly: "e2e-weekly-cleanup",
-} as const;
+// Filled in by seedSchedules: the dashboard API assigns automation ids.
+const SCHEDULE_IDS = { daily: "", weekly: "" };
 
 interface ThreadSeed {
   id: string;
@@ -294,73 +292,48 @@ async function seedThreads(
 }
 
 async function seedSchedules(request: APIRequestContext) {
-  const now = new Date().toISOString();
+  const login = await request.post("/control/login", { data: ADMIN_USER });
+  expect(login.ok(), await login.text()).toBeTruthy();
   const schedules = [
     {
-      id: SCHEDULE_IDS.daily,
-      name: "E2E Daily Health",
-      prompt: "Check repository health.",
-      schedule: "0 9 * * 1-5",
-      repo: null,
-      slack_channel_id: null,
-      slack_notification_mode: "always",
-      model: null,
-      effort: null,
+      key: "daily" as const,
+      body: {
+        workspace: "default",
+        name: "E2E Daily Health",
+        prompt: "Check repository health.",
+        triggers: [{ kind: "schedule", cron: "0 9 * * 1-5" }],
+        slack_notification_mode: "always",
+      },
       enabled: true,
-      cron_id: "e2e-cron-daily-health",
-      created_by: USER.login,
-      user_email: USER.email,
-      created_at: now,
-      updated_at: now,
     },
     {
-      id: SCHEDULE_IDS.weekly,
-      name: "E2E Weekly Cleanup",
-      prompt: "Clean up stale work.",
-      schedule: "0 10 * * 1",
-      repo: { owner: "acme", name: "beta" },
-      slack_channel_id: null,
-      slack_notification_mode: "on_action",
-      model: null,
-      effort: null,
+      key: "weekly" as const,
+      body: {
+        workspace: "default",
+        name: "E2E Weekly Cleanup",
+        prompt: "Clean up stale work.",
+        triggers: [{ kind: "schedule", cron: "0 10 * * 1", repo: "acme/beta" }],
+        slack_notification_mode: "on_action",
+      },
       enabled: false,
-      cron_id: "e2e-cron-weekly-cleanup",
-      created_by: USER.login,
-      user_email: USER.email,
-      created_at: now,
-      updated_at: now,
     },
   ];
 
   for (const schedule of schedules) {
-    const response = await request.put("/store/items", {
-      data: {
-        namespace: ["agent_schedules"],
-        key: schedule.id,
-        value: schedule,
-      },
+    const response = await request.post("/dashboard/api/schedules", {
+      data: schedule.body,
+      headers: SAME_ORIGIN_HEADERS,
     });
     expect(response.ok(), await response.text()).toBeTruthy();
-    createdScheduleIds.add(schedule.id);
-  }
-}
-
-async function deleteScheduleThreads(
-  request: APIRequestContext,
-  scheduleId: string,
-) {
-  for (;;) {
-    const searchResponse = await request.post("/threads/search", {
-      data: { metadata: { schedule_id: scheduleId }, limit: 100, offset: 0 },
-    });
-    expect(searchResponse.ok(), await searchResponse.text()).toBeTruthy();
-    const threads = (await searchResponse.json()) as Array<{
-      thread_id: string;
-    }>;
-    if (threads.length === 0) return;
-    for (const thread of threads) {
-      const response = await request.delete(`/threads/${thread.thread_id}`);
-      expect([200, 204, 404]).toContain(response.status());
+    const { id } = (await response.json()) as { id: string };
+    SCHEDULE_IDS[schedule.key] = id;
+    createdScheduleIds.add(id);
+    if (!schedule.enabled) {
+      const paused = await request.patch(`/dashboard/api/schedules/${id}`, {
+        data: { enabled: false },
+        headers: SAME_ORIGIN_HEADERS,
+      });
+      expect(paused.ok(), await paused.text()).toBeTruthy();
     }
   }
 }
@@ -374,10 +347,15 @@ async function cleanupFixtures(request: APIRequestContext) {
     const response = await request.delete(`/threads/${threadId}`);
     expect([200, 204, 404]).toContain(response.status());
   }
+  if (createdScheduleIds.size > 0) {
+    const login = await request.post("/control/login", { data: ADMIN_USER });
+    expect(login.ok(), await login.text()).toBeTruthy();
+  }
   for (const scheduleId of createdScheduleIds) {
-    const response = await request.delete("/store/items", {
-      data: { namespace: ["agent_schedules"], key: scheduleId },
-    });
+    const response = await request.delete(
+      `/dashboard/api/schedules/${scheduleId}`,
+      { headers: SAME_ORIGIN_HEADERS },
+    );
     expect([200, 204, 404]).toContain(response.status());
   }
   createdThreadIds.clear();
@@ -725,10 +703,8 @@ test.describe("automation run history", () => {
     page,
     request,
   }) => {
-    await deleteScheduleThreads(request, SCHEDULE_IDS.daily);
-    await deleteScheduleThreads(request, SCHEDULE_IDS.weekly);
-    await seedThreads(request, [...workspaceThreads(), ...automationThreads()]);
     await seedSchedules(request);
+    await seedThreads(request, [...workspaceThreads(), ...automationThreads()]);
     const loginResponse = await page.request.post("/control/login", {
       data: ADMIN_USER,
     });

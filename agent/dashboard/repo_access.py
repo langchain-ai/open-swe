@@ -1,5 +1,6 @@
 """GitHub repository access checks for dashboard actions."""
 
+import logging
 from datetime import timedelta
 
 import httpx2
@@ -9,6 +10,8 @@ from agent.dashboard.profiles import get_valid_access_token
 from agent.github.app import get_github_app_installation_token
 from agent.review.styles import normalize_repo_full_name
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
+
+logger = logging.getLogger(__name__)
 
 # Bounds how long a user who lost GitHub access can keep reading App-token data.
 REPO_ACCESS_FRESH_FOR = timedelta(seconds=30)
@@ -114,3 +117,34 @@ async def repo_config_for_workspace(full_name: str | None) -> dict[str, str] | N
     await require_repo_access_for_workspace(normalized)
     owner, name = normalized.split("/", 1)
     return {"owner": owner, "name": name}
+
+
+async def repo_is_private(full_name: str) -> bool | None:
+    """Whether ``full_name`` is private, read with the workspace GitHub App; ``None`` if unknown."""
+    token = await get_github_app_installation_token()
+    if not token:
+        return None
+    owner, name = normalize_repo_full_name(full_name).split("/", 1)
+    try:
+        async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+            response = await client.get(
+                f"https://api.github.com/repos/{owner}/{name}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+    except httpx2.HTTPError:
+        logger.warning(
+            "Could not read repository visibility", extra={"repository": full_name}, exc_info=True
+        )
+        return None
+    if response.status_code != 200:
+        logger.warning(
+            "Could not read repository visibility",
+            extra={"repository": full_name, "github_status": response.status_code},
+        )
+        return None
+    private = response.json().get("private")
+    return private if isinstance(private, bool) else None
