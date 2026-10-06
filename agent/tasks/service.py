@@ -239,6 +239,8 @@ async def launch_worker(
             "base_branch",
             "branch_prefix",
             "sandbox_id",
+            "sandbox_kind",
+            "sandbox_bridge_client",
             SANDBOX_PROXY_CONFIG_METADATA_KEY,
             GITHUB_TOKEN_REPOSITORIES_KEY,
             PARTICIPANT_LOGINS_KEY,

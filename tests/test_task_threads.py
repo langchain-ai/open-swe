@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from agent.database import postgres
 from agent.tasks import presentation, service, store
 from agent.tasks.presentation import TaskEventMetadata
-from agent.threads import creation
+from agent.threads import access, creation, handlers
 from agent.users import User, UserPreferences
 from agent.webhooks import event_matches
 from agent.webhooks.event_matches import EventMatch
@@ -154,6 +154,37 @@ async def test_task_owner_still_needs_admin_permission(client: MagicMock) -> Non
     with pytest.raises(HTTPException) as error:
         await service.authorized_metadata(service.Actor(COORDINATOR, OWNER))
     assert error.value.status_code == 403
+
+
+async def test_desktop_worker_cannot_be_shared(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.metadata[COORDINATOR].update(
+        visibility="private",
+        sandbox_id="bridge:desktop",
+        sandbox_kind="bridge",
+        sandbox_bridge_client="desktop",
+    )
+    current_task = task()
+    delegation = store.TaskDelegation(
+        worker_thread_id=str(uuid4()),
+        task_id=current_task.id,
+        coordinator_thread_id=COORDINATOR,
+        instructions="Fix login",
+        model=MODEL,
+        effort="low",
+    )
+    monkeypatch.setattr(service, "record_event", AsyncMock())
+    monkeypatch.setattr(EventMatch, "deliver", AsyncMock())
+    for module in (access, handlers):
+        monkeypatch.setattr(module, "langgraph_client", lambda: client)
+
+    await service.launch_worker(current_task, delegation, client.metadata[COORDINATOR])
+
+    with pytest.raises(HTTPException, match="owner's Mac") as error:
+        await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
+    assert error.value.status_code == 409
+    client.threads.update.assert_not_called()
 
 
 async def test_worker_cannot_spawn_siblings(
