@@ -8,6 +8,7 @@ import asyncio
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Literal
 
 import httpx
@@ -40,6 +41,40 @@ IN_PROGRESS: frozenset[RevisionStatus] = frozenset(
 
 class DeployError(Exception):
     """The preview revision did not reach DEPLOYED."""
+
+
+class SupersededDeploy(Exception):
+    """The preview branch no longer points to the published commit."""
+
+
+async def preview_sha() -> str:
+    process = await asyncio.create_subprocess_exec(
+        "git",
+        "ls-remote",
+        "--exit-code",
+        "origin",
+        "refs/heads/preview",
+        cwd=Path(__file__).resolve().parent.parent,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+    except TimeoutError as exc:
+        process.kill()
+        await process.communicate()
+        raise DeployError("timed out reading the preview branch") from exc
+    if process.returncode:
+        raise DeployError(f"could not read the preview branch: {stderr.decode().strip()}")
+    fields = stdout.decode().split()
+    if (
+        len(fields) != 2
+        or fields[1] != "refs/heads/preview"
+        or len(fields[0]) != 40
+        or any(character not in "0123456789abcdef" for character in fields[0])
+    ):
+        raise DeployError("invalid preview branch response")
+    return fields[0]
 
 
 class SourceRevisionConfig(BaseModel):
@@ -79,10 +114,19 @@ class Deployer:
         self.expected_sha = expected_sha
         self.deadline = time.monotonic() + TIMEOUT_SECONDS
 
+    async def check_superseded(self) -> None:
+        current_sha = await preview_sha()
+        if current_sha != self.expected_sha:
+            raise SupersededDeploy(
+                f"preview branch moved from {self.expected_sha} to {current_sha}; "
+                "this run is superseded, replacement deployment not verified"
+            )
+
     async def wait_for_revision(self) -> Revision:
         print(f"waiting for automatic deployment of {self.expected_sha}", flush=True)
         offset = 0
         while time.monotonic() < self.deadline:
+            await self.check_superseded()
             response = await self.client.get(
                 f"{self.path}/revisions", params={"limit": 100, "offset": offset}
             )
@@ -107,6 +151,7 @@ class Deployer:
         status = revision.status
         print(f"revision {revision.id}: {status}", flush=True)
         while revision.status in IN_PROGRESS:
+            await self.check_superseded()
             if time.monotonic() > self.deadline:
                 raise DeployError(f"revision {revision.id} still {revision.status} after timeout")
             await asyncio.sleep(POLL_SECONDS)
@@ -137,7 +182,13 @@ class Deployer:
         print("::endgroup::", flush=True)
 
     async def deploy(self) -> None:
-        revision = await self.settle(await self.wait_for_revision())
+        try:
+            revision = await self.settle(await self.wait_for_revision())
+            if revision.status in {"INTERRUPTED", "SKIPPED"}:
+                await self.check_superseded()
+        except SupersededDeploy as exc:
+            print(f"::warning::{exc}", flush=True)
+            return
         if revision.status != "DEPLOYED":
             await self.print_logs(revision)
             detail = f": {revision.status_message}" if revision.status_message else ""
