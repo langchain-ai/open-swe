@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
+from agent.human_review.completed_reviews import CompletedReview
 from agent.review_guide.launch import notify_pr_updated
 from agent.schedules import store as schedules
 from agent.webhooks import common
@@ -174,6 +175,8 @@ async def github_webhook(
     if event_type == "pull_request_review" and payload.get("action") in {"submitted", "dismissed"}:
         # Any reviewer's verdict can complete a review request, registered with Open SWE or not.
         background_tasks.add_task(service.settle_human_reviews, payload)
+        if payload.get("action") == "submitted":
+            background_tasks.add_task(CompletedReview.record, payload)
 
     if is_issue_event:
         action = payload.get("action", "")

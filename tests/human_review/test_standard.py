@@ -99,7 +99,7 @@ def test_a_failing_check_github_does_not_require_does_not_block_the_request() ->
 
 @pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
 async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expected: str) -> None:
-    from agent.human_review.standard import run_deadline
+    from agent.human_review.standard import AutoAssignResult, run_deadline
 
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
     request = HumanReviewRequest(
@@ -115,7 +115,10 @@ async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expecte
         patch("agent.human_review.standard._assignment_minutes", AsyncMock(return_value=minutes)),
         patch("agent.human_review.standard._schedule", AsyncMock(return_value=True)),
         patch("agent.human_review.standard._github_approvers", AsyncMock(return_value=[])),
-        patch("agent.human_review.standard.start_auto_assign", AsyncMock(return_value=True)),
+        patch(
+            "agent.human_review.standard.start_auto_assign",
+            AsyncMock(return_value=AutoAssignResult("woken")),
+        ),
     ):
         assert await run_deadline(str(request.id), "unclaimed") == {"status": expected}
 
