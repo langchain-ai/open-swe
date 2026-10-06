@@ -239,11 +239,32 @@ export type GitHubTriggerEvent =
   | "pull_request.closed"
   | "pull_request.merged"
 
+export type SlackTriggerEvent = "message.posted"
+export type SlackTriggerSenders = "anyone" | "people" | "bots"
+export type LinearTriggerEvent = "issue.created" | "issue.labeled"
+
 /** One way an automation fires; `kind` names the provider, the rest are its filters. */
 export type AutomationTriggerConfig =
-  /** `repo` is where runs start: a cron carries no event to say. */
-  | { kind: "schedule"; cron: string; repo?: string | null }
+  | { kind: "schedule"; cron: string }
   | { kind: "github"; repo: string; events: Array<GitHubTriggerEvent> }
+  | {
+      kind: "slack"
+      channel: string
+      events: Array<SlackTriggerEvent>
+      senders?: SlackTriggerSenders
+      /** Case-insensitive regular expression the message text must match. */
+      match?: string | null
+      max_runs_per_hour?: number | null
+    }
+  | {
+      kind: "linear"
+      /** Team key, e.g. ENG. */
+      team: string
+      events: Array<LinearTriggerEvent>
+      labels?: Array<string>
+      project?: string | null
+      max_runs_per_hour?: number | null
+    }
 
 export type AutomationTriggerProvider = AutomationTriggerConfig["kind"]
 
@@ -257,6 +278,19 @@ export const AUTOMATION_EVENT_PROVIDERS = {
       "pull_request.closed": "PR closed",
       "pull_request.merged": "PR merged",
     } satisfies Record<GitHubTriggerEvent, string>,
+  },
+  slack: {
+    label: "Slack",
+    events: {
+      "message.posted": "Message posted",
+    } satisfies Record<SlackTriggerEvent, string>,
+  },
+  linear: {
+    label: "Linear",
+    events: {
+      "issue.created": "Issue created",
+      "issue.labeled": "Label added",
+    } satisfies Record<LinearTriggerEvent, string>,
   },
 } as const
 

@@ -31,6 +31,7 @@ from agent.dashboard.repo_access import (
     require_repo_access_for_workspace,
 )
 from agent.dashboard.workspace_settings import get_workspace_settings
+from agent.database import postgres
 from agent.database.postgres import transaction
 from agent.dispatch import create_durable_run
 from agent.github.comments import fence_github_comment_body
@@ -41,12 +42,14 @@ from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
 from agent.review.styles import normalize_repo_full_name
 from agent.run_config import RunConfig
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     bind_slack_thread_id,
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
 from agent.slack.dm import note_for_concierge, open_dm
+from agent.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
@@ -79,6 +82,21 @@ GITHUB_EVENT_DESCRIPTIONS: dict[GitHubEvent, str] = {
     "pull_request.closed": "a pull request was closed",
     "pull_request.merged": "a pull request was merged",
 }
+SlackTriggerEvent = Literal["message.posted"]
+SLACK_EVENT_DESCRIPTIONS: dict[SlackTriggerEvent, str] = {
+    "message.posted": "a message was posted",
+}
+SlackSenders = Literal["anyone", "people", "bots"]
+_SLACK_TRIGGER_CHANNEL_RE = re.compile(r"^[CG][A-Z0-9]{8,}$")
+_SLACK_MESSAGE_MAX_CHARS = 8_000
+LinearTriggerEvent = Literal["issue.created", "issue.labeled"]
+LINEAR_EVENT_DESCRIPTIONS: dict[LinearTriggerEvent, str] = {
+    "issue.created": "an issue was created",
+    "issue.labeled": "a label was added to an issue",
+}
+_LINEAR_TEAM_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,9}$")
+_LINEAR_DESCRIPTION_MAX_CHARS = 8_000
+_RATE_WINDOW = timedelta(hours=1)
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
 _NEW_CRON_GRACE = timedelta(minutes=5)
@@ -112,18 +130,11 @@ def _normalized_repo(value: str) -> str:
 class ScheduleTrigger(BaseModel):
     kind: Literal["schedule"] = "schedule"
     cron: str = Field(min_length=1, max_length=120)
-    # A cron carries no event to say where to work, so runs start here.
-    repo: str | None = None
 
     @field_validator("cron")
     @classmethod
     def _valid_cron(cls, value: str) -> str:
         return normalize_cron_schedule(value)
-
-    @field_validator("repo")
-    @classmethod
-    def _valid_repo(cls, value: str | None) -> str | None:
-        return _normalized_repo(value) if value else None
 
 
 class GitHubTrigger(BaseModel):
@@ -139,7 +150,70 @@ class GitHubTrigger(BaseModel):
         return _normalized_repo(value)
 
 
-TriggerConfig = Annotated[ScheduleTrigger | GitHubTrigger, Field(discriminator="kind")]
+class SlackTrigger(BaseModel):
+    """Fires on messages in one Slack channel Open SWE is a member of."""
+
+    kind: Literal["slack"] = "slack"
+    channel: str = Field(min_length=9, max_length=40)
+    events: list[SlackTriggerEvent] = Field(min_length=1)
+    senders: SlackSenders = "anyone"
+    # Case-insensitive regular expression the message text must match.
+    match: str | None = Field(default=None, max_length=200)
+    max_runs_per_hour: int | None = Field(default=None, ge=1, le=100)
+
+    @field_validator("channel")
+    @classmethod
+    def _valid_channel(cls, value: str) -> str:
+        channel = value.strip().upper()
+        if not _SLACK_TRIGGER_CHANNEL_RE.fullmatch(channel):
+            raise ValueError("channel must be a Slack channel ID starting with C or G")
+        return channel
+
+    @field_validator("match")
+    @classmethod
+    def _valid_match(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError(f"match is not a valid regular expression: {exc}") from exc
+        return value
+
+
+class LinearTrigger(BaseModel):
+    """Fires on issue events in one Linear team."""
+
+    kind: Literal["linear"] = "linear"
+    team: str = Field(min_length=1, max_length=10)
+    events: list[LinearTriggerEvent] = Field(min_length=1)
+    # Issue labels, by name: an issue must carry one, or for issue.labeled, gain one.
+    labels: list[str] = Field(default_factory=list, max_length=20)
+    project: str | None = Field(default=None, max_length=200)
+    max_runs_per_hour: int | None = Field(default=None, ge=1, le=100)
+
+    @field_validator("team")
+    @classmethod
+    def _valid_team(cls, value: str) -> str:
+        team = value.strip().upper()
+        if not _LINEAR_TEAM_KEY_RE.fullmatch(team):
+            raise ValueError("team must be a Linear team key, such as ENG")
+        return team
+
+    @field_validator("labels")
+    @classmethod
+    def _valid_labels(cls, value: list[str]) -> list[str]:
+        return [label.strip() for label in value if label.strip()]
+
+    @field_validator("project")
+    @classmethod
+    def _valid_project(cls, value: str | None) -> str | None:
+        return value.strip() if value and value.strip() else None
+
+
+TriggerConfig = Annotated[
+    ScheduleTrigger | GitHubTrigger | SlackTrigger | LinearTrigger, Field(discriminator="kind")
+]
 _TRIGGERS = TypeAdapter(list[TriggerConfig])
 
 
@@ -299,7 +373,13 @@ _SELECT_AUTOMATIONS = """
 
 
 def _match_key(trigger: TriggerConfig) -> str | None:
-    return trigger.repo.lower() if isinstance(trigger, GitHubTrigger) else None
+    if isinstance(trigger, GitHubTrigger):
+        return trigger.repo.lower()
+    if isinstance(trigger, SlackTrigger):
+        return trigger.channel
+    if isinstance(trigger, LinearTrigger):
+        return trigger.team
+    return None
 
 
 async def _load_records(
@@ -553,13 +633,30 @@ def _parsed_triggers(record: dict[str, Any]) -> list[TriggerConfig]:
 async def _checked_triggers(
     triggers: Sequence[TriggerConfig], login: str, *, use_workspace_credentials: bool
 ) -> list[TriggerConfig]:
-    """``triggers`` once whoever configures them can reach every repository they name."""
-    for repo in {trigger.repo for trigger in triggers if trigger.repo}:
+    """``triggers`` once whoever configures them can reach every repository they name,
+    and Open SWE can read every Slack channel they watch."""
+    repos = {trigger.repo for trigger in triggers if isinstance(trigger, GitHubTrigger)}
+    for repo in repos:
         if use_workspace_credentials:
             await repo_config_for_workspace(repo)
         else:
             await repo_config_for_user(login, repo)
+    for channel in sorted({t.channel for t in triggers if isinstance(t, SlackTrigger)}):
+        await _require_watchable_slack_channel(channel)
     return list(triggers)
+
+
+async def _require_watchable_slack_channel(channel_id: str) -> None:
+    """Refuse a channel whose messages Slack doesn't deliver to Open SWE."""
+    channel = await SlackChannel.load(channel_id, use_cache=False)
+    if channel is None:
+        raise HTTPException(422, f"Slack channel {channel_id} could not be read")
+    if not channel.context.allows_operations:
+        raise HTTPException(422, "externally shared Slack channels can't trigger automations")
+    if channel.payload.get("is_member") is not True:
+        raise HTTPException(
+            422, f"invite Open SWE to #{channel.name or channel_id} so it sees its messages"
+        )
 
 
 async def _refuse_public_events_for_admin(
@@ -588,18 +685,18 @@ def _repo_dict(full_name: str | None) -> dict[str, str] | None:
     return {"owner": owner, "name": name}
 
 
-def _trigger_repo(record: dict[str, Any], trigger_id: str | None = None) -> str | None:
-    """The repository a run starts in: the named trigger's, else the first one with a repo."""
-    triggers = record.get("triggers") or []
-    for trigger in triggers:
-        if trigger_id is not None and trigger.get("id") == trigger_id:
-            repo = (trigger.get("config") or {}).get("repo")
-            return repo if isinstance(repo, str) and repo else None
-    for trigger in sorted(triggers, key=lambda t: t.get("kind") != "schedule"):
+def _test_run_repo(record: dict[str, Any]) -> str | None:
+    """The repository a test run starts in: its first GitHub trigger's, which events would use."""
+    for trigger in record.get("triggers") or []:
         repo = (trigger.get("config") or {}).get("repo")
-        if isinstance(repo, str) and repo:
+        if trigger.get("kind") == "github" and isinstance(repo, str) and repo:
             return repo
     return None
+
+
+def _work_in_repo(prompt_text: str, repo: str | None) -> str:
+    """``prompt_text`` naming ``repo``, for a schedule that used to start runs there."""
+    return f"{prompt_text}\n\nWork in the `{repo}` repository." if repo else prompt_text
 
 
 async def create_agent_schedule(
@@ -815,7 +912,7 @@ def _legacy_triggers(record: dict[str, Any]) -> tuple[list[TriggerConfig], str |
     repo = _repo_full_name(record.get("repo") if isinstance(record.get("repo"), dict) else None)
     if trigger == "schedule":
         schedule = record.get("schedule")
-        return ([ScheduleTrigger(cron=schedule, repo=repo)] if isinstance(schedule, str) else []), (
+        return ([ScheduleTrigger(cron=schedule)] if isinstance(schedule, str) else []), (
             record.get("cron_id") if isinstance(record.get("cron_id"), str) else None
         )
     # Older releases only had this one event trigger, which always named a repo.
@@ -865,7 +962,15 @@ async def _import_store_automation(
                 "id": uuid.UUID(schedule_id),
                 "workspace_id": workspace_id,
                 "name": str(record.get("name") or _derive_name(str(record.get("prompt") or ""))),
-                "prompt": str(record.get("prompt") or ""),
+                # Schedules no longer name a repository; keep where runs used to start.
+                "prompt": _work_in_repo(
+                    str(record.get("prompt") or ""),
+                    None
+                    if record.get("trigger") not in (None, "schedule")
+                    else _repo_full_name(
+                        record.get("repo") if isinstance(record.get("repo"), dict) else None
+                    ),
+                ),
                 "slack_channel_id": record.get("slack_channel_id"),
                 "slack_notification_mode": _slack_notification_mode(record),
                 "admin_thread": record.get("admin_thread") is True,
@@ -1464,12 +1569,344 @@ async def launch_github_issue_automations(
     return await launch_github_automations("issues", {"action": "opened", **payload}, delivery_id)
 
 
+_SLACK_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_message)", re.IGNORECASE)
+# Message subtypes that are someone posting, as opposed to edits, joins, or deletions.
+_SLACK_POST_SUBTYPES = frozenset({"", "bot_message", "file_share"})
+
+
+def _slack_message_text(event: SlackEvent) -> str:
+    """The text a message shows, with alert attachments (where bots put their content)."""
+    parts = [event.text or ""]
+    for attachment in event.attachments:
+        for field in ("pretext", "title", "text", "fallback"):
+            value = attachment.get(field)
+            if isinstance(value, str) and value.strip() and value not in parts:
+                parts.append(value)
+    return "\n".join(part for part in parts if part.strip())
+
+
+def _slack_trigger_fires(
+    config: dict[str, Any], channel: str, *, from_bot: bool, text: str
+) -> bool:
+    if config.get("channel") != channel or "message.posted" not in (config.get("events") or []):
+        return False
+    senders = config.get("senders") or "anyone"
+    if (senders == "bots" and not from_bot) or (senders == "people" and from_bot):
+        return False
+    pattern = config.get("match")
+    return not pattern or re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def _slack_event_prompt(
+    record: dict[str, Any], channel: SlackChannelContext, event: SlackEvent, text: str
+) -> str:
+    author = f"bot {event.bot_id}" if event.is_from_bot else f"<@{event.resolve_user_id()}>"
+    message = text[:_SLACK_MESSAGE_MAX_CHARS]
+    return prompt(
+        "runs/slack-automation-event",
+        prompt=record["prompt"],
+        event_description=SLACK_EVENT_DESCRIPTIONS["message.posted"],
+        channel=f"#{channel.label}" if channel.label else channel.id,
+        channel_id=channel.id,
+        author=author,
+        ts=event.ts,
+        message=_SLACK_FENCE_RE.sub(r"&lt;\1", message),
+    )
+
+
+async def slack_channel_watched(channel_id: str) -> bool:
+    """Whether an enabled automation has a Slack trigger on ``channel_id``."""
+    if not postgres.configured():
+        return False
+    try:
+        async with transaction() as conn:
+            row = await conn.execute(
+                text(
+                    "SELECT 1 FROM automation_trigger t JOIN automation a "
+                    "ON a.id = t.automation_id WHERE t.kind = 'slack' "
+                    "AND t.match_key = :channel AND a.enabled LIMIT 1"
+                ),
+                {"channel": channel_id.upper()},
+            )
+            return row.first() is not None
+    except Exception:
+        logger.exception(
+            "Could not check for Slack automations", extra={"slack_channel": channel_id}
+        )
+        return False
+
+
+async def launch_slack_automations(
+    envelope: SlackEventEnvelope, channel: SlackChannelContext, bot_user_id: str
+) -> list[dict[str, Any]]:
+    """Run every automation a posted Slack message triggers, each at most once per message."""
+    event = envelope.event
+    if (
+        event is None
+        or event.type != "message"
+        or event.subtype not in _SLACK_POST_SUBTYPES
+        or (event.thread_ts and event.thread_ts != event.ts)
+        or not event.ts
+    ):
+        return []
+    channel_id = event.resolve_channel_id().upper()
+    if not _SLACK_TRIGGER_CHANNEL_RE.fullmatch(channel_id) or not channel.allows_operations:
+        return []
+    user = event.resolve_user_id()
+    if (bot_user_id and user == bot_user_id) or (
+        event.app_id and event.app_id == envelope.api_app_id
+    ):
+        return []
+    async with transaction() as conn:
+        records = await _load_records(
+            conn,
+            "WHERE a.enabled AND a.id IN (SELECT automation_id FROM automation_trigger "
+            "WHERE kind = 'slack' AND match_key = :channel)",
+            {"channel": channel_id},
+        )
+    text = _slack_message_text(event)
+    results: list[dict[str, Any]] = []
+    for record in records:
+        schedule_id = record["id"]
+        fired = next(
+            (
+                trigger.get("config") or {}
+                for trigger in record.get("triggers") or []
+                if trigger.get("kind") == "slack"
+                and _slack_trigger_fires(
+                    trigger.get("config") or {},
+                    channel_id,
+                    from_bot=event.is_from_bot,
+                    text=text,
+                )
+            ),
+            None,
+        )
+        if fired is None:
+            continue
+        claim_prefix = f"{schedule_id}:{channel_id}:"
+        cap = fired.get("max_runs_per_hour")
+        if isinstance(cap, int) and (
+            await event_claims.count_recent(
+                _DELIVERY_CLAIM_SCOPE, claim_prefix, within=_RATE_WINDOW
+            )
+            >= cap
+        ):
+            logger.warning(
+                "Slack automation hit its hourly run limit",
+                extra={"schedule_id": schedule_id, "slack_channel": channel_id},
+            )
+            continue
+        claim_key = f"{claim_prefix}{event.ts}"
+        if not await event_claims.claim(_DELIVERY_CLAIM_SCOPE, claim_key, ttl=_DELIVERY_CLAIM_TTL):
+            continue
+        try:
+            result = await _launch_agent_schedule_record(
+                record, repo=None, prompt=_slack_event_prompt(record, channel, event, text)
+            )
+        except Exception:
+            logger.exception(
+                "Failed to launch Slack automation", extra={"schedule_id": schedule_id}
+            )
+            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+            continue
+        if result.get("status") != "started":
+            logger.error(
+                "Slack automation did not start",
+                extra={"schedule_id": schedule_id, "launch_status": result.get("status")},
+            )
+            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+        results.append(result)
+    return results
+
+
+def _named(items: object) -> dict[str, str]:
+    """``{id: name}`` for a Linear list of ``{id, name}`` objects."""
+    if not isinstance(items, list):
+        return {}
+    return {
+        str(item["id"]): str(item.get("name") or "")
+        for item in items
+        if isinstance(item, dict) and item.get("id")
+    }
+
+
+def _linear_issue_events(payload: dict[str, Any]) -> tuple[set[LinearTriggerEvent], set[str]]:
+    """The trigger events one Linear delivery stands for, and the label names it added."""
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    if payload.get("type") != "Issue" or not isinstance(data, dict):
+        return set(), set()
+    if payload.get("action") == "create":
+        return {"issue.created"}, set()
+    updated_from = payload.get("updatedFrom")
+    if payload.get("action") != "update" or not isinstance(updated_from, dict):
+        return set(), set()
+    before = updated_from.get("labelIds")
+    after = data.get("labelIds")
+    if not isinstance(before, list) or not isinstance(after, list):
+        return set(), set()
+    added = {str(label) for label in after} - {str(label) for label in before}
+    names = _named(data.get("labels"))
+    added_names = {names.get(label_id, "") for label_id in added} - {""}
+    return ({"issue.labeled"}, added_names) if added else (set(), set())
+
+
+def _linear_team_key(data: dict[str, Any]) -> str:
+    team = data.get("team")
+    if isinstance(team, dict) and isinstance(team.get("key"), str) and team["key"]:
+        return team["key"].upper()
+    identifier = data.get("identifier")
+    if isinstance(identifier, str) and "-" in identifier:
+        return identifier.rsplit("-", 1)[0].upper()
+    return ""
+
+
+def _linear_trigger_fires(
+    config: dict[str, Any],
+    team: str,
+    event: LinearTriggerEvent,
+    *,
+    labels: set[str],
+    added_labels: set[str],
+    project: str,
+) -> bool:
+    if config.get("team") != team or event not in (config.get("events") or []):
+        return False
+    wanted_project = config.get("project")
+    if wanted_project and wanted_project.lower() != project.lower():
+        return False
+    wanted = {label.lower() for label in config.get("labels") or []}
+    if not wanted:
+        return True
+    candidates = added_labels if event == "issue.labeled" else labels
+    return bool(wanted & {label.lower() for label in candidates})
+
+
+async def _linear_event_prompt(
+    record: dict[str, Any],
+    data: dict[str, Any],
+    event: LinearTriggerEvent,
+    *,
+    team: str,
+    labels: set[str],
+    project: str,
+) -> str:
+    creator = data.get("creator") if isinstance(data.get("creator"), dict) else {}
+    creator_email = creator.get("email") if isinstance(creator, dict) else None
+    state = data.get("state") if isinstance(data.get("state"), dict) else {}
+    lines = [
+        f"Issue: {data.get('identifier') or ''} {data.get('title') or ''}",
+        f"URL: {data.get('url') or ''}",
+        f"Team: {team}",
+        f"Project: {project or '(none)'}",
+        f"Labels: {', '.join(sorted(labels)) or '(none)'}",
+        f"State: {state.get('name') if isinstance(state, dict) else ''}",
+        f"Creator: {creator.get('name') if isinstance(creator, dict) else ''}",
+    ]
+    description = str(data.get("description") or "")[:_LINEAR_DESCRIPTION_MAX_CHARS]
+    context = "\n".join(lines) + f"\n\n{description}"
+    registered = bool(await User.login_for_email(creator_email))
+    return prompt(
+        "runs/linear-automation-event",
+        prompt=record["prompt"],
+        event_description=LINEAR_EVENT_DESCRIPTIONS[event],
+        event_context=fence_github_comment_body(context, registered=registered),
+    )
+
+
+async def launch_linear_automations(
+    payload: dict[str, Any], delivery_id: str
+) -> list[dict[str, Any]]:
+    """Run every automation a Linear issue delivery triggers, each at most once per delivery."""
+    events, added_labels = _linear_issue_events(payload)
+    if not events:
+        return []
+    if not delivery_id:
+        logger.warning("Linear automation delivery is missing a delivery ID")
+        return []
+    data: dict[str, Any] = payload["data"]
+    team = _linear_team_key(data)
+    if not _LINEAR_TEAM_KEY_RE.fullmatch(team):
+        return []
+    labels = set(_named(data.get("labels")).values()) - {""}
+    project_value = data.get("project")
+    project = str(project_value.get("name") or "") if isinstance(project_value, dict) else ""
+    async with transaction() as conn:
+        records = await _load_records(
+            conn,
+            "WHERE a.enabled AND a.id IN (SELECT automation_id FROM automation_trigger "
+            "WHERE kind = 'linear' AND match_key = :team)",
+            {"team": team},
+        )
+    results: list[dict[str, Any]] = []
+    for record in records:
+        schedule_id = record["id"]
+        match = next(
+            (
+                (trigger.get("config") or {}, event)
+                for trigger in record.get("triggers") or []
+                if trigger.get("kind") == "linear"
+                for event in sorted(events)
+                if _linear_trigger_fires(
+                    trigger.get("config") or {},
+                    team,
+                    event,
+                    labels=labels,
+                    added_labels=added_labels,
+                    project=project,
+                )
+            ),
+            None,
+        )
+        if match is None:
+            continue
+        config, event = match
+        claim_prefix = f"{schedule_id}:linear:{team}:"
+        cap = config.get("max_runs_per_hour")
+        if isinstance(cap, int) and (
+            await event_claims.count_recent(
+                _DELIVERY_CLAIM_SCOPE, claim_prefix, within=_RATE_WINDOW
+            )
+            >= cap
+        ):
+            logger.warning(
+                "Linear automation hit its hourly run limit",
+                extra={"schedule_id": schedule_id, "linear_team": team},
+            )
+            continue
+        claim_key = f"{claim_prefix}{delivery_id}"
+        if not await event_claims.claim(_DELIVERY_CLAIM_SCOPE, claim_key, ttl=_DELIVERY_CLAIM_TTL):
+            continue
+        try:
+            result = await _launch_agent_schedule_record(
+                record,
+                repo=None,
+                prompt=await _linear_event_prompt(
+                    record, data, event, team=team, labels=labels, project=project
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to launch Linear automation", extra={"schedule_id": schedule_id}
+            )
+            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+            continue
+        if result.get("status") != "started":
+            logger.error(
+                "Linear automation did not start",
+                extra={"schedule_id": schedule_id, "launch_status": result.get("status")},
+            )
+            await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
+        results.append(result)
+    return results
+
+
 async def launch_scheduled_agent_run(
     schedule_id: str, trigger_id: str | None = None
 ) -> dict[str, Any]:
     """Run the automation a cron fired for; ``trigger_id`` names its schedule trigger.
 
-    Crons made before triggers had ids send none, and run with the first schedule's repo.
+    Crons made before triggers had ids send none and count as the first schedule.
     """
     record = await get_agent_schedule(schedule_id)
     if not record:
@@ -1495,7 +1932,7 @@ async def launch_scheduled_agent_run(
     if fired is None:
         await _delete_orphan_crons(schedule_id, keep=cron_ids)
         return {"status": "trigger_mismatch", "schedule_id": schedule_id}
-    return await _launch_agent_schedule_record(record, repo=_trigger_repo(record, fired["id"]))
+    return await _launch_agent_schedule_record(record, repo=None)
 
 
 async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
@@ -1503,7 +1940,7 @@ async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
     _assert_schedule_exists(record)
     assert record is not None
 
-    result = await _launch_agent_schedule_record(record, repo=_trigger_repo(record), test_run=True)
+    result = await _launch_agent_schedule_record(record, repo=_test_run_repo(record), test_run=True)
     status = result.get("status")
     if status == "started":
         return result

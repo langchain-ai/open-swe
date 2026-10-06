@@ -74,8 +74,19 @@ vi.mock("@/features/automations/components/AutomationRuns", () => ({
   AutomationRuns: () => <div />,
 }))
 vi.mock("@/features/automations/components/TriggerMenu", () => ({
-  TriggerMenu: ({ onGitHub }: { onGitHub?: () => void }) =>
-    onGitHub ? <button onClick={onGitHub}>Add GitHub trigger</button> : null,
+  TriggerMenu: ({
+    onGitHub,
+    onLinear,
+  }: {
+    onGitHub?: () => void
+    onLinear?: () => void
+  }) =>
+    onGitHub ? (
+      <>
+        <button onClick={onGitHub}>Add GitHub trigger</button>
+        <button onClick={onLinear}>Add Linear trigger</button>
+      </>
+    ) : null,
 }))
 vi.mock("@/features/agents/components/ModelPicker", () => ({
   ModelPicker: () => <div />,
@@ -264,6 +275,33 @@ describe("AutomationEditor", () => {
         kind: "github",
         repo: "acme/oss",
         events: ["pull_request.closed", "pull_request.merged"],
+      },
+    ])
+  })
+
+  it("saves a Linear trigger with its team and filters", () => {
+    signInAsAdmin()
+    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Linear trigger" }))
+    fireEvent.change(screen.getByLabelText("Team key"), {
+      target: { value: "eng" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Label added" }))
+    fireEvent.change(screen.getByLabelText("Labels"), {
+      target: { value: "agent-fix, p1" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    expect(mocks.createMutate.mock.calls[0]?.[0].triggers).toEqual([
+      { kind: "schedule", cron: "0 9 * * *" },
+      {
+        kind: "linear",
+        team: "ENG",
+        events: ["issue.labeled"],
+        labels: ["agent-fix", "p1"],
+        project: null,
+        max_runs_per_hour: null,
       },
     ])
   })

@@ -312,7 +312,7 @@ async function seedSchedules(request: APIRequestContext) {
         workspace: "default",
         name: "E2E Weekly Cleanup",
         prompt: "Clean up stale work.",
-        triggers: [{ kind: "schedule", cron: "0 10 * * 1", repo: "acme/beta" }],
+        triggers: [{ kind: "schedule", cron: "0 10 * * 1" }],
         slack_notification_mode: "on_action",
       },
       enabled: false,

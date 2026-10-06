@@ -53,3 +53,17 @@ async def release(scope: str, key: str) -> None:
             text("DELETE FROM event_claim WHERE scope = :scope AND key = :key"),
             {"scope": scope, "key": key},
         )
+
+
+async def count_recent(scope: str, key_prefix: str, *, within: timedelta) -> int:
+    """How many claims in ``scope`` whose key starts with ``key_prefix`` were taken lately."""
+    async with transaction() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT count(*) FROM event_claim WHERE scope = :scope "
+                "AND left(key, length(:prefix)) = :prefix "
+                "AND claimed_at > clock_timestamp() - CAST(:within AS interval)"
+            ),
+            {"scope": scope, "prefix": key_prefix, "within": within},
+        )
+        return int(result.scalar_one())
