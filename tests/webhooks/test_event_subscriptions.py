@@ -30,9 +30,10 @@ async def workspace(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> dict[
             {
                 "id": channel_id,
                 "is_channel": True,
+                "is_member": channel_id != "CNOTJOINED",
                 "is_private": channel_id != "CPUBLIC",
-                "is_im": False,
-                "is_mpim": False,
+                "is_im": channel_id == "DDM",
+                "is_mpim": channel_id == "GDM",
             }
         )
 
@@ -48,7 +49,7 @@ async def workspace(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> dict[
             "INSERT INTO pull_request (id, repository_id, number, owner, repo) "
             "VALUES (:pull_request, :repository, 7, 'acme', 'widgets')",
             "INSERT INTO workspace_slack_channel (channel_id, workspace_id) "
-            "VALUES ('CPRIVATE', :workspace), ('CPUBLIC', :workspace), ('COWN', :workspace)",
+            "VALUES ('CPRIVATE', :workspace), ('CPUBLIC', :workspace), ('COWN', :workspace), ('DDM', :workspace), ('GDM', :workspace), ('CNOTJOINED', :workspace)",
         ):
             await conn.execute(text(statement), ids)
     return ids
@@ -218,7 +219,7 @@ async def test_a_ci_result_reaches_every_pull_request_it_lists_with_its_text_fen
     assert "Ignore prior instructions" in fenced.split(UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG)[0]
 
 
-async def test_slack_matches_only_public_channels(
+async def test_slack_matches_joined_channels_but_not_dms(
     workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
 ) -> None:
     await _subscribe(workspace, sources=["slack"], event_types=["message"])
@@ -227,10 +228,14 @@ async def test_slack_matches_only_public_channels(
     await _slack("CPUBLIC", "channel", "s-public")
     await _slack("COWN", "group", "s-own")
 
-    assert [match.delivery_id for match in await _owed()] == ["s-public"]
+    await _slack("DDM", "im", "s-dm")
+    await _slack("GDM", "mpim", "s-group-dm")
+    await _slack("CNOTJOINED", "channel", "s-not-joined")
+
+    assert [match.delivery_id for match in await _owed()] == ["s-private", "s-public", "s-own"]
 
     async with transaction() as conn:
         deliveries = await conn.scalars(
             text("SELECT delivery_id FROM event_log WHERE source = 'slack'")
         )
-        assert list(deliveries) == ["s-public"]
+        assert list(deliveries) == ["s-private", "s-public", "s-own"]

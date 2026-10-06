@@ -167,6 +167,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
                 {
                     "id": "CPUBLIC",
                     "is_channel": True,
+                    "is_member": True,
                     "is_private": False,
                     "is_im": False,
                     "is_mpim": False,
@@ -277,6 +278,7 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
                 {
                     "id": "CPUBLIC",
                     "is_channel": True,
+                    "is_member": True,
                     "is_private": False,
                     "is_im": False,
                     "is_mpim": False,
