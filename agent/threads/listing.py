@@ -929,6 +929,9 @@ async def list_dashboard_threads_page(
             client,
             candidates,
         )
+        _attach_flat_task_memberships(
+            summaries, await sidebar_memberships([str(summary["id"]) for summary in summaries])
+        )
         filtered = [
             summary
             for summary in summaries
@@ -952,8 +955,7 @@ async def list_dashboard_threads_page(
             window,
         )
         has_more = len(candidates) > safe_offset + safe_limit
-
-    _attach_flat_task_memberships(
-        items, await sidebar_memberships([str(item["id"]) for item in items])
-    )
+        _attach_flat_task_memberships(
+            items, await sidebar_memberships([str(item["id"]) for item in items])
+        )
     return {"items": items, "limit": safe_limit, "offset": safe_offset, "hasMore": has_more}

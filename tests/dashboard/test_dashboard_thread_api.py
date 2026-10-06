@@ -2,7 +2,7 @@ import base64
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid7
 
@@ -1137,6 +1137,55 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     assert {item["id"] for item in result["items"]} == {"t0"}
     assert result["items"][0]["status"] == "finished"
     assert set(run_list_thread_ids) == {"t0", "t1"}
+
+
+@pytest.mark.parametrize("status", ["interrupted", "error"])
+async def test_flat_status_filter_applies_task_overrides_before_paging(
+    monkeypatch: pytest.MonkeyPatch, status: Literal["interrupted", "error"]
+) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    memberships = {
+        thread_id: SidebarTaskMembership(
+            thread_id,
+            "task",
+            "worker",
+            "coordinator",
+            cancelled=status == "interrupted",
+            launch_error=status == "error",
+        )
+        for thread_id in ("t0", "t1")
+    }
+
+    async def membership_lookup(ids: list[str]) -> dict[str, SidebarTaskMembership]:
+        return {key: member for key, member in memberships.items() if key in ids}
+
+    async def search(*, offset: int, limit: int, **_: object) -> list[dict[str, object]]:
+        return threads[offset : offset + limit]
+
+    client = SimpleNamespace(threads=SimpleNamespace(search=search))
+    monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
+
+    finished = await thread_listing.list_dashboard_threads_page(
+        "octocat", status="finished", limit=1
+    )
+    assert [item["id"] for item in finished["items"]] == ["t2"]
+    assert finished["items"][0]["status"] == "finished"
+    assert finished["hasMore"] is False
+
+    first = await thread_listing.list_dashboard_threads_page("octocat", status=status, limit=1)
+    assert [item["id"] for item in first["items"]] == ["t0"]
+    assert first["items"][0]["status"] == status
+    assert first["hasMore"] is True
+
+    second = await thread_listing.list_dashboard_threads_page(
+        "octocat", status=status, limit=1, offset=1
+    )
+    assert [item["id"] for item in second["items"]] == ["t1"]
+    assert second["items"][0]["status"] == status
+    assert second["hasMore"] is False
 
 
 async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
