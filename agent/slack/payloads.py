@@ -395,6 +395,7 @@ class SlackChannelPayload(SlackPayload):
     topic: str = ""
     purpose: str = ""
     is_channel: bool | None = None
+    is_member: bool | None = None
     is_private: bool | None = None
     is_im: bool | None = None
     is_mpim: bool | None = None
@@ -418,6 +419,7 @@ class SlackChannelPayload(SlackPayload):
 
     @field_validator(
         "is_channel",
+        "is_member",
         "is_private",
         "is_im",
         "is_mpim",
@@ -428,6 +430,11 @@ class SlackChannelPayload(SlackPayload):
     @classmethod
     def _only_boolean(cls, raw: object) -> bool | None:
         return raw if isinstance(raw, bool) else None
+
+    @property
+    def publishes_events(self) -> bool:
+        """Joined channels consent to workspace events; DMs never do."""
+        return self.is_member is True and self.is_im is False and self.is_mpim is False
 
     @property
     def is_public(self) -> bool:

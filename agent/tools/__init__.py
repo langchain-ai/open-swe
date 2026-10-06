@@ -32,7 +32,6 @@ _TOOL_MODULES = {
     "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
     "merge_expedited_pr": ".merge_expedited_pr",
-    "notify_automation_channel": ".notify_automation_channel",
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
@@ -71,8 +70,9 @@ _TOOL_MODULES = {
     "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_reply": "agent.slack.tools.reply",
-    "slack_start_new_thread": "agent.slack.tools.start_new_thread",
+    "slack_breakout_thread": "agent.slack.tools.start_new_thread",
     "submit_thread_feedback": ".submit_thread_feedback",
+    "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
     "update_automation": ".automations",
     "update_finding": ".update_finding",
@@ -109,7 +109,6 @@ __all__ = [
     "manage_incident",
     "manage_thread",
     "merge_expedited_pr",
-    "notify_automation_channel",
     "open_pull_request",
     "output_iframe",
     "publish_review",
@@ -148,8 +147,9 @@ __all__ = [
     "slack_read_channel_messages",
     "slack_read_thread_messages",
     "slack_reply",
-    "slack_start_new_thread",
+    "slack_breakout_thread",
     "submit_thread_feedback",
+    "suggest_task",
     "trigger_automation",
     "update_automation",
     "update_finding",
@@ -174,7 +174,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
     from agent.slack.tools.reply import slack_reply
     from agent.slack.tools.request_pr_review import request_pr_review
-    from agent.slack.tools.start_new_thread import slack_start_new_thread
+    from agent.slack.tools.start_new_thread import slack_breakout_thread
     from agent.tools.add_finding import add_finding
     from agent.tools.automations import (
         create_automation,
@@ -196,7 +196,6 @@ if TYPE_CHECKING:
     from agent.tools.listen_events import list_event_types, listen_events
     from agent.tools.manage_baby_sit import manage_baby_sit
     from agent.tools.merge_expedited_pr import merge_expedited_pr
-    from agent.tools.notify_automation_channel import notify_automation_channel
     from agent.tools.open_pull_request import link_pull_request, open_pull_request
     from agent.tools.organization_skills import delete_organization_skill, save_organization_skill
     from agent.tools.output_iframe import output_iframe
@@ -221,6 +220,7 @@ if TYPE_CHECKING:
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from agent.tools.search_pull_requests import search_pull_requests
     from agent.tools.submit_thread_feedback import submit_thread_feedback
+    from agent.tools.suggest_task import suggest_task
     from agent.tools.threads import get_thread, list_threads, manage_thread, start_thread
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill
