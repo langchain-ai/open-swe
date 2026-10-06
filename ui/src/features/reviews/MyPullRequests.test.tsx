@@ -28,6 +28,7 @@ import type { ReviewsSearch } from "./search"
 vi.mock("@/lib/api", () => ({
   api: {
     myPullRequests: vi.fn(),
+    searchPullRequests: vi.fn(),
     myPullRequestDetails: vi.fn(),
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
@@ -181,6 +182,10 @@ beforeEach(() => {
   vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: false })
   vi.mocked(api.reviewSummaries).mockResolvedValue({})
   vi.mocked(api.myPullRequests).mockResolvedValue(payload)
+  vi.mocked(api.searchPullRequests).mockResolvedValue({
+    pull_requests: [],
+    has_more: false,
+  })
   vi.mocked(api.repos).mockResolvedValue({
     installations: [],
     repositories: [],

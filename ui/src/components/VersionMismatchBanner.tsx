@@ -7,13 +7,12 @@ import { sessionQueryOptions } from "@/lib/session"
 
 export function VersionMismatchBanner() {
   const hydrated = useIsHydrated()
-  const { data: user } = useQuery({
-    ...sessionQueryOptions,
-    refetchInterval: 60_000,
-  })
+  // `InvalidationStream` refetches the session when a stream reports another backend.
+  const { data: user } = useQuery(sessionQueryOptions)
   const running = hydrated ? window.__OPEN_SWE_BUNDLE__?.commit : null
   const deployed = normalizeBuildInfo(user?.build_info)?.backend.commit
-  if (!running || !deployed || running === deployed) return null
+  if (!running || !deployed || running === deployed || window.openSweDesktop)
+    return null
 
   return (
     <div
@@ -24,8 +23,7 @@ export function VersionMismatchBanner() {
         Frontend version differs from the deployed backend.
       </span>
       <Link
-        to="/my-settings"
-        hash="about"
+        to="/my-settings/about"
         className="shrink-0 underline underline-offset-2"
       >
         Details

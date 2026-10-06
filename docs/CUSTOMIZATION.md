@@ -418,7 +418,7 @@ Investigate graphs.
 ### Personal MCP servers
 
 Any signed-in user can connect remote MCP servers with their own credentials under
-**My settings → Personal MCPs**. The form, JSON import, OAuth, header handling, and
+**Settings → Connections → MCP servers**. The form, JSON import, OAuth, header handling, and
 tool discovery work exactly like workspace connections. Records live in the Store
 under `["user_mcps", <trimmed lowercase github login>]`, so one user's connections and credentials are
 never visible to, reused by, or revealed to another user. The dashboard API is

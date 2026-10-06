@@ -31,7 +31,7 @@ from agent.slack.client import (
     strip_bot_mention,
 )
 from agent.slack.payloads import SlackChannelContext, SlackMessage
-from agent.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
+from agent.slack.thinking import settle_slack_thread_status
 from agent.slack.webhook import workspace_scoped_default_repo
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User
@@ -220,7 +220,6 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         if len(request.question) > MAX_QUESTION_CHARS:
             await _refuse(request, _BY_THE_WAY_TOO_LONG)
             return
-        await restore_slack_thinking_status(request.channel_id, request.reply_thread_ts)
     channel_context = await common.resolve_slack_channel_context(request.channel_id)
     if not channel_context.allows_operations:
         await _refuse(request, _CHANNEL_REFUSAL)
