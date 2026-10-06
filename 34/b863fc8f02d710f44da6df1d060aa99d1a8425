@@ -1,0 +1,26 @@
+agent/federation/github_oidc.py
+  s_8c15db54e0c42b::t_5c3a1b53bd827c 47-48
+  s_8c15db54e0c42b::t_3ae6ee59683629 99,102-105,107
+agent/rollout_events.py
+  s_8c15db54e0c42b::t_f1c033350b4775 3-4,15-16,50-90,103,105
+tests/webhooks/test_rollout_webhook.py
+  s_8c15db54e0c42b::t_71fe63586ca9e1 1,4,7,9,14-17,20-43,48-51,57-58,62-68,74,76-94,99,102-103,107,114
+agent/config.py
+  s_8c15db54e0c42b::t_2d89f5831740a1 247-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "34b863fc8f02d710f44da6df1d060aa99d1a8425",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
