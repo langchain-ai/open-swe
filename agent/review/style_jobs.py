@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from langgraph_sdk import get_client
+from pydantic import BaseModel, ConfigDict
 
 from agent.config import ENV
 from agent.dispatch import create_durable_run
@@ -16,6 +17,7 @@ from agent.review.style_collector import (
 from agent.review.styles import (
     REVIEW_STYLES,
     TERMINAL_RUN_FAILURES,
+    RepoFullName,
     ReviewStyle,
     reconcile_running_status,
 )
@@ -28,7 +30,15 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "analyzer"
 
 
-def _thread_title(full_name: str) -> str:
+class ReviewStyleRunMetadata(BaseModel):
+    """Run metadata naming the repository whose review style a run analyzes."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    review_style_full_name: RepoFullName | None = None
+
+
+def _thread_title(full_name: RepoFullName) -> str:
     return f"Review style: {full_name}"
 
 
@@ -40,7 +50,7 @@ def langgraph_client():
     return get_client()
 
 
-def build_continual_run_input(full_name: str) -> RunInput:
+def build_continual_run_input(full_name: RepoFullName) -> RunInput:
     """Run input for a continual-learning analyzer run (shared with the cron)."""
     return build_run_input(
         (
@@ -64,7 +74,7 @@ def build_continual_run_input(full_name: str) -> RunInput:
     )
 
 
-def build_continual_run_configurable(full_name: str) -> dict[str, Any]:
+def build_continual_run_configurable(full_name: RepoFullName) -> dict[str, Any]:
     """Configurable for a continual-learning analyzer run (shared with the cron).
 
     Includes an explicit ``thread_id`` so the run is anchored to the repo's
@@ -83,7 +93,7 @@ def build_continual_run_configurable(full_name: str) -> dict[str, Any]:
 
 
 async def start_bootstrap_analysis(
-    full_name: str,
+    full_name: RepoFullName,
     *,
     github_token: str,
     created_by: str,
@@ -155,6 +165,7 @@ async def start_bootstrap_analysis(
             ),
             source="review-style-bootstrap",
             thread_title=_thread_title(full_name),
+            metadata=ReviewStyleRunMetadata(review_style_full_name=full_name).model_dump(),
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             client=client,
         )
@@ -170,7 +181,7 @@ async def start_bootstrap_analysis(
 
 
 async def start_continual_run(
-    full_name: str,
+    full_name: RepoFullName,
     *,
     created_by: str = "manual",
 ) -> ReviewStyle:
@@ -197,7 +208,7 @@ async def start_continual_run(
         return await REVIEW_STYLES.mark_failed(full_name, "run start failed")
 
 
-async def sync_review_style_run_status(full_name: str) -> ReviewStyle:
+async def sync_review_style_run_status(full_name: RepoFullName) -> ReviewStyle:
     """Refresh store status from the latest analyzer run when still running."""
     record = await REVIEW_STYLES.get_or_seed(full_name)
     if record.status != "running":
@@ -242,7 +253,22 @@ async def sync_review_style_run_status(full_name: str) -> ReviewStyle:
     )
 
 
-async def cancel_review_style_analysis(full_name: str) -> ReviewStyle:
+async def settle_review_style_run(run_metadata: dict[str, Any]) -> None:
+    """Clear ``running`` once a review style run ends, which no client polls for."""
+    full_name = ReviewStyleRunMetadata.model_validate(run_metadata).review_style_full_name
+    if full_name is None:
+        return
+    try:
+        await sync_review_style_run_status(full_name)
+    except Exception:
+        logger.warning(
+            "Could not settle review style run",
+            exc_info=True,
+            extra={"repo_full_name": full_name},
+        )
+
+
+async def cancel_review_style_analysis(full_name: RepoFullName) -> ReviewStyle:
     """Stop an in-flight analyzer run and clear stale ``running`` status."""
     record = await REVIEW_STYLES.get_or_seed(full_name)
     if record.status != "running":

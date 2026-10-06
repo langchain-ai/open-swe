@@ -5,6 +5,7 @@ import { ArrowRight, History, Search } from "lucide-react"
 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { cn } from "@/lib/utils"
 import { incidentsApi } from "./api"
 import { citationPreview } from "./citations"
@@ -49,7 +50,12 @@ export function IncidentList({
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.next_cursor ?? undefined,
-    refetchInterval: 5000,
+    meta: {
+      invalidatedBy: [
+        invalidationTopic("incidents"),
+        invalidationTopic("incident-settings"),
+      ],
+    },
     retry: false,
   })
   const items = incidents.data?.pages.flatMap((page) => page.items) ?? []

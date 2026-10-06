@@ -22,6 +22,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, ValidationError
 
+from agent.ui_invalidations.topics import KeyedTopic, Topic
+
 logger = logging.getLogger(__name__)
 
 Namespace = Sequence[str]
@@ -173,7 +175,7 @@ async def search_all_entries(
 RecordT = TypeVar("RecordT", bound=BaseModel)
 
 
-class TypedStore[RecordT: BaseModel]:
+class TypedStore[RecordT: BaseModel, KeyT: str = str]:
     """A namespace whose values are validated against ``model`` on the way out.
 
     Records outlive the code that wrote them, so ``model`` should default every
@@ -181,22 +183,41 @@ class TypedStore[RecordT: BaseModel]:
     ``get`` raises — the caller asked for that one record — while the search
     methods skip it and log, so one unreadable record cannot take a whole
     listing down with it.
+
+    Every write invalidates ``invalidates``, and for a ``KeyedTopic`` the
+    written key's topic too.
     """
 
-    def __init__(self, namespace: Namespace, model: type[RecordT]) -> None:
+    def __init__(
+        self,
+        namespace: Namespace,
+        model: type[RecordT],
+        *,
+        invalidates: KeyedTopic[KeyT] | Topic | None = None,
+    ) -> None:
         self.namespace = list(namespace)
         self.model = model
+        self.invalidates = invalidates
 
-    async def get(self, key: str) -> RecordT | None:
+    async def get(self, key: KeyT) -> RecordT | None:
         value = await get_value(self.namespace, key)
         return None if value is None else self.model.model_validate(value)
 
-    async def put(self, key: str, record: RecordT) -> RecordT:
+    async def put(self, key: KeyT, record: RecordT) -> RecordT:
         await put_value(self.namespace, key, record.model_dump(mode="json"))
+        await self._invalidate(key)
         return record
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, key: KeyT) -> None:
         await delete_value(self.namespace, key)
+        await self._invalidate(key)
+
+    async def _invalidate(self, key: KeyT) -> None:
+        match self.invalidates:
+            case KeyedTopic():
+                await self.invalidates.invalidate(key=key)
+            case Topic():
+                await self.invalidates.invalidate()
 
     async def search(
         self,

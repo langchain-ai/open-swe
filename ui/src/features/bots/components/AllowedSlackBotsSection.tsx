@@ -21,7 +21,11 @@ const DIRECTORY_QUERY_KEY = ["allowedSlackBotDirectory"]
 const sameBot = (a: AllowedSlackBot, b: AllowedSlackBot) =>
   a.team_id === b.team_id && a.bot_id === b.bot_id
 
-export function AllowedSlackBotsSection() {
+export function AllowedSlackBotsSection({
+  onBotChange,
+}: {
+  onBotChange?: (bot: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const [manual, setManual] = useState(false)
   const [botId, setBotId] = useState("")
@@ -89,7 +93,7 @@ export function AllowedSlackBotsSection() {
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h3 id="allowed-slack-bots-heading" className="text-sm font-medium">
-            Allowed bots
+            Enabled bots
           </h3>
           <p className="text-xs/relaxed text-muted-foreground">
             Let trusted Slack bots start a task by mentioning Open SWE.
@@ -291,18 +295,27 @@ export function AllowedSlackBotsSection() {
               key={`${bot.team_id}:${bot.bot_id}`}
               className="flex items-center gap-3 px-3 py-3"
             >
-              <Avatar>
-                <AvatarImage src={bot.image_url} alt="" />
-                <AvatarFallback>
-                  <Robot size={18} />
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium" title={bot.name}>
-                  {bot.name}
-                </p>
-                <p className="text-xs text-muted-foreground">{bot.bot_id}</p>
-              </div>
+              <button
+                type="button"
+                onClick={() => onBotChange?.(`${bot.team_id}:${bot.bot_id}`)}
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-1 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                disabled={!onBotChange}
+              >
+                <Avatar>
+                  <AvatarImage src={bot.image_url} alt="" />
+                  <AvatarFallback>
+                    <Robot size={18} />
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium" title={bot.name}>
+                    {bot.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{bot.bot_id}</p>
+                </div>
+                <span className="text-xs text-success">Enabled</span>
+                {onBotChange && <span aria-hidden="true">→</span>}
+              </button>
               <Button
                 size="sm"
                 variant="ghost"

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import httpx
 import httpx2
@@ -15,6 +16,7 @@ from agent.human_review.standard import (
     SUMMARY_MAX_CHARS,
     merge_wait,
     request_blockers,
+    review_reminder_at,
     summary_line,
 )
 from agent.slack.blocks import block_payload
@@ -59,6 +61,22 @@ def _snapshot(**overrides: object) -> PullRequestSnapshot:
     for name, value in overrides.items():
         setattr(base, name, value)
     return base
+
+
+@pytest.mark.parametrize(
+    ("start", "expected"),
+    [
+        ("2026-09-28T08:00:00", "2026-09-28T11:00:00"),
+        ("2026-09-28T17:00:00", "2026-09-29T10:00:00"),
+        ("2026-10-30T17:00:00", "2026-11-02T10:00:00"),
+        ("2026-10-31T12:00:00", "2026-11-02T11:00:00"),
+    ],
+)
+def test_review_reminders_count_only_local_business_hours(start: str, expected: str) -> None:
+    timezone = ZoneInfo("America/New_York")
+    assert review_reminder_at(datetime.fromisoformat(start).replace(tzinfo=timezone), timezone) == (
+        datetime.fromisoformat(expected).replace(tzinfo=timezone).astimezone(UTC)
+    )
 
 
 def test_a_ready_pull_request_can_be_put_up_for_review() -> None:
@@ -171,6 +189,7 @@ async def test_merged_card_names_only_actual_approvers(states: dict[str, str] | 
     rendered = str(payload)
     for message in (text, rendered):
         assert "merged" in message
+        assert "by @ada" in message
         if states:
             assert "approved by <@U_grace>, @hopper" in message
         else:
@@ -213,11 +232,14 @@ async def test_approved_card_collapses_without_closing_the_request(
     request.requested_by = None
     with (
         patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)),
-        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
         text, blocks = await _render_standard(request, None, "token")
     assert ("Review request: approved" in text) is collapsed
     assert (len(blocks) == 1) is collapsed
+    assert "<@U_ada>" in str(block_payload(blocks))
+    if collapsed:
+        assert "by <@U_ada>" in text
     assert request.state == "open"
 
 

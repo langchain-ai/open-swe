@@ -384,6 +384,7 @@ async def _build_dashboard_configurable(
         "source": source,
         "github_login": login,
         "user_email": await resolve_run_email(login, profile),
+        "background_task_completion": False,
     }
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
@@ -1547,6 +1548,7 @@ async def _enrich_system_run_start_command(
             "workspace": principal.workspace,
             "environment": principal.workspace,
             STARTED_BY_ID: principal.started_by_id,
+            "background_task_completion": False,
         },
         invocation_id,
     )

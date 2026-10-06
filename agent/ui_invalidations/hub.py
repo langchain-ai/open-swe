@@ -12,7 +12,8 @@ import logging
 import time
 from collections.abc import Iterable, Iterator
 
-from agent.database import notifications, postgres
+from agent.database import postgres
+from agent.database.notifications import LISTENER
 from agent.ui_invalidations import outbox
 
 logger = logging.getLogger(__name__)
@@ -22,11 +23,6 @@ REPLAY_MARGIN_SECONDS = 30.0
 commits a moment after its row was inserted."""
 
 _PRUNE_INTERVAL_SECONDS = 3600.0
-
-_STREAMS: dict[str, set[Stream]] = {}
-_PRUNE_TASK: asyncio.Task[None] | None = None
-_STARTED_AT = time.monotonic()
-_STOP = asyncio.Event()
 
 
 class Stream:
@@ -56,83 +52,82 @@ class Stream:
         return changed
 
 
-@contextlib.contextmanager
-def subscribe(topics: frozenset[str]) -> Iterator[Stream]:
-    """A stream registered for ``topics`` until the block exits.
+class Hub:
+    def __init__(self) -> None:
+        self._streams: dict[str, set[Stream]] = {}
+        self._prune_task: asyncio.Task[None] | None = None
+        self._started_at = time.monotonic()
+        self._stop = asyncio.Event()
 
-    Registration comes first, so a caller can replay what it missed afterwards
-    without a gap in which a change is neither replayed nor heard.
-    """
-    stream = Stream(topics)
-    for topic in topics:
-        _STREAMS.setdefault(topic, set()).add(stream)
-    try:
-        yield stream
-    finally:
+    @contextlib.contextmanager
+    def subscribe(self, topics: frozenset[str]) -> Iterator[Stream]:
+        """A stream registered for ``topics`` until the block exits.
+
+        Registration comes first, so a caller can replay what it missed afterwards
+        without a gap in which a change is neither replayed nor heard.
+        """
+        stream = Stream(topics)
         for topic in topics:
-            streams = _STREAMS.get(topic)
-            if streams is not None:
-                streams.discard(stream)
-                if not streams:
-                    _STREAMS.pop(topic, None)
-
-
-def deliver(topics: Iterable[str]) -> None:
-    for topic in topics:
-        for stream in tuple(_STREAMS.get(topic, ())):
-            stream.mark((topic,))
-
-
-async def start() -> None:
-    global _PRUNE_TASK, _STARTED_AT
-    if not postgres.configured():
-        logger.info("UI invalidations disabled: PostgreSQL is not configured")
-        return
-    _STARTED_AT = time.monotonic()
-    _STOP.clear()
-    await notifications.listen(outbox.CHANNEL, _on_notify, _on_connected)
-    if _PRUNE_TASK is None or _PRUNE_TASK.done():
-        _PRUNE_TASK = asyncio.create_task(_prune_forever(), name="ui-invalidation-prune")
-
-
-async def stop() -> None:
-    global _PRUNE_TASK
-    _STOP.set()
-    notifications.unlisten(outbox.CHANNEL)
-    task = _PRUNE_TASK
-    _PRUNE_TASK = None
-    if task is not None:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-    _STREAMS.clear()
-
-
-def _on_notify(payload: str) -> None:  # pragma: no cover - driven by Postgres
-    deliver(payload.split("\n"))
-
-
-async def _on_connected(down_seconds: float | None) -> None:
-    if not _STREAMS:
-        return
-    unheard = time.monotonic() - _STARTED_AT if down_seconds is None else down_seconds
-    age = unheard + REPLAY_MARGIN_SECONDS
-    deliver(await outbox.invalidated_since(dict.fromkeys(_STREAMS, age)))
-
-
-async def _prune_forever() -> None:
-    while not _STOP.is_set():
+            self._streams.setdefault(topic, set()).add(stream)
         try:
-            await asyncio.wait_for(_STOP.wait(), timeout=_PRUNE_INTERVAL_SECONDS)
-        except TimeoutError:
-            pass
-        if _STOP.is_set():
+            yield stream
+        finally:
+            for topic in topics:
+                streams = self._streams.get(topic)
+                if streams is not None:
+                    streams.discard(stream)
+                    if not streams:
+                        del self._streams[topic]
+
+    def deliver(self, topics: Iterable[str]) -> None:
+        topics = tuple(topics)
+        for stream in {stream for topic in topics for stream in self._streams.get(topic, ())}:
+            stream.mark(topics)
+
+    async def start(self) -> None:
+        if not postgres.configured():
+            logger.info("UI invalidations disabled: PostgreSQL is not configured")
             return
-        try:
-            pruned = await outbox.prune()
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001
-            logger.warning("Pruning UI invalidations failed", exc_info=True)
-            continue
-        logger.info("Pruned UI invalidations", extra={"pruned_ui_invalidations": pruned})
+        self._started_at = time.monotonic()
+        self._stop.clear()
+        await LISTENER.listen(outbox.CHANNEL, self._on_notify, self._on_connected)
+        if self._prune_task is None or self._prune_task.done():
+            self._prune_task = asyncio.create_task(
+                self._prune_forever(), name="ui-invalidation-prune"
+            )
+
+    async def stop(self) -> None:
+        self._stop.set()
+        LISTENER.unlisten(outbox.CHANNEL)
+        task, self._prune_task = self._prune_task, None
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._streams.clear()
+
+    def _on_notify(self, payload: str) -> None:  # pragma: no cover - driven by Postgres
+        self.deliver(payload.split("\n"))
+
+    async def _on_connected(self, down_seconds: float | None) -> None:
+        if not self._streams:
+            return
+        unheard = time.monotonic() - self._started_at if down_seconds is None else down_seconds
+        age = unheard + REPLAY_MARGIN_SECONDS
+        self.deliver(await outbox.invalidated_since(dict.fromkeys(self._streams, age)))
+
+    async def _prune_forever(self) -> None:
+        while True:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._stop.wait(), timeout=_PRUNE_INTERVAL_SECONDS)
+            if self._stop.is_set():
+                return
+            try:
+                pruned = await outbox.prune()
+            except Exception:  # noqa: BLE001
+                logger.warning("Pruning UI invalidations failed", exc_info=True)
+                continue
+            logger.info("Pruned UI invalidations", extra={"pruned_ui_invalidations": pruned})
+
+
+HUB = Hub()

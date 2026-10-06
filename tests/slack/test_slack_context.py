@@ -505,6 +505,9 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
     assert kwargs["multitask_strategy"] == ("interrupt" if explicitly_tagged else "enqueue")
+    trigger = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
+    assert trigger.get("explicit_bot_mention") == str(explicitly_tagged).lower()
+    assert "<@UBOT>" not in (trigger.text or "")
     assert (
         f"@{webhook_common.SLACK_BOT_USERNAME} create the PR" in str(kwargs["input"])
     ) == explicitly_tagged
@@ -767,8 +770,40 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         request_blocks=[{"type": "text", "text": "do the thing"}],
         dispatched_timestamps=cast(set, kwargs.get("dispatched_timestamps", set())),
         run_described_person_ids=cast(set, kwargs.get("run_described_person_ids", set())),
+        explicit_mention=bool(kwargs.get("explicit_mention", False)),
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+@pytest.mark.parametrize("explicit_mention", [True, False])
+def test_current_slack_message_preserves_ingress_mention(explicit_mention: bool) -> None:
+    contents = _context_input([], explicit_mention=explicit_mention)
+    trigger_blocks = contents[-1]
+    assert isinstance(trigger_blocks, list)
+    trigger = ElementTree.fromstring(trigger_blocks[0]["text"])
+    assert trigger.get("explicit_bot_mention") == str(explicit_mention).lower()
+    assert (trigger.text or "").strip() == "do the thing"
+
+
+def test_replayed_slack_mentions_ignore_forwarded_tags() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "user": "U123", "text": "<@UBOT> could this stack?"},
+            {
+                "ts": "2.0",
+                "user": "U123",
+                "text": "interesting",
+                "attachments": [{"is_share": True, "text": "<@UBOT> fix this"}],
+            },
+        ]
+    )
+    replayed = [
+        ElementTree.fromstring(content)
+        for content in contents
+        if isinstance(content, str) and content.startswith("<input-message")
+    ]
+    assert [message.get("explicit_bot_mention") for message in replayed] == ["true", "false"]
+    assert "could this stack?" in (replayed[0].text or "")
 
 
 def test_slack_context_labels_mentioned_people_with_their_names() -> None:
