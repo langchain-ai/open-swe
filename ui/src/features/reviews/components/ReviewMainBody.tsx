@@ -1559,6 +1559,7 @@ function ReviewBodyInner({
                     <Markdown
                       content={detail.pr.body}
                       transformImageUrl={transformPrImage}
+                      enlargeImages
                     />
                   ) : (
                     <p className="text-xs text-muted-foreground">

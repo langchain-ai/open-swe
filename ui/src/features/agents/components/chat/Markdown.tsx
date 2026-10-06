@@ -1,4 +1,10 @@
-import { Component, createElement, memo, useMemo } from "react"
+import { Component, createElement, memo, useMemo, useState } from "react"
+import {
+  Dialog,
+  DialogClose,
+  DialogPopup,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Streamdown,
   defaultRemarkPlugins,
@@ -33,6 +39,7 @@ interface MarkdownProps {
    * leave it as-is.
    */
   transformImageUrl?: (src: string) => string
+  enlargeImages?: boolean
 }
 
 /**
@@ -256,7 +263,40 @@ export const Markdown = memo(function Markdown({
   content,
   isLive = false,
   transformImageUrl,
+  enlargeImages = false,
 }: MarkdownProps) {
+  const [image, setImage] = useState<{ src: string; alt: string } | null>(null)
+  const components = useMemo(
+    () =>
+      enlargeImages
+        ? {
+            ...COMPONENTS,
+            img: ({ src, alt }: ExtraProps & ComponentProps<"img">) => (
+              <img
+                src={typeof src === "string" ? src : undefined}
+                alt={alt ?? ""}
+                loading="lazy"
+                role="button"
+                tabIndex={0}
+                aria-label={`Enlarge ${alt || "image"}`}
+                className="cursor-zoom-in border border-border/60 focus-visible:outline-2 focus-visible:outline-ring"
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  if (typeof src === "string") setImage({ src, alt: alt ?? "" })
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault()
+                    event.currentTarget.click()
+                  }
+                }}
+              />
+            ),
+          }
+        : COMPONENTS,
+    [enlargeImages]
+  )
   const urlTransform = useMemo(() => {
     if (!transformImageUrl) return undefined
     return (
@@ -279,7 +319,7 @@ export const Markdown = memo(function Markdown({
           animated={isLive ? STREAMDOWN_ANIMATED : false}
           shikiTheme={SHIKI_THEME}
           className="streamdown-agent max-w-full min-w-0 space-y-0"
-          components={COMPONENTS}
+          components={components}
           remarkPlugins={REMARK_PLUGINS}
           allowedTags={ALLOWED_TAGS}
           urlTransform={urlTransform}
@@ -287,6 +327,26 @@ export const Markdown = memo(function Markdown({
           {content}
         </Streamdown>
       </MarkdownErrorBoundary>
+      <Dialog
+        open={image !== null}
+        onOpenChange={(open) => {
+          if (!open) setImage(null)
+        }}
+      >
+        <DialogPopup className="max-w-[95vw]">
+          <div className="flex items-center justify-between gap-4 p-4">
+            <DialogTitle>{image?.alt || "Image preview"}</DialogTitle>
+            <DialogClose className="rounded-md border px-3 py-1">
+              Close
+            </DialogClose>
+          </div>
+          <div className="overflow-auto p-4">
+            {image && (
+              <img src={image.src} alt={image.alt} className="max-w-none" />
+            )}
+          </div>
+        </DialogPopup>
+      </Dialog>
     </div>
   )
 })
