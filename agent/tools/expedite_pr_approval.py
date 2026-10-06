@@ -38,6 +38,7 @@ from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
 from agent.slack.http import SlackRequestError
 from agent.tools.manage_baby_sit import dispatch_run_config
+from agent.users import User
 
 
 def _failure(error: str) -> dict[str, Any]:
@@ -170,6 +171,8 @@ async def expedite_pr_approval(
         )
 
     payload = PullRequestPayload.model_validate(pr)
+    if await User.for_login("github", payload.author) is None:
+        return _failure("Expedited review is only available for PRs authored by Open SWE users.")
     review_channel = (
         await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
     ).review_channel.strip()

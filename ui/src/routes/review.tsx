@@ -3,60 +3,28 @@ import { useQuery } from "@tanstack/react-query"
 import { CaretRightIcon } from "@phosphor-icons/react"
 import { useMemo } from "react"
 import { IoLogoGithub } from "react-icons/io5"
-import {
-  AppShell,
-  SettingsNavRow,
-  SettingsSection,
-} from "@/components/AppShell"
+import { SettingsPage, SettingsSection } from "@/components/AppShell"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
-import { RequireLogin } from "@/lib/auth-redirect"
 import { useRepos } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
-import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/review")({
   component: ReviewPage,
-  head: () => ({ meta: [{ title: pageTitle("Open SWE Review") }] }),
+  head: () => ({ meta: [{ title: pageTitle("Code review") }] }),
 })
 function ReviewPage() {
-  const session = useSession()
-
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-
-  const canEdit = session.data.is_admin
-
   return (
-    <AppShell
-      user={session.data}
-      title="Open SWE Review"
-      description="Review pull requests for bugs and issues on demand, or run reviews automatically. Runs are billed based on underlying agent usage."
+    <SettingsPage
+      title="Code review"
+      description="Open SWE Review checks pull requests for bugs on demand, or automatically on the repositories you choose. Runs are billed by underlying agent usage."
     >
-      <RepositoriesSection canEdit={canEdit} />
-
-      <SettingsSection title="Rules">
-        <SettingsNavRow
-          to="/review/styles"
-          label="Review Style Prompts"
-          description="Per-repo review style guides and approval policy overrides."
-        />
-        <SettingsNavRow
-          to="/workspaces"
-          label="Workspace review settings"
-          description="Guidelines and review toggles are configured on each workspace."
-        />
-      </SettingsSection>
-    </AppShell>
+      <RepositoriesSection />
+    </SettingsPage>
   )
 }
-function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
+
+function RepositoriesSection() {
   const repos = useRepos()
 
   const autoReview = useQuery({

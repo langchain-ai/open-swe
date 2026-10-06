@@ -289,6 +289,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     ]
   )
 
+  const commentOnDiff = useCallback(
+    (content: string) => submitMessage(content, []),
+    [submitMessage]
+  )
+
   const restoreQueuedAutoSelection = autoIntent.restore
 
   const queuedText = (entry: QueuedTurn) =>
@@ -888,6 +893,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
+                      targetControlsBelow: true,
                       selectedLocalRepoPath: localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,
@@ -912,6 +918,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       </div>
       <AgentGitPanel
         thread={thread}
+        onComment={canPost ? commentOnDiff : undefined}
         revealFilePath={revealFilePath}
         revealChangesKey={revealChangesKey}
         collapsed={panelCollapsed}
