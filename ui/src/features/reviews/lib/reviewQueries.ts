@@ -1,7 +1,15 @@
 import { queryOptions } from "@tanstack/react-query"
 
 import { api } from "@/lib/api"
-import { pullRequestTopic } from "@/lib/invalidations/topics"
+import { invalidationTopic } from "@/lib/invalidations/topics"
+
+/** A pull request's topic; GitHub names are case-insensitive. */
+function pullRequestTopic(owner: string, repo: string, number: number) {
+  return invalidationTopic(
+    "pull-request",
+    `${owner.toLowerCase()}/${repo.toLowerCase()}/${number}`
+  )
+}
 
 /** The review page payload; its pull request's topic refetches it when the mirror changes. */
 export function reviewDetailQuery(owner: string, repo: string, number: number) {

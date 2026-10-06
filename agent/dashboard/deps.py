@@ -30,7 +30,8 @@ ADMIN_DEP = Depends(admin_session)
 
 
 class RepoScopedRecord(Protocol):
-    full_name: str
+    @property
+    def full_name(self) -> str: ...
 
 
 async def filter_repo_models_for_user[RepoRecordT: RepoScopedRecord](

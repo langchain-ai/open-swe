@@ -79,8 +79,7 @@ from agent.github.pull_request_diff import (
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repositories import Repository
 from agent.review.findings import REVIEWER_THREAD_KIND
-from agent.ui_invalidations import outbox
-from agent.ui_invalidations.topics import pull_request_topic
+from agent.ui_invalidations import Topic
 from agent.users.models import User, UserIdentity
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -370,9 +369,14 @@ class PullRequest(Base):
         """Whether this record carries a whole GitHub PR, so saving it refreshes the mirror."""
         return self.github_updated_at is not None and bool(self.head_sha)
 
+    @staticmethod
+    def topic_key_of(owner: str, repo: str, number: int) -> str:
+        """The PR's key in ``Topic.PULL_REQUESTS``; GitHub names are case-insensitive."""
+        return f"{owner.lower()}/{repo.lower()}/{number}"
+
     @property
-    def topic(self) -> str:
-        return pull_request_topic(self.owner, self.repo, self.number)
+    def topic_key(self) -> str:
+        return self.topic_key_of(self.owner, self.repo, self.number)
 
     @property
     def files_current(self) -> bool:
@@ -436,7 +440,7 @@ class PullRequest(Base):
             before = row.github_updated_at if row is not None else None
             row = await cls.pull(owner, repo, number)
             if row.github_updated_at != before:
-                await outbox.invalidate_standalone(row.topic)
+                await Topic.PULL_REQUESTS.invalidate(key=row.topic_key)
             await row.sync_revision(recheck_unfinished=True)
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -447,7 +451,7 @@ class PullRequest(Base):
 
     async def changed_on_github(self) -> None:
         """Tell open pages this saved snapshot changed, and list a new head's files and checks."""
-        await outbox.invalidate_standalone(self.topic)
+        await Topic.PULL_REQUESTS.invalidate(key=self.topic_key)
         if not (self.files_current and self.checks_current):
             type(self).refresh_in_background(self.owner, self.repo, self.number)
 
@@ -514,7 +518,7 @@ class PullRequest(Base):
                     files_truncated=len(raw) >= GITHUB_MAX_LISTED_FILES,
                 )
             )
-            await outbox.invalidate(session, self.topic)
+            await Topic.PULL_REQUESTS.invalidate(session, key=self.topic_key)
         self.files_head_sha, self.files_base_ref, self.merge_base_sha = (
             head_sha,
             base_ref,
@@ -559,7 +563,7 @@ class PullRequest(Base):
                 )
                 if not still_a_head:
                     await CheckRun.forget_commit(session, self.repository_id, previous)
-            await outbox.invalidate(session, self.topic)
+            await Topic.PULL_REQUESTS.invalidate(session, key=self.topic_key)
         self.checks_head_sha = head_sha
 
     async def files(self) -> list[PullRequestFile]:
@@ -600,9 +604,10 @@ class PullRequest(Base):
             if not heads:
                 return
             await CheckRun.store(session, [CheckRun.from_payload(run, heads[0].repository_id)])
-            await outbox.invalidate(
-                session, *(pull_request_topic(h.owner, h.repo, h.number) for h in heads)
-            )
+            for head in heads:
+                await Topic.PULL_REQUESTS.invalidate(
+                    session, key=cls.topic_key_of(head.owner, head.repo, head.number)
+                )
 
     @staticmethod
     async def _github_token() -> str:

@@ -26,6 +26,7 @@ from agent.slack.client import (
     slack_message_bot_name,
 )
 from agent.store import store_client
+from agent.ui_invalidations import Topic
 from agent.utils.thread_ops import queue_message_for_thread
 
 logger = logging.getLogger(__name__)
@@ -263,6 +264,7 @@ async def dispatch_turn(
         multitask_strategy=multitask_strategy or ("interrupt" if explicit else "enqueue"),
         after_seconds=after_seconds,
     )
+    await Topic.INCIDENTS.invalidate(key=record.id)
     return dict(run)
 
 
@@ -291,6 +293,7 @@ async def handle_run_completion(thread_id: str, run_id: str | None, status: str)
     record = records[0] if records else None
     if record is None:
         return {"status": "ignored", "reason": "unknown incident thread"}
+    await Topic.INCIDENTS.invalidate(key=record.id)
     if status == "success":
         policy = await service.get_policy()
         if (

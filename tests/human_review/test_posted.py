@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.expedited_review.eligibility import ChangedFile
 from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
+from agent.github.codeowners import CodeOwners
 from agent.github.pull_requests import PullRequest
 from agent.human_review import lifecycle, posted, standard
 from agent.human_review.posted import linked_pull_request
@@ -90,7 +92,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
         removed = {
             params["name"]
             for method, params in slack_api.calls[start:]
-            if method == "reactions.remove"
+            if method == "reactions.remove" and params["name"] != "white_check_mark"
         }
         assert removed == {"x", "construction"} - expected
         assert all(
@@ -99,6 +101,30 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
         )
 
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User()))
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
+    monkeypatch.setattr(
+        standard, "fetch_changed_files", AsyncMock(return_value=[ChangedFile(filename="app.py")])
+    )
+    await settle_with_reactions(set())
+    stored = await HumanReviewRequest.get(request.id)
+    assert stored is not None and stored.approved_at is None
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @grace")))
+    await settle_with_reactions(set())
+    stored = await HumanReviewRequest.get(request.id)
+    assert stored is not None and stored.approved_at is not None
+    monkeypatch.setattr(
+        CodeOwners, "fetch", AsyncMock(side_effect=standard.RepoFileUnreadableError("unreadable"))
+    )
+    await settle_with_reactions(set())
+    stored = await HumanReviewRequest.get(request.id)
+    assert stored is not None and stored.approved_at is None
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=None))
+    await settle_with_reactions(set())
+    stored = await HumanReviewRequest.get(request.id)
+    assert stored is not None and stored.approved_at is not None
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
+    await settle_with_reactions(set())
+
     preferences = UserPreferences()
 
     async def owner_preferences(login: str) -> UserPreferences:
@@ -131,6 +157,20 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     await settle_with_reactions({"merged"})
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.state == "merged"
+
+
+async def test_each_owned_path_needs_an_approval_including_team_owners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.github import codeowners
+
+    monkeypatch.setattr(codeowners, "team_members", AsyncMock(return_value=["Grace"]))
+    owners = CodeOwners.parse("* @ada\n/api/ @lc/backend @bob\n/docs/\n")
+    paths = ["app.py", "api/routes.py", "docs/guide.md"]
+    assert not await owners.approved_by(paths, {"ada"})
+    assert not await owners.approved_by(paths, {"grace"})
+    assert await owners.approved_by(paths, {"ADA", "grace"})
+    assert await owners.approved_by(paths, {"ada", "bob"})
 
 
 async def test_retirement_clears_in_flight_and_stale_blockers(

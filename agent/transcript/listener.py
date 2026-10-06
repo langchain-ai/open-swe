@@ -19,7 +19,8 @@ from collections.abc import AsyncIterator
 
 from sqlalchemy import ARRAY, Text, bindparam, text
 
-from agent.database import notifications, postgres
+from agent.database import postgres
+from agent.database.notifications import LISTENER
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +96,11 @@ async def start() -> None:
     if not postgres.configured():
         logger.info("Transcript listener disabled: PostgreSQL is not configured")
         return
-    await notifications.listen(CHANNEL, _on_notify, _on_connected)
+    await LISTENER.listen(CHANNEL, _on_notify, _on_connected)
 
 
 async def stop() -> None:
-    notifications.unlisten(CHANNEL)
+    LISTENER.unlisten(CHANNEL)
     _SUBSCRIBERS.clear()
 
 

@@ -5,15 +5,19 @@ analysis metadata, and the status of the background style-analysis run.
 """
 
 import logging
-from typing import Literal
+from typing import Literal, NewType
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agent.store import TypedStore, now_iso
+from agent.ui_invalidations import Topic
 
 logger = logging.getLogger(__name__)
 
 REVIEW_STYLES_NAMESPACE: list[str] = ["review_styles"]
+
+RepoFullName = NewType("RepoFullName", str)
+"""A GitHub repository as ``owner/repo``, from ``normalize_repo_full_name``."""
 
 AnalysisStatus = Literal["idle", "running", "completed", "failed"]
 
@@ -26,7 +30,7 @@ _TERMINAL_SUCCESS = frozenset({"success", "completed"})
 TERMINAL_RUN_FAILURES = frozenset({"error", "failed", "timeout", "interrupted", "cancelled"})
 
 
-def normalize_repo_full_name(raw: str) -> str:
+def normalize_repo_full_name(raw: str) -> RepoFullName:
     """Normalize user input to ``owner/repo``."""
     v = raw.strip()
     for prefix in ("https://github.com/", "http://github.com/", "github.com/"):
@@ -38,15 +42,15 @@ def normalize_repo_full_name(raw: str) -> str:
     parts = [p for p in v.split("/") if p]
     if len(parts) != 2:
         raise ValueError("full_name must be owner/repo")
-    return f"{parts[0]}/{parts[1]}"
+    return RepoFullName(f"{parts[0]}/{parts[1]}")
 
 
 class ReviewStyleCreate(BaseModel):
-    full_name: str = Field(..., description="GitHub repo in owner/name form")
+    full_name: RepoFullName = Field(..., description="GitHub repo in owner/name form")
 
     @field_validator("full_name", mode="before")
     @classmethod
-    def _valid_full_name(cls, v: str) -> str:
+    def _valid_full_name(cls, v: str) -> RepoFullName:
         return normalize_repo_full_name(v)
 
 
@@ -65,7 +69,7 @@ class ReviewStylePromptUpdate(BaseModel):
 class ReviewStyle(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    full_name: str
+    full_name: RepoFullName
     owner: str = ""
     name: str = ""
     status: AnalysisStatus = "idle"
@@ -84,7 +88,7 @@ class ReviewStyle(BaseModel):
     updated_at: str = ""
 
     @classmethod
-    def seed(cls, full_name: str, created_by: str = "") -> ReviewStyle:
+    def seed(cls, full_name: RepoFullName, created_by: str = "") -> ReviewStyle:
         owner, _, name = full_name.partition("/")
         now = now_iso()
         return cls(
@@ -105,9 +109,9 @@ def effective_approval_mode(record: ReviewStyle | None) -> ApprovalMode:
     return (record.approval_mode if record else None) or "dry_run"
 
 
-class ReviewStyleStore(TypedStore[ReviewStyle]):
+class ReviewStyleStore(TypedStore[ReviewStyle, RepoFullName]):
     def __init__(self) -> None:
-        super().__init__(REVIEW_STYLES_NAMESPACE, ReviewStyle)
+        super().__init__(REVIEW_STYLES_NAMESPACE, ReviewStyle, invalidates=Topic.REVIEW_STYLES)
 
     async def list_all(self) -> list[ReviewStyle]:
         records = await self.search_all()
@@ -118,16 +122,18 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
         record.updated_at = now_iso()
         return await self.put(record.full_name, record)
 
-    async def get_or_seed(self, full_name: str, created_by: str = "") -> ReviewStyle:
+    async def get_or_seed(self, full_name: RepoFullName, created_by: str = "") -> ReviewStyle:
         return await self.get(full_name) or ReviewStyle.seed(full_name, created_by)
 
-    async def create(self, full_name: str, created_by: str) -> ReviewStyle:
+    async def create(self, full_name: RepoFullName, created_by: str) -> ReviewStyle:
         existing = await self.get(full_name)
         if existing:
             return existing
         return await self.put(full_name, ReviewStyle.seed(full_name, created_by))
 
-    async def update_prompts(self, full_name: str, update: ReviewStylePromptUpdate) -> ReviewStyle:
+    async def update_prompts(
+        self, full_name: RepoFullName, update: ReviewStylePromptUpdate
+    ) -> ReviewStyle:
         record = await self.get_or_seed(full_name)
         if update.custom_prompt is not None:
             record.custom_prompt = update.custom_prompt
@@ -138,13 +144,13 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
             record.approval_mode = update.approval_mode
         return await self.save(record)
 
-    async def set_continual_cron(self, full_name: str, cron_id: str | None) -> ReviewStyle:
+    async def set_continual_cron(self, full_name: RepoFullName, cron_id: str | None) -> ReviewStyle:
         record = await self.get_or_seed(full_name)
         record.continual_cron_id = cron_id
         return await self.save(record)
 
     async def record_run_started(
-        self, full_name: str, *, run_id: str | None, created_by: str
+        self, full_name: RepoFullName, *, run_id: str | None, created_by: str
     ) -> ReviewStyle:
         record = await self.get_or_seed(full_name, created_by)
         record.analysis_run_id = run_id
@@ -153,7 +159,7 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
 
     async def mark_running(
         self,
-        full_name: str,
+        full_name: RepoFullName,
         *,
         thread_id: str,
         run_id: str | None,
@@ -173,7 +179,7 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
 
     async def mark_completed(
         self,
-        full_name: str,
+        full_name: RepoFullName,
         *,
         custom_prompt: str | None = None,
         analysis_summary: str | None = None,
@@ -196,13 +202,13 @@ class ReviewStyleStore(TypedStore[ReviewStyle]):
             record.reviews_sampled = reviews_sampled
         return await self.save(record)
 
-    async def mark_failed(self, full_name: str, error: str) -> ReviewStyle:
+    async def mark_failed(self, full_name: RepoFullName, error: str) -> ReviewStyle:
         record = await self.get_or_seed(full_name)
         record.status = "failed"
         record.error = error
         return await self.save(record)
 
-    async def mark_idle(self, full_name: str) -> ReviewStyle:
+    async def mark_idle(self, full_name: RepoFullName) -> ReviewStyle:
         record = await self.get_or_seed(full_name)
         record.status = "idle"
         record.error = None
@@ -214,7 +220,7 @@ REVIEW_STYLES = ReviewStyleStore()
 
 
 async def reconcile_running_status(
-    full_name: str,
+    full_name: RepoFullName,
     record: ReviewStyle,
     *,
     run_status: str | None,
@@ -261,7 +267,7 @@ async def get_repo_custom_prompt(owner: str, repo: str) -> str | None:
     prompt, and a store blip should cost the run its style supplement, not the
     whole review.
     """
-    full_name = f"{owner}/{repo}"
+    full_name = RepoFullName(f"{owner}/{repo}")
     try:
         record = await REVIEW_STYLES.get(full_name)
     except Exception:

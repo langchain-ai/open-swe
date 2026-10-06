@@ -17,7 +17,9 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from agent.dashboard.deps import SESSION_DEP
-from agent.ui_invalidations import hub, outbox, topics
+from agent.ui_invalidations import outbox
+from agent.ui_invalidations.hub import HUB, REPLAY_MARGIN_SECONDS
+from agent.ui_invalidations.topics import Topic
 from agent.utils.build_info import backend_build_info
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,7 @@ async def api_ui_invalidations(
 ) -> StreamingResponse:
     """``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``."""
     ages = _parse_subscriptions(t or [])
-    allowed = await asyncio.gather(*(topics.may_hear(session, topic) for topic in ages))
+    allowed = await asyncio.gather(*(Topic.may_hear(session, topic) for topic in ages))
     heard = {topic: age for (topic, age), ok in zip(ages.items(), allowed, strict=True) if ok}
     denied = sorted(set(ages) - set(heard))
     return StreamingResponse(
@@ -55,7 +57,7 @@ def _parse_subscriptions(values: list[str]) -> dict[str, float]:
     ages: dict[str, float] = {}
     for value in values:
         age, _, topic = value.partition(".")
-        if not age.isdigit() or not topics.valid(topic):
+        if not age.isdigit() or not Topic.well_formed(topic):
             raise HTTPException(400, f"unreadable subscription {value[:80]!r}")
         ages[topic] = max(ages.get(topic, 0.0), float(age))
     return ages
@@ -63,8 +65,8 @@ def _parse_subscriptions(values: list[str]) -> dict[str, float]:
 
 async def _stream(ages: dict[str, float], denied: list[str]) -> AsyncGenerator[str]:
     """``hello`` names what was invalidated while the reader was away; it is synchronized after."""
-    with hub.subscribe(frozenset(ages)) as stream:
-        windows = {topic: age + hub.REPLAY_MARGIN_SECONDS for topic, age in ages.items()}
+    with HUB.subscribe(frozenset(ages)) as stream:
+        windows = {topic: age + REPLAY_MARGIN_SECONDS for topic, age in ages.items()}
         try:
             stream.mark(await outbox.invalidated_since(windows))
         except Exception:  # noqa: BLE001

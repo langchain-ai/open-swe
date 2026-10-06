@@ -12,6 +12,7 @@ import {
   MagnifyingGlassIcon,
   NotePencilIcon,
   PlusIcon,
+  RobotIcon,
   TrashIcon,
   PushPinIcon,
   PushPinSlashIcon,
@@ -137,6 +138,7 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
 const NAV = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
+  { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
   { to: "/incidents", label: "Incidents", icon: Radar },
 ] as const

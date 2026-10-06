@@ -9,7 +9,12 @@ commit so a pull request cannot rewrite the policy it is judged by.
 import logging
 
 from agent.github.repo_files import fetch_repo_file
-from agent.review.styles import REVIEW_STYLES, ApprovalMode, effective_approval_mode
+from agent.review.styles import (
+    REVIEW_STYLES,
+    ApprovalMode,
+    RepoFullName,
+    effective_approval_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +37,7 @@ async def fetch_approvals_md(
 async def approval_mode_for(owner: str, repo: str) -> ApprovalMode:
     """The repository's approval mode; a failed lookup is ``dry_run``, which never approves."""
     try:
-        record = await REVIEW_STYLES.get(f"{owner}/{repo}")
+        record = await REVIEW_STYLES.get(RepoFullName(f"{owner}/{repo}"))
     except Exception:
         logger.exception("approval mode lookup failed", extra={"repository": f"{owner}/{repo}"})
         return "dry_run"

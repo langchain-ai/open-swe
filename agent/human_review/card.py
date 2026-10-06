@@ -136,12 +136,19 @@ def open_card(
 
 
 def closed_card(
-    request: HumanReviewRequest, *, title: str, outcome: str, review_states: dict[str, str]
+    request: HumanReviewRequest,
+    *,
+    title: str,
+    author: str,
+    outcome: str,
+    review_states: dict[str, str],
 ) -> tuple[str, list[Block]]:
     """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
     pr = request.pull_request
     if outcome == "merged" and (approvers := _approvers(request, review_states)):
         outcome = f"merged — approved by {approvers}"
-    return f"Review request: {outcome} — {pr.url}", [
-        section(f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)}")
+    return f"Review request: {outcome} — {pr.url} — by {author}", [
+        section(
+            f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)} — by {author}"
+        )
     ]

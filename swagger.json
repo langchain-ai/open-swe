@@ -172,6 +172,30 @@
         "title": "AllowedSlackBot",
         "type": "object"
       },
+      "AllowedSlackBotEntry": {
+        "description": "What any signed-in user may see of an allowed bot: enough to name its threads.",
+        "properties": {
+          "image_url": {
+            "default": "",
+            "title": "Image Url",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "AllowedSlackBotEntry",
+        "type": "object"
+      },
       "ApiKeyCreate": {
         "properties": {
           "description": {
@@ -1651,6 +1675,19 @@
           "message"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HumanReviewAvailability": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "HumanReviewAvailability",
         "type": "object"
       },
       "HumanReviewDismissBody": {
@@ -12129,6 +12166,70 @@
       }
     },
     "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review": {
+      "get": {
+        "operationId": "api_human_review_availability_dashboard_api_repos__owner___repo__pulls__number__human_review_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanReviewAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Human Review Availability",
+        "tags": [
+          "dashboard",
+          "human-review"
+        ]
+      },
       "post": {
         "operationId": "api_request_human_review_dashboard_api_repos__owner___repo__pulls__number__human_review_post",
         "parameters": [
@@ -16207,6 +16308,38 @@
         ]
       }
     },
+    "/dashboard/api/slack/allowed-bots/directory": {
+      "get": {
+        "description": "Names and avatars of allowed bots, for the Bots view every user can open.",
+        "operationId": "api_allowed_slack_bot_directory_dashboard_api_slack_allowed_bots_directory_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AllowedSlackBotEntry"
+                  },
+                  "title": "Response Api Allowed Slack Bot Directory Dashboard Api Slack Allowed Bots Directory Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Allowed Slack Bot Directory",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/allowed-bots/{team_id}/{bot_id}": {
       "delete": {
         "operationId": "api_remove_allowed_slack_bot_dashboard_api_slack_allowed_bots__team_id___bot_id__delete",
@@ -16799,7 +16932,8 @@
               "enum": [
                 "all",
                 "interactive",
-                "automation"
+                "automation",
+                "bot"
               ],
               "title": "Scope",
               "type": "string"
@@ -16819,6 +16953,23 @@
                 }
               ],
               "title": "Automation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bot",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot"
             }
           },
           {
