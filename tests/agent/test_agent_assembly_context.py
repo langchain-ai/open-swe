@@ -94,11 +94,26 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
     assert filesystem._offload_binary_content
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-async def test_task_tools_require_the_thread_owners_opt_in(saved_thread_scope, enabled: bool):
+@pytest.mark.parametrize(
+    ("enabled", "binding", "available"),
+    [
+        (False, {}, False),
+        (True, {}, True),
+        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True),
+        (True, {"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False),
+        (True, {"sandbox_id": "bridge:legacy-cli"}, False),
+    ],
+)
+async def test_task_tools_require_owner_opt_in_and_supported_sandbox(
+    saved_thread_scope: dict[str, object],
+    enabled: bool,
+    binding: dict[str, str],
+    available: bool,
+) -> None:
     from agent.users import User, UserPreferences
 
     saved_thread_scope.update(owner_type="user", owner_login="owner")
+    saved_thread_scope.update(binding)
 
     async def preferences(login: str) -> UserPreferences:
         return UserPreferences(experimental_task_coordination=enabled if login == "owner" else True)
@@ -108,8 +123,8 @@ async def test_task_tools_require_the_thread_owners_opt_in(saved_thread_scope, e
     tools = captured["tools"]
     assert isinstance(tools, list)
     names = {_registered_tool_name(tool) for tool in tools}
-    assert ("spawn_worker" in names) is enabled
-    assert ("control_worker" in names) is enabled
+    assert ("spawn_worker" in names) is available
+    assert ("control_worker" in names) is available
 
 
 @pytest.mark.parametrize("role", ["coordinator", "worker"])

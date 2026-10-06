@@ -144,6 +144,30 @@ async def test_default_off_rejects_delegation_without_creating_a_task(
     assert not client.created_runs
 
 
+@pytest.mark.parametrize("bridge_client", ["cli", None])
+async def test_cli_bridge_rejects_delegation_before_reserving_a_worker(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, bridge_client: str | None
+) -> None:
+    client.metadata[COORDINATOR]["sandbox_id"] = "bridge:cli"
+    if bridge_client is not None:
+        client.metadata[COORDINATOR]["sandbox_bridge_client"] = bridge_client
+    monkeypatch.setattr(store, "load_context", AsyncMock(return_value=None))
+    reserve = AsyncMock()
+    monkeypatch.setattr(store, "reserve_worker", reserve)
+
+    with pytest.raises(ValueError, match="one-shot CLI bridge"):
+        await service.spawn_worker(
+            service.Actor(COORDINATOR, OWNER),
+            instructions="Implement",
+            model=None,
+            effort=None,
+            request_id="cli-call",
+        )
+
+    reserve.assert_not_awaited()
+    assert not client.created_runs
+
+
 async def test_public_thread_does_not_allow_using_owners_credentials(client: MagicMock) -> None:
     with pytest.raises(PermissionError, match="thread owner"):
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))

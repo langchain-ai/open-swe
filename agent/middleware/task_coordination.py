@@ -11,7 +11,11 @@ from langgraph.runtime import Runtime
 from agent.github.proxy import maybe_refresh_proxy_token
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import prompt
-from agent.tasks.flags import task_coordination_enabled, task_owner_login
+from agent.tasks.flags import (
+    task_coordination_enabled,
+    task_coordination_supported,
+    task_owner_login,
+)
 from agent.tasks.store import TaskContext, get_delegation, load_context
 from agent.utils.json_types import thread_metadata
 
@@ -31,7 +35,9 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     async def for_thread(cls, thread_id: str) -> Self | None:
         metadata = thread_metadata(await langgraph_sdk.get_client().threads.get(thread_id))
         owner_login = task_owner_login(metadata)
-        enabled = await task_coordination_enabled(owner_login)
+        enabled = task_coordination_supported(metadata) and await task_coordination_enabled(
+            owner_login
+        )
         context = await load_context(thread_id)
         if context is not None and context.membership.role == "worker":
             delegation = await get_delegation(thread_id)
@@ -74,7 +80,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
             coordinator_thread_id=context.task.coordinator_thread_id,
             role=context.membership.role,
             delegated=context.task.delegated,
-            delegation_enabled=await task_coordination_enabled(self.owner_login),
+            delegation_enabled=self.enabled and await task_coordination_enabled(self.owner_login),
         )
         blocks = list(request.system_message.content_blocks) if request.system_message else []
         blocks.append({"type": "text", "text": instructions})
