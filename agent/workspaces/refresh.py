@@ -14,12 +14,9 @@ its capture lands:
   ``UPDATE_INTERVAL_SECONDS`` enqueues one in the background, so the image
   converges and later creations skip the work.
 
-Creating a sandbox from a stale snapshot *also* runs the update script in that
-sandbox, before the first model call — see ``SandboxCreateConfig.run_update_script``.
-The background capture alone is not enough: it never helps the run that
-triggered it, and when runs are sparse every run is a triggering run, so the
-first one after a quiet spell would work against a checkout as old as the last
-nightly rebuild.
+A run whose sandbox boots from a stale snapshot never waits on the update: it
+starts on the image as captured and warns its requester that checkouts may be
+behind.
 
 The outcome — status, kind, timestamps, a capped log — lands on the workspace
 record for the dashboard. A failed refresh of either kind leaves the previous
@@ -210,7 +207,9 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
     return steps
 
 
-def is_snapshot_stale(record: Workspace) -> bool:
+def is_snapshot_stale(
+    record: Workspace, *, interval_seconds: int = UPDATE_INTERVAL_SECONDS
+) -> bool:
     """Whether the image a new sandbox boots from has aged past the interval.
 
     This gates the update that runs *in the run's own sandbox*, so it keys on
@@ -223,7 +222,7 @@ def is_snapshot_stale(record: Workspace) -> bool:
     captured = _parse_iso(record.last_captured_at)
     if captured is None:
         return True
-    return (datetime.now(UTC) - captured).total_seconds() >= UPDATE_INTERVAL_SECONDS
+    return (datetime.now(UTC) - captured).total_seconds() >= interval_seconds
 
 
 def is_update_due(record: Workspace) -> bool:
@@ -271,6 +270,8 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
     record = await WORKSPACES.get(slug)
     if record is None:
         return {"status": "unknown_workspace", "slug": slug}
+    if record.inherit_default_sandbox:
+        return {"status": "inherited_sandbox", "slug": slug}
     if kind == "full" and not record.setup_script:
         return {"status": "no_setup_script", "slug": slug}
     if kind == "update" and not record.update_script:

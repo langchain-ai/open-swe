@@ -13,6 +13,7 @@ from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.user_preferences import get_user_preferences
 from agent.github.pull_request_checks import PullRequestState
+from agent.github.pull_request_context import PullRequestFixScope
 from agent.threads import terminal
 from agent.threads.diffs import (
     get_dashboard_thread_branch_diff,
@@ -44,6 +45,7 @@ from agent.threads.handlers import (
     share_thread_with_workspace,
 )
 from agent.threads.listing import (
+    DashboardThreadScope,
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
     list_dashboard_threads,
@@ -168,8 +170,9 @@ async def api_list_threads_page(
     source: str | None = None,
     status: str | None = None,
     q: str | None = None,
-    scope: Literal["all", "interactive", "automation"] = "all",
+    scope: DashboardThreadScope = "all",
     automation_id: str | None = None,
+    bot: Annotated[str | None, Query(max_length=80)] = None,
     repo: str | None = None,
     ownerless: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
@@ -197,6 +200,7 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+        bot=bot,
         repo=repo,
         ownerless=ownerless,
         sort_by=sort_by,
@@ -239,6 +243,7 @@ async def api_get_thread_pull_request_context(
     thread_id: str,
     repo_full_name: str,
     number: int,
+    scope: PullRequestFixScope,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     return await get_dashboard_thread_pull_request_context(
@@ -246,6 +251,7 @@ async def api_get_thread_pull_request_context(
         session["sub"],
         repo_full_name=repo_full_name,
         number=number,
+        scope=scope,
         email=session.get("email"),
     )
 

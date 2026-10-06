@@ -1,6 +1,7 @@
 """Linear webhook HTTP routes."""
 
 import re
+import time
 
 from fastapi import APIRouter
 
@@ -12,6 +13,26 @@ from agent.webhooks.event_log import EventLog, EventRefs
 router = APIRouter()
 
 _ISSUE_IDENTIFIER_RE = re.compile(r"/issue/([A-Za-z][A-Za-z0-9_]*-\d+)(?:/|$)")
+# Linear signs webhookTimestamp with the body; an older delivery is a replay.
+_MAX_DELIVERY_AGE_MS = 60_000
+
+
+def _is_replay(payload: object) -> bool:
+    timestamp = payload.get("webhookTimestamp") if isinstance(payload, dict) else None
+    if not isinstance(timestamp, int):
+        return False
+    return abs(time.time() * 1000 - timestamp) > _MAX_DELIVERY_AGE_MS
+
+
+async def _launch_automations(payload: dict[str, object], delivery_id: str) -> None:
+    from agent.schedules.store import launch_linear_automations
+
+    try:
+        await launch_linear_automations(payload, delivery_id)
+    except Exception:
+        common.logger.exception(
+            "Linear automations failed for a delivery", extra={"linear_delivery": delivery_id}
+        )
 
 
 def _issue_url(payload_url: object) -> tuple[str, str]:
@@ -51,6 +72,15 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     except common.json.JSONDecodeError:
         common.logger.exception("Failed to parse webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
+    if _is_replay(payload):
+        common.logger.warning("Rejecting a stale Linear webhook delivery")
+        raise common.HTTPException(status_code=401, detail="Stale webhook timestamp")
+
+    if payload.get("type") == "Issue" and payload.get("action") in {"create", "update"}:
+        background_tasks.add_task(
+            _launch_automations, payload, request.headers.get("Linear-Delivery", "")
+        )
+        return {"status": "accepted", "message": "Checking Linear automations"}
 
     if payload.get("type") != "Comment":
         common.logger.debug("Ignoring webhook: not a Comment event")

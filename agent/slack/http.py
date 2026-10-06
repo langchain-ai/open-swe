@@ -21,6 +21,13 @@ SLACK_REQUEST_ERRORS = (SlackApiError, aiohttp.ClientError, TimeoutError, ValueE
 _SDK_LOGGER = logging.Logger("agent.slack.sdk", level=logging.WARNING)
 
 
+class SlackRequestError(RuntimeError):
+    def __init__(self, code: str, *, invited: list[str] | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.invited = invited or []
+
+
 class _SlackResponse(aiohttp.ClientResponse):
     async def json(self, **kwargs: Any) -> dict[str, Any]:
         data = await super().json(**kwargs)

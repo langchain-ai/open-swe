@@ -274,6 +274,7 @@ def _fully_populated(now: str) -> Workspace:
     """A record with nothing left at its default, so a dropped field shows up."""
     return Workspace(
         slug="base",
+        inherit_default_sandbox=True,
         name="Base",
         prompt="build with make",
         setup_script="make setup",
