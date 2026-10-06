@@ -31,6 +31,7 @@ from agent.skill_store.routes import router as skills_router
 from agent.slack.dashboard_routes import router as slack_router
 from agent.threads.routes import router as threads_router
 from agent.transcript.routes import router as transcript_router
+from agent.ui_invalidations.routes import router as ui_invalidations_router
 from agent.users.routes import router as users_router
 from agent.workspaces.routes import router as workspaces_router
 
@@ -69,3 +70,4 @@ router.include_router(threads_router)
 router.include_router(transcript_router)
 router.include_router(api_keys_router)
 router.include_router(bridge_router)
+router.include_router(ui_invalidations_router)

@@ -11,6 +11,7 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     upload_slack_thread_file,
 )
+from agent.slack.http import SlackRequestError
 from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
 from agent.utils.thread_ops import langgraph_client
 
@@ -97,7 +98,7 @@ async def slack_attach_html(
             ):
                 return {"success": False, "error": "Slack thread moved; retry the attachment"}
 
-            file_id, error = await upload_slack_thread_file(
+            file_id = await upload_slack_thread_file(
                 channel_id,
                 thread_ts,
                 filename,
@@ -105,9 +106,9 @@ async def slack_attach_html(
                 title=display_title,
                 initial_comment=comment,
             )
-        if error:
-            return {"success": False, "error": error}
         return {"success": True, "file_id": file_id, "filename": filename}
+    except SlackRequestError as exc:
+        return {"success": False, "error": exc.code or "upload_failed"}
     finally:
         await _remove_staged_file(backend, staged_path)
 

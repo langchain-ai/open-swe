@@ -13,6 +13,7 @@ from agent.slack.client import (
     get_slack_permalink,
     post_slack_thread_reply_with_ts,
 )
+from agent.slack.http import SlackRequestError
 from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -60,19 +61,20 @@ async def repost_thread_card(
     ``adopt`` records the new timestamp and answers whether the new copy is the one to
     keep; when it is not, the new copy is deleted instead of the old one.
     """
-    message_ts, error = await post_slack_thread_reply_with_ts(
-        location[0],
-        location[1],
-        text,
-        blocks=block_payload(blocks),
-        agent_thread_id=agent_thread_id,
-        reply_broadcast=broadcast,
-        login=login,
-    )
-    if not message_ts:
+    try:
+        message_ts = await post_slack_thread_reply_with_ts(
+            location[0],
+            location[1],
+            text,
+            blocks=block_payload(blocks),
+            agent_thread_id=agent_thread_id,
+            reply_broadcast=broadcast,
+            login=login,
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Failed to repost Slack card",
-            extra={"slack_error": error, "broadcast": broadcast},
+            extra={"slack_error": exc.code, "broadcast": broadcast},
         )
         return False
     kept = await adopt(message_ts)

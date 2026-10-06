@@ -123,16 +123,16 @@ def _repo_config(configurable: dict[str, Any], metadata: dict[str, Any]) -> dict
 
 async def resolve_thread_participant_logins(
     config: Mapping[str, Any],
-) -> tuple[set[str] | None, int, str | None]:
+) -> tuple[set[str], int]:
     configurable = as_json_object(config.get("configurable"))
     thread_id = configurable.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
-        return None, 0, "Missing thread_id in run config"
+        raise ValueError("Missing thread_id in run config")
 
     try:
         thread = await get_client().threads.get(thread_id)
-    except Exception:
-        return None, 0, "Could not verify the active thread"
+    except Exception as exc:
+        raise ValueError("Could not verify the active thread") from exc
     metadata = thread_metadata(thread)
 
     candidate_logins = set(
@@ -149,18 +149,18 @@ async def resolve_thread_participant_logins(
     if context.slack_thread is not None:
         slack_thread = context.slack_thread
         if not slack_thread.channel_id:
-            return None, 0, "Slack thread context is incomplete"
+            raise ValueError("Slack thread context is incomplete")
         messages = await fetch_slack_thread_messages(
             slack_thread.channel_id, slack_thread.thread_ts
         )
         if not messages:
-            return None, 0, "Could not verify Slack thread participants"
+            raise ValueError("Could not verify Slack thread participants")
         mapped, source_unresolved = await _mapped_slack_logins(messages)
         logins.update(mapped)
         unresolved_count += source_unresolved
     elif context.linear_issue is not None:
         if not logins:
-            return None, unresolved_count, "Linear participant metadata is unavailable"
+            raise ValueError("Linear participant metadata is unavailable")
     elif context.github_issue is not None or (source == "github" and context.pr_number is not None):
         issue_number = (
             context.github_issue.number if context.github_issue else None
@@ -168,25 +168,25 @@ async def resolve_thread_participant_logins(
         repo = _repo_config(configurable, metadata)
         token = await resolve_thread_github_token(config)
         if not repo or not issue_number or not token:
-            return None, 0, "GitHub thread context is incomplete"
+            raise ValueError("GitHub thread context is incomplete")
         participants = await fetch_github_thread_participants(repo, issue_number, token=token)
         if participants is None:
-            return None, 0, "Could not verify GitHub thread participants"
+            raise ValueError("Could not verify GitHub thread participants")
         mapped, source_unresolved = await _mapped_github_logins(participants)
         logins.update(mapped)
         unresolved_count += source_unresolved
     elif source == "dashboard":
         if not metadata.get(PARTICIPANT_LOGINS_KEY):
-            return None, 0, "Dashboard participant metadata is unavailable"
+            raise ValueError("Dashboard participant metadata is unavailable")
     elif source == "schedule":
         if not metadata.get(PARTICIPANT_LOGINS_KEY):
-            return None, 0, "Schedule participant metadata is unavailable"
+            raise ValueError("Schedule participant metadata is unavailable")
     else:
-        return None, 0, "Unsupported or missing thread source"
+        raise ValueError("Unsupported or missing thread source")
 
     if not logins:
-        return None, unresolved_count, "No mapped participants were found for the active thread"
-    return logins, unresolved_count, None
+        raise ValueError("No mapped participants were found for the active thread")
+    return logins, unresolved_count
 
 
 async def resolve_participant(on_behalf_of: str) -> str:
@@ -197,9 +197,7 @@ async def resolve_participant(on_behalf_of: str) -> str:
     caller = await resolve_github_login(as_json_object(config))
     if not caller or login.lower() != caller.lower():
         raise ValueError("on_behalf_of must match the user who triggered this run.")
-    participants, _, error = await resolve_thread_participant_logins(config)
-    if participants is None:
-        raise ValueError(error or "Could not verify thread participants")
+    participants, _ = await resolve_thread_participant_logins(config)
     matches = {participant.lower(): participant for participant in participants}
     if login.lower() not in matches:
         raise ValueError(f"{login!r} is not a verified participant in this thread.")

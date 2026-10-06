@@ -246,6 +246,7 @@ export interface Profile {
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
+  pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
@@ -271,6 +272,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
+  pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
@@ -294,6 +296,13 @@ export interface AllowedSlackBot {
   name: string
   created_by: string
   created_at: string
+  image_url: string
+}
+
+/** What any signed-in user may see of an allowed bot; `key` is `team_id:bot_id`. */
+export interface AllowedSlackBotEntry {
+  key: string
+  name: string
   image_url: string
 }
 
@@ -436,6 +445,7 @@ export type UsageLeaderboardSort =
   | "merged_prs_per_thread"
   | "agent_loc"
   | "feedback_given"
+  | "prs_reviewed"
 export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
@@ -451,14 +461,16 @@ export interface AnalyticsMetadata {
   build_info?: BuildInfo
 }
 
+export interface LeaderboardUser {
+  name: string
+  github_login: string | null
+  email?: string | null
+  avatar_url?: string | null
+}
+
 export interface UsageLeaderboardRow {
   rank: number
-  user: {
-    name: string
-    github_login: string | null
-    email: string | null
-    avatar_url?: string | null
-  }
+  user: LeaderboardUser
   favorite_model: string
   favorite_model_effort?: string | null
   invocations: number
@@ -469,6 +481,7 @@ export interface UsageLeaderboardRow {
   merged_prs: number
   merged_prs_per_thread?: number
   agent_loc: number
+  prs_reviewed?: number
   feedback_given: number
   is_top_feedback_contributor?: boolean
   additions: number
@@ -735,6 +748,7 @@ export interface WorkspaceOptionList {
 
 /** Body for `POST /workspaces`; `name` is the only required field. */
 export interface WorkspaceCreate {
+  inherit_default_sandbox?: boolean
   name: string
   prompt?: string
   repos?: Array<string>
@@ -754,6 +768,7 @@ export type JsonValue =
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
+  inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
   name?: string
   prompt?: string
@@ -775,6 +790,7 @@ export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
  * the sandbox image and its last rebuild.
  */
 export interface WorkspaceRecord {
+  inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
   slug: string
   name: string
@@ -987,6 +1003,7 @@ export interface PullRequestActionResult {
 
 export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
+  | { intent: "message"; title: string; message: string }
   | {
       intent: "fix"
       scope: PullRequestFixScope
@@ -1573,6 +1590,8 @@ export const api = {
       `/slack/channels${refresh ? "?refresh=true" : ""}`
     ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
+  listAllowedSlackBotDirectory: () =>
+    request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
       method: "POST",
@@ -1746,6 +1765,12 @@ export const api = {
     ),
   openPullRequestThread: (repo: string, number: number, title: string) =>
     pullRequestThread(repo, number, { intent: "open", title }),
+  messagePullRequestThread: (
+    repo: string,
+    number: number,
+    title: string,
+    message: string
+  ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
     method: MergeMethod

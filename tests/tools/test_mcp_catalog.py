@@ -1,6 +1,7 @@
 import asyncio
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from cryptography.fernet import Fernet
 from mcp.types import Tool
@@ -63,3 +64,28 @@ async def test_stale_catalog_is_served_then_refreshed(fake_store, monkeypatch):
     await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
     monkeypatch.setattr(cache, "_now_ms", now)
     assert sorted(await names()) == ["fetch", "search"]
+
+
+@pytest.mark.parametrize(
+    ("raised", "message"),
+    [
+        (
+            ExceptionGroup("session", [httpx.ConnectError("[Errno 8] nodename not known")]),
+            "Could not reach the MCP server: [Errno 8] nodename not known",
+        ),
+        (
+            RuntimeError("https://example.com/mcp?token=secret"),
+            "Could not discover MCP tools (RuntimeError); check the URL and authentication headers",
+        ),
+    ],
+)
+async def test_discovery_error_names_the_failure_without_secrets(monkeypatch, raised, message):
+    from agent.mcp.models import MCPConnection
+
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(side_effect=raised))
+    record = MCPConnection.model_construct(name="example", url="https://example.com/mcp")
+
+    with pytest.raises(ValueError) as error:
+        await runtime.discover_tools(record, ("ns",))
+
+    assert str(error.value) == message
