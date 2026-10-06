@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react"
-import { TreeStructureIcon } from "@phosphor-icons/react"
 import {
   File,
   Virtualizer,
@@ -19,6 +18,17 @@ import {
   useDiffOverflow,
 } from "@/features/agents/utils/diffUtils"
 import { useWorkspaceFile } from "@/features/agents/lib/workspaceFiles"
+import { PanelIconButton } from "@/features/agents/components/panel/PanelIconButton"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { FadeText } from "@langchain/gtm-platform-design-system/ui/fade-text"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { AlertTriangle, TreeStructure } from "@/components/glyphs"
 import { useResolvedTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -30,16 +40,24 @@ interface FilesPanelProps {
   onOpenFile: (relativePath: string) => void
 }
 
-function PreviewMessage(props: { children: string; error?: boolean }) {
+function PreviewMessage(props: { children: string }) {
   return (
-    <div
-      className={cn(
-        "flex min-h-0 flex-1 items-center justify-center px-6 text-center text-meta text-ink-subtle",
-        props.error && "text-risk"
-      )}
-    >
-      {props.children}
-    </div>
+    <Stack className="min-h-0 flex-1">
+      <EmptyState title={props.children} />
+    </Stack>
+  )
+}
+
+function PreviewError(props: { message: string }) {
+  return (
+    <Box padding="md">
+      <StateNotice
+        icon={AlertTriangle}
+        title="Couldn't open this file"
+        description={props.message}
+        tone="RISK"
+      />
+    </Box>
   )
 }
 
@@ -83,7 +101,7 @@ function FilePreview(props: {
   relativePath: string
 }) {
   const { data, error } = props.file
-  if (error) return <PreviewMessage error>{error.message}</PreviewMessage>
+  if (error) return <PreviewError message={error.message} />
   if (!data) return <PreviewMessage>Loading…</PreviewMessage>
   if (data.kind !== "file") return <PreviewMessage>Not a file.</PreviewMessage>
   if (data.binary)
@@ -91,10 +109,10 @@ function FilePreview(props: {
   return (
     <>
       {data.truncated ? (
-        <div className="shrink-0 border-b border-line px-3 py-1.5 text-meta text-ink-subtle">
+        <p className="shrink-0 border-b border-line px-3 py-1.5 text-meta text-ink-subtle">
           Preview limited to the first 1 MB of a {data.size.toLocaleString()}{" "}
           byte file.
-        </div>
+        </p>
       ) : null}
       <SourcePreview name={props.relativePath} contents={data.contents} />
     </>
@@ -113,48 +131,43 @@ export function FilesPanel({
   const showExplorer = explorerOpen || relativePath === null
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas"
-      style={{ "--panel-diff-bg": "var(--gtm-canvas)" } as React.CSSProperties}
-    >
+    <Stack bg="panel" className="min-h-0 flex-1 overflow-hidden">
       {relativePath ? (
-        <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-3">
-          <span
-            className="min-w-0 flex-1 truncate text-meta text-ink-subtle"
-            title={relativePath}
+        <Inline
+          gap="xs"
+          className="h-row-data shrink-0 border-b border-line pr-2 pl-3"
+        >
+          <FadeText
+            lines={1}
+            render={<span title={relativePath} />}
+            className="flex-1 font-mono text-meta whitespace-nowrap text-ink-subtle"
           >
             {relativePath}
-          </span>
+          </FadeText>
           <DiffWrapToggle />
-          <button
-            type="button"
-            aria-label={
-              explorerOpen ? "Hide file explorer" : "Show file explorer"
-            }
-            aria-pressed={explorerOpen}
-            title={explorerOpen ? "Hide file explorer" : "Show file explorer"}
+          <PanelIconButton
+            label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
+            pressed={explorerOpen}
             onClick={() => setExplorerOpen((open) => !open)}
-            className={cn(
-              "flex size-6 items-center justify-center rounded-tick text-ink-subtle/70 transition-colors hover:text-ink",
-              explorerOpen && "bg-hover text-ink"
-            )}
           >
-            <TreeStructureIcon className="size-3.5" />
-          </button>
-        </div>
+            <Icon icon={TreeStructure} size="sm" />
+          </PanelIconButton>
+        </Inline>
       ) : null}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <Inline align="stretch" className="min-h-0 flex-1 overflow-hidden">
         {relativePath ? (
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <Stack className="min-w-0 flex-1 overflow-hidden">
             <FilePreview file={file} relativePath={relativePath} />
-          </div>
+          </Stack>
         ) : null}
         {showExplorer ? (
-          <aside
+          <Inline
+            render={<aside />}
+            align="stretch"
             className={cn(
-              "flex min-h-0 shrink-0",
+              "min-h-0 shrink-0",
               relativePath
-                ? "w-[min(22rem,46%)] min-w-56 border-l border-line"
+                ? "w-2/5 max-w-88 min-w-56 border-l border-line"
                 : "min-w-0 flex-1"
             )}
           >
@@ -167,9 +180,9 @@ export function FilesPanel({
                 ? { onRefreshSelectedFile: () => void file.refetch() }
                 : {})}
             />
-          </aside>
+          </Inline>
         ) : null}
-      </div>
-    </div>
+      </Inline>
+    </Stack>
   )
 }

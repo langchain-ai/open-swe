@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
 } from "react"
-import { Check, ChevronDown, ChevronRight } from "lucide-react"
 
 import type { ModelOption } from "@/lib/api"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -18,6 +17,16 @@ import {
 } from "@/features/agents/lib/provider/useModelOptions"
 import { formatTokenCount } from "@/features/agents/lib/contextUsage"
 import { Z } from "@/features/agents/components/z-index"
+import {
+  COMPOSER_POPUP_ROW_CLASS,
+  ComposerControl,
+  ComposerControlChevron,
+} from "@/features/agents/components/composer/ComposerControl"
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { POPUP_SURFACE_SHELL } from "@langchain/gtm-platform-design-system/ui/popup-surface"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
+import { Check, ChevronRight } from "@/components/glyphs"
 import { cn } from "@/lib/utils"
 
 export interface ModelPickerProps {
@@ -52,7 +61,7 @@ function effortForModel(
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-3 pt-2 pb-1 text-meta text-ink-subtle/60">
+    <div className="px-1.5 pt-1.5 pb-1 text-meta font-medium text-ink-subtle">
       {children}
     </div>
   )
@@ -84,18 +93,17 @@ function OptionRow({
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-label whitespace-nowrap transition-colors",
-        selected ? "text-ink" : "text-ink-subtle",
+        COMPOSER_POPUP_ROW_CLASS,
+        "whitespace-nowrap",
+        selected && "font-medium",
         focused && "bg-hover",
-        disabled
-          ? "cursor-default opacity-40"
-          : "cursor-pointer hover:bg-hover"
+        disabled ? "cursor-default opacity-50" : "cursor-pointer hover:bg-hover"
       )}
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {trailing ??
         (selected && (
-          <Check className="size-3.5 shrink-0 text-ink-subtle/60" />
+          <Icon icon={Check} size="sm" className="text-ink-subtle" />
         ))}
     </button>
   )
@@ -359,23 +367,18 @@ export function ModelPicker({
       ref={containerRef}
       className={cn("relative min-w-0 shrink", className)}
     >
-      <button
+      <ComposerControl
         type="button"
         disabled={pickerDisabled}
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="listbox"
         aria-expanded={open}
         title={triggerTitle}
-        className={cn(
-          "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-label text-ink-subtle transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
-          triggerClassName
-        )}
+        className={cn("max-w-56", triggerClassName)}
       >
-        <span className="truncate">{triggerLabel}</span>
-        {!pickerDisabled && (
-          <ChevronDown className="size-3.5 shrink-0 opacity-60" />
-        )}
-      </button>
+        <span className="min-w-0 truncate">{triggerLabel}</span>
+        {!pickerDisabled && <ComposerControlChevron />}
+      </ComposerControl>
       {open && !pickerDisabled && (
         <div
           data-testid="model-picker-panel"
@@ -386,7 +389,7 @@ export function ModelPicker({
           <div
             ref={mainPaneRef}
             tabIndex={-1}
-            className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-control py-1 outline-none"
+            className={cn("flex w-56 flex-col p-1", POPUP_SURFACE_SHELL)}
           >
             {selectedModel ? (
               <>
@@ -394,7 +397,7 @@ export function ModelPicker({
                   <>
                     <SectionHeading>Context</SectionHeading>
                     <div
-                      className="flex items-center gap-2 px-3 py-1.5 text-label text-ink"
+                      className={cn(COMPOSER_POPUP_ROW_CLASS, "font-mono")}
                       title="Context window reported for this model"
                     >
                       <span className="min-w-0 flex-1 truncate">
@@ -425,18 +428,25 @@ export function ModelPicker({
                 </div>
               </>
             ) : (
-              <p className="px-3 py-1.5 text-label text-ink-subtle/60">
+              <p className="px-1.5 py-1 text-label text-ink-subtle">
                 Model and reasoning are chosen when the thread starts.
               </p>
             )}
-            <div ref={modelRowRef} className="mt-1 border-t border-line pt-1">
+            <div
+              ref={modelRowRef}
+              className="-mx-1 mt-1 border-t border-line px-1 pt-1"
+            >
               <SectionHeading>Model</SectionHeading>
               <OptionRow
                 label={selectedModel?.label ?? "Auto"}
                 selected={false}
                 focused={pane === "models" || mainIndex === modelRowIndex}
                 trailing={
-                  <ChevronRight className="size-3.5 shrink-0 text-ink-subtle/60" />
+                  <Icon
+                    icon={ChevronRight}
+                    size="sm"
+                    className="text-ink-subtle"
+                  />
                 }
                 onMouseEnter={openModelPane}
                 onClick={openModelPane}
@@ -447,20 +457,24 @@ export function ModelPicker({
             <div
               ref={modelPaneRef}
               style={{ top: modelPaneTop }}
-              className="dropdown-glass absolute left-full ml-1 flex w-60 flex-col overflow-hidden rounded-control"
+              className={cn(
+                "absolute left-full ml-1 flex w-60 flex-col overflow-hidden",
+                POPUP_SURFACE_SHELL
+              )}
             >
-              <input
-                autoFocus
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search models"
-                aria-label="Search models"
-                className="w-full border-b border-line bg-transparent px-3 py-2 text-label text-ink outline-none placeholder:text-ink-subtle/60"
-              />
+              <Box padding="xs" className="border-b border-line">
+                <SearchInput
+                  autoFocus
+                  label="Search models"
+                  placeholder="Search models"
+                  value={query}
+                  onValueChange={setQuery}
+                />
+              </Box>
               <div
                 role="listbox"
                 aria-label="Models"
-                className="max-h-72 overflow-y-auto py-1"
+                className="max-h-72 overflow-y-auto p-1"
               >
                 {showAuto && (
                   <OptionRow
@@ -472,7 +486,7 @@ export function ModelPicker({
                   />
                 )}
                 {filteredModels.length === 0 ? (
-                  <p className="px-3 py-1.5 text-label text-ink-subtle/60">
+                  <p className="px-1.5 py-1 text-label text-ink-subtle">
                     No matches
                   </p>
                 ) : (
@@ -487,7 +501,7 @@ export function ModelPicker({
                       label={
                         <>
                           {model.label}{" "}
-                          <span className="text-ink-subtle/60">
+                          <span className="text-ink-subtle">
                             {formatEffort(effortForModel(model, selection))}
                           </span>
                         </>

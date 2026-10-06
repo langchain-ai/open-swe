@@ -62,9 +62,9 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
 
 const SHEET_SIDE_CLASS: Record<"top" | "right" | "bottom" | "left", string> = {
   right:
-    "inset-y-4 right-4 h-auto w-full max-w-sm data-ending-style:translate-x-5 data-starting-style:translate-x-8",
+    "inset-y-4 right-4 h-auto w-[calc(100%-2rem)] max-w-sm data-ending-style:translate-x-5 data-starting-style:translate-x-8",
   left:
-    "inset-y-4 left-4 h-auto w-full max-w-sm data-ending-style:-translate-x-5 data-starting-style:-translate-x-8",
+    "inset-y-4 left-4 h-auto w-[calc(100%-2rem)] max-w-sm data-ending-style:-translate-x-5 data-starting-style:-translate-x-8",
   top:
     "inset-x-4 top-4 h-auto data-ending-style:-translate-y-5 data-starting-style:-translate-y-8",
   bottom:

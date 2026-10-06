@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react"
-import { LoaderCircle } from "lucide-react"
 
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ArrowUp, Square } from "@/components/glyphs"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
-import { cn } from "@/lib/utils"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
 export interface ActiveRun {
@@ -57,25 +58,8 @@ function useEscapeToStop(enabled: boolean, onStop: () => void) {
   }, [enabled])
 }
 
-function SendIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height="14"
-      viewBox="0 0 14 14"
-      width="14"
-    >
-      <path
-        d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  )
-}
+/* The composer's one primary: a round send on the control rung, as in the reference composer. */
+const PRIMARY_ACTION_CLASS = "rounded-full"
 
 function SendButton({
   canSubmit,
@@ -84,23 +68,17 @@ function SendButton({
   label = "Send message",
 }: ComposerPrimaryActionsProps & { label?: string }) {
   return (
-    <button
+    <Button
       aria-label={label}
-      className={cn(
-        "relative isolate flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-ink text-canvas shadow-control shadow-ink/20 transition-all duration-150",
-        "hover:scale-105 hover:bg-ink/85 active:shadow-none enabled:cursor-pointer",
-        "disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none"
-      )}
+      className={PRIMARY_ACTION_CLASS}
       disabled={!canSubmit}
+      loading={submitting}
       onClick={onSubmit}
+      size="icon"
       type="button"
     >
-      {submitting ? (
-        <LoaderCircle className="size-3.5 animate-spin" />
-      ) : (
-        <SendIcon />
-      )}
-    </button>
+      <Icon icon={ArrowUp} />
+    </Button>
   )
 }
 
@@ -116,32 +94,17 @@ function StopButton({
   useEscapeToStop(stopOnEscape && !disabled, onStop)
 
   return (
-    <button
+    <Button
       aria-label="Stop run"
-      className={cn(
-        "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-ink text-canvas shadow-control shadow-ink/20 transition-all duration-150",
-        "hover:scale-105 hover:bg-ink/85 active:shadow-none",
-        "disabled:pointer-events-none disabled:opacity-40"
-      )}
-      disabled={disabled}
+      className={PRIMARY_ACTION_CLASS}
+      loading={disabled}
       onClick={onStop}
+      size="icon"
       title="Stop run (Esc)"
       type="button"
     >
-      {disabled ? (
-        <LoaderCircle className="size-3.5 animate-spin" />
-      ) : (
-        <svg
-          aria-hidden="true"
-          fill="currentColor"
-          height="12"
-          viewBox="0 0 12 12"
-          width="12"
-        >
-          <rect height="8" rx="1.5" width="8" x="2" y="2" />
-        </svg>
-      )}
-    </button>
+      <Icon icon={Square} size="sm" />
+    </Button>
   )
 }
 

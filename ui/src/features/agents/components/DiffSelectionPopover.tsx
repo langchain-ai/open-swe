@@ -1,9 +1,12 @@
 import type { ComponentProps, ReactNode } from "react"
 
-import { Popover, PopoverContent } from "@langchain/gtm-platform-design-system/ui/popover"
+import {
+  Popover,
+  PopoverContent,
+} from "@langchain/gtm-platform-design-system/ui/popover"
 import type { DiffLineSelection } from "@/features/agents/utils/diffSelection"
 
-// Pierre renders lines in a shadow-control root, which `contains` doesn't cross.
+// Pierre renders lines in a shadow root, which `contains` doesn't cross.
 function isInDiff(selection: DiffLineSelection, node: Node) {
   const root = node.getRootNode()
   const host = root instanceof ShadowRoot ? root.host : node

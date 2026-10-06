@@ -1,26 +1,59 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import {
-  Check,
-  Cloud,
-  Folder,
-  FolderGit2,
-  FolderOpen,
-  FolderPlus,
-  GitBranch,
-  Laptop,
-  Trash2,
-} from "lucide-react"
+import { useMemo, useState } from "react"
 
-import { ComposerControlChevron } from "./ComposerControl"
+import {
+  COMPOSER_POPUP_ROW_CLASS,
+  ComposerControl,
+  ComposerControlChevron,
+} from "./ComposerControl"
 import type {
   DesktopProject,
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import { DropdownMenu, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem, DropdownMenuContent, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/gtm-platform-design-system/ui/popover"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
+import {
+  Check,
+  Cloud,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  GitBranch,
+  Layers,
+  Monitor,
+  Trash2,
+} from "@/components/glyphs"
 import { cn } from "@/lib/utils"
 
 export type RunTarget = "cloud" | "local"
+
+function isRunTarget(value: unknown): value is RunTarget {
+  return value === "cloud" || value === "local"
+}
+
+function isWorkspaceMode(value: unknown): value is DesktopWorkspaceMode {
+  return value === "local" || value === "worktree"
+}
 
 export function RunTargetSelector({
   value,
@@ -29,26 +62,34 @@ export function RunTargetSelector({
   value: RunTarget
   onChange: (value: RunTarget) => void
 }) {
-  const Icon = value === "local" ? Laptop : Cloud
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80">
-        <Icon className="size-3.5 shrink-0" />
-        <span>{value === "local" ? "This Mac" : "Cloud"}</span>
-        <ComposerControlChevron />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-44" sideOffset={7}>
-        <DropdownMenuGroup>
+      <DropdownMenuTrigger
+        render={
+          <ComposerControl>
+            <Icon icon={value === "local" ? Monitor : Cloud} size="sm" />
+            <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+            <ComposerControlChevron />
+          </ComposerControl>
+        }
+      />
+      <DropdownMenuContent align="start" className="w-44" side="top">
+        <DropdownMenuRadioGroup
+          value={value}
+          onValueChange={(next) => {
+            if (isRunTarget(next)) onChange(next)
+          }}
+        >
           <DropdownMenuLabel>Work in</DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => onChange("local")}>
-            <Laptop />
-            This Mac{value === "local" && <Check className="ml-auto" />}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onChange("cloud")}>
-            <Cloud />
-            Cloud{value === "cloud" && <Check className="ml-auto" />}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
+          <DropdownMenuRadioItem value="local">
+            <Icon icon={Monitor} size="sm" />
+            This Mac
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="cloud">
+            <Icon icon={Cloud} size="sm" />
+            Cloud
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -77,17 +118,20 @@ export function LocalRepoSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={cn(
-          "flex max-w-[260px] items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80",
-          triggerClassName
-        )}
-        title={selectedRepo?.cwd}
-      >
-        <FolderOpen className="size-3.5 shrink-0" />
-        <span className="truncate">{selectedRepo?.name ?? placeholder}</span>
-        <ComposerControlChevron />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64" side={side} sideOffset={7}>
+        render={
+          <ComposerControl
+            className={cn("max-w-64", triggerClassName)}
+            title={selectedRepo?.cwd}
+          >
+            <Icon icon={FolderOpen} size="sm" />
+            <span className="min-w-0 truncate">
+              {selectedRepo?.name ?? placeholder}
+            </span>
+            <ComposerControlChevron />
+          </ComposerControl>
+        }
+      />
+      <DropdownMenuContent align="start" className="w-64" side={side}>
         <DropdownMenuGroup>
           <DropdownMenuLabel>Repositories</DropdownMenuLabel>
           {repos.length === 0 && (
@@ -99,22 +143,24 @@ export function LocalRepoSelector({
               onClick={() => onSelectRepo(repo.cwd)}
               title={repo.cwd}
             >
-              <FolderOpen />
+              <Icon icon={FolderOpen} size="sm" />
               <span className="min-w-0 flex-1 truncate">{repo.name}</span>
-              {selectedRepoPath === repo.cwd && <Check className="ml-auto" />}
+              {selectedRepoPath === repo.cwd && (
+                <Icon icon={Check} size="sm" className="ml-auto" />
+              )}
             </DropdownMenuItem>
           ))}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem onClick={onAddRepo}>
-            <FolderPlus />
+            <Icon icon={FolderPlus} size="sm" />
             Add repository…
           </DropdownMenuItem>
           {repos.length > 0 && (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
-                <Trash2 />
+                <Icon icon={Trash2} size="sm" />
                 Remove repository…
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-64">
@@ -126,7 +172,7 @@ export function LocalRepoSelector({
                       title={repo.cwd}
                       variant="destructive"
                     >
-                      <FolderOpen />
+                      <Icon icon={FolderOpen} size="sm" />
                       <span className="truncate">{repo.name}</span>
                     </DropdownMenuItem>
                   ))}
@@ -151,36 +197,46 @@ export function LocalWorkspaceSelector({
   /** What the label calls a worktree the thread is already working in. */
   worktreeLabel?: string
 }) {
-  const Icon = value === "worktree" ? FolderGit2 : Folder
+  const glyph = value === "worktree" ? Layers : Folder
   const label = value === "worktree" ? worktreeLabel : "Current checkout"
   if (!onChange)
     return (
-      <span className="flex items-center gap-1 text-ink-subtle">
-        <Icon className="size-3.5 shrink-0" />
+      <Inline
+        gap="xs"
+        className="h-control-sm px-1.5 text-meta text-ink-subtle"
+      >
+        <Icon icon={glyph} size="sm" />
         {label}
-      </span>
+      </Inline>
     )
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80">
-        <Icon className="size-3.5 shrink-0" />
-        <span>{label}</span>
-        <ComposerControlChevron />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-52" sideOffset={7}>
-        <DropdownMenuGroup>
+      <DropdownMenuTrigger
+        render={
+          <ComposerControl>
+            <Icon icon={glyph} size="sm" />
+            <span>{label}</span>
+            <ComposerControlChevron />
+          </ComposerControl>
+        }
+      />
+      <DropdownMenuContent align="start" className="w-52" side="top">
+        <DropdownMenuRadioGroup
+          value={value}
+          onValueChange={(next) => {
+            if (isWorkspaceMode(next)) onChange(next)
+          }}
+        >
           <DropdownMenuLabel>Workspace</DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => onChange("local")}>
-            <Folder />
+          <DropdownMenuRadioItem value="local">
+            <Icon icon={Folder} size="sm" />
             Current checkout
-            {value === "local" && <Check className="ml-auto" />}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onChange("worktree")}>
-            <FolderGit2 />
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="worktree">
+            <Icon icon={Layers} size="sm" />
             New worktree
-            {value === "worktree" && <Check className="ml-auto" />}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -207,21 +263,12 @@ export function LocalBranchSelector({
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
-  const containerRef = useRef<HTMLDivElement>(null)
 
   const filtered = useMemo(() => {
     const value = query.trim().toLowerCase()
     if (!value) return refs
     return refs.filter((ref) => ref.name.toLowerCase().includes(value))
   }, [query, refs])
-
-  useEffect(() => {
-    function handlePointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handlePointerDown)
-    return () => document.removeEventListener("mousedown", handlePointerDown)
-  }, [])
 
   const select = (branch: string) => {
     onSelectBranch(branch)
@@ -230,61 +277,72 @@ export function LocalBranchSelector({
   }
 
   return (
-    <div ref={containerRef} className="relative min-w-0 shrink">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => {
-          if (!open) onRefresh()
-          setOpen((value) => !value)
-        }}
-        className="flex max-w-[260px] cursor-pointer items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next && !open) onRefresh()
+        setOpen(next)
+      }}
+    >
+      <PopoverTrigger
+        render={
+          <ComposerControl className="max-w-64" disabled={disabled}>
+            <Icon icon={GitBranch} size="sm" />
+            <span className="min-w-0 truncate">
+              {selectedBranch ?? "No branch"}
+            </span>
+            <ComposerControlChevron />
+          </ComposerControl>
+        }
+      />
+      <PopoverContent
+        align="start"
+        className="flex max-h-72 w-72 flex-col"
+        inset="flush"
+        side="top"
       >
-        <GitBranch className="size-3.5 shrink-0" />
-        <span className="truncate">{selectedBranch ?? "No branch"}</span>
-        <ComposerControlChevron />
-      </button>
-      {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded-compact bg-panel text-label text-ink shadow-popup ring-1 ring-ink/10">
-          <div className="border-b border-line">
-            <input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search refs..."
-              className="w-full bg-transparent px-3 py-2 text-ink outline-none placeholder:text-ink-subtle"
-            />
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-1">
-            {filtered.length === 0 ? (
-              <div className="px-2 py-1.5 text-ink-subtle">
-                No refs found.
-              </div>
-            ) : (
-              filtered.map((ref) => (
-                <button
-                  key={ref.name}
-                  type="button"
-                  onClick={() => select(ref.name)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-badge px-2 py-1.5 text-left transition-colors hover:bg-hover hover:text-ink",
-                    ref.name === selectedBranch
-                      ? "text-ink"
-                      : "text-ink-subtle"
-                  )}
-                >
-                  <span className="min-w-0 flex-1 truncate">{ref.name}</span>
-                  {badge(ref) && (
-                    <span className="shrink-0 text-meta text-ink-subtle/60">
-                      {badge(ref)}
-                    </span>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+        <Box padding="xs" className="shrink-0 border-b border-line">
+          <SearchInput
+            autoFocus
+            label="Search refs"
+            placeholder="Search refs..."
+            value={query}
+            onValueChange={setQuery}
+          />
+        </Box>
+        <Box padding="xs" className="min-h-0 flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="px-1.5 py-1 text-label text-ink-subtle">
+              No refs found.
+            </p>
+          ) : (
+            filtered.map((ref) => (
+              <button
+                key={ref.name}
+                type="button"
+                onClick={() => select(ref.name)}
+                className={cn(
+                  COMPOSER_POPUP_ROW_CLASS,
+                  "cursor-pointer hover:bg-hover focus-visible:bg-hover",
+                  ref.name === selectedBranch && "font-medium"
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate font-mono">
+                  {ref.name}
+                </span>
+                {badge(ref) && (
+                  <span className="shrink-0 text-meta text-ink-subtle">
+                    {badge(ref)}
+                  </span>
+                )}
+                {ref.name === selectedBranch && (
+                  <Icon icon={Check} size="sm" className="text-ink-subtle" />
+                )}
+              </button>
+            ))
+          )}
+        </Box>
+      </PopoverContent>
+    </Popover>
   )
 }

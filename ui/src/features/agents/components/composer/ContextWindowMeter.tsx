@@ -1,13 +1,19 @@
-import { Popover, PopoverContent, PopoverTrigger } from "@langchain/gtm-platform-design-system/ui/popover"
+import { Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/gtm-platform-design-system/ui/popover"
+import { Progress } from "@langchain/gtm-platform-design-system/ui/progress"
 import { formatTokenCount } from "@/features/agents/lib/contextUsage"
-import { cn } from "@/lib/utils"
 
 export interface ContextWindowMeterProps {
   usedTokens?: number | null
   contextWindow?: number | null
 }
 
-const RADIUS = 9.75
+const RADIUS = 9
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 const OVERLOADED_PERCENTAGE = 90
 
@@ -23,7 +29,7 @@ function formatPercentage(value: number): string {
     : `${Math.round(value)}%`
 }
 
-/** Ring gauge for context usage; the detail panel opens on hover. */
+/** Ring gauge for context usage; the reading opens on hover. */
 export function ContextWindowMeter({
   usedTokens,
   contextWindow,
@@ -36,9 +42,6 @@ export function ContextWindowMeter({
     limit != null ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0
   const hasPercentage = limit != null
   const isOverloaded = hasPercentage && percentage >= OVERLOADED_PERCENTAGE
-  const usageColor = isOverloaded
-    ? "var(--color-destructive)"
-    : "color-mix(in oklab, var(--gtm-ink-subtle) 72%, transparent)"
   const label = hasPercentage
     ? `Context window ${formatPercentage(percentage)} used`
     : `Context window ${formatTokenCount(used)} tokens`
@@ -50,62 +53,55 @@ export function ContextWindowMeter({
         delay={150}
         openOnHover
         render={
-          <button
+          <Button
             aria-label={label}
-            className={cn(
-              "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-subtle transition-colors outline-none",
-              "hover:bg-hover data-[pressed]:bg-hover",
-              "focus-visible:ring-2 focus-visible:ring-primary"
-            )}
+            className="rounded-full text-ink-subtle"
             data-testid="context-window-indicator"
+            size="icon-sm"
             type="button"
+            variant="ghost"
           >
-            <span className="relative flex size-5 items-center justify-center">
-              <svg
-                aria-hidden="true"
-                className="absolute inset-0 size-full -rotate-90 transform-gpu"
-                viewBox="0 0 24 24"
-              >
+            <svg
+              aria-hidden="true"
+              className="size-4 -rotate-90"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                cx="12"
+                cy="12"
+                fill="none"
+                r={RADIUS}
+                stroke="var(--gtm-line-strong)"
+                strokeDasharray={hasPercentage ? undefined : "3 3"}
+                strokeWidth="3"
+              />
+              {hasPercentage && (
                 <circle
+                  className="transition-[stroke-dashoffset] duration-fast ease-out-quint motion-reduce:transition-none"
                   cx="12"
                   cy="12"
                   fill="none"
                   r={RADIUS}
-                  stroke="color-mix(in oklab, var(--gtm-ink-subtle) 24%, transparent)"
-                  strokeDasharray={hasPercentage ? undefined : "3 3"}
+                  stroke={
+                    isOverloaded ? "var(--gtm-risk)" : "var(--gtm-ink-subtle)"
+                  }
+                  strokeDasharray={CIRCUMFERENCE}
+                  strokeDashoffset={CIRCUMFERENCE * (1 - percentage / 100)}
+                  strokeLinecap="round"
                   strokeWidth="3"
                 />
-                {hasPercentage && (
-                  <circle
-                    className="transition-[stroke-dashoffset,stroke] duration-500 ease-out motion-reduce:transition-none"
-                    cx="12"
-                    cy="12"
-                    fill="none"
-                    r={RADIUS}
-                    stroke={usageColor}
-                    strokeDasharray={CIRCUMFERENCE}
-                    strokeDashoffset={CIRCUMFERENCE * (1 - percentage / 100)}
-                    strokeLinecap="round"
-                    strokeWidth="3"
-                  />
-                )}
-              </svg>
-            </span>
-          </button>
+              )}
+            </svg>
+          </Button>
         }
       />
-      <PopoverContent
-        align="end"
-        className="w-64 max-w-none text-left whitespace-normal"
-        side="top"
-        tooltipStyle
-      >
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-meta font-medium text-ink-subtle">
+      <PopoverContent align="end" className="w-64" side="top">
+        <Stack gap="sm">
+          <Inline justify="between" gap="md">
+            <span className="text-label font-medium text-ink">
               Context window
-            </div>
-            <div className="text-meta text-ink-subtle/70 tabular-nums">
+            </span>
+            <span className="font-mono text-meta text-ink-subtle tabular-nums">
               {hasPercentage ? (
                 <>
                   <span>{formatPercentage(percentage)}</span>
@@ -117,35 +113,25 @@ export function ContextWindowMeter({
               ) : (
                 formatTokenCount(used)
               )}
-            </div>
-          </div>
-          {hasPercentage && (
-            <div
-              aria-label="Context window usage"
-              aria-valuemax={100}
-              aria-valuemin={0}
-              aria-valuenow={Math.round(percentage)}
-              className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
-              role="progressbar"
-            >
-              <div
-                className="h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"
-                style={{ backgroundColor: usageColor, width: `${percentage}%` }}
-              />
-            </div>
-          )}
-          {!hasPercentage && (
-            <p className="text-meta leading-4 text-ink-subtle/70">
+            </span>
+          </Inline>
+          {hasPercentage ? (
+            <Progress
+              label="Context window usage"
+              value={Math.round(percentage)}
+            />
+          ) : (
+            <p className="text-meta text-ink-subtle">
               The context window for this model was not reported.
             </p>
           )}
           {isOverloaded && (
-            <p className="text-meta leading-4 font-medium text-risk">
+            <p className="text-meta font-medium text-risk">
               Approaching the context limit — start a new thread if replies
               degrade.
             </p>
           )}
-        </div>
+        </Stack>
       </PopoverContent>
     </Popover>
   )

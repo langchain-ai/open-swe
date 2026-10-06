@@ -3,6 +3,7 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/700.css";
 @import "@langchain/gtm-platform-design-system/styles.css";
 @import "./styles/app.css";
 @import "./styles/markdown.css";

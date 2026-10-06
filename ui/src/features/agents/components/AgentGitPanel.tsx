@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { DownloadIcon } from "lucide-react"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import { agentsApi } from "@/features/agents/lib/api"
@@ -25,6 +24,9 @@ import {
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
+import { PanelIconButton } from "@/features/agents/components/panel/PanelIconButton"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Download } from "@/components/glyphs"
 
 interface AgentGitPanelProps {
   onComment?: (content: string) => Promise<void>
@@ -216,16 +218,14 @@ export function AgentGitPanel({
           onScopeChange={(next) => selectScope(threadRef, next)}
           extraActions={
             canDownloadRecovery ? (
-              <button
-                type="button"
-                aria-label="Download recovery patch"
+              <PanelIconButton
+                label="Download recovery patch"
                 title={recoveryError ?? "Download recovery patch"}
                 disabled={recoveringPatch}
                 onClick={() => void downloadRecoveryPatch()}
-                className="flex size-7 items-center justify-center rounded-badge text-ink-subtle transition-colors hover:bg-hover hover:text-ink disabled:opacity-50"
               >
-                <DownloadIcon className="size-3.5" />
-              </button>
+                <Icon icon={Download} size="sm" />
+              </PanelIconButton>
             ) : undefined
           }
         />

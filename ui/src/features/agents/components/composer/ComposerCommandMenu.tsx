@@ -1,7 +1,12 @@
 import { memo, useLayoutEffect, useRef } from "react"
-import { Bot, File as FileIcon, Hash } from "lucide-react"
 
+import { COMPOSER_POPUP_ROW_CLASS } from "./ComposerControl"
 import type { ComposerTriggerKind } from "./composerTrigger"
+import type { Glyph } from "@/components/glyphs"
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { POPUP_SURFACE_SHELL } from "@langchain/gtm-platform-design-system/ui/popup-surface"
+import { Bot, File, Hash } from "@/components/glyphs"
 import { cn } from "@/lib/utils"
 
 export type ComposerCommandItem =
@@ -34,6 +39,13 @@ export type ComposerCommandItem =
       label: string
       description: string
     }
+
+const ITEM_GLYPH: Record<ComposerCommandItem["type"], Glyph> = {
+  path: File,
+  "slash-command": Bot,
+  skill: Bot,
+  "slack-channel": Hash,
+}
 
 interface ComposerCommandMenuProps {
   items: Array<ComposerCommandItem>
@@ -70,7 +82,10 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
 
   return (
     <div
-      className="dropdown-glass absolute bottom-full left-0 z-50 mb-2 w-full max-w-md overflow-hidden rounded-control"
+      className={cn(
+        "absolute inset-x-0 bottom-full z-50 mb-1.5 max-w-md overflow-hidden",
+        POPUP_SURFACE_SHELL
+      )}
       role="listbox"
       aria-label={
         triggerKind === "path"
@@ -83,15 +98,14 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
       }
     >
       {items.length > 0 ? (
-        <div ref={listRef} className="max-h-64 overflow-y-auto py-1">
+        <div ref={listRef} className="max-h-64 overflow-y-auto p-1">
           {items.map((item) => (
             <button
               aria-selected={activeItemId === item.id}
               className={cn(
-                "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-label select-none",
-                activeItemId === item.id
-                  ? "bg-hover text-ink"
-                  : "text-ink"
+                COMPOSER_POPUP_ROW_CLASS,
+                "cursor-pointer gap-2",
+                activeItemId === item.id && "bg-hover"
               )}
               data-composer-item-id={item.id}
               key={item.id}
@@ -105,22 +119,21 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
               role="option"
               type="button"
             >
-              {item.type === "path" ? (
-                <FileIcon className="size-3.5 shrink-0 text-ink-subtle/80" />
-              ) : item.type === "slack-channel" ? (
-                <Hash className="size-3.5 shrink-0 text-ink-subtle/80" />
-              ) : (
-                <Bot className="size-3.5 shrink-0 text-ink-subtle/80" />
-              )}
+              <Box
+                render={<span />}
+                className="flex size-control-sm shrink-0 items-center justify-center rounded-compact bg-hover text-ink-subtle"
+              >
+                <Icon icon={ITEM_GLYPH[item.type]} size="sm" />
+              </Box>
               <span className="shrink-0 font-medium">{item.label}</span>
-              <span className="min-w-0 flex-1 truncate text-ink-subtle/70">
+              <span className="min-w-0 flex-1 truncate text-meta text-ink-subtle">
                 {item.description}
               </span>
             </button>
           ))}
         </div>
       ) : (
-        <p className="px-4 py-3 text-meta text-ink-subtle/70">
+        <p className="px-3 py-2.5 text-label text-ink-subtle">
           {emptyStateText ??
             (triggerKind === "path"
               ? "No matching files."

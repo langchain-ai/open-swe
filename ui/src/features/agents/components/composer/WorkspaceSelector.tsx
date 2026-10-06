@@ -1,7 +1,19 @@
-import { useEffect, useRef, useState } from "react"
-import { CaretDownIcon, StackIcon } from "@phosphor-icons/react"
+import { useState } from "react"
 
+import {
+  COMPOSER_POPUP_ROW_CLASS,
+  ComposerControl,
+  ComposerControlChevron,
+} from "./ComposerControl"
 import type { WorkspaceOption } from "@/lib/api"
+import { Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/gtm-platform-design-system/ui/popover"
+import { Check, Stack as StackGlyph } from "@/components/glyphs"
 import { cn } from "@/lib/utils"
 
 interface WorkspaceSelectorProps {
@@ -31,18 +43,6 @@ export function WorkspaceSelector({
   placeholder = "No workspace",
 }: WorkspaceSelectorProps) {
   const [open, setOpen] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node
-      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
 
   if (workspaces.length < (showWithOneWorkspace ? 1 : 2)) return null
 
@@ -51,23 +51,32 @@ export function WorkspaceSelector({
   )
 
   return (
-    <div ref={dropdownRef} className="relative min-w-0 shrink">
-      <button
-        type="button"
-        disabled={disabled}
-        aria-label="Workspace"
-        onClick={() => setOpen((value) => !value)}
-        className="flex max-w-[220px] cursor-pointer items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <ComposerControl
+            aria-label="Workspace"
+            className="max-w-56"
+            disabled={disabled}
+          >
+            <Icon icon={StackGlyph} size="sm" />
+            <span className="min-w-0 truncate">
+              {selected?.name ?? placeholder}
+            </span>
+            <ComposerControlChevron />
+          </ComposerControl>
+        }
+      />
+      <PopoverContent
+        align="start"
+        className="max-h-72 w-64"
+        inset="flush"
+        scrollable
       >
-        <StackIcon className="size-3.5 shrink-0" />
-        <span className="flex-1 truncate text-left">
-          {selected?.name ?? placeholder}
-        </span>
-        <CaretDownIcon className="size-3 shrink-0 opacity-70" />
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 flex max-h-72 w-64 flex-col overflow-y-auto rounded-tick border border-line bg-panel text-label text-ink shadow-popup">
-          <div className="px-2 pt-2 pb-1 text-ink-subtle">Workspace</div>
+        <Stack padding="xs">
+          <p className="px-1.5 py-1 text-meta font-medium text-ink-subtle">
+            Workspace
+          </p>
           {workspaces.map((workspace) => {
             const isSelected = workspace.slug === selectedSlug
             return (
@@ -79,24 +88,28 @@ export function WorkspaceSelector({
                   setOpen(false)
                 }}
                 className={cn(
-                  "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
-                  isSelected ? "text-ink" : "text-ink-subtle"
+                  COMPOSER_POPUP_ROW_CLASS,
+                  "cursor-pointer hover:bg-hover focus-visible:bg-hover"
                 )}
               >
-                <span className="truncate">{workspace.name}</span>
+                <span className="min-w-0 truncate">{workspace.name}</span>
                 {!workspace.has_snapshot && (
-                  <span className="ml-2 shrink-0 text-meta text-ink-subtle">
+                  <span className="shrink-0 text-meta text-ink-subtle">
                     no snapshot
                   </span>
                 )}
                 {isSelected && (
-                  <span className="ml-auto pl-3 text-ink-subtle">✓</span>
+                  <Icon
+                    icon={Check}
+                    size="sm"
+                    className="ml-auto text-ink-subtle"
+                  />
                 )}
               </button>
             )
           })}
-        </div>
-      )}
-    </div>
+        </Stack>
+      </PopoverContent>
+    </Popover>
   )
 }

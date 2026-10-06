@@ -1,16 +1,26 @@
 import { useEffect, useMemo, useRef } from "react"
-import { ArrowClockwiseIcon } from "@phosphor-icons/react"
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react"
 import type { FileTreeBatchOperation } from "@pierre/trees"
 
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
 import type { WorkspaceEntry } from "@/features/agents/lib/workspaceFiles"
 import {
+  TREE_ITEM_HEIGHT,
   TREE_UNSAFE_CSS,
   treeThemeStyle,
 } from "@/features/agents/components/DiffFilesView"
+import { PanelIconButton } from "@/features/agents/components/panel/PanelIconButton"
 import { useDirectoryEntries } from "@/features/agents/lib/workspaceFiles"
-import { cn } from "@/lib/utils"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
+import { AlertTriangle, RefreshCw } from "@/components/glyphs"
 
 interface FileBrowserPanelProps {
   target: TerminalTarget
@@ -94,7 +104,7 @@ export function FileBrowserPanel({
 
   const { model } = useFileTree({
     paths: [],
-    density: "compact",
+    itemHeight: TREE_ITEM_HEIGHT,
     fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: true,
     initialExpansion: "closed",
@@ -187,45 +197,54 @@ export function FileBrowserPanel({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-canvas">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-2">
-        <button
-          type="button"
-          aria-label="Refresh files"
-          title="Refresh files"
+    <Stack bg="panel" className="min-h-0 flex-1">
+      <Inline
+        gap="xs"
+        className="h-row-data shrink-0 border-b border-line px-2"
+      >
+        <PanelIconButton
+          label="Refresh files"
           onClick={() => {
             refresh()
             onRefreshSelectedFile?.()
           }}
-          className="flex size-6 shrink-0 items-center justify-center rounded-tick text-ink-subtle/70 transition-colors hover:text-ink"
         >
-          <ArrowClockwiseIcon
-            className={cn("size-3.5", isPending && "animate-spin")}
+          <Icon
+            icon={RefreshCw}
+            size="sm"
+            className={
+              isPending ? "animate-spin motion-reduce:animate-none" : undefined
+            }
           />
-        </button>
-        <input
-          type="search"
-          value={search.value}
-          aria-label="Search files"
+        </PanelIconButton>
+        <SearchInput
+          className="min-w-0 flex-1"
+          label="Search files"
           placeholder="Search files"
           spellCheck={false}
-          onChange={(event) => handleSearchChange(event.target.value)}
+          value={search.value}
+          onValueChange={handleSearchChange}
           onKeyDown={(event) => {
             if (event.key !== "Escape") return
             search.close()
             event.currentTarget.blur()
           }}
-          className="h-7 min-w-0 flex-1 bg-transparent px-1 text-meta outline-none placeholder:text-ink-subtle/70"
         />
-      </div>
+      </Inline>
       {error ? (
-        <button
-          type="button"
-          onClick={refresh}
-          className="p-4 text-left text-label leading-relaxed text-risk"
-        >
-          {error} Click to retry.
-        </button>
+        <Box padding="md">
+          <StateNotice
+            icon={AlertTriangle}
+            title="Couldn't load files"
+            description={error}
+            tone="RISK"
+            action={
+              <Button size="compact" variant="outline" onClick={refresh}>
+                Retry
+              </Button>
+            }
+          />
+        </Box>
       ) : null}
       <FileTree
         model={model}
@@ -235,10 +254,9 @@ export function FileBrowserPanel({
           {
             height: "100%",
             ...treeThemeStyle(),
-            "--trees-theme-sidebar-bg": "var(--gtm-canvas)",
           } as React.CSSProperties
         }
       />
-    </div>
+    </Stack>
   )
 }

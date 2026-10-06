@@ -1,9 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import {
-  ArrowsInIcon,
-  ArrowsOutIcon,
-  SidebarSimpleIcon,
-} from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 
 import type {
@@ -12,7 +7,10 @@ import type {
 } from "@/features/agents/lib/rightPanelStore"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import { Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Expand, Minimize, PanelRight } from "@/components/glyphs"
+import { PanelIconButton } from "@/features/agents/components/panel/PanelIconButton"
 import {
   TerminalActions,
   TerminalPanel,
@@ -59,26 +57,6 @@ function useIsNarrowLayout(): boolean {
     return () => media.removeEventListener("change", onChange)
   }, [])
   return narrow
-}
-
-function PanelControl(props: {
-  label: string
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        aria-label={props.label}
-        className="rounded-badge p-1.5 text-ink-subtle/70 transition-colors hover:bg-hover hover:text-ink"
-        onClick={props.onClick}
-        type="button"
-      >
-        {props.children}
-      </TooltipTrigger>
-      <TooltipContent>{props.label}</TooltipContent>
-    </Tooltip>
-  )
 }
 
 /**
@@ -262,20 +240,18 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   if (collapsed) {
     return (
-      <button
-        type="button"
+      <PanelIconButton
+        label="Show panel"
         onClick={() => onCollapsedChange(false)}
-        aria-label="Show panel"
-        title="Show panel"
-        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-badge text-ink-subtle hover:bg-hover hover:text-ink"
+        className="fixed top-2 right-2 z-30"
       >
-        <SidebarSimpleIcon className="size-4" />
-      </button>
+        <Icon icon={PanelRight} />
+      </PanelIconButton>
     )
   }
 
   const layoutControls = (
-    <div className="flex shrink-0 items-center">
+    <Inline className="shrink-0">
       {activeSurface?.kind === "terminal" ? (
         <TerminalActions
           groupId={activeSurface.resourceId}
@@ -283,27 +259,23 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         />
       ) : null}
       {narrow ? null : (
-        <PanelControl
+        <PanelIconButton
           label={maximized ? "Exit full screen" : "Expand panel"}
           onClick={() => setMaximized((value) => !value)}
         >
-          {maximized ? (
-            <ArrowsInIcon className="size-4" />
-          ) : (
-            <ArrowsOutIcon className="size-4" />
-          )}
-        </PanelControl>
+          <Icon icon={maximized ? Minimize : Expand} />
+        </PanelIconButton>
       )}
-      <PanelControl
+      <PanelIconButton
         label="Hide panel"
         onClick={() => {
           setMaximized(false)
           onCollapsedChange(true)
         }}
       >
-        <SidebarSimpleIcon className="size-4" />
-      </PanelControl>
-    </div>
+        <Icon icon={PanelRight} />
+      </PanelIconButton>
+    </Inline>
   )
 
   const body = (

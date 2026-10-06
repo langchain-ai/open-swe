@@ -9,7 +9,6 @@ import {
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import { CaretDownIcon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
 import { useDiffLineSelection } from "@/features/agents/utils/diffSelection"
 import {
@@ -18,7 +17,21 @@ import {
 } from "@/features/agents/utils/codeExcerpt"
 import { DiffSelectionPopover } from "@/features/agents/components/DiffSelectionPopover"
 import { reportError } from "@/lib/errorReporting"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Collapsible,
+  CollapsibleChevron,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@langchain/gtm-platform-design-system/ui/collapsible"
+import { FadeText } from "@langchain/gtm-platform-design-system/ui/fade-text"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
@@ -33,7 +46,6 @@ import {
   useDiffOptions,
 } from "@/features/agents/utils/diffUtils"
 import { useIsMobile } from "@/lib/useIsMobile"
-import { cn } from "@/lib/utils"
 
 export interface PanelFile {
   filePath: string
@@ -87,17 +99,17 @@ export function toPanelFiles(
   }))
 }
 
-// Neutral filename foreground from the pierre Shiki themes (pierre-light /
-// pierre-dark sidebar foreground). The tree tints filename text by git status,
-// so feeding this keeps names neutral grey/white instead of accent-blue.
-const TREE_FILE_FG = "light-dark(#525252, #a3a3a3)"
+// The tree tints filenames by git status; the changed-files list states status
+// with its diffstat instead, so names stay on neutral ink.
+const TREE_FILE_FG = "var(--gtm-ink-muted)"
 
-// Selected rows must read as high-contrast (white in dark, near-black in light)
-// while the rest stay neutral. The built-in git-status content color outranks
-// the selection color by specificity, so override it from the `unsafe` layer.
+// Selected rows read as the sidebar's selection: fill plus weight. The built-in
+// git-status content colour outranks the selection colour by specificity, so
+// override it from the `unsafe` layer.
 export const TREE_UNSAFE_CSS = `
   [data-item-selected="true"] [data-item-section="content"] {
     color: var(--trees-selected-fg);
+    font-weight: 500;
   }
 
   /* On click a row is focus-ringed a frame before it's marked selected, which
@@ -108,23 +120,32 @@ export const TREE_UNSAFE_CSS = `
   }
 `
 
+/** SidebarTree row geometry: the compact control rung. */
+export const TREE_ITEM_HEIGHT = 28
+
 export function treeThemeStyle(): React.CSSProperties {
   return {
     "--trees-theme-sidebar-bg": "var(--gtm-panel)",
     "--trees-theme-sidebar-fg": "var(--gtm-ink)",
     "--trees-theme-sidebar-border": "var(--gtm-line)",
     "--trees-theme-sidebar-header-fg": "var(--gtm-ink-subtle)",
-    "--trees-theme-list-hover-bg":
-      "color-mix(in oklab, var(--gtm-primary) 10%, transparent)",
-    "--trees-theme-list-active-selection-bg":
-      "color-mix(in oklab, var(--gtm-primary) 22%, transparent)",
+    "--trees-theme-list-hover-bg": "var(--gtm-hover)",
+    "--trees-theme-list-active-selection-bg": "var(--gtm-selected)",
     "--trees-theme-list-active-selection-fg": "var(--gtm-ink)",
     "--trees-selected-focused-border-color-override": "transparent",
     "--trees-theme-input-bg": "var(--gtm-panel)",
     "--trees-theme-input-fg": "var(--gtm-ink)",
-    "--trees-theme-input-border": "var(--gtm-line)",
+    "--trees-theme-input-border": "var(--gtm-line-strong)",
     "--trees-theme-focus-ring": "var(--gtm-primary)",
-    "--trees-theme-scrollbar-thumb": "var(--gtm-line)",
+    "--trees-theme-scrollbar-thumb": "var(--gtm-line-strong)",
+    "--trees-accent-override": "var(--gtm-primary)",
+    "--trees-indent-guide-bg-override": "var(--gtm-line-strong)",
+    "--trees-font-family-override":
+      "var(--font-inter), ui-sans-serif, system-ui, sans-serif",
+    "--trees-font-size-override": "13px",
+    // rounded-compact; the tree draws its own rows, so the rung is restated.
+    "--trees-border-radius-override": "12px",
+    "--trees-padding-inline-override": "8px",
     "--trees-theme-git-added-fg": TREE_FILE_FG,
     "--trees-theme-git-modified-fg": TREE_FILE_FG,
     "--trees-theme-git-deleted-fg": TREE_FILE_FG,
@@ -132,6 +153,20 @@ export function treeThemeStyle(): React.CSSProperties {
     "--trees-theme-git-untracked-fg": TREE_FILE_FG,
     "--trees-theme-git-ignored-fg": "var(--gtm-ink-subtle)",
   } as React.CSSProperties
+}
+
+/** A file's +/- counts, in the state inks. */
+export function DiffStat(props: { additions: number; deletions: number }) {
+  return (
+    <Inline className="shrink-0 font-mono tabular-nums">
+      <Badge tier="plain" tone="positive" className="font-mono">
+        +{props.additions}
+      </Badge>
+      <Badge tier="plain" tone="risk" className="font-mono">
+        -{props.deletions}
+      </Badge>
+    </Inline>
+  )
 }
 
 interface DiffFilesViewProps {
@@ -211,15 +246,18 @@ export function DiffFilesView({
   return (
     <>
       {!hideHeader && (
-        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-line px-3 py-1">
-          <div className="min-w-0 flex-1">{leading}</div>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+        <Inline
+          gap="xs"
+          className="@container min-h-row-data shrink-0 flex-nowrap overflow-hidden border-b border-line px-2"
+        >
+          <Box className="min-w-0 flex-1">{leading}</Box>
+          <Inline gap="xs" className="ml-auto shrink-0">
             <DiffWrapToggle />
             {actions}
             {files.length > 0 && (
-              <span className="flex shrink-0 items-center gap-2 text-meta whitespace-nowrap text-ink-subtle/70">
+              <Inline gap="xs" className="shrink-0 pl-1 whitespace-nowrap">
                 <span
-                  className="@max-[620px]:hidden"
+                  className="text-meta text-ink-subtle @max-xl:hidden"
                   title={
                     truncated ? "Only the first files are shown" : undefined
                   }
@@ -227,14 +265,14 @@ export function DiffFilesView({
                   {truncated ? "first " : ""}
                   {files.length} file{files.length === 1 ? "" : "s"}
                 </span>
-                <span className="text-positive">
-                  +{totals.additions}
-                </span>
-                <span className="text-risk">-{totals.deletions}</span>
-              </span>
+                <DiffStat
+                  additions={totals.additions}
+                  deletions={totals.deletions}
+                />
+              </Inline>
             )}
-          </div>
-        </div>
+          </Inline>
+        </Inline>
       )}
 
       <div className="flex min-h-0 flex-1">
@@ -261,19 +299,19 @@ export function DiffFilesView({
             </Virtualizer>
           </WorkerPoolContextProvider>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-meta text-ink-subtle/70">
-            {emptyLabel}
-          </div>
+          <Box className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <EmptyState title={emptyLabel} />
+          </Box>
         )}
 
         {fullScreen && !isMobile && files.length > 0 && (
-          <div className="w-72 shrink-0 border-l border-line bg-panel">
+          <Box bg="panel" className="w-72 shrink-0 border-l border-line">
             <FileTreeExplorer
               files={files}
               selectedTreePath={selectedTreePath}
               onSelect={selectTreePath}
             />
-          </div>
+          </Box>
         )}
       </div>
     </>
@@ -358,73 +396,64 @@ const FileDiffSection = memo(
 
     return (
       <div ref={sectionRef} className="overflow-hidden border-b border-line">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-panel px-3 py-2 text-left text-label transition-colors hover:bg-hover"
-        >
-          <CaretDownIcon
-            className={cn(
-              "size-3 shrink-0 text-ink-subtle transition-transform",
-              !open && "-rotate-90"
-            )}
-          />
-          <span className="min-w-0 truncate" title={file.treePath}>
-            {directory && (
-              <span className="text-ink-subtle">{directory}</span>
-            )}
-            <span className="font-medium text-ink">{fileName}</span>
-          </span>
-          <span className="ml-auto flex shrink-0 items-center gap-2">
-            <span className="text-positive">+{file.additions}</span>
-            <span className="text-risk">-{file.deletions}</span>
-          </span>
-        </button>
-        {open &&
-          (file.unrenderable ? (
-            file.patch ? (
-              <pre className="overflow-x-auto bg-canvas p-4 font-mono text-label leading-5 text-ink">
-                <code>{file.patch}</code>
-              </pre>
-            ) : (
-              <div className="bg-canvas p-4 text-center text-meta text-ink-subtle/70">
-                Binary file — diff not available.
-              </div>
-            )
-          ) : (
-            <div
-              {...lineSelection.wrapperProps}
-              className="overflow-hidden bg-canvas"
-              style={
-                {
-                  "--panel-diff-bg": "var(--gtm-canvas)",
-                } as React.CSSProperties
-              }
+        <Collapsible open={open} onOpenChange={setOpen}>
+          <CollapsibleTrigger className="h-row-data w-full gap-2 rounded-none bg-panel px-3 transition-colors duration-fast ease-out-quint hover:bg-hover focus-visible:ring-inset motion-reduce:transition-none">
+            <CollapsibleChevron />
+            <FadeText
+              lines={1}
+              render={<span title={file.treePath} />}
+              className="flex-1 font-mono text-label whitespace-nowrap"
             >
-              <MultiFileDiff
-                oldFile={oldFile}
-                newFile={newFile}
-                options={options}
-                selectedLines={lineSelection.selectedLines}
-                metrics={DIFF_VIRTUAL_METRICS}
-              />
-            </div>
-          ))}
+              {directory && (
+                <span className="text-ink-subtle">{directory}</span>
+              )}
+              <span className="font-medium text-ink">{fileName}</span>
+            </FadeText>
+            <DiffStat additions={file.additions} deletions={file.deletions} />
+          </CollapsibleTrigger>
+          <CollapsibleContent smooth={false}>
+            {file.unrenderable ? (
+              file.patch ? (
+                <pre className="overflow-x-auto bg-panel p-4 font-mono text-label text-ink">
+                  <code>{file.patch}</code>
+                </pre>
+              ) : (
+                <p className="bg-panel p-4 text-center text-meta text-ink-subtle">
+                  Binary file — diff not available.
+                </p>
+              )
+            ) : (
+              <div
+                {...lineSelection.wrapperProps}
+                className="overflow-hidden bg-panel"
+              >
+                <MultiFileDiff
+                  oldFile={oldFile}
+                  newFile={newFile}
+                  options={options}
+                  selectedLines={lineSelection.selectedLines}
+                  metrics={DIFF_VIRTUAL_METRICS}
+                />
+              </div>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
         {onComment && (
           <DiffSelectionPopover
             selection={lineSelection}
             initialFocus={textareaRef}
-            className="w-80 p-2"
+            className="w-80"
           >
-            <form
-              className="space-y-2"
+            <Stack
+              render={<form />}
+              gap="sm"
               onSubmit={(event) => {
                 event.preventDefault()
                 void submitComment()
               }}
             >
               {draft && (
-                <div className="truncate text-meta text-ink-subtle">
+                <div className="truncate font-mono text-meta text-ink-subtle">
                   {file.treePath} ·{" "}
                   {draft.start === draft.end
                     ? `line ${draft.start}`
@@ -450,7 +479,7 @@ const FileDiffSection = memo(
                 disabled={sending}
                 className="max-h-48 min-h-20"
               />
-              <div className="flex justify-end gap-2">
+              <Inline gap="sm" justify="end">
                 <Button
                   type="button"
                   variant="ghost"
@@ -470,8 +499,8 @@ const FileDiffSection = memo(
                 >
                   {sending ? "Sending…" : "Send to Open SWE"}
                 </Button>
-              </div>
-            </form>
+              </Inline>
+            </Stack>
           </DiffSelectionPopover>
         )}
       </div>
@@ -498,6 +527,7 @@ function FileTreeExplorer({
   const { model } = useFileTree({
     paths,
     gitStatus,
+    itemHeight: TREE_ITEM_HEIGHT,
     initialExpansion: "open",
     flattenEmptyDirectories: true,
     search: true,
@@ -526,8 +556,8 @@ function FileTreeExplorer({
   }, [model, selectedTreePath])
 
   return (
-    <div className="flex h-full flex-col">
+    <Stack className="h-full">
       <FileTree model={model} style={{ height: "100%", ...treeThemeStyle() }} />
-    </div>
+    </Stack>
   )
 }

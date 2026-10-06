@@ -82,20 +82,20 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-bg-separator-override: var(--gtm-hover);
   --diffs-bg-buffer-override: var(--diffs-surface);
 
-  --diffs-bg-addition-override: color-mix(in srgb, var(--diffs-surface) 80%, #22c55e);
-  --diffs-bg-addition-number-override: color-mix(in srgb, var(--diffs-surface) 75%, #22c55e);
-  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, #22c55e);
-  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, #22c55e);
+  --diffs-bg-addition-override: var(--gtm-positive-bg);
+  --diffs-bg-addition-number-override: color-mix(in srgb, var(--gtm-positive-bg) 88%, var(--gtm-positive));
+  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--gtm-positive-bg) 82%, var(--gtm-positive));
+  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--gtm-positive-bg) 70%, var(--gtm-positive));
 
-  --diffs-bg-deletion-override: color-mix(in srgb, var(--diffs-surface) 80%, #ef4444);
-  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--diffs-surface) 75%, #ef4444);
-  --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--diffs-surface) 70%, #ef4444);
-  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diffs-surface) 60%, #ef4444);
+  --diffs-bg-deletion-override: var(--gtm-risk-bg);
+  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--gtm-risk-bg) 88%, var(--gtm-risk));
+  --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--gtm-risk-bg) 82%, var(--gtm-risk));
+  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--gtm-risk-bg) 70%, var(--gtm-risk));
 
   --diffs-fg-number-override: var(--gtm-ink-subtle);
   --diffs-font-size: 12px;
   --diffs-line-height: 1.5;
-  --diffs-font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, monospace;
+  --diffs-font-family: var(--font-plex-mono), ui-monospace, Menlo, monospace;
 
   background-color: var(--diffs-surface) !important;
 }

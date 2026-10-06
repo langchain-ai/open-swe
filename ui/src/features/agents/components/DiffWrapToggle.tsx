@@ -1,25 +1,19 @@
-import { TextAlignLeftIcon } from "@phosphor-icons/react"
-
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { WrapText } from "@/components/glyphs"
+import { PanelIconButton } from "@/features/agents/components/panel/PanelIconButton"
 import { useDiffWrap } from "@/features/agents/utils/diffUtils"
-import { cn } from "@/lib/utils"
 
 export function DiffWrapToggle({ className }: { className?: string }) {
   const [wrap, setWrap] = useDiffWrap()
 
   return (
-    <button
-      type="button"
+    <PanelIconButton
+      label="Wrap lines"
+      pressed={wrap}
       onClick={() => setWrap(!wrap)}
-      aria-label="Wrap lines"
-      aria-pressed={wrap}
-      title="Wrap lines"
-      className={cn(
-        "flex size-6 items-center justify-center rounded-tick text-ink-subtle/70 transition-colors hover:text-ink",
-        wrap && "bg-hover text-ink",
-        className
-      )}
+      className={className}
     >
-      <TextAlignLeftIcon className="size-3.5" />
-    </button>
+      <Icon icon={WrapText} size="sm" />
+    </PanelIconButton>
   )
 }

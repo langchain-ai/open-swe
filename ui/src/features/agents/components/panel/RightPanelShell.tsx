@@ -75,7 +75,7 @@ export function RightPanelShell(props: {
     <div
       ref={hostRef}
       className={cn(
-        "relative flex h-full min-h-0 max-w-full min-w-0 flex-col self-stretch bg-canvas",
+        "relative flex h-full min-h-0 max-w-full min-w-0 flex-col self-stretch bg-panel",
         isInline
           ? props.maximized
             ? "flex-1 border-l border-line"

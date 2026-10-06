@@ -1,12 +1,14 @@
 import type { ReactNode } from "react"
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
 
+/** Bottom dock for the composer, on the thread's 704px measure. */
 export function AgentComposerDock({ children }: { children: ReactNode }) {
   return (
-    <div
+    <Box
       className="shrink-0 px-4 pb-4"
       style={{ viewTransitionName: "agent-composer" }}
     >
-      <div className="mx-auto w-full max-w-3xl min-w-0">{children}</div>
-    </div>
+      <Box className="mx-auto w-full max-w-thread min-w-0">{children}</Box>
+    </Box>
   )
 }

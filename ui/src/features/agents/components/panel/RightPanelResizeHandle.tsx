@@ -7,28 +7,20 @@ interface Props {
 }
 
 /**
- * Hit target for resizing a right-anchored panel via its left edge.
- *
- * - Sits on top of the panel's border with a 4px overlap on each side so the
- *   user can grab a few pixels off the edge without aiming.
- * - Visual indicator is a 1px line that lights up on hover/active to mirror
- *   VS Code / Cursor.
+ * Seam handle for a right-anchored panel, drawn like the app rail's: a thin
+ * strip straddling the hairline that only tints under the pointer.
  */
 export function RightPanelResizeHandle({ handlers, className }: Props) {
   return (
     <div
       role="separator"
       aria-orientation="vertical"
+      aria-label="Resize panel"
       className={cn(
-        "group absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize select-none",
+        "absolute inset-y-0 left-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize touch-none bg-transparent transition-colors duration-fast ease-out-quint select-none hover:bg-line-strong/40 active:bg-line-strong/60 motion-reduce:transition-none",
         className
       )}
       {...handlers}
-    >
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-150 group-hover:bg-line group-active:bg-primary/60"
-      />
-    </div>
+    />
   )
 }

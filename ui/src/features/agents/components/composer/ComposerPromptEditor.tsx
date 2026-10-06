@@ -34,7 +34,6 @@ import {
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
 } from "lexical"
-import { File as FileIcon, Hash } from "lucide-react"
 
 import { SkillBadge } from "../SkillBadge"
 import { splitPromptIntoSegments } from "./composerMentions"
@@ -47,7 +46,8 @@ import type {
   SerializedLexicalNode,
   Spread,
 } from "lexical"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import { MentionChip } from "@langchain/gtm-platform-design-system/ui/mention-chip"
+import { File, Hash } from "@/components/glyphs"
 import { cn } from "@/lib/utils"
 
 export type ComposerCommandKey =
@@ -65,8 +65,8 @@ export interface ComposerPromptEditorHandle {
 }
 
 const EMPTY_SKILL_NAMES = new Set<string>()
-const MENTION_CHIP_CLASS_NAME =
-  "inline-flex max-w-full select-none items-center gap-1 rounded-badge border border-line/70 bg-hover/40 px-1.5 py-px align-middle text-meta font-medium leading-[1.1] text-ink"
+/* The inline host Lexical creates for every chip; the chip owns its own face. */
+const CHIP_HOST_CLASS_NAME = "relative inline-flex align-middle"
 
 type SerializedComposerMentionNode = Spread<
   { path: string; source: string; type: "composer-mention"; version: 1 },
@@ -80,28 +80,12 @@ type SerializedComposerSkillNode = Spread<
 
 function ComposerMentionChip({ path }: { path: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            className={MENTION_CHIP_CLASS_NAME}
-            contentEditable={false}
-            spellCheck={false}
-          >
-            <FileIcon className="size-3.5 shrink-0 opacity-70" aria-hidden />
-            <span className="truncate leading-tight select-none">
-              {basenameOfPath(path)}
-            </span>
-          </span>
-        }
-      />
-      <TooltipContent
-        className="max-w-[30rem] leading-tight break-words whitespace-normal"
-        side="top"
-      >
-        {path}
-      </TooltipContent>
-    </Tooltip>
+    <MentionChip
+      description={path}
+      icon={File}
+      kindLabel="File"
+      label={basenameOfPath(path)}
+    />
   )
 }
 
@@ -149,7 +133,7 @@ class ComposerMentionNode extends DecoratorNode<React.ReactElement> {
 
   override createDOM(): HTMLElement {
     const dom = document.createElement("span")
-    dom.className = "relative inline-flex align-middle leading-none"
+    dom.className = CHIP_HOST_CLASS_NAME
     return dom
   }
 
@@ -216,7 +200,7 @@ class ComposerSkillNode extends DecoratorNode<React.ReactElement> {
 
   override createDOM(): HTMLElement {
     const dom = document.createElement("span")
-    dom.className = "relative inline-flex align-middle leading-none"
+    dom.className = CHIP_HOST_CLASS_NAME
     return dom
   }
 
@@ -304,7 +288,7 @@ class ComposerChannelNode extends DecoratorNode<React.ReactElement> {
 
   override createDOM(): HTMLElement {
     const dom = document.createElement("span")
-    dom.className = "relative inline-flex align-middle leading-none"
+    dom.className = CHIP_HOST_CLASS_NAME
     return dom
   }
 
@@ -322,17 +306,12 @@ class ComposerChannelNode extends DecoratorNode<React.ReactElement> {
 
   override decorate(): React.ReactElement {
     return (
-      <span
-        className={MENTION_CHIP_CLASS_NAME}
-        contentEditable={false}
-        spellCheck={false}
-        title={this.__channelId}
-      >
-        <Hash className="size-3.5 shrink-0 opacity-70" aria-hidden />
-        <span className="truncate leading-tight select-none">
-          {this.__name}
-        </span>
-      </span>
+      <MentionChip
+        description={this.__channelId}
+        icon={Hash}
+        kindLabel="Slack channel"
+        label={this.__name}
+      />
     )
   }
 }
@@ -754,7 +733,7 @@ function ComposerPromptEditorInner({
             aria-label="Message"
             aria-placeholder={placeholder}
             className={cn(
-              "block max-h-50 w-full overflow-y-auto bg-transparent text-body leading-relaxed break-words whitespace-pre-wrap text-ink focus:outline-none",
+              "block max-h-50 w-full overflow-y-auto bg-transparent px-3 pt-3 pb-1 text-body break-words whitespace-pre-wrap text-ink focus:outline-none",
               className
             )}
             data-testid="composer-editor"
@@ -763,7 +742,7 @@ function ComposerPromptEditorInner({
           />
         }
         placeholder={
-          <div className="pointer-events-none absolute inset-0 text-body leading-relaxed text-ink-subtle/60">
+          <div className="pointer-events-none absolute inset-x-3 top-3 truncate text-body text-ink-subtle">
             {placeholder}
           </div>
         }

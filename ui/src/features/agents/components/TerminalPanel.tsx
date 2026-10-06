@@ -1,15 +1,9 @@
 import { useEffect, useRef, useState } from "react"
-import {
-  Copy,
-  LoaderCircle,
-  Plus,
-  RefreshCw,
-  SquareSplitHorizontal,
-  SquareSplitVertical,
-  Trash2,
-  X,
-} from "lucide-react"
 
+import type {
+  GhosttyColor,
+  GhosttyTheme,
+} from "@/features/agents/terminal/ghostty/core"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
 import type { TerminalSplitDirection } from "@/features/agents/lib/terminalState"
@@ -17,6 +11,26 @@ import { MAX_TERMINALS_PER_GROUP } from "@/features/agents/lib/terminalState"
 import { cn } from "@/lib/utils"
 import { useAttachedTerminal } from "@/features/agents/lib/terminalSession"
 import { GhosttyTerminalSurface } from "@/features/agents/terminal/ghostty/surface"
+import { PanelIconButton } from "@/features/agents/components/panel/PanelIconButton"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { POPUP_SURFACE_SHELL } from "@langchain/gtm-platform-design-system/ui/popup-surface"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+import {
+  Columns,
+  Copy,
+  Plus,
+  RefreshCw,
+  Rows,
+  Trash2,
+  X,
+} from "@/components/glyphs"
 
 interface TerminalPanelProps {
   target: TerminalTarget
@@ -41,21 +55,46 @@ interface TerminalViewportProps {
   restartRequest: number
 }
 
-function terminalTheme() {
-  const dark = document.documentElement.classList.contains("dark")
-  return dark
-    ? {
-        background: { r: 10, g: 10, b: 10 },
-        foreground: { r: 245, g: 245, b: 245 },
-        cursor: { r: 180, g: 203, b: 255 },
-        selectionBackground: "rgba(180, 203, 255, 0.25)",
-      }
-    : {
-        background: { r: 253, g: 253, b: 253 },
-        foreground: { r: 39, g: 39, b: 42 },
-        cursor: { r: 38, g: 56, b: 78 },
-        selectionBackground: "rgba(37, 63, 99, 0.2)",
-      }
+/** Parses a computed `rgb()`/`rgba()` or `color(srgb …)` value. */
+function parseComputedColor(value: string): GhosttyColor {
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(value)
+  if (rgb) return { r: Number(rgb[1]), g: Number(rgb[2]), b: Number(rgb[3]) }
+  const srgb = /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(value)
+  if (srgb)
+    return {
+      r: Math.round(Number(srgb[1]) * 255),
+      g: Math.round(Number(srgb[2]) * 255),
+      b: Math.round(Number(srgb[3]) * 255),
+    }
+  throw new Error(`Unsupported terminal colour: ${value}`)
+}
+
+/**
+ * The canvas renderer takes RGB, not CSS, so the theme reads the design
+ * tokens through a probe element: the terminal sits on the panel surface in
+ * panel ink, and the cursor and selection are the primary.
+ */
+function terminalTheme(): GhosttyTheme {
+  const probe = document.createElement("span")
+  probe.style.display = "none"
+  document.body.append(probe)
+  try {
+    const read = (token: string) => {
+      probe.style.color = `var(${token})`
+      return parseComputedColor(getComputedStyle(probe).color)
+    }
+    const background = read("--gtm-panel")
+    const foreground = read("--gtm-ink")
+    const cursor = read("--gtm-primary")
+    return {
+      background,
+      foreground,
+      cursor,
+      selectionBackground: `rgb(${cursor.r} ${cursor.g} ${cursor.b} / 0.25)`,
+    }
+  } finally {
+    probe.remove()
+  }
 }
 
 function TerminalViewport({
@@ -106,7 +145,7 @@ function TerminalViewport({
       theme: terminalTheme(),
       font: {
         family:
-          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+          "IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
         size: 13,
       },
       onData: (data) => {
@@ -174,7 +213,7 @@ function TerminalViewport({
     )
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["class", "style"],
+      attributeFilter: ["class", "style", "data-theme"],
     })
 
     return () => {
@@ -205,77 +244,53 @@ function TerminalViewport({
 
   return (
     <div
-      className="relative h-full min-h-0 min-w-0 bg-canvas"
+      className="relative h-full min-h-0 min-w-0 bg-panel"
       onMouseDown={onFocus}
     >
       <div ref={mountRef} className="h-full w-full overflow-hidden" />
       {selection && (
-        <div className="absolute right-2 bottom-2 z-10 flex overflow-hidden rounded-badge border border-line bg-canvas shadow-control">
+        <Inline
+          className={cn(
+            "absolute right-2 bottom-2 z-10 p-0.5",
+            POPUP_SURFACE_SHELL
+          )}
+        >
           {onAddToChat && (
-            <button
-              type="button"
-              className="flex items-center gap-1 px-2 py-1 text-meta hover:bg-hover"
+            <Button
+              size="compact"
+              variant="ghost"
               onClick={() => {
                 onAddToChat(selection)
                 surfaceRef.current?.clearSelection()
               }}
             >
-              <Plus className="size-3" /> Add to chat
-            </button>
+              <Icon icon={Plus} size="sm" />
+              Add to chat
+            </Button>
           )}
-          <button
-            type="button"
-            aria-label="Copy selection"
-            className={cn(
-              "p-1.5 hover:bg-hover",
-              onAddToChat && "border-l border-line"
-            )}
+          <PanelIconButton
+            label="Copy selection"
             onClick={() => {
               void navigator.clipboard.writeText(selection)
               surfaceRef.current?.clearSelection()
             }}
           >
-            <Copy className="size-3" />
-          </button>
-        </div>
+            <Icon icon={Copy} size="sm" />
+          </PanelIconButton>
+        </Inline>
       )}
       {target.kind === "cloud" && state.status === "starting" && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-badge border border-line bg-canvas/95 px-2 py-1 text-meta text-ink-subtle shadow-control">
-          <LoaderCircle className="size-3 animate-spin" />
+        <Badge className="absolute top-2 left-2 shadow-popup">
+          <Spinner size="sm" />
           {state.buffer ? "Reconnecting…" : "Connecting…"}
-        </div>
+        </Badge>
       )}
       {(error || state.error) && (
-        <div className="absolute inset-x-2 top-2 rounded-badge border border-risk/40 bg-canvas/95 px-3 py-2 text-label text-risk shadow-control">
-          {error ?? state.error}
-        </div>
+        <Alert className="absolute inset-x-2 top-2 w-auto" tone="risk">
+          <AlertDescription>{error ?? state.error}</AlertDescription>
+        </Alert>
       )}
     </div>
-  )
-}
-
-function ActionButton({
-  label,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string
-  disabled?: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="rounded-tick p-1.5 text-ink-subtle transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      {children}
-    </button>
   )
 }
 
@@ -303,42 +318,42 @@ export function TerminalActions({
   }
 
   return (
-    <div className="flex shrink-0 items-center">
-      <ActionButton
+    <Inline className="shrink-0">
+      <PanelIconButton
         label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}
         disabled={atSplitLimit}
         onClick={() => split("horizontal")}
       >
-        <SquareSplitHorizontal className="size-3.5" />
-      </ActionButton>
-      <ActionButton
+        <Icon icon={Columns} size="sm" />
+      </PanelIconButton>
+      <PanelIconButton
         label={`Split vertically${atSplitLimit ? " (maximum 4)" : ""}`}
         disabled={atSplitLimit}
         onClick={() => split("vertical")}
       >
-        <SquareSplitVertical className="size-3.5" />
-      </ActionButton>
-      <ActionButton
+        <Icon icon={Rows} size="sm" />
+      </PanelIconButton>
+      <PanelIconButton
         label="Clear terminal"
         onClick={() => terminals.clear(activeTerminalId)}
       >
-        <Trash2 className="size-3.5" />
-      </ActionButton>
-      <ActionButton
+        <Icon icon={Trash2} size="sm" />
+      </PanelIconButton>
+      <PanelIconButton
         label="Restart terminal"
         onClick={() => terminals.restart(activeTerminalId)}
       >
-        <RefreshCw className="size-3.5" />
-      </ActionButton>
+        <Icon icon={RefreshCw} size="sm" />
+      </PanelIconButton>
       {terminalIds.length > 1 ? (
-        <ActionButton
+        <PanelIconButton
           label="Close terminal"
           onClick={() => terminals.closeTerminal(activeTerminalId)}
         >
-          <X className="size-3.5" />
-        </ActionButton>
+          <Icon icon={X} size="sm" />
+        </PanelIconButton>
       ) : null}
-    </div>
+    </Inline>
   )
 }
 
@@ -367,9 +382,9 @@ export function TerminalPanel({
       data-hotkeys="ignore"
     >
       {terminals.error && (
-        <div className="absolute inset-x-2 top-2 z-10 rounded-badge border border-risk/40 bg-canvas/95 px-3 py-2 text-label text-risk shadow-control">
-          {terminals.error}
-        </div>
+        <Alert className="absolute inset-x-2 top-2 z-10 w-auto" tone="risk">
+          <AlertDescription>{terminals.error}</AlertDescription>
+        </Alert>
       )}
 
       <div

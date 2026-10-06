@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ImagePlus, Plus, X } from "lucide-react"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
 import { ComposerControl } from "./ComposerControl"
@@ -44,7 +43,19 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { DropdownMenu, DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Image as ImageGlyph, Plus, X } from "@/components/glyphs"
 import { slackChannelMatches } from "@/components/SlackChannelCombobox"
 import type { SlackChannelOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
@@ -749,41 +760,49 @@ export const ChatComposer = memo(function ChatComposer({
     </>
   )
 
+  // The root, the card and the editor's own wrapper are three levels up from
+  // the editable: e2e locates the target controls through that ancestry.
   return (
     <div
       className={cn(
         "relative w-full font-sans text-label",
-        compact ? "max-w-none" : "max-w-2xl"
+        compact ? "max-w-none" : "max-w-thread"
       )}
     >
       {composerError && (
-        <div className="mb-2 px-1 text-label text-risk" role="alert">
+        <p className="mb-2 px-1 text-label text-risk" role="alert">
           {composerError}
-        </div>
+        </p>
       )}
 
       {!selectedModelSupportsImages && (
-        <div className="dropdown-glass mb-2 rounded-control border border-attention/30 px-3 py-2 text-meta text-ink-subtle">
-          The selected model does not accept image input. Remove the image
-          {pendingImages.length > 1 ? "s" : ""} or switch to a vision-enabled
-          model to send.
-        </div>
+        <Alert className="mb-2" tone="attention">
+          <AlertDescription>
+            The selected model does not accept image input. Remove the image
+            {pendingImages.length > 1 ? "s" : ""} or switch to a vision-enabled
+            model to send.
+          </AlertDescription>
+        </Alert>
       )}
 
       {targetControls && !targetControlsBelow && (
-        <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-panel bg-hover px-4 pt-3 pb-5 text-label">
+        <Inline
+          gap="xs"
+          wrap
+          className="relative z-0 mx-4 -mb-2 min-w-0 rounded-t-panel border border-b-0 border-line bg-composer-foot px-1.5 pt-1 pb-3"
+          data-composer-tray
+        >
           {targetControls}
-        </div>
+        </Inline>
       )}
 
       <div
         data-chat-composer
         className={cn(
-          "relative z-10 flex flex-col rounded-panel border border-ink/20 bg-panel px-3 py-2.5 shadow-popup transition-[border-color,box-shadow] duration-300 hover:shadow-popup dark:border-[0.75px] dark:bg-[#222] dark:shadow-none dark:hover:shadow-none",
-          compact ? "min-h-[88px]" : "min-h-[106px]",
+          "relative z-10 flex flex-col rounded-panel border bg-composer-card shadow-control transition-[border-color] duration-fast ease-out-quint motion-reduce:transition-none",
           dragKind
-            ? "border-primary dark:border"
-            : "focus-within:border-ink/30 hover:border-ink/30"
+            ? "border-primary"
+            : "border-line focus-within:border-line-strong hover:border-line-strong"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -801,12 +820,18 @@ export const ChatComposer = memo(function ChatComposer({
         )}
 
         {dragKind && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-panel bg-panel/80 backdrop-blur-sm">
-            <span className="rounded-badge bg-hover px-3 py-1.5 text-label font-medium text-ink">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-panel bg-composer-card/90">
+            <Box
+              render={<span />}
+              padding="sm"
+              radius="compact"
+              bg="hover"
+              className="text-label font-medium text-ink"
+            >
               {dragKind === "path"
                 ? "Drop to mention this file"
                 : "Drop images here"}
-            </span>
+            </Box>
           </div>
         )}
 
@@ -820,7 +845,7 @@ export const ChatComposer = memo(function ChatComposer({
         />
 
         {pendingImages.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+          <Inline gap="sm" wrap className="px-3 pt-3">
             {pendingImages.map((image, index) => (
               <div
                 className="group relative"
@@ -828,12 +853,12 @@ export const ChatComposer = memo(function ChatComposer({
               >
                 <img
                   alt={image.fileName || "Pending image"}
-                  className="size-16 rounded-compact border border-line object-cover"
+                  className="size-row-record rounded-compact border border-line object-cover"
                   src={`data:${image.mimeType};base64,${image.base64}`}
                 />
                 <button
                   aria-label="Remove image"
-                  className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-line bg-panel text-ink-subtle opacity-0 shadow-control transition-opacity group-hover:opacity-100 hover:text-ink"
+                  className="absolute -top-1.5 -right-1.5 flex size-badge items-center justify-center rounded-full border border-line bg-panel text-ink-subtle opacity-0 shadow-control transition-opacity duration-fast ease-out-quint group-hover:opacity-100 hover:text-ink focus-visible:opacity-100 motion-reduce:transition-none"
                   onClick={() =>
                     setPendingImages((prev) =>
                       prev.filter((_, i) => i !== index)
@@ -841,15 +866,15 @@ export const ChatComposer = memo(function ChatComposer({
                   }
                   type="button"
                 >
-                  <X className="size-3" />
+                  <Icon icon={X} size="sm" />
                 </button>
               </div>
             ))}
-          </div>
+          </Inline>
         )}
 
         <ComposerPromptEditor
-          className={compact ? "min-h-[36px]" : "min-h-[52px]"}
+          className={compact ? "min-h-row-convo" : "min-h-composer"}
           cursor={cursor}
           disabled={disabled}
           editorRef={editorRef}
@@ -870,31 +895,35 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-meta text-ink-subtle">
+        <Inline
+          gap="xs"
+          className="min-w-0 rounded-b-panel bg-composer-foot px-1.5 py-1.5"
+          data-composer-foot
+        >
           <DropdownMenu onOpenChange={setExtrasMenuOpen}>
             <DropdownMenuTrigger
               render={
                 <ComposerControl
                   aria-label="More composer options"
-                  className="size-7 px-0"
+                  size="icon-sm"
                   type="button"
                 />
               }
             >
-              <Plus className="size-4" />
+              <Icon icon={Plus} />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-44" side="top" sideOffset={7}>
+            <DropdownMenuContent align="start" className="w-44" side="top">
               <DropdownMenuItem
                 disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
                 onClick={() => fileInputRef.current?.click()}
               >
-                <ImagePlus />
+                <Icon icon={ImageGlyph} size="sm" />
                 Attach images
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <Inline className="min-w-0 flex-1">
             {models.length > 0 && (
               <ModelPicker
                 models={models}
@@ -904,17 +933,14 @@ export const ChatComposer = memo(function ChatComposer({
                 requireImageSupport={pendingImages.length > 0}
                 routed={routed}
                 selection={selection}
-                triggerClassName="h-7 max-w-full rounded-badge px-2 text-meta text-ink-subtle/70 hover:bg-muted hover:text-ink/80"
               />
             )}
-          </div>
+          </Inline>
 
-          <div className="flex items-center gap-1">
-            <ContextWindowMeter
-              contextWindow={contextUsage?.contextWindow}
-              usedTokens={contextUsage?.usedTokens}
-            />
-          </div>
+          <ContextWindowMeter
+            contextWindow={contextUsage?.contextWindow}
+            usedTokens={contextUsage?.usedTokens}
+          />
 
           <ComposerPrimaryActions
             activeRun={activeRun}
@@ -927,13 +953,13 @@ export const ChatComposer = memo(function ChatComposer({
             stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}
           />
-        </div>
+        </Inline>
       </div>
 
       {targetControls && targetControlsBelow && (
-        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 px-3 text-label">
+        <Inline gap="xs" wrap className="min-w-0 px-1.5 pt-1.5">
           {targetControls}
-        </div>
+        </Inline>
       )}
     </div>
   )

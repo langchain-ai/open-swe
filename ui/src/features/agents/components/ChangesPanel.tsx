@@ -1,17 +1,39 @@
 import { useMemo, useState } from "react"
-import {
-  ChevronDownIcon,
-  GitPullRequestIcon,
-  RefreshCwIcon,
-} from "lucide-react"
-import { GitBranchIcon } from "@phosphor-icons/react"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DiffScopeKind } from "@/features/agents/lib/diffPanelStore"
 import type { PanelFile } from "@/features/agents/components/DiffFilesView"
 import { DiffFilesView } from "@/features/agents/components/DiffFilesView"
-import { DropdownMenu, DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import { PanelIconButton } from "@/features/agents/components/panel/PanelIconButton"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { FadeText } from "@langchain/gtm-platform-design-system/ui/fade-text"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@langchain/gtm-platform-design-system/ui/tooltip"
+import {
+  ChevronDown,
+  GitBranch,
+  GitPullRequest,
+  RefreshCw,
+} from "@/components/glyphs"
 
 export type ChangesStatus = "ready" | "missing" | "error"
 
@@ -87,18 +109,19 @@ function ScopeSwitcher(props: {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
-        className="flex h-6 min-w-0 shrink cursor-pointer items-center gap-1 rounded-badge px-1.5 text-body font-medium text-ink transition-colors hover:bg-hover"
-        aria-label={`Diff scope: ${label}`}
+        render={
+          <Button
+            aria-label={`Diff scope: ${label}`}
+            className="min-w-0 shrink gap-1 px-1.5"
+            size="compact"
+            variant="ghost"
+          />
+        }
       >
         <span className="min-w-0 truncate">{label}</span>
-        <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+        <Icon icon={ChevronDown} size="sm" className="text-ink-subtle" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        side="bottom"
-        sideOffset={6}
-        className="min-w-52"
-      >
+      <DropdownMenuContent align="start" className="min-w-52">
         <DropdownMenuItem onClick={() => props.onScopeChange("working-tree")}>
           {SCOPE_LABELS["working-tree"]}
         </DropdownMenuItem>
@@ -139,33 +162,39 @@ export function ChangesPanel({
   const actions = useMemo(
     () => (
       <>
-        <button
-          type="button"
-          aria-label="Refresh changes"
-          title="Refresh changes"
+        <PanelIconButton
+          label="Refresh changes"
           onClick={onRefresh}
           disabled={isFetching}
-          className="flex size-7 shrink-0 items-center justify-center rounded-badge text-ink-subtle transition-colors hover:bg-hover hover:text-ink disabled:opacity-50"
         >
-          <RefreshCwIcon
-            className={isFetching ? "size-3.5 animate-spin" : "size-3.5"}
+          <Icon
+            icon={RefreshCw}
+            size="sm"
+            className={
+              isFetching ? "animate-spin motion-reduce:animate-none" : undefined
+            }
           />
-        </button>
+        </PanelIconButton>
         {extraActions}
         {pr && (
-          <a
-            href={pr.url}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="View PR"
-            title="View PR"
-            className="flex h-7 shrink-0 items-center gap-1.5 rounded-badge border border-line px-2 text-label font-medium text-ink transition-colors hover:bg-hover @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
+          <Button
+            nativeButton={false}
+            render={
+              <a
+                href={pr.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="View PR"
+                title="View PR"
+              />
+            }
+            variant="outline"
+            size="compact"
+            className="@max-2xl:w-control-sm @max-2xl:px-0"
           >
-            <GitPullRequestIcon className="size-3.5 shrink-0" />
-            <span className="whitespace-nowrap @max-[680px]:hidden">
-              View PR
-            </span>
-          </a>
+            <Icon icon={GitPullRequest} size="sm" />
+            <span className="@max-2xl:hidden">View PR</span>
+          </Button>
         )}
       </>
     ),
@@ -173,12 +202,16 @@ export function ChangesPanel({
   )
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <Stack className="min-h-0 flex-1">
       {truncated && (
-        <div className="shrink-0 border-b border-line bg-attention-bg px-3 py-2 text-label text-attention">
-          Only the first {files.length} changed file
-          {files.length === 1 ? " is" : "s are"} shown.
-        </div>
+        <Box className="shrink-0 px-2 pt-2">
+          <Alert tone="attention">
+            <AlertDescription>
+              Only the first {files.length} changed file
+              {files.length === 1 ? " is" : "s are"} shown.
+            </AlertDescription>
+          </Alert>
+        </Box>
       )}
       <DiffFilesView
         files={files}
@@ -188,7 +221,7 @@ export function ChangesPanel({
         emptyLabel={emptyLabel}
         truncated={truncated}
         leading={
-          <div className="flex min-w-0 items-center gap-1.5">
+          <Inline gap="xs" className="min-w-0">
             <ScopeSwitcher
               scope={scope}
               branchScopeAvailable={branchScopeAvailable}
@@ -196,27 +229,34 @@ export function ChangesPanel({
             />
             {branch && (
               <>
-                <span
-                  className="min-w-0 truncate text-meta text-ink-subtle @max-[520px]:hidden"
-                  title={branch}
+                <FadeText
+                  lines={1}
+                  render={<span title={branch} />}
+                  className="flex-1 font-mono text-meta whitespace-nowrap text-ink-subtle @max-lg:hidden"
                 >
                   {branch}
-                </span>
+                </FadeText>
                 <Tooltip>
                   <TooltipTrigger
-                    aria-label={`Branch: ${branch}`}
-                    className="hidden size-7 shrink-0 items-center justify-center rounded-badge text-ink-subtle hover:bg-hover @max-[520px]:flex"
+                    render={
+                      <Button
+                        aria-label={`Branch: ${branch}`}
+                        className="hidden text-ink-subtle @max-lg:inline-flex"
+                        size="icon-sm"
+                        variant="ghost"
+                      />
+                    }
                   >
-                    <GitBranchIcon className="size-4 shrink-0" />
+                    <Icon icon={GitBranch} size="sm" />
                   </TooltipTrigger>
                   <TooltipContent>{branch}</TooltipContent>
                 </Tooltip>
               </>
             )}
-          </div>
+          </Inline>
         }
         actions={actions}
       />
-    </div>
+    </Stack>
   )
 }
