@@ -339,7 +339,7 @@ class _GitHub:
         self.files = [
             {"filename": f"src/f{n}.py", "status": "modified", "additions": n, "deletions": 1}
             for n in range(3)
-        ]
+        ] + [{"filename": "src/gone.py", "status": "removed", "additions": 0, "deletions": 4}]
         self.check_runs: list[dict[str, object]] = [
             {"name": "lint", "status": "completed", "conclusion": "success"}
         ]
@@ -377,7 +377,9 @@ class _GitHub:
                     {
                         **file,
                         "patch": f"@@ -1 +1 @@\n-old {file['filename']}\n+new",
-                        "contents_url": f"https://api.github.com/repos/lc/repo/contents/x?ref={listed}",
+                        # GitHub points a removed file's contents at the base, where it exists.
+                        "contents_url": "https://api.github.com/repos/lc/repo/contents/x?ref="
+                        + (self.base if file["status"] == "removed" else listed),
                     }
                     for file in self.files[(page - 1) * per_page : page * per_page]
                 ],
@@ -439,6 +441,7 @@ async def test_review_page_reads_the_mirror_once_a_pr_is_listed(github: _GitHub)
         ("src/f0.py", 0),
         ("src/f1.py", 1),
         ("src/f2.py", 2),
+        ("src/gone.py", 3),
     ]
 
 
@@ -526,7 +529,8 @@ async def test_patch_pages_follow_the_listing_and_refuse_a_moved_head(
     monkeypatch.setattr(reviews, "PATCH_PAGE_SIZE", 2)
     second = await reviews.get_review_patches("lc", "repo", 7, github.head, 2)
     assert [(file.path, (file.patch or "").splitlines()[0]) for file in second.files] == [
-        ("src/f2.py", "diff --git a/src/f2.py b/src/f2.py")
+        ("src/f2.py", "diff --git a/src/f2.py b/src/f2.py"),
+        ("src/gone.py", "diff --git a/src/gone.py b/src/gone.py"),
     ]
 
     with pytest.raises(HTTPException) as excinfo:

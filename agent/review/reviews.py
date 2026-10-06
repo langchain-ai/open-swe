@@ -1340,7 +1340,7 @@ async def get_review_patches(
                 client, f"{owner}/{repo}", pr_number, page=page, per_page=PATCH_PAGE_SIZE
             )
         files = [PullRequestFilePayload.model_validate(item) for item in raw]
-        if any(file.head_sha not in ("", head_sha) for file in files):
+        if PullRequestFilePayload.listing_moved(files, head_sha):
             raise HTTPException(409, "the pull request head moved")
         return ReviewPatchPage(
             head_sha=head_sha,

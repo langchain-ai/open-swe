@@ -473,7 +473,7 @@ class PullRequest(Base):
         head_sha, base_ref = self.head_sha, self.base_ref
         raw = await list_pull_request_files(client, self.repo_full_name, self.number)
         files = [PullRequestFilePayload.model_validate(item) for item in raw]
-        if any(file.head_sha not in ("", head_sha) for file in files):
+        if PullRequestFilePayload.listing_moved(files, head_sha):
             logger.info(
                 "Pull request head moved while listing its files",
                 extra={"pr_repo_full_name": self.repo_full_name, "pr_number": self.number},
@@ -1026,11 +1026,20 @@ class PullRequestFilePayload(BaseModel):
     patch: str | None = None
     contents_url: str = ""
 
-    @property
-    def head_sha(self) -> str:
-        """The commit GitHub listed this file at, read from ``contents_url``'s ``ref``."""
+    def listed_at_another_head(self, head_sha: str) -> bool:
+        """Whether GitHub listed this file at a head other than ``head_sha``.
+
+        Read from ``contents_url``'s ``ref``, which names the head for every
+        file but a removed one: that points at the base, where it still exists.
+        """
+        if self.status == "removed":
+            return False
         query = parse_qs(urlsplit(self.contents_url).query)
-        return query["ref"][0] if "ref" in query else ""
+        return "ref" in query and query["ref"][0] != head_sha
+
+    @classmethod
+    def listing_moved(cls, files: Sequence[Self], head_sha: str) -> bool:
+        return any(file.listed_at_another_head(head_sha) for file in files)
 
 
 class PullRequestFile(Base):
