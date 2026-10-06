@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import JsonValue
 from sqlalchemy import func, select
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.database import postgres
 from agent.tasks import presentation, service, store
 from agent.tasks.presentation import TaskEventMetadata
@@ -21,6 +22,55 @@ from agent.webhooks.event_subscriptions import EventSubscription
 MODEL = "openai:gpt-6-astra"
 COORDINATOR = str(uuid4())
 OWNER = "owner"
+WORKSPACE_MODEL = "anthropic:claude-sonnet-5-5"
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        pytest.param({"source": "slack", "model": MODEL, "effort": "high"}, id="slack"),
+        pytest.param(
+            {
+                "model": MODEL,
+                "effort": "high",
+                "resolved_model": WORKSPACE_MODEL,
+                "resolved_effort": "low",
+            },
+            id="switched-model",
+        ),
+        pytest.param({"resolved_model": MODEL, "resolved_effort": "high"}, id="legacy"),
+        pytest.param({"agent_settings": {"model_id": MODEL, "effort": "high"}}, id="saved"),
+    ],
+)
+async def test_worker_inherits_coordinator_model_and_effort(
+    monkeypatch: pytest.MonkeyPatch, metadata: dict[str, object]
+) -> None:
+    settings = WorkspaceSettings(
+        {"default_agent_model": WORKSPACE_MODEL, "default_agent_reasoning_effort": "low"}
+    )
+    monkeypatch.setattr(service, "get_workspace_settings", AsyncMock(return_value=settings))
+
+    assert await service.model_choice("default", metadata, None, None) == (MODEL, "high")
+
+
+async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = WorkspaceSettings(
+        {"default_agent_model": WORKSPACE_MODEL, "default_agent_reasoning_effort": "low"}
+    )
+    monkeypatch.setattr(service, "get_workspace_settings", AsyncMock(return_value=settings))
+    metadata: dict[str, object] = {"model": MODEL, "effort": "high"}
+
+    assert await service.model_choice("default", metadata, None, "max") == (MODEL, "max")
+    assert await service.model_choice("default", metadata, WORKSPACE_MODEL, None) == (
+        WORKSPACE_MODEL,
+        "low",
+    )
+    assert await service.model_choice("default", {}, None, None) == (WORKSPACE_MODEL, "low")
+    assert await service.model_choice(
+        "default", {"model": "anthropic:claude-fable-5-1", "effort": "high"}, None, None
+    ) == (WORKSPACE_MODEL, "low")
+    with pytest.raises(ValueError, match="not supported"):
+        await service.model_choice("default", metadata, None, "none")
 
 
 def task() -> store.CoordinatedTask:

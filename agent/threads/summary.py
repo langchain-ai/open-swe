@@ -9,7 +9,6 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.options import SUPPORTED_MODEL_IDS
 from agent.github.pull_requests import PullRequest
 from agent.review.findings import (
     REVIEWER_THREAD_KIND,
@@ -90,14 +89,6 @@ def _thread_metadata(thread: ThreadLike) -> JsonObject:
 def thread_source(metadata: Mapping[str, Any]) -> str:
     source = metadata.get("source")
     return source if isinstance(source, str) and source else DASHBOARD_SOURCE
-
-
-def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
-    for key in ("resolved_model", "model"):
-        model = metadata.get(key)
-        if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
-            return model
-    return None
 
 
 def thread_is_owner(metadata: Mapping[str, Any], login: str | None) -> bool:

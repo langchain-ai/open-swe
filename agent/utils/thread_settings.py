@@ -16,6 +16,7 @@ from typing import Any, TypedDict
 
 from pydantic import TypeAdapter, ValidationError
 
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, normalize_model_choice
 from agent.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,20 @@ class ThreadSettings(TypedDict, total=False):
 
 
 _THREAD_SETTINGS_ADAPTER = TypeAdapter(ThreadSettings)
+
+
+def thread_model_choice(metadata: Mapping[str, object]) -> tuple[str | None, str | None]:
+    """Read the active selection, then legacy metadata and the saved settings."""
+    stored = metadata.get(THREAD_SETTINGS_KEY)
+    settings = stored if isinstance(stored, Mapping) else {}
+    for model, effort in (
+        (metadata.get("model"), metadata.get("effort")),
+        (metadata.get("resolved_model"), metadata.get("resolved_effort")),
+        (settings.get("model_id"), settings.get("effort")),
+    ):
+        if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
+            return model, normalize_model_choice(model, effort)[1]
+    return None, None
 
 
 def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettings, bool]:

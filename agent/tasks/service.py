@@ -31,6 +31,7 @@ from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_EMAILS_KEY, PARTICIPANT_LOGINS_KEY
+from agent.utils.thread_settings import thread_model_choice
 from agent.webhooks.event_matches import EventMatch
 from agent.webhooks.event_subscriptions import EventSubscription
 from agent.workspaces.routing import resolve_workspace
@@ -87,20 +88,15 @@ async def model_choice(
     settings = await get_workspace_settings(workspace)
     choices = available_requested_models(fable_enabled=settings.fable_enabled)
     default_model, default_effort = settings.default_model("agent")
-    inherited_model = metadata.get("resolved_model")
-    chosen_model = model or (
-        inherited_model
-        if isinstance(inherited_model, str) and inherited_model in choices
-        else default_model
-    )
+    inherited_model, inherited_effort = thread_model_choice(metadata)
+    chosen_model = model or (inherited_model if inherited_model in choices else default_model)
     option = choices.get(chosen_model)
     if option is None:
         raise ValueError("The requested model is not available in this workspace")
-    inherited_effort = metadata.get("resolved_effort")
     chosen_effort = effort or (
         inherited_effort
         if model is None
-        and isinstance(inherited_effort, str)
+        and chosen_model == inherited_model
         and inherited_effort in option["efforts"]
         else default_effort
         if chosen_model == default_model
