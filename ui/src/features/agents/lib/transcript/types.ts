@@ -232,6 +232,7 @@ type Stored<EventType extends string, Payload> = StoredEventEnvelope & {
 export type StoredEvent =
   | Stored<"turn.requested", TurnRequestedPayload>
   | Stored<"turn.started", TurnPayload>
+  | Stored<"turn.first_token", TurnPayload>
   | Stored<"turn.queued", TurnQueuedPayload>
   | Stored<"turn.completed", TurnPayload>
   | Stored<"turn.failed", TurnFailedPayload>

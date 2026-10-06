@@ -53,6 +53,22 @@ afterEach(() => {
 })
 
 describe("agent run span", () => {
+  it("records the first token independently of buffered prose", () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0)
+    const tracker = new RunTracker({ transport: "cloud", threadId: THREAD_A })
+    tracker.submitted()
+    clock.mockReturnValue(8000)
+    tracker.transcriptEvent({ firstToken: true })
+    clock.mockReturnValue(36000)
+    tracker.transcriptEvent({ firstToken: true, text: true })
+    tracker.completed("success")
+    expect(getPerfSpans()[0]?.steps).toEqual([
+      { name: "first_event", at: 8000 },
+      { name: "first_token", at: 8000 },
+      { name: "first_text", at: 36000 },
+    ])
+  })
+
   it("tracks a submitted run from send to completion", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000)
     const tracker = new RunTracker({ transport: "cloud", threadId: THREAD_A })

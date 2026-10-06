@@ -185,6 +185,7 @@ export function useThreadTranscript(
           const payload = event.payload
           runTracker.transcriptEvent({
             opensRun: event.event_type === "turn.started",
+            firstToken: event.event_type === "turn.first_token",
             text:
               event.event_type === "message.appended" &&
               Boolean("text" in payload && payload.text),

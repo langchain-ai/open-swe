@@ -18,6 +18,25 @@ from agent.middleware import transcript as mw
 from agent.transcript.engine import Command
 from agent.transcript.events import MessageUsage, TurnFailed
 
+
+def test_first_token_precedes_paragraph_flush() -> None:
+    state = mw.RunState(
+        thread_id="thread",
+        run_id="run",
+        turn_id=uuid7(),
+        enabled=True,
+        queue=asyncio.Queue(),
+    )
+    handler = mw._DeltaHandler(state, [], "message")
+    handler._feed("", "Thinking")
+    handler._feed("Hello", "")
+    assert state.queue is not None
+    command = state.queue.get_nowait()
+    assert command.event.type == "turn.first_token"
+    assert state.queue.empty()
+    assert state.buffers["message"].text.pending == "Hello"
+
+
 THREAD_ID = "thread-under-test"
 RUN_ID = "run-under-test"
 

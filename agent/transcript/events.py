@@ -232,6 +232,11 @@ class TurnInterrupted(_Body):
     run_id: str | None = None
 
 
+class TurnFirstToken(_Body):
+    type: Literal["turn.first_token"] = "turn.first_token"
+    turn_id: UUID
+
+
 class MessageAppended(_Body):
     """A flushed fragment of an AI message.
 
@@ -318,6 +323,7 @@ type TranscriptEvent = Annotated[
     | TurnCheckpointCompleted
     | TurnFailed
     | TurnInterrupted
+    | TurnFirstToken
     | MessageAppended
     | MessageCompleted
     | ToolStarted

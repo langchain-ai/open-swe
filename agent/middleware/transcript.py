@@ -63,6 +63,7 @@ from agent.transcript.events import (
     ToolStarted,
     TurnCompleted,
     TurnFailed,
+    TurnFirstToken,
     TurnInterrupted,
     TurnRequested,
     TurnStarted,
@@ -178,6 +179,7 @@ class RunState:
     queue: asyncio.Queue[Command] | None = None
     writer: asyncio.Task[None] | None = None
     terminal: bool = False
+    first_token_seen: bool = False
 
     def enqueue(self, *commands: Command) -> None:
         """Queue commands for the writer. Nothing is shed: the turn end drains."""
@@ -490,6 +492,17 @@ class _DeltaHandler(AsyncCallbackHandler):
             return
         self.streamed = True
         try:
+            if not self._namespace and not self._state.first_token_seen:
+                self._state.first_token_seen = True
+                self._state.enqueue(
+                    Command(
+                        command_id=str(uuid.uuid7()),
+                        event=TurnFirstToken(turn_id=self._state.turn_id),
+                        actor_kind="agent",
+                        run_id=self._state.run_id,
+                        turn_id=self._state.turn_id,
+                    )
+                )
             buffers = _buffers(self._state, self.message_id)
             if text:
                 buffers.text.add(text)
