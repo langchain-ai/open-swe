@@ -205,7 +205,9 @@ function sidebarRowClassName({
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
     "text-foreground",
-    active ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
+    active
+      ? "bg-blue-100 dark:bg-accent"
+      : "group-hover/row:bg-sidebar-row-hover"
   )
 }
 
