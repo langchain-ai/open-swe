@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from agent.review.session import ReviewSessionMetadata
 from agent.review.walkthrough import Walkthrough
+from agent.tasks.flags import task_coordination_enabled
 from agent.tasks.store import SidebarTaskMembership, sidebar_memberships
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
@@ -403,6 +404,9 @@ async def attach_task_workers(
     memberships = await sidebar_memberships(ids)
     if not memberships:
         return
+    if not await task_coordination_enabled(login):
+        _attach_flat_task_memberships(summaries, memberships)
+        return
     coordinator_ids = [
         key for key, membership in memberships.items() if membership.role == "coordinator"
     ]
@@ -431,6 +435,16 @@ async def attach_task_workers(
             _attach_task_membership(summary, membership, related)
             if membership.role == "coordinator":
                 summary["taskWorkers"] = by_parent.get(thread_id, [])
+
+
+def _attach_flat_task_memberships(
+    summaries: list[JsonObject], memberships: Mapping[str, SidebarTaskMembership]
+) -> None:
+    # Keep worker notification suppression without fetching parents or children.
+    for summary in summaries:
+        membership = memberships.get(str(summary["id"]))
+        if membership is not None and membership.role == "worker":
+            _attach_task_membership(summary, membership, {})
 
 
 async def _task_hierarchy_page(
@@ -839,6 +853,7 @@ async def list_dashboard_threads_page(
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_participant_login or login
+    hierarchy = hierarchy and await task_coordination_enabled(login)
     search_email = email if search_login == login else None
     if scope == "automation" and filter_participant_login is None:
         searches = [{"thread_category": "automation"}, {"source": "schedule"}]
@@ -938,4 +953,7 @@ async def list_dashboard_threads_page(
         )
         has_more = len(candidates) > safe_offset + safe_limit
 
+    _attach_flat_task_memberships(
+        items, await sidebar_memberships([str(item["id"]) for item in items])
+    )
     return {"items": items, "limit": safe_limit, "offset": safe_offset, "hasMore": has_more}

@@ -1,4 +1,8 @@
-import { threadFamily, sidebarRefreshInterval } from "./sidebarThreads"
+import {
+  threadFamily,
+  sidebarRefreshInterval,
+  sidebarThreadForMode,
+} from "./sidebarThreads"
 import {
   useInfiniteQuery,
   useMutation,
@@ -35,6 +39,7 @@ import { api } from "@/lib/api"
 import { chatRoutes } from "@/lib/chatRoutes"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { reportError } from "@/lib/errorReporting"
+import { useProfile } from "@/lib/profile"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
@@ -613,20 +618,24 @@ function sidebarPageParams({
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
-    hierarchy: true,
+    hierarchy: false,
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
   }
 }
 
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
+  const hierarchy = useProfile().data?.experimental_task_coordination === true
   return useQuery({
     queryKey: agentThreadKeys.pinned,
     queryFn: agentsApi.listPinnedThreads,
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    refetchInterval: (query) => sidebarRefreshInterval(query.state.data),
+    select: (threads) =>
+      threads.map((thread) => sidebarThreadForMode(thread, hierarchy)),
+    refetchInterval: (query) =>
+      sidebarRefreshInterval(query.state.data, hierarchy),
   })
 }
 
@@ -662,8 +671,9 @@ export function useSidebarActiveThread({
   includeResolved?: boolean
   enabled?: boolean
 }): AgentThread | undefined {
+  const hierarchy = useProfile().data?.experimental_task_coordination === true
   const loaded = loadedThreads
-    .flatMap(threadFamily)
+    .flatMap((thread) => (hierarchy ? threadFamily(thread) : [thread]))
     .some((thread) => thread.id === activeThreadId)
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
@@ -672,7 +682,11 @@ export function useSidebarActiveThread({
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
-      sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
+      sidebarRefreshInterval(
+        current.state.data ? [current.state.data] : [],
+        hierarchy
+      ),
+    select: (thread) => sidebarThreadForMode(thread, hierarchy),
     retry: false,
   })
   return !loaded && (!query.data?.resolved || includeResolved)
@@ -685,12 +699,17 @@ function useSidebarThreadPages(
   enabled: boolean
 ) {
   const hydrated = useSidebarPrefsHydrated()
+  const hierarchy = useProfile().data?.experimental_task_coordination === true
+  params = { ...params, hierarchy }
   const query = useInfiniteThreadsPages(params, {
     enabled: enabled && hydrated,
     pollWhileRunning: true,
   })
   return {
-    items: query.data?.pages.flatMap((page) => page.items) ?? [],
+    items:
+      query.data?.pages.flatMap((page) =>
+        page.items.map((thread) => sidebarThreadForMode(thread, hierarchy))
+      ) ?? [],
     hasMore: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
     isPending: query.isPending,
@@ -1273,7 +1292,7 @@ export function useInfiniteThreadsPages(
   })
   const refreshPages =
     pagesQuery.data?.pages.filter((page) =>
-      sidebarRefreshInterval(page.items)
+      sidebarRefreshInterval(page.items, params.hierarchy)
     ) ?? []
   const pollOffsets =
     refreshPages.length > 0
@@ -1286,7 +1305,8 @@ export function useInfiniteThreadsPages(
     return true
   }
   const refreshInterval = sidebarRefreshInterval(
-    refreshPages.flatMap((page) => page.items)
+    refreshPages.flatMap((page) => page.items),
+    params.hierarchy
   )
   useQuery({
     queryKey: ["agent-thread-page-poll", params, pollOffsets],
@@ -1297,7 +1317,11 @@ export function useInfiniteThreadsPages(
             ...new Set([
               0,
               ...refreshPages
-                .filter((page) => sidebarRefreshInterval(page.items) === 2000)
+                .filter(
+                  (page) =>
+                    sidebarRefreshInterval(page.items, params.hierarchy) ===
+                    2000
+                )
                 .map((page) => page.offset),
             ]),
           ]
@@ -1368,7 +1392,10 @@ export function useThreadsPage(
     placeholderData: (prev) => prev,
     refetchInterval: (query) =>
       options.pollWhileRunning
-        ? sidebarRefreshInterval(query.state.data?.items)
+        ? sidebarRefreshInterval(
+            query.state.data?.items,
+            params.hierarchy ?? false
+          )
         : false,
     ...(options.staleWhileRevalidate
       ? {

@@ -378,17 +378,40 @@ export function sidebarItemContains(
 }
 
 export function sidebarRefreshInterval(
-  threads: ReadonlyArray<AgentThread> = []
+  threads: ReadonlyArray<AgentThread> = [],
+  hierarchy = true
 ): number | false {
   if (
     threads.some((thread) =>
-      threadFamily(thread).some((member) => member.status === "running")
+      (hierarchy ? threadFamily(thread) : [thread]).some(
+        (member) => member.status === "running"
+      )
     )
   )
     return 2000
-  return threads.some((thread) => thread.taskMembership?.role === "coordinator")
+  return hierarchy &&
+    threads.some((thread) => thread.taskMembership?.role === "coordinator")
     ? 30_000
     : false
+}
+
+export function sidebarThreadForMode(
+  thread: AgentThread,
+  hierarchy: boolean
+): AgentThread {
+  if (
+    hierarchy ||
+    (!thread.taskWorkers && thread.taskMembership?.role !== "coordinator")
+  )
+    return thread
+  return {
+    ...thread,
+    taskWorkers: undefined,
+    taskMembership:
+      thread.taskMembership?.role === "worker"
+        ? thread.taskMembership
+        : undefined,
+  }
 }
 
 export function pinnedThreadShortcuts(

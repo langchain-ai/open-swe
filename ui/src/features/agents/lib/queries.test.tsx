@@ -49,8 +49,13 @@ const page: ThreadsPage = {
 }
 
 const clients: Array<QueryClient> = []
+const profile = vi.hoisted(() => ({
+  data: { experimental_task_coordination: false },
+}))
+vi.mock("@/lib/profile", () => ({ useProfile: () => profile }))
 
 afterEach(() => {
+  profile.data.experimental_task_coordination = false
   vi.useRealTimers()
   for (const client of clients) client.clear()
   clients.length = 0
@@ -385,7 +390,7 @@ describe("sidebar queries", () => {
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
         limit: SIDEBAR_PAGE_SIZE,
-        hierarchy: true,
+        hierarchy: false,
         offset: 0,
         resolved: false,
         scope: "interactive",
@@ -399,7 +404,7 @@ describe("sidebar queries", () => {
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
         limit: SIDEBAR_PAGE_SIZE,
-        hierarchy: true,
+        hierarchy: false,
         offset: 0,
         resolved: false,
         scope: "interactive",
@@ -755,7 +760,54 @@ describe("sidebar task families", () => {
     taskWorkers: [worker],
   } as AgentThread
 
+  it("switches list modes and hides cached workers without discovery polling after opt-out", async () => {
+    vi.useFakeTimers()
+    const list = vi.spyOn(agentsApi, "listThreadsPage").mockResolvedValue({
+      ...page,
+      items: [coordinator],
+    })
+    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([coordinator])
+    const client = testClient()
+    const { result, rerender } = renderHook(
+      () => ({
+        recents: useSidebarRecents({ repoMode: false }),
+        pins: useSidebarPinnedThreads(),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await vi.waitFor(() => expect(result.current.recents.items).toHaveLength(1))
+    expect(list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hierarchy: false })
+    )
+    expect(result.current.recents.items[0]?.taskWorkers).toBeUndefined()
+    expect(result.current.pins.data?.[0]?.taskWorkers).toBeUndefined()
+
+    profile.data.experimental_task_coordination = true
+    rerender()
+    await vi.waitFor(() =>
+      expect(result.current.recents.items[0]?.taskWorkers).toHaveLength(1)
+    )
+    expect(list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hierarchy: true })
+    )
+    expect(result.current.pins.data?.[0]?.taskWorkers).toHaveLength(1)
+
+    profile.data.experimental_task_coordination = false
+    rerender()
+    await vi.waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hierarchy: false })
+      )
+    )
+    expect(result.current.recents.items[0]?.taskWorkers).toBeUndefined()
+    expect(result.current.pins.data?.[0]?.taskWorkers).toBeUndefined()
+    const calls = list.mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(31_000))
+    expect(list).toHaveBeenCalledTimes(calls)
+  })
+
   it("does not fetch or insert a selected worker already nested in a loaded family", () => {
+    profile.data.experimental_task_coordination = true
     const getThread = vi.spyOn(agentsApi, "getThread")
     const client = testClient()
     const { result } = renderHook(
@@ -787,6 +839,7 @@ describe("sidebar task families", () => {
   })
 
   it("keeps the existing page poll alive for idle coordinators and discovers new workers", async () => {
+    profile.data.experimental_task_coordination = true
     vi.useFakeTimers()
     let workers: Array<AgentThread> = [{ ...worker, status: "finished" }]
     vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(async () => ({

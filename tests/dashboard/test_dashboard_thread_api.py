@@ -23,7 +23,7 @@ from agent.threads import listing as thread_listing
 from agent.threads import proxy as thread_proxy
 from agent.threads import runs as thread_runs
 from agent.transcript.engine import AppendResult
-from agent.users import User
+from agent.users import User, UserPreferences
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
@@ -865,6 +865,16 @@ async def test_task_hierarchy_pages_filters_visibility_and_idle_refresh(
     )
     monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
+    preferences = AsyncMock(return_value=UserPreferences())
+    monkeypatch.setattr(User, "preferences_for_login", preferences)
+    disabled = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=2)
+    assert [item["id"] for item in disabled["items"]] == ["t0", "t1"]
+    assert all("taskWorkers" not in item for item in disabled["items"])
+    assert disabled["items"][0]["taskMembership"]["role"] == "worker"
+    flat_parent = {"id": "t3"}
+    await thread_listing.attach_task_workers(client, [flat_parent], "octocat", None)
+    assert "taskWorkers" not in flat_parent
+    preferences.return_value = UserPreferences(experimental_task_coordination=True)
     first = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=1)
     assert [item["id"] for item in first["items"]] == ["t3"]
     assert first["hasMore"] is True
@@ -912,6 +922,11 @@ async def test_task_hierarchy_pages_filters_visibility_and_idle_refresh(
 async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        User,
+        "preferences_for_login",
+        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
+    )
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
     threads = _make_threads(12, resolved_before=0)
     for index, thread in enumerate(threads):
