@@ -912,12 +912,14 @@ function buildHumanMessage(
   // Our own replies reach the transcript twice: once forwarded as thread
   // context, once as the `slack_reply` call that sent them.
   if (entity?.senderType === "self") return null
-  const text = parsed.content
+  const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
+  const text = taskEvent?.content ?? parsed.content
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
-  if (!chunks.length) return null
+  if (!chunks.length && !taskEvent) return null
   return {
     id: row.messageId,
+    ...(taskEvent ? { taskEvent } : {}),
     author:
       parsed.type === "message" && parsed.senderKind === "system"
         ? "system"

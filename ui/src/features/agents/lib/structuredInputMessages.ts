@@ -1,5 +1,80 @@
 export type StructuredSenderKind = "person" | "system"
 
+interface TaskEventSource {
+  version: 1
+  task_id: string
+  sender_thread_id: string
+  sender_role: "worker" | "coordinator"
+  sender_label: string | null
+  content: string
+}
+
+export type TaskEventMetadata = TaskEventSource &
+  (
+    | { kind: "message"; status: null }
+    | {
+        kind: "completion"
+        status: "success" | "error" | "timeout" | "interrupted"
+      }
+  )
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function taskEventMetadata(
+  attributes: Record<string, string>
+): TaskEventMetadata | undefined {
+  if (
+    attributes.sender !== "system:event-subscription" ||
+    attributes.kind !== "system" ||
+    attributes.surface !== "automation" ||
+    !UUID_PATTERN.test(attributes.event_match ?? "") ||
+    !attributes.task_event
+  )
+    return undefined
+
+  let value: unknown
+  try {
+    value = JSON.parse(attributes.task_event)
+  } catch {
+    return undefined
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined
+  const data = value as Record<string, unknown>
+  if (
+    data.version !== 1 ||
+    typeof data.task_id !== "string" ||
+    !UUID_PATTERN.test(data.task_id) ||
+    typeof data.sender_thread_id !== "string" ||
+    !UUID_PATTERN.test(data.sender_thread_id) ||
+    (data.sender_role !== "worker" && data.sender_role !== "coordinator") ||
+    (data.sender_label !== null && typeof data.sender_label !== "string") ||
+    typeof data.content !== "string"
+  )
+    return undefined
+
+  const source: TaskEventSource = {
+    version: 1,
+    task_id: data.task_id,
+    sender_thread_id: data.sender_thread_id,
+    sender_role: data.sender_role,
+    sender_label: data.sender_label,
+    content: data.content,
+  }
+  if (data.kind === "message" && data.status === null)
+    return { ...source, kind: "message", status: null }
+  if (
+    data.kind === "completion" &&
+    (data.status === "success" ||
+      data.status === "error" ||
+      data.status === "timeout" ||
+      data.status === "interrupted")
+  )
+    return { ...source, kind: "completion", status: data.status }
+  return undefined
+}
+
 /** Senders that steer the model and say nothing a reader of the thread needs. */
 const SILENT_SENDERS = new Set([
   "system:sender-context",
@@ -26,6 +101,7 @@ export type ParsedStructuredInput =
       sender: string
       senderKind: StructuredSenderKind
       surface?: string
+      taskEvent?: TaskEventMetadata
     }
   | { type: "legacy"; content: string }
 
@@ -243,12 +319,14 @@ export function parseStructuredInput(
     const attributes = parseAttributes(messageMatch[1] ?? "")
     const split = splitContent(messageMatch[2] ?? "")
     if (attributes?.sender && split && consumeDataElements(split.remainder)) {
+      const taskEvent = taskEventMetadata(attributes)
       return {
         type: "message",
         content: decodeXmlText(split.content),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,
+        ...(taskEvent ? { taskEvent } : {}),
       }
     }
   }

@@ -5,12 +5,26 @@ import { useEffect, useRef, useState } from "react"
 import { SkillPromptText } from "../SkillBadge"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
+import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
 export function UserMessage({ message }: { message: Message }) {
+  if (message.taskEvent) {
+    return (
+      <TaskEventMessage
+        event={message.taskEvent}
+        messageId={message.id}
+        timestamp={message.timestampIsFallback ? undefined : message.timestamp}
+      />
+    )
+  }
+  return <StandardUserMessage message={message} />
+}
+
+function StandardUserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
   const text = message.chunks

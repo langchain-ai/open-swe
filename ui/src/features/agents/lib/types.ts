@@ -1,3 +1,5 @@
+import type { TaskEventMetadata } from "./structuredInputMessages"
+
 export type Author = "user" | "agent" | "system" | "tool"
 
 export type ChunkKind =
@@ -214,6 +216,7 @@ export interface Message {
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */

@@ -2,7 +2,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import RunStatus
@@ -19,7 +19,8 @@ from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.prompts import prompt
 from agent.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, SANDBOX_PROXY_CONFIG_METADATA_KEY
 from agent.source_context import SourceContext
-from agent.tasks import store
+from agent.tasks import presentation, store
+from agent.tasks.presentation import TaskEventMetadata
 from agent.threads.access import resolve_run_email
 from agent.threads.creation import create_thread
 from agent.threads.handlers import interrupt_transcript_turns
@@ -141,7 +142,12 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
 
 
 async def record_event(
-    task: store.CoordinatedTask, recipient_thread_id: str, delivery_id: str, content: str
+    task: store.CoordinatedTask,
+    recipient_thread_id: str,
+    delivery_id: str,
+    content: str,
+    *,
+    task_event: TaskEventMetadata | None = None,
 ) -> None:
     config = await recipient_config(recipient_thread_id)
     workspace = config.get("workspace")
@@ -166,13 +172,19 @@ async def record_event(
             delivery_id=delivery_id,
             content=content,
             run_config=config,
+            task_event=task_event.model_dump(mode="json") if task_event is not None else None,
         ).record(session)
 
 
 async def notify(
-    task: store.CoordinatedTask, recipient_thread_id: str, delivery_id: str, content: str
+    task: store.CoordinatedTask,
+    recipient_thread_id: str,
+    delivery_id: str,
+    content: str,
+    *,
+    task_event: TaskEventMetadata | None = None,
 ) -> None:
-    await record_event(task, recipient_thread_id, delivery_id, content)
+    await record_event(task, recipient_thread_id, delivery_id, content, task_event=task_event)
     await EventMatch.deliver(recipient_thread_id, "enqueue")
 
 
@@ -417,6 +429,14 @@ async def message_task_thread(
         recipient,
         f"message:{actor.thread_id}:{request_id}",
         prompt("tasks/message", sender_thread_id=actor.thread_id, message=message.strip()),
+        task_event=TaskEventMetadata(
+            task_id=context.task.id,
+            sender_thread_id=UUID(actor.thread_id),
+            sender_role=context.membership.role,
+            sender_label=await presentation.sender_label(actor.thread_id),
+            kind="message",
+            content=message,
+        ),
     )
     return {"success": True, "recipient_thread_id": recipient}
 
