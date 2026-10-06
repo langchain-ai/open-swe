@@ -1179,6 +1179,8 @@ export interface ReviewDiffFile extends ReviewListedFile {
    * GitHub has none (binary or very large files).
    */
   patch: string | null | undefined
+  /** Its page failed to load; the patch stays `undefined` until a retry. */
+  patchFailed: boolean
 }
 
 export interface ReviewFileContents {
@@ -1856,11 +1858,12 @@ export const api = {
     repo: string,
     number: number,
     headSha: string,
+    baseSha: string,
     page: number
   ) =>
     request<ReviewPatchPage>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/patches` +
-        `?head_sha=${encodeURIComponent(headSha)}&page=${page}`
+        `?head_sha=${encodeURIComponent(headSha)}&base_sha=${encodeURIComponent(baseSha)}&page=${page}`
     ),
   getReviewFileContents: (
     owner: string,

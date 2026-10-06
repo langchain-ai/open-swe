@@ -284,11 +284,12 @@ async def api_get_review_patches(
     repo: str,
     pr_number: int,
     head_sha: str,
+    base_sha: str,
     page: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> ReviewPatchPage:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await get_review_patches(owner, repo, pr_number, head_sha, page)
+    return await get_review_patches(owner, repo, pr_number, head_sha, base_sha, page)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/file-contents")

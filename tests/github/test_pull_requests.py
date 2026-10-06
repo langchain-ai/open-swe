@@ -523,16 +523,19 @@ async def test_check_runs_only_move_forward_and_are_dropped_with_their_head(
     assert [run.head_sha for run in await moved.check_runs() or []] == [github.head]
 
 
-async def test_patch_pages_follow_the_listing_and_refuse_a_moved_head(
+async def test_patch_pages_follow_the_listing_and_refuse_a_relisted_one(
     github: _GitHub, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(reviews, "PATCH_PAGE_SIZE", 2)
-    second = await reviews.get_review_patches("lc", "repo", 7, github.head, 2)
+    await reviews.get_review("lc", "repo", 7)
+    await _settle_refreshes()
+    second = await reviews.get_review_patches("lc", "repo", 7, github.head, github.merge_base, 2)
     assert [(file.path, (file.patch or "").splitlines()[0]) for file in second.files] == [
         ("src/f2.py", "diff --git a/src/f2.py b/src/f2.py"),
         ("src/gone.py", "diff --git a/src/gone.py b/src/gone.py"),
     ]
 
-    with pytest.raises(HTTPException) as excinfo:
-        await reviews.get_review_patches("lc", "repo", 7, "e" * 40, 1)
-    assert excinfo.value.status_code == 409
+    for head, base in ((github.head, "e" * 40), ("e" * 40, github.merge_base)):
+        with pytest.raises(HTTPException) as excinfo:
+            await reviews.get_review_patches("lc", "repo", 7, head, base, 1)
+        assert excinfo.value.status_code == 409

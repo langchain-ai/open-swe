@@ -12,6 +12,7 @@ const file: ReviewDiffFile = {
   deletions: 1,
   position: 0,
   patch: "patch",
+  patchFailed: false,
   baseSha: "a".repeat(40),
   headSha: "b".repeat(40),
 }

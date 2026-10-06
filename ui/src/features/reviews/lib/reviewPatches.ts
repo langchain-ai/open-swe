@@ -28,27 +28,39 @@ export function settledPrefix(
   return pending === -1 ? statuses.length : pending
 }
 
+function isRelisted(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409
+}
+
+export interface PatchRequests {
+  /** Load the page holding `path` now, ahead of the background preload. */
+  request: (path: string) => void
+  /** Fetch the page holding `path` again after it failed. */
+  retry: (path: string) => void
+}
+
 export interface ReviewDiffFiles {
   /** null until the diff lists the current head's files. */
   files: Array<ReviewDiffFile> | null
-  /** Load the page holding `path` now, ahead of the background preload. */
-  requestPatch: (path: string) => void
+  requests: PatchRequests
 }
 
-/** Lets a diff card ask for its file's patch when it nears the viewport. */
-export const RequestPatchContext = createContext<(path: string) => void>(
-  () => {}
-)
+/** Lets a diff card ask for its file's patch, or retry it, from where it renders. */
+export const PatchRequestsContext = createContext<PatchRequests>({
+  request: () => {},
+  retry: () => {},
+})
 
 /**
  * The listed files with their patches merged in as their pages load.
  *
  * Patches come a page at a time from GitHub's own diff, so commentable lines
- * always match GitHub. Pages load in listing order a few at a time; a page a
- * viewer needs sooner (a file scrolled near, a finding jumped to) loads at
- * once. Query results are structurally shared, so a file keeps its object
- * identity until its own patch arrives and a landing page re-renders only its
- * files.
+ * always match GitHub. A page is keyed by the merge base and head its file
+ * list came with, so a relisted PR never reads another listing's pages. Pages
+ * load in listing order a few at a time; a page a viewer needs sooner (a file
+ * scrolled near, a finding jumped to) loads at once. Query results are
+ * structurally shared, so a file keeps its object identity until its own
+ * patch arrives and a landing page re-renders only its files.
  */
 export function useReviewDiffFiles(
   owner: string,
@@ -62,15 +74,17 @@ export function useReviewDiffFiles(
   const pageSize = diff?.patch_page_size ?? 1
   const headSha = diff?.head_sha ?? ""
   const baseSha = diff?.base_sha ?? ""
+  const revision = `${baseSha}..${headSha}`
   const pages = Array.from(
     { length: listed ? Math.ceil(listed.length / pageSize) : 0 },
     (_, index) => index + 1
   )
   const [requested, setRequested] = useState<{
-    head: string
+    revision: string
     pages: ReadonlySet<number>
-  }>({ head: "", pages: new Set() })
-  const requestedPages = requested.head === headSha ? requested.pages : null
+  }>({ revision: "", pages: new Set() })
+  const requestedPages =
+    requested.revision === revision ? requested.pages : null
 
   const settled = settledPrefix(
     pages.map(
@@ -80,6 +94,7 @@ export function useReviewDiffFiles(
           owner,
           repo,
           number,
+          baseSha,
           headSha,
           page,
         ])?.status
@@ -89,41 +104,42 @@ export function useReviewDiffFiles(
     ? Math.min(PRELOAD_PAGE_BUDGET, settled + PRELOAD_CONCURRENCY)
     : 0
 
-  const { files, headMoved } = useQueries({
+  const { files, relisted } = useQueries({
     queries: pages.map((page) => ({
-      queryKey: ["reviewPatches", owner, repo, number, headSha, page],
-      queryFn: () => api.getReviewPatches(owner, repo, number, headSha, page),
+      queryKey: ["reviewPatches", owner, repo, number, baseSha, headSha, page],
+      queryFn: () =>
+        api.getReviewPatches(owner, repo, number, headSha, baseSha, page),
       enabled: (requestedPages?.has(page) ?? false) || page <= preloadThrough,
       ...expiresInBrowser,
       retry: (failures: number, error: Error) =>
-        !(error instanceof ApiError && error.status === 409) && failures < 1,
+        !isRelisted(error) && failures < 1,
     })),
     combine: (results) => ({
       files:
         listed?.map((file): ReviewDiffFile => {
-          const page = results[patchPage(file, pageSize) - 1]?.data
+          const result = results[patchPage(file, pageSize) - 1]
+          const page = result?.data
           const patch = page
             ? (page.files.find((entry) => entry.path === file.path)?.patch ??
               null)
             : undefined
-          return { ...file, baseSha, headSha, patch }
+          const patchFailed =
+            !page && result?.isError === true && !isRelisted(result.error)
+          return { ...file, baseSha, headSha, patch, patchFailed }
         }) ?? null,
-      headMoved: results.some(
-        (result) =>
-          result.error instanceof ApiError && result.error.status === 409
-      ),
+      relisted: results.some((result) => isRelisted(result.error)),
     }),
   })
 
   useEffect(() => {
-    if (!headMoved) return
+    if (!relisted) return
     void queryClient.invalidateQueries({
       queryKey: ["reviewDiff", owner, repo, number],
     })
     void queryClient.invalidateQueries({
       queryKey: ["review", owner, repo, number],
     })
-  }, [headMoved, queryClient, owner, repo, number])
+  }, [relisted, queryClient, owner, repo, number])
 
   const pageOf = useMemo(
     () =>
@@ -132,20 +148,40 @@ export function useReviewDiffFiles(
       ),
     [listed, pageSize]
   )
-  const requestPatch = useCallback(
+  const request = useCallback(
     (path: string) => {
       const page = pageOf.get(path)
       if (page === undefined) return
       setRequested((current) => {
         const known =
-          current.head === headSha ? current.pages : new Set<number>()
+          current.revision === revision ? current.pages : new Set<number>()
         return known.has(page)
           ? current
-          : { head: headSha, pages: new Set(known).add(page) }
+          : { revision, pages: new Set(known).add(page) }
       })
     },
-    [pageOf, headSha, setRequested]
+    [pageOf, revision, setRequested]
   )
+  const retry = useCallback(
+    (path: string) => {
+      const page = pageOf.get(path)
+      if (page === undefined) return
+      void queryClient.refetchQueries({
+        queryKey: [
+          "reviewPatches",
+          owner,
+          repo,
+          number,
+          baseSha,
+          headSha,
+          page,
+        ],
+        exact: true,
+      })
+    },
+    [pageOf, queryClient, owner, repo, number, baseSha, headSha]
+  )
+  const requests = useMemo(() => ({ request, retry }), [request, retry])
 
-  return { files, requestPatch }
+  return { files, requests }
 }

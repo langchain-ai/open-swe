@@ -13,7 +13,7 @@ import {
   reviewChatQuery,
 } from "@/features/agents/lib/queries"
 import {
-  RequestPatchContext,
+  PatchRequestsContext,
   useReviewDiffFiles,
 } from "@/features/reviews/lib/reviewPatches"
 import {
@@ -89,7 +89,7 @@ function ReviewDetailPage() {
     ...reviewDiffQuery(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
   })
-  const { files: diffFiles, requestPatch } = useReviewDiffFiles(
+  const { files: diffFiles, requests: patchRequests } = useReviewDiffFiles(
     owner,
     repo,
     prNumber,
@@ -188,7 +188,7 @@ function ReviewDetailPage() {
           <Skeleton className="h-96 w-full" />
         </div>
       ) : (
-        <RequestPatchContext value={requestPatch}>
+        <PatchRequestsContext value={patchRequests}>
           <ReviewMainBody
             key={detail.data.head_sha}
             detail={detail.data}
@@ -197,7 +197,7 @@ function ReviewDetailPage() {
             onUpdateOpenComment={updateActiveComment}
             onCloseOpenComment={closeActiveComment}
           />
-        </RequestPatchContext>
+        </PatchRequestsContext>
       )}
     </div>
   )

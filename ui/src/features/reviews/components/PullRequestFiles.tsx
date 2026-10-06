@@ -42,6 +42,7 @@ import {
 import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { useReviewDiffFiles } from "@/features/reviews/lib/reviewPatches"
+import { PatchLoadFailed } from "@/features/reviews/components/PatchPlaceholder"
 import { reviewDiffQuery } from "@/features/reviews/lib/reviewQueries"
 import { pullRequestKey } from "@/features/reviews/lib/status"
 import { FILE_ANCHOR_ATTRIBUTE } from "@/features/reviews/lib/scrollAnchor"
@@ -215,7 +216,7 @@ export function PullRequestFiles({
     ...reviewDiffQuery(owner, name, pr.number),
     enabled: wanted || expanded.length > 0,
   })
-  const { files: diffFiles, requestPatch } = useReviewDiffFiles(
+  const { files: diffFiles, requests: patchRequests } = useReviewDiffFiles(
     owner,
     name,
     pr.number,
@@ -227,8 +228,8 @@ export function PullRequestFiles({
     [diffFiles]
   )
   useEffect(() => {
-    for (const path of expanded) requestPatch(path)
-  }, [expanded, requestPatch])
+    for (const path of expanded) patchRequests.request(path)
+  }, [expanded, patchRequests])
   const comments = useLineComments(pr, login)
   const want = () => {
     setWanted(true)
@@ -269,6 +270,7 @@ export function PullRequestFiles({
                     path={file.path}
                     file={byPath.get(file.path)}
                     comments={comments}
+                    onRetry={() => patchRequests.retry(file.path)}
                   />
                 )}
               </div>
@@ -332,11 +334,13 @@ function FileDiff({
   path,
   file,
   comments,
+  onRetry,
 }: {
   pr: PullRequestTarget
   path: string
   file: ReviewDiffFile | undefined
   comments: ReturnType<typeof useLineComments>
+  onRetry: () => void
 }) {
   const { draft, setDraft, sent, batch, send, removeFromBatch } = comments
   const diffOptions = useDiffOptions("unified")
@@ -451,6 +455,7 @@ function FileDiff({
     },
     [setDraft, send, removeFromBatch]
   )
+  if (file?.patchFailed) return <PatchLoadFailed onRetry={onRetry} />
   if (file?.patch === undefined) {
     return file ? (
       <p className="p-3 text-xs text-muted-foreground">Loading diff…</p>

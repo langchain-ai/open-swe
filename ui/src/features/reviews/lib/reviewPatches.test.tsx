@@ -47,7 +47,7 @@ function render(options?: { preload?: boolean }) {
 it("merges each page's patches as it lands, marking files GitHub has no patch for", async () => {
   const pages = vi
     .spyOn(api, "getReviewPatches")
-    .mockImplementation(async (_owner, _repo, _number, head, page) => ({
+    .mockImplementation(async (_owner, _repo, _number, head, _base, page) => ({
       head_sha: head,
       files:
         page === 1
@@ -63,7 +63,7 @@ it("merges each page's patches as it lands, marking files GitHub has no patch fo
       "diff --git a/f2.py b/f2.py\n",
     ])
   )
-  expect(pages.mock.calls.map((call) => call[4]).sort()).toEqual([1, 2])
+  expect(pages.mock.calls.map((call) => call[5]).sort()).toEqual([1, 2])
   expect(hook.result.current.files?.[0]).toMatchObject({
     baseSha: DIFF.base_sha,
     headSha: HEAD,
@@ -84,20 +84,56 @@ it("loads only the page a viewer asks for when preloading is off", async () => {
     undefined,
   ])
 
-  act(() => hook.result.current.requestPatch("f2.py"))
+  act(() => hook.result.current.requests.request("f2.py"))
 
   await waitFor(() =>
     expect(hook.result.current.files?.[2]?.patch).toBe(
       "diff --git a/f2.py b/f2.py\n"
     )
   )
-  expect(pages.mock.calls.map((call) => call[4])).toEqual([2])
+  expect(pages.mock.calls.map((call) => call[5])).toEqual([2])
   expect(hook.result.current.files?.[0]?.patch).toBeUndefined()
 })
 
-it("refetches the review when a page reports the head moved", async () => {
+it("marks a failed page's files failed instead of loading, until a retry lands", async () => {
+  let failing = true
+  vi.spyOn(api, "getReviewPatches").mockImplementation(
+    async (_owner, _repo, _number, head, _base, page) => {
+      if (failing && page === 2)
+        throw new ApiError(502, "GitHub request failed")
+      return {
+        head_sha: head,
+        files: [{ path: page === 1 ? "f0.py" : "f2.py", patch: "diff\n" }],
+      }
+    }
+  )
+  const { hook } = render()
+
+  // A failed page retries once, a second later, before it reports the error.
+  await waitFor(
+    () =>
+      expect(hook.result.current.files?.[2]).toMatchObject({
+        patch: undefined,
+        patchFailed: true,
+      }),
+    { timeout: 3_000 }
+  )
+  expect(hook.result.current.files?.[0]?.patchFailed).toBe(false)
+
+  failing = false
+  act(() => hook.result.current.requests.retry("f2.py"))
+
+  await waitFor(() =>
+    expect(hook.result.current.files?.[2]).toMatchObject({
+      patch: "diff\n",
+      patchFailed: false,
+    })
+  )
+})
+
+it("refetches the review when a page reports the file list was relisted", async () => {
   vi.spyOn(api, "getReviewPatches").mockRejectedValue(
-    new ApiError(409, "the pull request head moved")
+    new ApiError(409, "the pull request's files were listed again")
   )
   const { queryClient } = render()
   queryClient.setQueryData(["reviewDiff", "lc", "repo", 7], DIFF)

@@ -1318,20 +1318,24 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> ReviewDiff:
 
 
 async def get_review_patches(
-    owner: str, repo: str, pr_number: int, head_sha: str, page: int
+    owner: str, repo: str, pr_number: int, head_sha: str, base_sha: str, page: int
 ) -> ReviewPatchPage:
-    """One page of the PR's patches at ``head_sha``, in the order its files are listed.
+    """One page of the PR's patches between ``base_sha`` and ``head_sha``, in listing order.
 
-    GitHub lists only the current head, so a page asked for at any other head is
-    a 409 the client answers by refetching the file list. A page never changes
-    for a head, so it is cached.
+    ``base_sha`` is the merge base the client's file list came with. GitHub lists
+    only the current head against the current base, so a page asked for at any
+    other pair is a 409 the client answers by refetching the file list. A page
+    never changes for a pair, so it is cached.
     """
     from langgraph_api.cache import swr
 
-    if not _SHA.fullmatch(head_sha):
-        raise HTTPException(400, "invalid head revision")
+    if not _SHA.fullmatch(head_sha) or not _SHA.fullmatch(base_sha):
+        raise HTTPException(400, "invalid diff revision")
     if not 1 <= page <= GITHUB_MAX_LISTED_FILES // PATCH_PAGE_SIZE:
         raise HTTPException(400, "invalid patch page")
+    listed = await PullRequest.get(owner, repo, pr_number)
+    if listed is None or (listed.files_head_sha, listed.merge_base_sha) != (head_sha, base_sha):
+        raise HTTPException(409, "the pull request's files were listed again")
 
     async def load() -> ReviewPatchPage:
         token = await _require_app_token()
@@ -1358,7 +1362,9 @@ async def get_review_patches(
             ],
         )
 
-    key = f"pr-patches:{owner}/{repo}#{pr_number}@{head_sha}:{page}x{PATCH_PAGE_SIZE}".lower()
+    key = (
+        f"pr-patches:{owner}/{repo}#{pr_number}@{base_sha}..{head_sha}:{page}x{PATCH_PAGE_SIZE}"
+    ).lower()
     result = await swr(
         key, load, fresh_for=_PATCH_PAGE_TTL, max_age=_PATCH_PAGE_TTL, model=ReviewPatchPage
     )

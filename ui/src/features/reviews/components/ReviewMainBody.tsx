@@ -132,8 +132,11 @@ import { api, reviewImageProxyUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
-import { RequestPatchContext } from "@/features/reviews/lib/reviewPatches"
-import { PatchPlaceholder } from "@/features/reviews/components/PatchPlaceholder"
+import { PatchRequestsContext } from "@/features/reviews/lib/reviewPatches"
+import {
+  PatchLoadFailed,
+  PatchPlaceholder,
+} from "@/features/reviews/components/PatchPlaceholder"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -1960,10 +1963,14 @@ const FileDiffCard = memo(function FileDiffCard({
   pendingComments: ReadonlyArray<PendingReviewComment>
 }) {
   const diffOptions = useDiffOptions(diffStyle)
-  const requestPatch = useContext(RequestPatchContext)
+  const patchRequests = useContext(PatchRequestsContext)
   const requestOwnPatch = useCallback(
-    () => requestPatch(file.path),
-    [requestPatch, file.path]
+    () => patchRequests.request(file.path),
+    [patchRequests, file.path]
+  )
+  const retryOwnPatch = useCallback(
+    () => patchRequests.retry(file.path),
+    [patchRequests, file.path]
   )
   const selectFileLines = useCallback(
     (range: SelectedLineRange | null) => onSelectLines(file.path, range),
@@ -2217,7 +2224,9 @@ const FileDiffCard = memo(function FileDiffCard({
         </label>
       </div>
       {expanded &&
-        (file.patch === undefined ? (
+        (file.patchFailed ? (
+          <PatchLoadFailed onRetry={retryOwnPatch} />
+        ) : file.patch === undefined ? (
           <PatchPlaceholder
             lines={additions + deletions}
             onNearViewport={requestOwnPatch}

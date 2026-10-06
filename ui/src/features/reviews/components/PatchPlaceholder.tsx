@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const LINE_HEIGHT_PX = 20
@@ -55,6 +56,21 @@ export function PatchPlaceholder({
           style={{ width: `${40 + ((index * 37) % 55)}%` }}
         />
       ))}
+    </div>
+  )
+}
+
+/** Stands in for a diff whose patch page failed to load, with a way to try again. */
+export function PatchLoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-center justify-center gap-2 bg-card p-4 text-xs text-muted-foreground"
+    >
+      Couldn't load this diff.
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        Retry
+      </Button>
     </div>
   )
 }

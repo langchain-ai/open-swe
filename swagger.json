@@ -14289,6 +14289,15 @@
           },
           {
             "in": "query",
+            "name": "base_sha",
+            "required": true,
+            "schema": {
+              "title": "Base Sha",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "page",
             "required": true,
             "schema": {
