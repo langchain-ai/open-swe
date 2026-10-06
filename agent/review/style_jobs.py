@@ -17,6 +17,7 @@ from agent.review.style_collector import (
 from agent.review.styles import (
     REVIEW_STYLES,
     TERMINAL_RUN_FAILURES,
+    RepoFullName,
     ReviewStyle,
     reconcile_running_status,
 )
@@ -34,10 +35,10 @@ class ReviewStyleRunMetadata(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    review_style_full_name: str | None = None
+    review_style_full_name: RepoFullName | None = None
 
 
-def _thread_title(full_name: str) -> str:
+def _thread_title(full_name: RepoFullName) -> str:
     return f"Review style: {full_name}"
 
 
@@ -49,7 +50,7 @@ def langgraph_client():
     return get_client()
 
 
-def build_continual_run_input(full_name: str) -> RunInput:
+def build_continual_run_input(full_name: RepoFullName) -> RunInput:
     """Run input for a continual-learning analyzer run (shared with the cron)."""
     return build_run_input(
         (
@@ -73,7 +74,7 @@ def build_continual_run_input(full_name: str) -> RunInput:
     )
 
 
-def build_continual_run_configurable(full_name: str) -> dict[str, Any]:
+def build_continual_run_configurable(full_name: RepoFullName) -> dict[str, Any]:
     """Configurable for a continual-learning analyzer run (shared with the cron).
 
     Includes an explicit ``thread_id`` so the run is anchored to the repo's
@@ -92,7 +93,7 @@ def build_continual_run_configurable(full_name: str) -> dict[str, Any]:
 
 
 async def start_bootstrap_analysis(
-    full_name: str,
+    full_name: RepoFullName,
     *,
     github_token: str,
     created_by: str,
@@ -180,7 +181,7 @@ async def start_bootstrap_analysis(
 
 
 async def start_continual_run(
-    full_name: str,
+    full_name: RepoFullName,
     *,
     created_by: str = "manual",
 ) -> ReviewStyle:
@@ -207,7 +208,7 @@ async def start_continual_run(
         return await REVIEW_STYLES.mark_failed(full_name, "run start failed")
 
 
-async def sync_review_style_run_status(full_name: str) -> ReviewStyle:
+async def sync_review_style_run_status(full_name: RepoFullName) -> ReviewStyle:
     """Refresh store status from the latest analyzer run when still running."""
     record = await REVIEW_STYLES.get_or_seed(full_name)
     if record.status != "running":
@@ -267,7 +268,7 @@ async def settle_review_style_run(run_metadata: dict[str, Any]) -> None:
         )
 
 
-async def cancel_review_style_analysis(full_name: str) -> ReviewStyle:
+async def cancel_review_style_analysis(full_name: RepoFullName) -> ReviewStyle:
     """Stop an in-flight analyzer run and clear stale ``running`` status."""
     record = await REVIEW_STYLES.get_or_seed(full_name)
     if record.status != "running":

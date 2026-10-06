@@ -6,15 +6,17 @@ from fastapi import HTTPException
 
 from agent.incidents import service
 from agent.incidents.document_models import IncidentHistory
-from agent.incidents.models import Incident, IncidentReport
+from agent.incidents.models import Incident, IncidentId, IncidentReport
 from agent.store import TypedStore, get_value, now_iso, put_value
 from agent.ui_invalidations import Topic
 
-HISTORY = TypedStore(["incidents", "history"], IncidentHistory, invalidates=Topic.INCIDENTS)
+HISTORY = TypedStore[IncidentHistory, IncidentId](
+    ["incidents", "history"], IncidentHistory, invalidates=Topic.INCIDENTS
+)
 SUMMARIES = ["incidents", "summaries"]
 
 
-async def require_access(incident_id: str) -> Incident:
+async def require_access(incident_id: IncidentId) -> Incident:
     record = await service.INCIDENTS.get(incident_id)
     policy = await service.get_policy()
     history = await HISTORY.get(incident_id)
@@ -65,7 +67,7 @@ async def _saved_markdown(record: Incident) -> str | None:
     return summary["markdown"] if summary else None
 
 
-async def document_context(incident_id: str) -> dict[str, Any]:
+async def document_context(incident_id: IncidentId) -> dict[str, Any]:
     record = await require_access(incident_id)
     markdown = await _saved_markdown(record)
     return {
