@@ -47,6 +47,7 @@ function warmApiRequests(
     // Parameter order has to match the api client's, because the handoff below
     // matches on the resolved URL.
     const search = new URLSearchParams()
+    search.set("hierarchy", "true")
     search.set("limit", String(pageSize))
     search.set("offset", "0")
     if (!includeResolved) search.set("resolved", "false")

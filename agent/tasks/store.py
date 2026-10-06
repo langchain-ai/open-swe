@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID, uuid7
@@ -161,3 +162,63 @@ class TaskDelegation(Base):
 class TaskContext:
     task: Task
     membership: TaskMembership
+
+
+@dataclass(frozen=True)
+class SidebarTaskMembership:
+    thread_id: str
+    task_id: str
+    role: TaskRole
+    coordinator_thread_id: str
+    instructions: str = ""
+    cancelled: bool = False
+    launch_error: bool = False
+
+
+async def sidebar_memberships(
+    thread_ids: Sequence[str], *, workers_of: bool = False
+) -> dict[str, SidebarTaskMembership]:
+    """Read authoritative task relationships in batches, without thread metadata."""
+    if not thread_ids or not postgres.configured():
+        return {}
+    memberships: dict[str, SidebarTaskMembership] = {}
+    async with postgres.session() as session:
+        for offset in range(0, len(thread_ids), 1000):
+            ids = thread_ids[offset : offset + 1000]
+            statement = (
+                select(TaskMembership, CoordinatedTask, TaskDelegation)
+                .join(CoordinatedTask, CoordinatedTask.id == TaskMembership.task_id)
+                .outerjoin(
+                    TaskDelegation,
+                    (TaskDelegation.worker_thread_id == TaskMembership.thread_id)
+                    & (TaskDelegation.task_id == TaskMembership.task_id)
+                    & (
+                        TaskDelegation.coordinator_thread_id
+                        == CoordinatedTask.coordinator_thread_id
+                    ),
+                )
+            )
+            if workers_of:
+                statement = statement.where(
+                    CoordinatedTask.coordinator_thread_id.in_(ids),
+                    TaskMembership.role == "worker",
+                )
+            else:
+                statement = statement.where(TaskMembership.thread_id.in_(ids))
+            for membership, task, delegation in await session.execute(statement):
+                if (
+                    membership.role == "coordinator"
+                    and membership.thread_id != task.coordinator_thread_id
+                ):
+                    continue
+                memberships[membership.thread_id] = SidebarTaskMembership(
+                    thread_id=membership.thread_id,
+                    task_id=str(task.id),
+                    role=membership.role,
+                    coordinator_thread_id=task.coordinator_thread_id,
+                    instructions=delegation.instructions if delegation else "",
+                    cancelled=delegation.cancelled if delegation else False,
+                    launch_error=bool(delegation and delegation.launch_error),
+                )
+    return memberships
+

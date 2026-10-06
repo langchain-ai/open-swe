@@ -1,8 +1,12 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render } from "@testing-library/react"
+import { cleanup, render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
+
+import { SidebarThreadRow } from "./SidebarThreadRow"
+import { cloudSidebarThread } from "../lib/sidebarThreads"
+import type { AgentThread } from "../lib/types"
 
 import { AgentsShell } from "./AgentsSidebar"
 import { AppCommandProvider, useAppCommand } from "@/lib/appCommands"
@@ -56,7 +60,25 @@ const stub = vi.hoisted(() => {
 })
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
+  Link: ({
+    children,
+    to,
+    params,
+    search,
+    ...props
+  }: {
+    children?: React.ReactNode
+    to?: string
+    params?: { threadId?: string }
+    search?: { subagent?: string }
+  }) => (
+    <a
+      {...props}
+      href={`${to?.replace("$threadId", params?.threadId ?? "")}${search?.subagent ? `?subagent=${search.subagent}` : ""}`}
+    >
+      {children}
+    </a>
+  ),
   useNavigate: () => stub.noop,
   useRouterState: () => undefined,
   useSearch: () => undefined,
@@ -150,4 +172,77 @@ it("registers the active thread's commands once and then stops", async () => {
   )
 
   expect(probeRenders).toBeLessThanOrEqual(RENDER_BUDGET)
+})
+
+it("opens asynchronous workers as real conversations and expands the selected worker separately from synchronous subagents", () => {
+  const worker = {
+    id: "worker",
+    title: "Implement change",
+    subagents: [
+      {
+        toolCallId: "worker-sync",
+        title: "Worker inspection",
+        status: "in_progress",
+        subagentType: "general-purpose",
+        startedAt: 0,
+        endedAt: null,
+      },
+    ],
+    status: "finished",
+    viewed: true,
+  } as AgentThread
+  const parent = {
+    id: "parent",
+    title: "Coordinate change",
+    status: "idle",
+    viewed: true,
+    repo: "",
+    repoFullName: "",
+    taskWorkers: [worker],
+    subagents: [
+      {
+        toolCallId: "sync-tool",
+        title: "Inspect code",
+        status: "in_progress",
+        subagentType: "general-purpose",
+        startedAt: 0,
+        endedAt: null,
+      },
+    ],
+  } as AgentThread
+  const client = new QueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <SidebarThreadRow
+        item={cloudSidebarThread(parent)}
+        isActive={false}
+        activeThreadId="worker"
+        pinned={false}
+        archived={false}
+        onDeleteLocal={stub.noop}
+        onTogglePin={stub.noop}
+        onToggleArchived={stub.noop}
+      />
+    </QueryClientProvider>
+  )
+  const workerLink = screen.getByRole("link", { name: /Implement change/ })
+  expect(workerLink.getAttribute("href")).toBe("/agents/worker")
+  expect(workerLink.getAttribute("aria-current")).toBe("page")
+  expect(screen.getByText("Completed")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Hide task workers" }))
+  expect(screen.queryByRole("link", { name: /Implement change/ })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Show task workers" }))
+  expect(screen.getByRole("link", { name: /Implement change/ })).toBeTruthy()
+  const workerSyncToggle = screen.queryByRole("button", {
+    name: "Show worker subagents",
+  })
+  if (workerSyncToggle) fireEvent.click(workerSyncToggle)
+  expect(
+    screen.getByRole("link", { name: /Worker inspection/ }).getAttribute("href")
+  ).toBe("/agents/worker?subagent=worker-sync")
+  const syncToggle = screen.queryByRole("button", { name: "Show subagents" })
+  if (syncToggle) fireEvent.click(syncToggle)
+  expect(
+    screen.getByRole("link", { name: /Inspect code/ }).getAttribute("href")
+  ).toBe("/agents/parent?subagent=sync-tool")
 })

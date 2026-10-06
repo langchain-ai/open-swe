@@ -1,3 +1,4 @@
+import { threadFamily, sidebarRefreshInterval } from "./sidebarThreads"
 import {
   useInfiniteQuery,
   useMutation,
@@ -66,8 +67,12 @@ function patchAgentThread(
   threadId: string,
   patch: Partial<AgentThread>
 ): void {
-  const update = (thread: AgentThread) =>
-    thread.id === threadId ? { ...thread, ...patch } : thread
+  const update = (thread: AgentThread): AgentThread =>
+    thread.id === threadId
+      ? { ...thread, ...patch }
+      : thread.taskWorkers
+        ? { ...thread, taskWorkers: thread.taskWorkers.map(update) }
+        : thread
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
@@ -124,18 +129,21 @@ function findCachedAgentThread(
     ) ??
     queryClient
       .getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)
-      ?.find(matches) ??
+      ?.flatMap(threadFamily)
+      .find(matches) ??
     queryClient
       .getQueriesData<InfiniteData<ThreadsPage>>({
         queryKey: ["agent-threads", "lists", "infinite-pages"],
       })
       .flatMap(([, data]) => data?.pages.flatMap((page) => page.items) ?? [])
+      .flatMap(threadFamily)
       .find(matches) ??
     queryClient
       .getQueriesData<ThreadsPage>({
         queryKey: ["agent-threads", "lists", "page"],
       })
       .flatMap(([, data]) => data?.items ?? [])
+      .flatMap(threadFamily)
       .find(matches)
   )
 }
@@ -166,7 +174,24 @@ function updateThreadPageResolved(
   resolved: boolean
 ): ThreadsPage {
   const thread = page.items.find((item) => item.id === threadId)
-  if (!thread) return page
+  if (!thread)
+    return {
+      ...page,
+      items: page.items.map((item) =>
+        item.taskWorkers
+          ? {
+              ...item,
+              taskWorkers: item.taskWorkers.flatMap((worker) =>
+                worker.id !== threadId
+                  ? [worker]
+                  : params.resolved != null && params.resolved !== resolved
+                    ? []
+                    : [{ ...worker, resolved }]
+              ),
+            }
+          : item
+      ),
+    }
   if (params.resolved != null && params.resolved !== resolved) {
     return {
       ...page,
@@ -274,10 +299,12 @@ export function markAgentThreadViewed(
   queryClient: QueryClient,
   threadId: string
 ): void {
-  const view = (thread: AgentThread) =>
+  const view = (thread: AgentThread): AgentThread =>
     thread.id === threadId && !thread.viewed
       ? { ...thread, viewed: true, viewedAt: Date.now() }
-      : thread
+      : thread.taskWorkers
+        ? { ...thread, taskWorkers: thread.taskWorkers.map(view) }
+        : thread
   const viewList = (threads: Array<AgentThread>) => threads.map(view)
 
   // Patched as already-stale: the detail GET is what marks the thread viewed
@@ -340,8 +367,12 @@ export function setAgentThreadResolved(
   threadId: string,
   resolved: boolean
 ): void {
-  const update = (thread: AgentThread) =>
-    thread.id === threadId ? { ...thread, resolved } : thread
+  const update = (thread: AgentThread): AgentThread =>
+    thread.id === threadId
+      ? { ...thread, resolved }
+      : thread.taskWorkers
+        ? { ...thread, taskWorkers: thread.taskWorkers.map(update) }
+        : thread
   const cachedThread = findCachedAgentThread(queryClient, threadId)
 
   queryClient.setQueryData<AgentThread>(
@@ -559,7 +590,7 @@ export function useSeedAgentThreadDetails(
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    for (const thread of threads) {
+    for (const thread of threads.flatMap(threadFamily)) {
       if (thread.id === activeThreadId) continue
       // Seed as already-stale: the detail GET is what marks a thread viewed
       // server-side, so opening a seeded entry must still refetch despite the
@@ -582,6 +613,7 @@ function sidebarPageParams({
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
+    hierarchy: true,
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
   }
@@ -594,10 +626,7 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
-    refetchInterval: (query) =>
-      query.state.data?.some((thread) => thread.status === "running")
-        ? 2000
-        : false,
+    refetchInterval: (query) => sidebarRefreshInterval(query.state.data),
   })
 }
 
@@ -633,7 +662,9 @@ export function useSidebarActiveThread({
   includeResolved?: boolean
   enabled?: boolean
 }): AgentThread | undefined {
-  const loaded = loadedThreads.some((thread) => thread.id === activeThreadId)
+  const loaded = loadedThreads
+    .flatMap(threadFamily)
+    .some((thread) => thread.id === activeThreadId)
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
@@ -641,7 +672,7 @@ export function useSidebarActiveThread({
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 2000 : false,
+      sidebarRefreshInterval(current.state.data ? [current.state.data] : []),
     retry: false,
   })
   return !loaded && (!query.data?.resolved || includeResolved)
@@ -1240,19 +1271,38 @@ export function useInfiniteThreadsPages(
         }
       : {}),
   })
-  const runningOffsets =
-    pagesQuery.data?.pages
-      .filter((page) =>
-        page.items.some((thread) => thread.status === "running")
-      )
-      .map((page) => page.offset) ?? []
+  const refreshPages =
+    pagesQuery.data?.pages.filter((page) =>
+      sidebarRefreshInterval(page.items)
+    ) ?? []
   const pollOffsets =
-    runningOffsets.length > 0 ? [...new Set([0, ...runningOffsets])] : []
+    refreshPages.length > 0
+      ? [...new Set([0, ...refreshPages.map((page) => page.offset)])]
+      : []
+  const idleRefreshedAt = useRef(0)
+  const discoverIdlePages = () => {
+    if (Date.now() - idleRefreshedAt.current < 30_000) return false
+    idleRefreshedAt.current = Date.now()
+    return true
+  }
+  const refreshInterval = sidebarRefreshInterval(
+    refreshPages.flatMap((page) => page.items)
+  )
   useQuery({
     queryKey: ["agent-thread-page-poll", params, pollOffsets],
     queryFn: async () => {
+      const offsets = discoverIdlePages()
+        ? pollOffsets
+        : [
+            ...new Set([
+              0,
+              ...refreshPages
+                .filter((page) => sidebarRefreshInterval(page.items) === 2000)
+                .map((page) => page.offset),
+            ]),
+          ]
       const refreshed = await Promise.all(
-        pollOffsets.map((offset) =>
+        offsets.map((offset) =>
           agentsApi.listThreadsPage({ ...params, offset })
         )
       )
@@ -1298,7 +1348,7 @@ export function useInfiniteThreadsPages(
       options.pollWhileRunning &&
       pollOffsets.length > 0
     ),
-    refetchInterval: 2000,
+    refetchInterval: refreshInterval,
   })
   return pagesQuery
 }
@@ -1317,9 +1367,8 @@ export function useThreadsPage(
     enabled: options.enabled,
     placeholderData: (prev) => prev,
     refetchInterval: (query) =>
-      options.pollWhileRunning &&
-      query.state.data?.items.some((thread) => thread.status === "running")
-        ? 2000
+      options.pollWhileRunning
+        ? sidebarRefreshInterval(query.state.data?.items)
         : false,
     ...(options.staleWhileRevalidate
       ? {

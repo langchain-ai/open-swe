@@ -16,6 +16,7 @@ from agent.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from agent.tasks.store import SidebarTaskMembership
 from agent.threads import diffs as thread_diffs
 from agent.threads import handlers
 from agent.threads import listing as thread_listing
@@ -821,6 +822,172 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert all(item["resolved"] is False for item in result["items"])
     assert page_size in offsets
     assert run_list_calls == 0
+
+
+async def test_task_hierarchy_pages_filters_visibility_and_idle_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
+    monkeypatch.setattr(thread_listing, "_THREADS_PAGE_SCAN_CAP", 2)
+    threads = _make_threads(5, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    memberships = {
+        "t0": SidebarTaskMembership("t0", "task", "worker", "t3", "Thread 0"),
+        "t1": SidebarTaskMembership("t1", "task", "worker", "t3", "Thread 1"),
+        "t3": SidebarTaskMembership("t3", "task", "coordinator", "t3"),
+    }
+
+    async def membership_lookup(
+        ids: list[str], *, workers_of: bool = False
+    ) -> dict[str, SidebarTaskMembership]:
+        return {
+            key: member
+            for key, member in memberships.items()
+            if (
+                member.role == "worker" and member.coordinator_thread_id in ids
+                if workers_of
+                else key in ids
+            )
+        }
+
+    async def search(
+        *, ids: list[str] | None = None, offset: int = 0, limit: int = 50, **_: object
+    ) -> list[dict[str, object]]:
+        return (
+            [thread for thread in threads if thread["thread_id"] in ids]
+            if ids is not None
+            else threads[offset : offset + limit]
+        )
+
+    client = SimpleNamespace(
+        threads=SimpleNamespace(search=search),
+        runs=SimpleNamespace(list=AsyncMock(return_value=[])),
+    )
+    monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
+    first = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=1)
+    assert [item["id"] for item in first["items"]] == ["t3"]
+    assert first["hasMore"] is True
+    parent = first["items"][0]
+    assert parent["status"] == "finished"
+    assert [worker["id"] for worker in parent["taskWorkers"]] == ["t0", "t1"]
+    assert parent["taskWorkers"][0]["title"] == "Thread 0 · t0"
+    second = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, offset=1, limit=2
+    )
+    assert [item["id"] for item in second["items"]] == ["t2", "t4"]
+    assert second["hasMore"] is False
+    filtered = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, query="Thread 0"
+    )
+    assert [item["id"] for item in filtered["items"]] == ["t3"]
+    assert [worker["id"] for worker in filtered["items"][0]["taskWorkers"]] == ["t0"]
+    cast(dict[str, object], threads[1]["metadata"]).update(
+        visibility="private", owner_login="someone-else"
+    )
+    threads[0]["status"] = "busy"
+    running = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True)
+    assert [worker["id"] for worker in running["items"][0]["taskWorkers"]] == ["t0"]
+    assert running["items"][0]["taskWorkers"][0]["status"] == "running"
+    assert running["items"][0]["status"] == "finished"
+    threads[0]["status"] = "idle"
+    memberships["t2"] = SidebarTaskMembership("t2", "task", "worker", "t3")
+    refreshed = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True)
+    assert [worker["id"] for worker in refreshed["items"][0]["taskWorkers"]] == ["t0", "t2"]
+    assert refreshed["items"][0]["taskWorkers"][0]["status"] == "finished"
+    cast(dict[str, object], threads[0]["metadata"])["resolved"] = True
+    archived = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, resolved=False
+    )
+    assert [worker["id"] for worker in archived["items"][0]["taskWorkers"]] == ["t2"]
+    cast(dict[str, object], threads[3]["metadata"]).update(
+        visibility="private", owner_login="someone-else"
+    )
+    standalone = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, query="Thread 0"
+    )
+    assert [item["id"] for item in standalone["items"]] == ["t0"]
+    assert standalone["items"][0]["taskMembership"]["coordinatorThreadId"] is None
+
+
+async def test_task_hierarchy_stops_after_enough_distinct_matching_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
+    monkeypatch.setattr(thread_listing, "_THREADS_PAGE_SCAN_CAP", 2)
+    threads = _make_threads(12, resolved_before=0)
+    for index, thread in enumerate(threads):
+        cast(dict[str, object], thread["metadata"]).update(
+            latest_run_status="error" if index == 4 else "success",
+            created_at_ms=index,
+        )
+    memberships = {
+        f"t{index}": SidebarTaskMembership(f"t{index}", "task", "worker", "t9")
+        for index in range(4)
+    }
+    memberships["t9"] = SidebarTaskMembership("t9", "task", "coordinator", "t9")
+    offsets: list[int] = []
+
+    async def membership_lookup(
+        ids: list[str], *, workers_of: bool = False
+    ) -> dict[str, SidebarTaskMembership]:
+        return {
+            key: member
+            for key, member in memberships.items()
+            if (
+                member.role == "worker" and member.coordinator_thread_id in ids
+                if workers_of
+                else key in ids
+            )
+        }
+
+    async def search(
+        *,
+        ids: list[str] | None = None,
+        offset: int = 0,
+        limit: int = 50,
+        sort_by: str = "updated_at",
+        **_: object,
+    ) -> list[dict[str, object]]:
+        if ids is not None:
+            return [thread for thread in threads if thread["thread_id"] in ids]
+        offsets.append(offset)
+        ordered = threads if sort_by == "updated_at" else list(reversed(threads))
+        return ordered[offset : offset + limit]
+
+    client = SimpleNamespace(
+        threads=SimpleNamespace(search=search),
+        runs=SimpleNamespace(list=AsyncMock(return_value=[])),
+    )
+    monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
+    first = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, limit=1, status="finished"
+    )
+    assert [item["id"] for item in first["items"]] == ["t9"]
+    assert first["hasMore"] is True
+    assert max(offsets) == 4
+    assert [worker["id"] for worker in first["items"][0]["taskWorkers"]] == ["t0", "t1", "t2", "t3"]
+    second = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, limit=1, offset=1, status="finished"
+    )
+    assert [item["id"] for item in second["items"]] == ["t5"]
+    memberships["t8"] = SidebarTaskMembership("t8", "task", "worker", "t9")
+    for index in (0, 5, 8):
+        cast(dict[str, object], threads[index]["metadata"])["title"] = "Needle"
+    offsets.clear()
+    filtered = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, limit=1, query="Needle"
+    )
+    assert max(offsets) == 4
+    assert [worker["id"] for worker in filtered["items"][0]["taskWorkers"]] == ["t0", "t8"]
+    offsets.clear()
+    newest = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, limit=1, sort_by="created_at"
+    )
+    assert [item["id"] for item in newest["items"]] == ["t11"]
+    assert max(offsets) == 0
 
 
 async def test_list_dashboard_threads_page_scopes_search_to_requested_participant(

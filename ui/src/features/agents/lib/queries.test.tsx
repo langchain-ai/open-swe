@@ -12,6 +12,8 @@ import {
   markAgentThreadViewed,
   optimisticThread,
   setAgentThreadStatus,
+  setAgentThreadTitle,
+  setAgentThreadResolved,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useRenameAgentThread,
@@ -261,6 +263,7 @@ describe("setAgentThreadStatus", () => {
         {
           items: [thread],
           limit: SIDEBAR_PAGE_SIZE,
+          hierarchy: true,
           offset: 0,
           hasMore: false,
         },
@@ -382,6 +385,7 @@ describe("sidebar queries", () => {
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
         limit: SIDEBAR_PAGE_SIZE,
+        hierarchy: true,
         offset: 0,
         resolved: false,
         scope: "interactive",
@@ -395,6 +399,7 @@ describe("sidebar queries", () => {
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
         limit: SIDEBAR_PAGE_SIZE,
+        hierarchy: true,
         offset: 0,
         resolved: false,
         scope: "interactive",
@@ -733,5 +738,84 @@ describe("markAgentThreadViewed", () => {
     expect(
       client.getQueryState(agentThreadKeys.detail("thread-1"))?.dataUpdatedAt
     ).toBe(0)
+  })
+})
+
+describe("sidebar task families", () => {
+  const worker = {
+    id: "worker",
+    title: "Implementation",
+    status: "running",
+    viewed: false,
+  } as AgentThread
+  const coordinator = {
+    id: "coordinator",
+    status: "idle",
+    taskMembership: { role: "coordinator", taskId: "task" },
+    taskWorkers: [worker],
+  } as AgentThread
+
+  it("does not fetch or insert a selected worker already nested in a loaded family", () => {
+    const getThread = vi.spyOn(agentsApi, "getThread")
+    const client = testClient()
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: worker.id,
+          loadedThreads: [coordinator],
+        }),
+      { wrapper: wrapperFor(client) }
+    )
+    expect(result.current).toBeUndefined()
+    expect(getThread).not.toHaveBeenCalled()
+  })
+
+  it("updates nested worker caches for navigation and optimistic edits", () => {
+    const client = testClient()
+    const key = agentThreadKeys.page({ hierarchy: true, resolved: false })
+    client.setQueryData(key, { ...page, items: [coordinator] })
+    markAgentThreadViewed(client, worker.id)
+    setAgentThreadTitle(client, worker.id, "Renamed")
+    setAgentThreadStatus(client, worker.id, "finished")
+    expect(
+      client.getQueryData<ThreadsPage>(key)?.items[0]?.taskWorkers?.[0]
+    ).toMatchObject({ viewed: true, title: "Renamed", status: "finished" })
+    setAgentThreadResolved(client, worker.id, true)
+    expect(
+      client.getQueryData<ThreadsPage>(key)?.items[0]?.taskWorkers
+    ).toEqual([])
+  })
+
+  it("keeps the existing page poll alive for idle coordinators and discovers new workers", async () => {
+    vi.useFakeTimers()
+    let workers: Array<AgentThread> = [{ ...worker, status: "finished" }]
+    const list = vi
+      .spyOn(agentsApi, "listThreadsPage")
+      .mockImplementation(async () => ({
+        ...page,
+        items: [{ ...coordinator, taskWorkers: workers }],
+      }))
+    const client = testClient()
+    const { result } = renderHook(
+      () => useSidebarRecents({ repoMode: false }),
+      { wrapper: wrapperFor(client) }
+    )
+    await vi.waitFor(() =>
+      expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
+    )
+    const calls = list.mock.calls.length
+    workers = [...workers, { ...worker, id: "new-worker", status: "running" }]
+    await act(() => vi.advanceTimersByTimeAsync(2100))
+    expect(list).toHaveBeenCalledTimes(calls)
+    expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
+    await act(() => vi.advanceTimersByTimeAsync(30_000))
+    await vi.waitFor(() =>
+      expect(result.current.items[0]?.taskWorkers).toHaveLength(2)
+    )
+    workers = workers.map((thread) => ({ ...thread, status: "finished" }))
+    await act(() => vi.advanceTimersByTimeAsync(2100))
+    await vi.waitFor(() =>
+      expect(result.current.items[0]?.taskWorkers?.[1]?.status).toBe("finished")
+    )
   })
 })

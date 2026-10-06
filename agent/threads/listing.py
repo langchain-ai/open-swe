@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from agent.review.session import ReviewSessionMetadata
 from agent.review.walkthrough import Walkthrough
+from agent.tasks.store import SidebarTaskMembership, sidebar_memberships
 from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
@@ -330,6 +331,206 @@ async def _summarize_threads(
     return summaries
 
 
+async def _readable_threads_by_id(
+    client: LangGraphClient,
+    thread_ids: Sequence[str],
+    login: str,
+    email: str | None,
+    *,
+    include_private: bool = True,
+) -> dict[str, ThreadLike]:
+    threads_by_id: dict[str, ThreadLike] = {}
+    for offset in range(0, len(thread_ids), _PINNED_THREADS_BATCH_SIZE):
+        ids = thread_ids[offset : offset + _PINNED_THREADS_BATCH_SIZE]
+        for thread in await client.threads.search(
+            ids=list(ids), limit=len(ids), select=_THREAD_LIST_SELECT
+        ):
+            metadata = _thread_metadata(thread)
+            thread_id = _thread_id(thread)
+            if (
+                thread_id
+                and thread_is_readable(metadata, login, email)
+                and not thread_is_unlisted(metadata)
+                and (include_private or metadata.get("visibility", "public") == "public")
+            ):
+                threads_by_id[thread_id] = thread
+    return threads_by_id
+
+
+def _attach_task_membership(
+    summary: JsonObject,
+    membership: SidebarTaskMembership,
+    readable_parents: Mapping[str, ThreadLike],
+) -> None:
+    relationship: JsonObject = {"role": membership.role, "taskId": membership.task_id}
+    if membership.role == "worker":
+        relationship["coordinatorThreadId"] = (
+            membership.coordinator_thread_id
+            if membership.coordinator_thread_id in readable_parents
+            else None
+        )
+        title = summary.get("title")
+        if (
+            not isinstance(title, str)
+            or not title.strip()
+            or title
+            in {
+                "Untitled agent",
+                membership.instructions[:80],
+            }
+        ):
+            label = " ".join(membership.instructions.split())[:64].strip() or "Worker"
+            summary["title"] = f"{label} · {membership.thread_id[:8]}"
+        if membership.cancelled:
+            summary["status"] = "interrupted"
+        elif membership.launch_error:
+            summary["status"] = "error"
+    summary["taskMembership"] = relationship
+
+
+async def attach_task_workers(
+    client: LangGraphClient,
+    summaries: list[JsonObject],
+    login: str,
+    email: str | None,
+    *,
+    resolved: bool | None = None,
+    include_private: bool = True,
+    filter_workers: Callable[[list[ThreadLike]], Awaitable[list[ThreadLike]]] | None = None,
+) -> None:
+    """Attach independently readable task children without recursively expanding them."""
+    ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
+    memberships = await sidebar_memberships(ids)
+    if not memberships:
+        return
+    coordinator_ids = [
+        key for key, membership in memberships.items() if membership.role == "coordinator"
+    ]
+    children = await sidebar_memberships(coordinator_ids, workers_of=True)
+    parent_ids = list({membership.coordinator_thread_id for membership in memberships.values()})
+    related = await _readable_threads_by_id(
+        client, [*parent_ids, *children], login, email, include_private=include_private
+    )
+    worker_threads = [
+        related[key]
+        for key, membership in children.items()
+        if key in related
+        and (resolved is None or _is_thread_resolved(_thread_metadata(related[key])) is resolved)
+    ]
+    if filter_workers is not None:
+        worker_threads = await filter_workers(worker_threads)
+    workers = await _summarize_threads(client, worker_threads, minimal_run_update=True)
+    by_parent: dict[str, list[JsonObject]] = {}
+    for worker in workers:
+        membership = children[str(worker["id"])]
+        _attach_task_membership(worker, membership, related)
+        by_parent.setdefault(membership.coordinator_thread_id, []).append(worker)
+    for summary in summaries:
+        thread_id = str(summary["id"])
+        if membership := memberships.get(thread_id):
+            _attach_task_membership(summary, membership, related)
+            if membership.role == "coordinator":
+                summary["taskWorkers"] = by_parent.get(thread_id, [])
+
+
+async def _task_hierarchy_page(
+    client: LangGraphClient,
+    candidates: list[ThreadLike],
+    login: str,
+    email: str | None,
+    *,
+    offset: int,
+    limit: int,
+    resolved: bool | None,
+    viewed: bool | None,
+    status: str | None,
+    include_private: bool,
+    sort_by: _ThreadSortBy,
+    matches_metadata: Callable[[ThreadLike], bool],
+) -> JsonObject:
+    memberships = await sidebar_memberships(
+        [thread_id for thread in candidates if (thread_id := _thread_id(thread))]
+    )
+    matches = {thread_id: thread for thread in candidates if (thread_id := _thread_id(thread))}
+    parent_ids = {
+        membership.coordinator_thread_id
+        for thread_id, membership in memberships.items()
+        if membership.role == "worker" and thread_id in matches
+    }
+    parents = await _readable_threads_by_id(
+        client, list(parent_ids), login, email, include_private=include_private
+    )
+    roots: dict[str, ThreadLike] = {}
+    activity: dict[str, int] = {}
+    for thread_id, thread in matches.items():
+        membership = memberships.get(thread_id)
+        parent = (
+            parents.get(membership.coordinator_thread_id)
+            if membership is not None and membership.role == "worker"
+            else None
+        )
+        root = parent if parent is not None else thread
+        root_id = _thread_id(root) or thread_id
+        roots[root_id] = root
+        activity[root_id] = max(activity.get(root_id, 0), _thread_timestamp_ms(thread, sort_by))
+    ordered = sorted(roots, key=lambda key: activity[key], reverse=True)
+    items = await _summarize_threads(
+        client, [roots[key] for key in ordered[offset : offset + limit]]
+    )
+    matching_roots = {
+        str(summary["id"])
+        for summary in items
+        if matches_metadata(roots[str(summary["id"])])
+        and _summary_matches_filters(
+            summary, resolved=resolved, viewed=viewed, source=None, status=status, query=None
+        )
+    }
+
+    async def filter_workers(workers: list[ThreadLike]) -> list[ThreadLike]:
+        worker_memberships = await sidebar_memberships(
+            [str(_thread_id(worker)) for worker in workers]
+        )
+        beneath_matching_root = {
+            worker_id
+            for worker_id, membership in worker_memberships.items()
+            if membership.coordinator_thread_id in matching_roots
+        }
+        filtered = [
+            worker
+            for worker in workers
+            if _thread_id(worker) in beneath_matching_root or matches_metadata(worker)
+        ]
+        if viewed is None and status is None:
+            return filtered
+        summaries = await _summarize_threads(client, filtered)
+        matching_workers = set(beneath_matching_root)
+        for summary in summaries:
+            worker_id = str(summary["id"])
+            if membership := worker_memberships.get(worker_id):
+                _attach_task_membership(summary, membership, parents)
+            if _summary_matches_filters(
+                summary, resolved=resolved, viewed=viewed, source=None, status=status, query=None
+            ):
+                matching_workers.add(worker_id)
+        return [worker for worker in filtered if _thread_id(worker) in matching_workers]
+
+    await attach_task_workers(
+        client,
+        items,
+        login,
+        email,
+        resolved=resolved,
+        include_private=include_private,
+        filter_workers=filter_workers,
+    )
+    return {
+        "items": items,
+        "limit": limit,
+        "offset": offset,
+        "hasMore": len(ordered) > offset + limit,
+    }
+
+
 async def _collect_thread_candidates(
     client: Any,
     searches: list[dict[str, Any]],
@@ -349,10 +550,16 @@ async def _collect_thread_candidates(
     target_per_search: int | None = None,
     surfaced_only: bool = False,
     sort_by: _ThreadSortBy = "updated_at",
+    hierarchy: bool = False,
+    viewed: bool | None = None,
+    status: str | None = None,
 ) -> list[ThreadLike]:
     seen: dict[str, ThreadLike] = {}
+    root_ids: dict[str, str] = {}
+    checked_parents: set[str] = set()
+    readable_parents: dict[str, ThreadLike] = {}
     for search_filter in searches:
-        matched_for_search = 0
+        matched_for_search: set[str] = set()
         offset = 0
         metadata_filter = _search_metadata_filter(
             search_filter,
@@ -362,7 +569,7 @@ async def _collect_thread_candidates(
             bot=bot,
             admin_threads=admin_threads,
         )
-        while offset < _THREADS_PAGE_SCAN_CAP:
+        while hierarchy or offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
                 client,
                 metadata_filter,
@@ -372,6 +579,7 @@ async def _collect_thread_candidates(
             )
             if not batch:
                 break
+            matching_batch: list[ThreadLike] = []
             for thread in batch:
                 metadata = _thread_metadata(thread)
                 if thread_source(metadata) == "incidents_agent":
@@ -402,11 +610,68 @@ async def _collect_thread_candidates(
                 thread_id = _thread_id(thread)
                 if not thread_id:
                     continue
-                matched_for_search += 1
+                matching_batch.append(thread)
+            if hierarchy:
+                new_threads = [
+                    thread for thread in matching_batch if _thread_id(thread) not in root_ids
+                ]
+                memberships = await sidebar_memberships(
+                    [str(_thread_id(thread)) for thread in new_threads]
+                )
+                if viewed is not None or status is not None:
+                    summaries = await _summarize_threads(client, new_threads)
+                    matches: set[str] = set()
+                    for summary in summaries:
+                        thread_id = str(summary["id"])
+                        if membership := memberships.get(thread_id):
+                            _attach_task_membership(summary, membership, {})
+                        if _summary_matches_filters(
+                            summary,
+                            resolved=resolved,
+                            viewed=viewed,
+                            status=status,
+                            source=None,
+                            query=None,
+                        ):
+                            matches.add(thread_id)
+                    new_threads = [
+                        thread for thread in new_threads if _thread_id(thread) in matches
+                    ]
+                parent_ids = {
+                    membership.coordinator_thread_id
+                    for membership in memberships.values()
+                    if membership.role == "worker"
+                } - checked_parents
+                readable_parents.update(
+                    await _readable_threads_by_id(
+                        client,
+                        list(parent_ids),
+                        viewer_login or "",
+                        viewer_email,
+                        include_private=include_private,
+                    )
+                )
+                checked_parents.update(parent_ids)
+                for thread in new_threads:
+                    thread_id = str(_thread_id(thread))
+                    membership = memberships.get(thread_id)
+                    root_ids[thread_id] = (
+                        membership.coordinator_thread_id
+                        if membership is not None
+                        and membership.role == "worker"
+                        and membership.coordinator_thread_id in readable_parents
+                        else thread_id
+                    )
+                matching_batch = [
+                    thread for thread in matching_batch if _thread_id(thread) in root_ids
+                ]
+            for thread in matching_batch:
+                thread_id = str(_thread_id(thread))
+                matched_for_search.add(root_ids.get(thread_id, thread_id))
                 seen.setdefault(thread_id, thread)
             if len(batch) < _THREADS_SEARCH_PAGE:
                 break
-            if target_per_search is not None and matched_for_search >= target_per_search:
+            if target_per_search is not None and len(matched_for_search) >= target_per_search:
                 break
             offset += _THREADS_SEARCH_PAGE
     return sorted(
@@ -473,11 +738,13 @@ async def _pinned_thread_summaries(
             if thread_id and thread_is_readable(_thread_metadata(thread), login, email):
                 threads_by_id[thread_id] = thread
     # Search order is unrelated to pin order; deleted/inaccessible IDs are omitted.
-    return await _summarize_threads(
+    summaries = await _summarize_threads(
         client,
         [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
         minimal_run_update=True,
     )
+    await attach_task_workers(client, summaries, login, email)
+    return summaries
 
 
 async def list_dashboard_pinned_threads(
@@ -568,6 +835,7 @@ async def list_dashboard_threads_page(
     surfaced_only: bool = False,
     admin_threads: bool | None = None,
     sort_by: _ThreadSortBy = "updated_at",
+    hierarchy: bool = False,
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_participant_login or login
@@ -584,7 +852,7 @@ async def list_dashboard_threads_page(
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), 100)
     summary_filters = viewed is not None or status is not None
-    target = None if summary_filters else safe_offset + safe_limit + 1
+    target = None if summary_filters and not hierarchy else safe_offset + safe_limit + 1
 
     candidates = await _collect_thread_candidates(
         client,
@@ -604,7 +872,42 @@ async def list_dashboard_threads_page(
         target_per_search=target,
         surfaced_only=surfaced_only,
         sort_by=sort_by,
+        hierarchy=hierarchy,
+        viewed=viewed,
+        status=status,
     )
+
+    if hierarchy:
+        return await _task_hierarchy_page(
+            client,
+            candidates,
+            login,
+            email,
+            offset=safe_offset,
+            limit=safe_limit,
+            resolved=resolved,
+            viewed=viewed,
+            status=status,
+            include_private=include_private,
+            sort_by=sort_by,
+            matches_metadata=lambda thread: (
+                _metadata_matches_filters(
+                    _thread_metadata(thread),
+                    resolved=resolved,
+                    source=source,
+                    query=query,
+                    scope=scope,
+                    automation_id=automation_id,
+                    repo=repo,
+                    ownerless=ownerless,
+                    admin_threads=admin_threads,
+                )
+                and (
+                    not surfaced_only
+                    or thread_source(_thread_metadata(thread)) in _SURFACED_SOURCES
+                )
+            ),
+        )
 
     if summary_filters:
         summaries = await _summarize_threads(
