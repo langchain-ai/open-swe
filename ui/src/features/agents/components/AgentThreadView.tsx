@@ -121,6 +121,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
+  const [dismissedWarning, setDismissedWarning] = useState("")
+  const workspaceWarningKey = JSON.stringify([
+    thread.id,
+    source.kind === "transcript" ? source.workspaceStale : null,
+  ])
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
@@ -678,7 +683,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           </div>
         )}
         {source.kind === "transcript" && source.workspaceStale && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+          <div
+            hidden={dismissedWarning === workspaceWarningKey}
+            className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
+          >
             <Alert variant="warning">
               <TriangleAlertIcon />
               <AlertDescription>
@@ -692,6 +700,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   anyway and is refreshing the image in the background.
                 </span>
               </AlertDescription>
+              <AlertAction>
+                <button
+                  type="button"
+                  onClick={() => setDismissedWarning(workspaceWarningKey)}
+                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  Dismiss
+                </button>
+              </AlertAction>
             </Alert>
           </div>
         )}
