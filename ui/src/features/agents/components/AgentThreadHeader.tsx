@@ -1,23 +1,39 @@
-import { ContextMenu } from "@base-ui/react/context-menu"
-import { Menu } from "@base-ui/react/menu"
-import { DotsThreeIcon } from "@phosphor-icons/react"
-import { Folder } from "lucide-react"
 import { useRef, useState } from "react"
-
 import { useNavigate } from "@tanstack/react-router"
-import type { DesktopLegacyLocalThread } from "@/desktop"
-import { useLocalThread } from "@/features/agents/lib/desktopLocal"
-import { useRefreshLegacyLocalThreads } from "@/features/agents/lib/legacyLocal"
-import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
-import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
+import { PageBand } from "@langchain/gtm-platform-design-system/patterns/page-band"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@langchain/gtm-platform-design-system/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@langchain/gtm-platform-design-system/ui/tooltip"
 
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import type { DesktopLegacyLocalThread } from "@/desktop"
+import type { AgentThread } from "@/features/agents/lib/types"
+import type { ThreadVisibility } from "@/lib/api"
+import type { Glyph } from "@/components/glyphs"
+import { Cloud, Ellipsis, Folder, Monitor, Terminal } from "@/components/glyphs"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
+import { ShareThreadDialog } from "@/features/agents/components/ShareThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
-import { ShareThreadDialog } from "@/features/agents/components/ShareThreadDialog"
-import type { AgentThread } from "@/features/agents/lib/types"
+import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
+import { useLocalThread } from "@/features/agents/lib/desktopLocal"
+import { useRefreshLegacyLocalThreads } from "@/features/agents/lib/legacyLocal"
 import {
   useContinueThreadPrivately,
   useDeleteAgentThread,
@@ -27,10 +43,22 @@ import {
   useSidebarPinnedThreads,
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
-import type { ThreadVisibility } from "@/lib/api"
+import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+
+type ThreadTarget = "Cloud" | "This Mac" | "Local CLI"
+
+const TARGET_GLYPH: Record<ThreadTarget, Glyph> = {
+  Cloud: Cloud,
+  "This Mac": Monitor,
+  "Local CLI": Terminal,
+}
+
+const WORKTREE_DELETE_DETAIL =
+  "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
+const LOCAL_DELETE_DETAIL =
+  "This removes its history but does not revert changes made to your repository."
 
 function ThreadRepoIndicator({
   thread,
@@ -59,22 +87,31 @@ function ThreadRepoIndicator({
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger
-        render={<button type="button" />}
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Repository: ${repoName}`}
+            data-no-drag=""
+            className="text-ink-subtle"
+          />
+        }
         closeOnClick={false}
         onClick={() => setOpen(true)}
         onPointerLeave={() => setOpen(false)}
         onBlur={() => setOpen(false)}
-        aria-label={`Repository: ${repoName}`}
-        data-no-drag=""
-        className="flex size-7 shrink-0 items-center justify-center text-ink-subtle"
       >
-        <Folder className="size-4" />
+        <Icon icon={Folder} />
       </TooltipTrigger>
-      <TooltipContent>{repoName}</TooltipContent>
+      <TooltipContent side="bottom">{repoName}</TooltipContent>
     </Tooltip>
   )
 }
 
+/**
+ * The thread's focus band: one 44px toolbar carrying the title, the object's
+ * actions, where it runs and who can read it. It is the only band on the route.
+ */
 export function AgentThreadHeader({
   title,
   target,
@@ -86,7 +123,7 @@ export function AgentThreadHeader({
   onVisibilityChange,
 }: {
   title?: string | null
-  target: "Cloud" | "This Mac" | "Local CLI"
+  target: ThreadTarget
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
   localThread?: DesktopLegacyLocalThread
@@ -100,7 +137,6 @@ export function AgentThreadHeader({
   const { prefs, toggleLocalPin } = useSidebarPrefs()
   const [deletingLocal, setDeletingLocal] = useState(false)
   const worktreeThread = useLocalThread(thread?.id ?? "") ?? localThread
-  const sidebarCollapsed = useSidebarCollapsed()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const pinnedThreads = useSidebarPinnedThreads({ enabled: Boolean(thread) })
@@ -128,12 +164,8 @@ export function AgentThreadHeader({
     : thread?.resolved === true
   const isDeleting = deletingLocal || deleteThread.isPending
   const confirmDelete = async () => {
-    if (isDeleting) return
     if (!localThread) {
-      if (thread)
-        deleteThread.mutate(thread.id, {
-          onSuccess: () => setDeleteOpen(false),
-        })
+      if (thread) await deleteThread.mutateAsync(thread.id)
       return
     }
     setDeletingLocal(true)
@@ -143,12 +175,10 @@ export function AgentThreadHeader({
       )
       if (!deleted) throw new Error("Local Open SWE thread not found")
       refreshLocalThreads(localThread.id)
-      setDeleteOpen(false)
       void navigate({ to: "/agents" })
-    } catch (error) {
-      reportError({ title: "Couldn't delete thread", error })
+    } finally {
+      setDeletingLocal(false)
     }
-    setDeletingLocal(false)
   }
   const [draft, setDraft] = useState<string | null>(null)
   const [savingTitle, setSavingTitle] = useState<string | null>(null)
@@ -225,6 +255,9 @@ export function AgentThreadHeader({
               archived: !archived,
             })
             .then(() => refreshLocalThreads(localThread.id))
+            .catch((error: unknown) =>
+              reportError({ title: "Couldn't archive or restore thread", error })
+            )
         } else if (thread && !resolveThread.isPending) {
           resolveThread.mutate({ threadId: thread.id, resolved: !archived })
         }
@@ -232,31 +265,34 @@ export function AgentThreadHeader({
       onDelete={() => setDeleteOpen(true)}
     />
   )
+  // Returning focus to the menu trigger would pull it out of the title editor.
+  const keepEditorFocus = () => (editingRef.current ? false : undefined)
 
   const header = (
-    <header
+    <Box
+      render={<header />}
       data-desktop-drag-region=""
-      className="relative z-10 h-11 shrink-0 border-b border-line/60 bg-canvas/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-canvas/60 after:to-transparent"
+      className={cn(
+        "shrink-0",
+        // The macOS traffic lights overhang the 48px icon rail.
+        isDesktop && "in-data-[rail-collapsed=true]:pl-6",
+        // Clears the fixed control that reopens the collapsed right panel.
+        panelCollapsed && "pr-8"
+      )}
     >
-      <div
-        className={cn(
-          "flex h-full w-full items-center gap-3 px-4",
-          sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14"),
-          panelCollapsed && "pr-14"
-        )}
-      >
-        {title && (
-          <div className="flex min-w-0 items-center gap-1 text-body font-medium">
-            {(thread || localThread) && (
-              <ThreadRepoIndicator thread={thread} localThread={localThread} />
-            )}
-            {draft !== null ? (
-              <input
+      <PageBand variant="toolbar" edge="none">
+        <Inline gap="xs" align="center" grow className="min-w-0">
+          {title && (thread || localThread) && (
+            <ThreadRepoIndicator thread={thread} localThread={localThread} />
+          )}
+          {title &&
+            (draft !== null ? (
+              <Input
                 autoFocus
                 onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
-                className="min-w-0 rounded-badge bg-muted px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="font-medium"
                 style={{ width: editorWidth }}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -274,78 +310,81 @@ export function AgentThreadHeader({
                 }}
               />
             ) : onRename ? (
-              <button
-                type="button"
-                aria-label="Rename thread"
+              <Button
                 ref={titleButtonRef}
+                variant="ghost"
+                aria-label="Rename thread"
                 aria-busy={savingTitle !== null}
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 truncate rounded-badge px-2 py-1 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+                className="min-w-0 justify-start px-2"
                 onClick={startRename}
               >
-                {savingTitle ?? title}
-              </button>
+                <Box render={<span />} className="truncate">
+                  {savingTitle ?? title}
+                </Box>
+              </Button>
             ) : (
-              <span className="min-w-0 truncate" title={title}>
+              <Box
+                render={<span />}
+                title={title}
+                className="min-w-0 truncate px-2 font-medium text-ink"
+              >
                 {title}
-              </span>
-            )}
-            {(thread || localThread) && (
-              <Menu.Root>
-                <Menu.Trigger
-                  aria-label="Thread actions"
-                  data-no-drag=""
-                  className="flex size-7 shrink-0 items-center justify-center rounded-badge text-ink-subtle hover:bg-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
-                >
-                  <DotsThreeIcon className="size-5" weight="bold" />
-                </Menu.Trigger>
-                <Menu.Portal>
-                  <Menu.Positioner
-                    align="start"
-                    sideOffset={4}
-                    className="z-50 outline-none"
-                  >
-                    <Menu.Popup
-                      finalFocus={() =>
-                        editingRef.current ? false : undefined
-                      }
-                      className="min-w-[10rem] overflow-hidden rounded-badge border border-line bg-panel p-1 text-ink shadow-popup outline-none"
-                    >
-                      {menuItems}
-                    </Menu.Popup>
-                  </Menu.Positioner>
-                </Menu.Portal>
-              </Menu.Root>
-            )}
-          </div>
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-3">
-          <span className="text-meta text-ink-subtle">{target}</span>
+              </Box>
+            ))}
+          {title && (thread || localThread) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Thread actions"
+                    data-no-drag=""
+                    className="text-ink-subtle"
+                  />
+                }
+              >
+                <Icon icon={Ellipsis} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="min-w-48"
+                finalFocus={keepEditorFocus}
+              >
+                {menuItems}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </Inline>
+        <Inline gap="md" align="center" className="shrink-0">
+          <Inline
+            gap="xs"
+            align="center"
+            ink="ink-subtle"
+            className="text-meta"
+          >
+            <Icon icon={TARGET_GLYPH[target]} size="sm" />
+            {target}
+          </Inline>
           {!localThread && visibilityMenu}
-        </div>
-      </div>
-    </header>
+        </Inline>
+      </PageBand>
+    </Box>
   )
 
   if (!thread && !localThread) return header
 
   return (
     <>
-      <ContextMenu.Root>
-        <ContextMenu.Trigger render={header} />
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup
-              finalFocus={() => (editingRef.current ? false : undefined)}
-              className="min-w-[10rem] overflow-hidden rounded-badge border border-line bg-panel p-1 text-ink shadow-popup outline-none"
-            >
-              {menuItems}
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
+      <ContextMenu>
+        <ContextMenuTrigger render={header} />
+        <ContextMenuContent className="min-w-48" finalFocus={keepEditorFocus}>
+          {menuItems}
+        </ContextMenuContent>
+      </ContextMenu>
       {thread && (
         <ShareThreadDialog
           open={shareOpen}
@@ -359,20 +398,20 @@ export function AgentThreadHeader({
           }
         />
       )}
-      <DeleteThreadDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        threadTitle={title ?? ""}
-        isDeleting={isDeleting}
-        onConfirm={() => void confirmDelete()}
-        detail={
-          worktreeThread
-            ? worktreeThread.ownedWorktrees?.length
-              ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
-              : "This removes its history but does not revert changes made to your repository."
-            : undefined
-        }
-      />
+      {deleteOpen && (
+        <DeleteThreadDialog
+          threadTitle={title ?? ""}
+          onConfirm={confirmDelete}
+          onDismiss={() => setDeleteOpen(false)}
+          detail={
+            worktreeThread
+              ? worktreeThread.ownedWorktrees?.length
+                ? WORKTREE_DELETE_DETAIL
+                : LOCAL_DELETE_DETAIL
+              : undefined
+          }
+        />
+      )}
     </>
   )
 }

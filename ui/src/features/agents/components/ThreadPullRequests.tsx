@@ -1,4 +1,21 @@
 import { useState } from "react"
+import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@langchain/gtm-platform-design-system/ui/hover-card"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+
+import type {
+  AgentPullRequest,
+  AgentPullRequestHealth,
+  ThreadFixScope,
+} from "@/features/agents/lib/types"
 import {
   AlertTriangle,
   ChevronDown,
@@ -6,27 +23,43 @@ import {
   GitPullRequest,
   MessageCircle,
   Wrench,
-} from "lucide-react"
+} from "@/components/glyphs"
 
-import type {
-  AgentPullRequest,
-  AgentPullRequestHealth,
-  ThreadFixScope,
-} from "@/features/agents/lib/types"
-import { Avatar, AvatarFallback, AvatarImage } from "@langchain/gtm-platform-design-system/ui/avatar"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
-import { cn } from "@/lib/utils"
+/** The transcript's PR previews open on the same beat. */
+const PREVIEW_DELAY_MS = 250
 
 export type ThreadFix = (
   pullRequest: AgentPullRequest,
   scope: ThreadFixScope
 ) => Promise<void> | void
 
-const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
-  draft: "bg-muted text-ink-subtle",
-  open: "bg-positive-bg text-positive",
-  merged: "bg-merged/15 text-merged",
-  closed: "bg-risk-bg text-risk",
+type BadgeTone = "positive" | "attention" | "risk" | "info" | "neutral"
+
+/* Merged is the app's own state pair; the other three are the system's tones. */
+const PR_STATE_BADGE: Record<
+  AgentPullRequest["state"],
+  { tone: BadgeTone; className?: string }
+> = {
+  draft: { tone: "neutral" },
+  open: { tone: "positive" },
+  merged: {
+    tone: "neutral",
+    className: "border-merged/20 bg-merged-bg text-merged",
+  },
+  closed: { tone: "risk" },
+}
+
+function PullRequestStateBadge({ state }: { state: AgentPullRequest["state"] }) {
+  const badge = PR_STATE_BADGE[state]
+  return (
+    <Badge
+      tier="quiet"
+      tone={badge.tone}
+      className={cn("capitalize", badge.className)}
+    >
+      {state}
+    </Badge>
+  )
 }
 
 function relativeAge(value: string | null): string {
@@ -72,12 +105,13 @@ function hasActionableIssues(
   )
 }
 
+/** The ink that says how the PR is doing; also published as `data-pr-tone`. */
 function pullRequestTone(
   pullRequest: AgentPullRequest,
   health: AgentPullRequestHealth | undefined
 ): string {
   const state = pullRequestState(pullRequest, health)
-  if (state === "merged") return "text-info"
+  if (state === "merged") return "text-merged"
   if (state === "closed") return "text-risk"
   if (hasActionableIssues(pullRequest, health)) return "text-risk"
   if (state === "draft") return "text-ink-subtle"
@@ -102,6 +136,10 @@ function healthKey(repoFullName: string, number: number): string {
   return `${repoFullName}#${number}`
 }
 
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`
+}
+
 function HealthSummary({
   health,
 }: {
@@ -110,27 +148,28 @@ function HealthSummary({
   if (!health) return null
   const failingCount = health.failingChecks.length
   const commentCount = health.unresolvedReviewThreadCount ?? 0
+  const pendingCount = health.pendingCheckCount ?? 0
   return (
     <>
       {failingCount > 0 && (
-        <span className="rounded-full bg-risk-bg px-2 py-0.5 font-medium text-risk">
-          {failingCount} check{failingCount === 1 ? "" : "s"}
-        </span>
+        <Badge tier="quiet" tone="risk">
+          {plural(failingCount, "check")}
+        </Badge>
       )}
       {commentCount > 0 && (
-        <span className="rounded-full bg-attention-bg px-2 py-0.5 font-medium text-attention">
-          {commentCount} comment{commentCount === 1 ? "" : "s"}
-        </span>
+        <Badge tier="quiet" tone="attention">
+          {plural(commentCount, "comment")}
+        </Badge>
       )}
       {health.mergeConflictState === "conflicting" && (
-        <span className="rounded-full bg-risk-bg px-2 py-0.5 font-medium text-risk">
+        <Badge tier="quiet" tone="risk">
           Conflict
-        </span>
+        </Badge>
       )}
-      {(health.pendingCheckCount ?? 0) > 0 && (
-        <span className="rounded-full bg-attention-bg px-2 py-0.5 font-medium text-attention">
-          {health.pendingCheckCount} pending
-        </span>
+      {pendingCount > 0 && (
+        <Badge tier="quiet" tone="attention">
+          {pendingCount} pending
+        </Badge>
       )}
     </>
   )
@@ -145,95 +184,104 @@ function HealthDetails({
 }) {
   if (unavailable) {
     return (
-      <p className="border-t border-line/70 pt-3 text-meta text-ink-subtle">
+      <Box
+        render={<p />}
+        className="border-t border-line pt-3 text-meta text-ink-subtle"
+      >
         GitHub health is unavailable. This PR is not marked clean.
-      </p>
+      </Box>
     )
   }
   if (!health) {
-    return <p className="text-meta text-ink-subtle">Loading PR health…</p>
+    return (
+      <Box render={<p />} className="text-meta text-ink-subtle">
+        Loading PR health…
+      </Box>
+    )
   }
   const healthUnavailable =
     !health.statusAvailable ||
     !health.checksAvailable ||
     !health.commentsAvailable
   return (
-    <div className="space-y-3 border-t border-line/70 pt-3">
+    <Stack gap="md" className="border-t border-line pt-3">
       {health.mergeConflictState === "conflicting" && (
-        <div className="flex items-start gap-2 text-body text-risk">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>This branch has merge conflicts.</span>
-        </div>
+        <Inline gap="sm" align="start" ink="risk" className="text-label">
+          <Icon icon={AlertTriangle} />
+          This branch has merge conflicts.
+        </Inline>
       )}
       {health.failingChecks.length > 0 && (
-        <div className="space-y-1.5" data-testid="pr-failing-checks">
-          <p className="text-label font-medium text-ink">
+        <Stack gap="xs" data-testid="pr-failing-checks">
+          <Box render={<p />} className="text-label font-medium text-ink">
             Failing checks ({health.failingChecks.length})
-          </p>
+          </Box>
           {health.failingChecks.map((check, index) => {
             const label = check.name || "Unnamed check"
-            const content = (
-              <>
-                <AlertTriangle className="size-3.5 shrink-0 text-risk" />
-                <span className="min-w-0 flex-1 truncate">{label}</span>
-                {check.conclusion && (
-                  <span className="shrink-0 text-ink-subtle">
-                    {check.conclusion.replaceAll("_", " ")}
-                  </span>
-                )}
-              </>
-            )
             return (
-              <div
+              <Inline
                 key={`${label}-${index}`}
-                className="flex items-center gap-2 px-1 py-0.5 text-label text-ink"
+                gap="sm"
+                align="center"
+                className="text-label text-ink"
               >
-                {content}
-              </div>
+                <Icon icon={AlertTriangle} size="sm" className="text-risk" />
+                <Box render={<span />} className="min-w-0 flex-1 truncate">
+                  {label}
+                </Box>
+                {check.conclusion && (
+                  <Box render={<span />} className="shrink-0 text-ink-subtle">
+                    {check.conclusion.replaceAll("_", " ")}
+                  </Box>
+                )}
+              </Inline>
             )
           })}
-        </div>
+        </Stack>
       )}
       {(health.unresolvedReviewThreadCount ?? 0) > 0 && (
-        <div className="space-y-2" data-testid="pr-unresolved-comments">
-          <p className="text-label font-medium text-ink">
+        <Stack gap="sm" data-testid="pr-unresolved-comments">
+          <Box render={<p />} className="text-label font-medium text-ink">
             Unresolved comments ({health.unresolvedReviewThreadCount})
-          </p>
+          </Box>
           {health.unresolvedReviewThreads.map((thread, index) => {
             const location = thread.path
               ? `${thread.path}${thread.line ? `:${thread.line}` : ""}`
               : "Pull request"
-            const content = (
-              <>
-                <div className="flex items-center gap-1.5 text-meta text-ink-subtle">
-                  <MessageCircle className="size-3 shrink-0" />
-                  <span>{thread.author ?? "Unknown author"}</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="truncate">{location}</span>
-                </div>
-                <p className="line-clamp-2 text-label text-ink">
-                  {thread.body || "No comment text"}
-                </p>
-              </>
-            )
             return (
-              <div
-                key={`${location}-${index}`}
-                className="space-y-1 px-1 py-0.5"
-              >
-                {content}
-              </div>
+              <Stack key={`${location}-${index}`} gap="xs">
+                <Inline
+                  gap="xs"
+                  align="center"
+                  ink="ink-subtle"
+                  className="min-w-0 text-meta"
+                >
+                  <Icon icon={MessageCircle} size="sm" />
+                  <Box render={<span />}>
+                    {thread.author ?? "Unknown author"}
+                  </Box>
+                  <Box render={<span />} aria-hidden="true">
+                    ·
+                  </Box>
+                  <Box render={<span />} className="truncate">
+                    {location}
+                  </Box>
+                </Inline>
+                <Box render={<p />} className="line-clamp-2 text-label text-ink">
+                  {thread.body || "No comment text"}
+                </Box>
+              </Stack>
             )
           })}
-        </div>
+        </Stack>
       )}
       {healthUnavailable && (
-        <p className="text-meta text-ink-subtle">
+        <Box render={<p />} className="text-meta text-ink-subtle">
           Some GitHub health details are unavailable. This PR is not marked
           clean.
-        </p>
+        </Box>
       )}
-    </div>
+    </Stack>
   )
 }
 
@@ -247,69 +295,79 @@ export function PullRequestHoverCard({
   healthUnavailable: boolean
 }) {
   const age = relativeAge(pullRequest.createdAt)
-  const authorInitial = pullRequest.author?.slice(0, 1).toUpperCase() || "?"
   const state = pullRequestState(pullRequest, health)
 
   return (
-    <div
+    <Stack
+      gap="md"
       data-testid={`pr-hover-card-${pullRequest.repoFullName}-${pullRequest.number}`}
-      className="w-96 max-w-[calc(100vw-2rem)] space-y-3 p-1"
+      className="min-w-0"
     >
-      <div className="flex items-center gap-2 text-body">
-        <span
-          className={cn(
-            "rounded-full px-2.5 py-1 text-label font-medium capitalize",
-            PR_STATE_STYLES[state]
-          )}
-        >
-          {state}
-        </span>
-        <span className="min-w-0 truncate text-ink-subtle">
+      <Inline gap="sm" align="center" className="text-label">
+        <PullRequestStateBadge state={state} />
+        <Box render={<span />} className="min-w-0 truncate text-ink-subtle">
           {pullRequest.repoFullName} #{pullRequest.number}
-        </span>
+        </Box>
         {age && (
-          <time
-            dateTime={pullRequest.createdAt ?? undefined}
-            suppressHydrationWarning
-            className="ml-auto shrink-0 text-ink-subtle"
+          <Box
+            render={
+              <time
+                dateTime={pullRequest.createdAt ?? undefined}
+                suppressHydrationWarning
+              />
+            }
+            className="ml-auto shrink-0 text-meta text-ink-subtle"
           >
             {age}
-          </time>
+          </Box>
         )}
-      </div>
-      <p className="text-title leading-snug font-medium text-ink">
+      </Inline>
+      <Box render={<p />} className="text-title font-medium text-ink">
         {pullRequest.title}
-      </p>
-      <div className="flex min-w-0 items-center gap-2 text-meta text-ink-subtle">
-        <span className="truncate">{pullRequest.baseRef}</span>
-        <span aria-hidden="true">←</span>
-        <span className="truncate">{pullRequest.headRef}</span>
-      </div>
-      <div className="flex items-center gap-2 text-body text-ink-subtle">
-        <Avatar size="sm">
-          {pullRequest.authorAvatarUrl && (
-            <AvatarImage src={pullRequest.authorAvatarUrl} alt="" />
-          )}
-          <AvatarFallback>{authorInitial}</AvatarFallback>
-        </Avatar>
-        <span className="min-w-0 truncate">
+      </Box>
+      <Inline
+        gap="sm"
+        align="center"
+        ink="ink-subtle"
+        className="min-w-0 font-mono text-meta"
+      >
+        <Box render={<span />} className="truncate">
+          {pullRequest.baseRef}
+        </Box>
+        <Box render={<span />} aria-hidden="true">
+          ←
+        </Box>
+        <Box render={<span />} className="truncate">
+          {pullRequest.headRef}
+        </Box>
+      </Inline>
+      <Inline gap="sm" align="center" ink="ink-subtle" className="text-label">
+        <Avatar
+          name={pullRequest.author ?? "Unknown author"}
+          src={pullRequest.authorAvatarUrl ?? undefined}
+          size="chat"
+        />
+        <Box render={<span />} className="min-w-0 truncate">
           {pullRequest.author ?? "Unknown author"}
-        </span>
-        <span className="ml-auto flex shrink-0 items-center gap-2">
-          <span className="text-positive">
+        </Box>
+        <Inline
+          gap="sm"
+          align="center"
+          className="ml-auto shrink-0 font-mono tabular-nums"
+        >
+          <Box render={<span />} className="text-positive">
             +{pullRequest.diffStats.additions}
-          </span>
-          <span className="text-risk">
+          </Box>
+          <Box render={<span />} className="text-risk">
             -{pullRequest.diffStats.deletions}
-          </span>
-          <span>
-            {pullRequest.diffStats.files} file
-            {pullRequest.diffStats.files === 1 ? "" : "s"}
-          </span>
-        </span>
-      </div>
+          </Box>
+          <Box render={<span />} className="font-sans">
+            {plural(pullRequest.diffStats.files, "file")}
+          </Box>
+        </Inline>
+      </Inline>
       <HealthDetails health={health} unavailable={healthUnavailable} />
-    </div>
+    </Stack>
   )
 }
 
@@ -332,70 +390,70 @@ function PullRequestLink({
   const tone = pullRequestTone(pullRequest, health)
 
   return (
-    <div className="flex min-w-0 items-stretch gap-1.5">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <a
-              href={pullRequest.url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
-              data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
-              data-pr-tone={tone}
-              className="group flex min-w-0 flex-1 items-center gap-2 rounded-compact border border-line/70 bg-panel/80 px-3 py-2 text-label shadow-control transition-colors hover:border-line hover:bg-hover/70"
-            />
-          }
+    <Inline gap="sm" align="stretch" className="min-w-0">
+      <HoverCard>
+        <HoverCardTrigger
+          delay={PREVIEW_DELAY_MS}
+          href={pullRequest.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
+          data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
+          data-pr-tone={tone}
+          className="flex h-row-data min-w-0 flex-1 items-center gap-2 rounded-control border border-line bg-panel px-3 text-label transition-colors duration-fast ease-out-quint outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
         >
-          <GitPullRequest className={cn("size-4 shrink-0", tone)} />
-          <span className={cn("shrink-0 font-medium", tone)}>
+          <Icon icon={GitPullRequest} className={tone} />
+          <Box
+            render={<span />}
+            className={cn("shrink-0 font-medium tabular-nums", tone)}
+          >
             #{pullRequest.number}
-          </span>
+          </Box>
           {compact ? (
-            <span className="min-w-0 truncate text-ink-subtle">
+            <Box render={<span />} className="min-w-0 truncate text-ink-subtle">
               {pullRequest.title}
-            </span>
+            </Box>
           ) : (
             <>
-              <span className="min-w-0 truncate text-ink-subtle">
+              <Box
+                render={<span />}
+                className="min-w-0 truncate text-ink-subtle"
+              >
                 {pullRequest.repoFullName}
-              </span>
-              <span className="hidden min-w-0 truncate text-ink-subtle/70 sm:block">
+              </Box>
+              <Box
+                render={<span />}
+                className="hidden min-w-0 truncate font-mono text-meta text-ink-subtle sm:block"
+              >
                 {pullRequest.headRef}
-              </span>
+              </Box>
             </>
           )}
-          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <Inline gap="sm" align="center" className="ml-auto shrink-0">
             <HealthSummary health={health} />
-            <span className="hidden text-positive sm:inline">
-              +{pullRequest.diffStats.additions}
-            </span>
-            <span className="hidden text-risk sm:inline">
-              -{pullRequest.diffStats.deletions}
-            </span>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 font-medium capitalize",
-                PR_STATE_STYLES[state]
-              )}
+            <Box
+              render={<span />}
+              className="hidden font-mono text-meta text-positive tabular-nums sm:inline"
             >
-              {state}
-            </span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent
-          side="top"
-          align="start"
-          sideOffset={8}
-          className="rounded-control p-3 shadow-overlay"
-        >
+              +{pullRequest.diffStats.additions}
+            </Box>
+            <Box
+              render={<span />}
+              className="hidden font-mono text-meta text-risk tabular-nums sm:inline"
+            >
+              -{pullRequest.diffStats.deletions}
+            </Box>
+            <PullRequestStateBadge state={state} />
+          </Inline>
+        </HoverCardTrigger>
+        <HoverCardContent side="top" align="start" sideOffset={8} className="w-96">
           <PullRequestHoverCard
             pullRequest={pullRequest}
             health={health}
             healthUnavailable={healthUnavailable}
           />
-        </TooltipContent>
-      </Tooltip>
+        </HoverCardContent>
+      </HoverCard>
       {onFix &&
         !compact &&
         fixScopes(pullRequest, health).map((scope) => (
@@ -407,7 +465,7 @@ function PullRequestLink({
             disabled={fixDisabled}
           />
         ))}
-    </div>
+    </Inline>
   )
 }
 
@@ -460,16 +518,16 @@ function FixButton({
     }
   }
   return (
-    <button
-      type="button"
+    <Button
+      variant="outline"
       aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
       disabled={disabled || fixing}
       onClick={() => void handleFix()}
-      className="flex shrink-0 items-center gap-1.5 rounded-compact border border-risk/30 bg-risk-bg px-3 text-label font-medium text-risk transition-colors hover:bg-risk-bg disabled:cursor-not-allowed disabled:opacity-50"
+      className="h-auto border-risk/40 text-risk hover:bg-risk-bg"
     >
-      <Wrench className="size-3.5" />
+      <Icon icon={Wrench} size="sm" />
       {fixing ? "Starting…" : failed ? "Retry" : FIX_LABELS[scope]}
-    </button>
+    </Button>
   )
 }
 
@@ -502,7 +560,7 @@ export function ThreadPullRequests({
   const hiddenCount = pullRequests.length - 1
 
   return (
-    <div data-testid="thread-pull-requests" className="space-y-1.5 pb-2">
+    <Stack gap="sm" data-testid="thread-pull-requests" className="pb-2">
       {visiblePullRequests.map((pullRequest) => (
         <PullRequestLink
           key={healthKey(pullRequest.repoFullName, pullRequest.number)}
@@ -517,20 +575,19 @@ export function ThreadPullRequests({
         />
       ))}
       {hiddenCount > 0 && (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-          className="flex items-center gap-1 rounded-badge px-2 py-1 text-meta text-ink-subtle transition-colors hover:bg-hover hover:text-ink"
-        >
-          {expanded ? (
-            <ChevronUp className="size-3.5" />
-          ) : (
-            <ChevronDown className="size-3.5" />
-          )}
-          {expanded ? "Show less" : `Show ${hiddenCount} more`}
-        </button>
+        <Box>
+          <Button
+            variant="ghost"
+            size="compact"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+            className="font-normal text-ink-subtle"
+          >
+            <Icon icon={expanded ? ChevronUp : ChevronDown} size="sm" />
+            {expanded ? "Show less" : `Show ${hiddenCount} more`}
+          </Button>
+        </Box>
       )}
-    </div>
+    </Stack>
   )
 }

@@ -78,11 +78,11 @@ test.describe("thread pull requests", () => {
     const fixButton = page.getByRole("button", { name: "Fix checks on PR #1" });
     await expect(summary).toHaveAttribute(
       "data-pr-tone",
-      "text-muted-foreground",
+      "text-ink-subtle",
     );
     await expect(summary).not.toHaveAttribute(
       "data-pr-tone",
-      "text-success-foreground",
+      "text-positive",
     );
     await expect(summary).toContainText("draft");
     await expect(fixButton).toHaveCount(0);
@@ -100,7 +100,7 @@ test.describe("thread pull requests", () => {
     await page.reload();
     await expect(summary).toHaveAttribute(
       "data-pr-tone",
-      "text-success-foreground",
+      "text-positive",
     );
     await expect(summary).toContainText("open");
     await expect(fixButton).toHaveCount(0);
@@ -120,7 +120,7 @@ test.describe("thread pull requests", () => {
     await failedRefresh;
     await expect(summary).toHaveAttribute(
       "data-pr-tone",
-      "text-muted-foreground",
+      "text-ink-subtle",
       { timeout: 5_000 },
     );
     await summary.focus();
@@ -205,7 +205,7 @@ test.describe("thread pull requests", () => {
     });
     await page.reload();
 
-    await expect(summary).toHaveAttribute("data-pr-tone", "text-destructive");
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-risk");
     await expect(summary).toContainText("3 checks");
     await expect(summary).toContainText("2 comments");
     await expect(summary).toContainText("Conflict");

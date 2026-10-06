@@ -1,20 +1,26 @@
 import { useMemo } from "react"
+import type { ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
-import {
-  ArrowLeftIcon,
-  CheckCircleIcon,
-  CircleNotchIcon,
-  WarningCircleIcon,
-} from "@phosphor-icons/react"
-
+import { PageBand } from "@langchain/gtm-platform-design-system/patterns/page-band"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle,
+  ChevronRight,
+} from "@/components/glyphs"
 import { LoadError } from "@/components/LoadError"
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Messages } from "@/features/agents/components/messages"
 import { asString } from "@/features/agents/components/subagents/SubagentCard"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import type { AgentThread, Message } from "@/features/agents/lib/types"
-import { cn } from "@/lib/utils"
 
 /**
  * A subagent viewed as a thread of its own: the task it was given, then
@@ -33,7 +39,6 @@ export function SubagentThreadView({
   const source = useThreadSource()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const sidebarCollapsed = useSidebarCollapsed()
   const task =
     source.kind === "transcript" ? source.subagentTask(subagentId) : null
   const description = task ? asString(task.input.description) : ""
@@ -55,22 +60,8 @@ export function SubagentThreadView({
   const title = description.split("\n", 1)[0]?.trim() || "Subagent"
   const subagentType = task ? asString(task.input.subagent_type) : ""
   const isRunning = task?.status === "in_progress"
-  const backLink = (
-    <Link
-      to="/agents/$threadId"
-      params={{ threadId: thread.id }}
-      search={{}}
-      data-no-drag=""
-      className="flex h-7 shrink-0 items-center gap-1 rounded-badge px-1.5 text-ink-subtle transition-colors hover:bg-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
-    >
-      <ArrowLeftIcon className="size-3.5" aria-hidden />
-      <span className="max-w-48 truncate text-label" title={thread.title}>
-        {thread.title}
-      </span>
-    </Link>
-  )
 
-  let body: React.ReactNode
+  let body: ReactNode
   if (source.kind !== "transcript") {
     body = (
       <LoadError
@@ -81,13 +72,16 @@ export function SubagentThreadView({
     )
   } else if (source.isHydrating) {
     body = (
-      <div className="flex flex-1 items-center justify-center px-6">
-        <img
-          src={`${import.meta.env.BASE_URL}logo-mark.png`}
-          alt="Loading subagent"
-          className="size-12 animate-pulse"
-        />
-      </div>
+      <Stack
+        aria-busy="true"
+        aria-label="Loading subagent"
+        gap="sm"
+        className="mx-auto w-full max-w-thread px-4 pt-6"
+      >
+        <Skeleton className="h-3 w-5/6" />
+        <Skeleton className="h-3 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+      </Stack>
     )
   } else if (!task) {
     body = (
@@ -104,12 +98,15 @@ export function SubagentThreadView({
         threadId={thread.id}
         scrollKey={`${thread.id}:${subagentId}`}
         isStreaming={isRunning}
-        contentWidthClass="max-w-3xl"
+        contentWidthClass="max-w-thread"
         footer={
           !isRunning && (
-            <p className="px-1 pt-2 pb-6 text-center text-meta text-ink-subtle/70">
+            <Box
+              render={<p />}
+              className="px-1 pt-2 pb-6 text-center text-meta text-ink-subtle"
+            >
               Subagents cannot be replied to. Follow up in the parent thread.
-            </p>
+            </Box>
           )
         }
       />
@@ -117,52 +114,77 @@ export function SubagentThreadView({
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <header
+    <Stack grow className="min-w-0">
+      <Box
+        render={<header />}
         data-desktop-drag-region=""
-        className="relative z-10 h-11 shrink-0 border-b border-line/60 bg-canvas/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-canvas/60 after:to-transparent"
+        className={cn(
+          "shrink-0",
+          // The macOS traffic lights overhang the 48px icon rail.
+          isDesktop && "in-data-[rail-collapsed=true]:pl-6"
+        )}
       >
-        <div
-          className={cn(
-            "flex h-full w-full items-center gap-2 px-4",
-            sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14")
-          )}
-        >
-          {backLink}
-          <span className="text-ink-subtle/50" aria-hidden>
-            /
-          </span>
-          <div className="flex min-w-0 items-center gap-2 text-body font-medium">
-            <span className="min-w-0 truncate" title={description || title}>
+        <PageBand variant="toolbar" edge="none">
+          <Inline gap="xs" align="center" grow className="min-w-0">
+            <Button
+              variant="ghost"
+              nativeButton={false}
+              render={
+                <Link
+                  to="/agents/$threadId"
+                  params={{ threadId: thread.id }}
+                  search={{}}
+                />
+              }
+              data-no-drag=""
+              title={thread.title}
+              className="min-w-0 shrink px-2 font-normal text-ink-muted"
+            >
+              <Icon icon={ArrowLeft} size="sm" />
+              <Box render={<span />} className="max-w-48 truncate">
+                {thread.title}
+              </Box>
+            </Button>
+            <Icon icon={ChevronRight} size="sm" className="text-ink-subtle" />
+            <Box
+              render={<span />}
+              title={description || title}
+              className="min-w-0 truncate px-1 font-medium text-ink"
+            >
               {title}
-            </span>
+            </Box>
             {subagentType && (
-              <Badge variant="outline" className="shrink-0">
+              <Badge tier="quiet" tone="neutral">
                 {subagentType}
               </Badge>
             )}
             {task?.status === "in_progress" ? (
-              <CircleNotchIcon
-                className="size-3.5 shrink-0 animate-spin text-ink-subtle"
-                aria-label="Subagent running"
+              <Spinner
+                size="sm"
+                label="Subagent running"
+                className="text-ink-subtle"
               />
             ) : task?.status === "error" ? (
-              <WarningCircleIcon
-                className="size-3.5 shrink-0 text-risk"
-                aria-label="Subagent failed"
+              <Icon
+                icon={AlertTriangle}
+                size="sm"
+                label="Subagent failed"
+                className="text-attention"
               />
             ) : task ? (
-              <CheckCircleIcon
-                className="size-3.5 shrink-0 text-ink-subtle/70"
-                aria-label="Subagent finished"
+              <Icon
+                icon={CheckCircle}
+                size="sm"
+                label="Subagent finished"
+                className="text-ink-subtle"
               />
             ) : null}
-          </div>
-        </div>
-      </header>
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          </Inline>
+        </PageBand>
+      </Box>
+      <Stack grow className="relative min-h-0 overflow-hidden">
         {body}
-      </div>
-    </div>
+      </Stack>
+    </Stack>
   )
 }

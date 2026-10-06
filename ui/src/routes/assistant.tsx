@@ -6,13 +6,15 @@ import {
   useMatch,
   useRouterState,
 } from "@tanstack/react-router"
-import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { AssistantProvider } from "@/features/assistant/AssistantProvider"
-import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
+import {
+  AgentsShell,
+  AgentsShellPlaceholder,
+} from "@/features/agents/components/AgentsSidebar"
 import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 
 export const Route = createFileRoute("/assistant")({
@@ -31,22 +33,12 @@ function AssistantLayout() {
   )
   const navigate = Route.useNavigate()
   const href = useRouterState({ select: (state) => state.location.href })
-  useEffect(() => {
-    document.documentElement.dataset["agentsTheme"] = "true"
-    return () => {
-      delete document.documentElement.dataset["agentsTheme"]
-    }
-  }, [])
   useEffect(() => rememberAppLocation(href), [href])
   if (
     session.isLoading ||
     (session.data && (profile.isPending || localThreads.isLoading))
   )
-    return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-canvas">
-        <Skeleton className="h-40 w-full max-w-md" />
-      </main>
-    )
+    return <AgentsShellPlaceholder />
   if (!session.data) return <RequireLogin />
   // A "This Mac" thread needs the desktop bridge and git controls of the agents view.
   if (!experimental || thisMacThread)

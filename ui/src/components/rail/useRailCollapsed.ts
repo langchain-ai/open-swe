@@ -1,9 +1,19 @@
-import { useCallback, useSyncExternalStore } from "react"
+import { useRouterState } from "@tanstack/react-router"
+import { useCallback, useEffect, useSyncExternalStore } from "react"
 
 const STORAGE_KEY = "open-swe.rail.collapsed"
 const NARROW_QUERY = "(max-width: 767px)"
 
 const listeners = new Set<() => void>()
+
+// A phone opens the rail over the work column for one pick and closes it on
+// the next navigation, so this state is never stored: the desktop preference
+// in localStorage is left alone.
+let narrowOpen = false
+
+function notify(): void {
+  for (const listener of listeners) listener()
+}
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
@@ -17,10 +27,12 @@ function subscribe(listener: () => void): () => void {
   }
 }
 
-// A phone gets the 48px icon rail whatever the desktop preference says, so the
-// work column keeps the screen; the stored choice is left alone for later.
+function isNarrow(): boolean {
+  return window.matchMedia(NARROW_QUERY).matches
+}
+
 function getSnapshot(): boolean {
-  if (window.matchMedia(NARROW_QUERY).matches) return true
+  if (isNarrow()) return !narrowOpen
   return window.localStorage.getItem(STORAGE_KEY) === "1"
 }
 
@@ -29,8 +41,12 @@ function getServerSnapshot(): boolean {
 }
 
 function setRailCollapsed(next: boolean): void {
-  window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0")
-  for (const listener of listeners) listener()
+  if (isNarrow()) {
+    narrowOpen = !next
+  } else {
+    window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0")
+  }
+  notify()
 }
 
 /** The product rail's collapsed state, shared by every shell and remembered across reloads. */
@@ -44,6 +60,12 @@ export function useRailCollapsed(): {
     getSnapshot,
     getServerSnapshot
   )
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  useEffect(() => {
+    if (!narrowOpen) return
+    narrowOpen = false
+    notify()
+  }, [pathname])
   const toggle = useCallback(() => setRailCollapsed(!collapsed), [collapsed])
   return { collapsed, setCollapsed: setRailCollapsed, toggle }
 }

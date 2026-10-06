@@ -1,7 +1,10 @@
-import { CopyIcon } from "@phosphor-icons/react"
 import { useState } from "react"
-
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+
+import { Check, Copy } from "@/components/glyphs"
 
 export function CopyDiagnosticsButton({
   getDiagnostics,
@@ -17,29 +20,38 @@ export function CopyDiagnosticsButton({
         JSON.stringify(getDiagnostics(), null, 2)
       )
       setCopyState("copied")
-    } catch {
+    } catch (error) {
+      console.warn("Diagnostics copy failed", { error })
       setCopyState("denied")
     }
   }
 
   return (
-    <div className="flex items-center gap-2 pt-1">
+    <Inline gap="sm" align="center" className="pt-1">
       <Button
         type="button"
         size="compact"
         variant="outline"
         onClick={() => void copy()}
       >
-        <CopyIcon aria-hidden="true" className="size-3.5" />
+        <Icon icon={copyState === "copied" ? Check : Copy} size="sm" />
         Copy diagnostics
       </Button>
-      <span aria-live="polite" role="status">
+      <Box
+        render={<span />}
+        aria-live="polite"
+        role="status"
+        className={cn(
+          "text-meta",
+          copyState === "denied" ? "text-risk" : "text-ink-subtle"
+        )}
+      >
         {copyState === "copied"
           ? "Diagnostics copied to clipboard."
           : copyState === "denied"
             ? "Clipboard unavailable. Check the browser's clipboard permission."
             : null}
-      </span>
-    </div>
+      </Box>
+    </Inline>
   )
 }

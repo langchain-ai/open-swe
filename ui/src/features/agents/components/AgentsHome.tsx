@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+
+import { AlertTriangle } from "@/components/glyphs"
+import { OpenSweMarkTile } from "@/components/rail/OpenSweMark"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
 import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
@@ -564,7 +569,7 @@ export function AgentsHome({
 
   return (
     <>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <Stack grow className="min-h-0 min-w-0 overflow-hidden">
         {session.data && !routePending && <OnboardingDialog />}
         <AgentThreadHeader
           title={optimisticDraftThread?.title}
@@ -579,27 +584,41 @@ export function AgentsHome({
           <Messages
             messages={optimisticDraftThread.messages}
             isStreaming
-            contentWidthClass="max-w-3xl"
+            contentWidthClass="max-w-thread"
           />
         ) : (
-          <div className="flex min-h-0 flex-1 overflow-y-auto px-3 py-6 sm:px-6 sm:py-8">
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-6">
-              <img
-                src={`${import.meta.env.BASE_URL}logo-mark.png`}
-                alt=""
-                className="size-14 opacity-30 grayscale dark:opacity-20"
-              />
-              <h1 className="text-center text-page tracking-tightish sm:text-display">
+          <Stack
+            grow
+            justify="end"
+            align="center"
+            className="min-h-0 px-4 pb-6"
+          >
+            <Inline
+              gap="sm"
+              align="center"
+              justify="center"
+              className="w-full max-w-thread"
+            >
+              <OpenSweMarkTile />
+              <Box
+                render={<h1 />}
+                className="text-page font-semibold tracking-tightish text-ink"
+              >
                 What should we build?
-              </h1>
-            </div>
-          </div>
+              </Box>
+            </Inline>
+          </Stack>
         )}
         <AgentComposerDock>
           {localError && (
-            <div className="mb-3 w-full rounded-control border border-risk/30 bg-risk-bg px-3 py-2 text-label text-risk">
-              {localError}
-            </div>
+            <Box className="pb-3">
+              <StateNotice
+                tone="ATTENTION"
+                icon={AlertTriangle}
+                title="The thread didn't start"
+                description={localError}
+              />
+            </Box>
           )}
           <AgentPromptBar
             activeRun={
@@ -652,7 +671,9 @@ export function AgentsHome({
             skills={skills.data}
           />
         </AgentComposerDock>
-      </div>
+        {/* Below the composer, the same air as above it, so the empty surface centres its one job. */}
+        {optimisticDraftThread ? null : <Box aria-hidden className="flex-1" />}
+      </Stack>
       {localRepo ? (
         <LocalRepoRightPanel
           scopeId={localRepo.scopeId}

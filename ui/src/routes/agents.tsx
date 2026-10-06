@@ -9,9 +9,12 @@ import {
 
 import { useQuery } from "@tanstack/react-query"
 
-import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
+import {
+  AgentsShell,
+  AgentsShellPlaceholder,
+} from "@/features/agents/components/AgentsSidebar"
+import { ThreadLoadingSkeleton } from "@/features/agents/components/AgentThreadPage"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
-import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -25,22 +28,7 @@ export const Route = createFileRoute("/agents")({
   head: () => ({ meta: [{ title: pageTitle("Agents") }] }),
 })
 
-/**
- * The `.agents-ui` class themes the layout subtree, but popovers, tooltips and
- * menus portal to `<body>`. Marking the document root while these routes are
- * mounted is what keeps those in the same palette.
- */
-function useAgentsTheme() {
-  useEffect(() => {
-    document.documentElement.dataset["agentsTheme"] = "true"
-    return () => {
-      delete document.documentElement.dataset["agentsTheme"]
-    }
-  }, [])
-}
-
 function AgentsLayout() {
-  useAgentsTheme()
   const session = useSession()
   const profile = useProfile()
   const experimentalAssistantUi = useExperimentalAssistantUi()
@@ -105,13 +93,7 @@ function AgentsLayout() {
     rememberAppLocation(location.href)
   }, [location.href])
 
-  if (session.isLoading) {
-    return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-canvas p-6">
-        <Skeleton className="h-40 w-full max-w-md" />
-      </main>
-    )
-  }
+  if (session.isLoading) return <AgentsShellPlaceholder />
 
   if (!session.data) return <RequireLogin />
   if (!awaitingRuntimeChoice && experimentalAssistantUi && !localHome) {
@@ -142,13 +124,7 @@ function AgentsLayout() {
       activeThreadId={activeThreadId ?? activeReviewThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
-      {awaitingRuntimeChoice ? (
-        <main className="flex min-w-0 flex-1 items-center justify-center p-6">
-          <Skeleton className="h-40 w-full max-w-md" />
-        </main>
-      ) : (
-        <Outlet />
-      )}
+      {awaitingRuntimeChoice ? <ThreadLoadingSkeleton /> : <Outlet />}
     </AgentsShell>
   )
 }

@@ -1,13 +1,60 @@
-import { Dialog } from "@base-ui/react/dialog"
-import { X } from "lucide-react"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@langchain/gtm-platform-design-system/ui/dialog"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import {
+  Shortcut,
+  type ShortcutKey,
+} from "@langchain/gtm-platform-design-system/ui/shortcut"
 
 import type { AppCommand } from "@/lib/appCommands"
-import { Kbd } from "@langchain/gtm-platform-design-system/ui/kbd"
-import { useShortcutLabel } from "@/lib/hotkeys"
+import { shortcutPlatform } from "@/lib/hotkeys"
+import { useIsHydrated } from "@/lib/hydration"
 
-function ShortcutKey({ shortcut }: { shortcut: string }) {
-  const label = useShortcutLabel(shortcut)
-  return <Kbd>{label}</Kbd>
+const KEY_ALIASES: Record<string, ShortcutKey> = {
+  cmd: "meta",
+  command: "meta",
+  control: "ctrl",
+  option: "alt",
+  escape: "esc",
+  return: "enter",
+  space: "Space",
+}
+
+/** An app shortcut string ("mod+shift+p") as the chord the system draws. */
+function shortcutKeys(shortcut: string): ReadonlyArray<ShortcutKey> {
+  const parts = shortcut
+    .toLowerCase()
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean)
+  // "?" is typed with Shift, but nobody reads it as Shift+?.
+  if (parts.length === 2 && parts[0] === "shift" && parts[1] === "?")
+    return ["?"]
+  return parts.map((part) => KEY_ALIASES[part] ?? part)
+}
+
+/** One shortcut as a row of keys, on the platform's modifier once hydrated. */
+export function ShortcutChord({
+  shortcut,
+  className,
+}: {
+  shortcut: string
+  className?: string
+}) {
+  const hydrated = useIsHydrated()
+  return (
+    <Shortcut
+      keys={shortcutKeys(shortcut)}
+      apple={hydrated && shortcutPlatform() === "mac"}
+      className={className}
+    />
+  )
 }
 
 export function AppShortcutReference({
@@ -28,58 +75,66 @@ export function AppShortcutReference({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/45 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <Dialog.Popup
-          className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(40rem,80vh)] w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-control border border-line bg-panel text-ink shadow-overlay outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
-          data-hotkeys="ignore"
-        >
-          <div className="flex items-center justify-between border-b border-line px-5 py-4">
-            <Dialog.Title className="text-body font-medium">
-              Keyboard shortcuts
-            </Dialog.Title>
-            <Dialog.Close
-              aria-label="Close keyboard shortcuts"
-              className="rounded-badge p-1 text-ink-subtle hover:bg-hover hover:text-ink"
-            >
-              <X className="size-4" />
-            </Dialog.Close>
-          </div>
-          <Dialog.Description className="sr-only">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        data-hotkeys="ignore"
+        aria-label="Keyboard shortcuts"
+        className="sm:max-w-xl"
+      >
+        <DialogHeader>
+          <DialogTitle className="text-title">Keyboard shortcuts</DialogTitle>
+          <DialogDescription className="sr-only">
             Keyboard shortcuts available in the current view.
-          </Dialog.Description>
-          <div className="overflow-y-auto p-5">
+          </DialogDescription>
+        </DialogHeader>
+        <ScrollArea
+          overflow="vertical"
+          viewportClassName="max-h-96"
+          className="-mx-4 min-h-0"
+        >
+          <Stack gap="xl" className="px-4 pb-1">
             {[...groups].map(([group, groupCommands]) => (
-              <section className="mb-6 last:mb-0" key={group}>
-                <h3 className="mb-2 text-meta font-semibold tracking-wide text-ink-subtle uppercase">
+              <Stack
+                key={group}
+                render={<section aria-label={group} />}
+                gap="xs"
+              >
+                <Box
+                  render={<h3 />}
+                  className="text-meta font-medium text-ink-subtle"
+                >
                   {group}
-                </h3>
-                <div className="divide-y divide-line/60 rounded-compact border border-line">
+                </Box>
+                <Stack gap="none" className="divide-y divide-line">
                   {groupCommands.map((command) => (
-                    <div
-                      className="flex min-h-10 items-center gap-3 px-3 py-2"
+                    <Inline
                       key={command.id}
+                      gap="md"
+                      align="center"
+                      className="min-h-row-data py-1"
                     >
-                      <span className="min-w-0 flex-1 text-body">
+                      <Box
+                        render={<span />}
+                        className="min-w-0 flex-1 text-label text-ink"
+                      >
                         {command.label}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1">
+                      </Box>
+                      <Inline gap="sm" align="center" className="shrink-0">
                         {command.shortcuts?.map((shortcut) => (
-                          <ShortcutKey
+                          <ShortcutChord
                             key={`${command.id}:${shortcut}`}
                             shortcut={shortcut}
                           />
                         ))}
-                      </div>
-                    </div>
+                      </Inline>
+                    </Inline>
                   ))}
-                </div>
-              </section>
+                </Stack>
+              </Stack>
             ))}
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+          </Stack>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
   )
 }

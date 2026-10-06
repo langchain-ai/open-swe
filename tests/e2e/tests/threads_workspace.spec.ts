@@ -408,8 +408,8 @@ test.describe("threads workspace", () => {
 
     const row = page.getByRole("link", { name: TITLES.shared }).first();
     await expect(row).toBeVisible();
-    await row.hover();
-    await row.getByRole("button", { name: "Pin thread" }).click();
+    await row.press("Shift+F10");
+    await page.getByRole("menuitem", { name: "Pin thread" }).click();
 
     const pinned = sidebarSection(page.locator("aside"), "Pinned");
     const pinnedRow = pinned.getByRole("link", { name: TITLES.shared });

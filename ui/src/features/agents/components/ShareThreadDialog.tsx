@@ -1,9 +1,25 @@
-import { Dialog } from "@base-ui/react/dialog"
-import { WarningIcon } from "@phosphor-icons/react"
 import { useState } from "react"
-
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@langchain/gtm-platform-design-system/ui/dialog"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 
+import { AlertTriangle, Share2 } from "@/components/glyphs"
+
+/*
+ * Not ConfirmableAction: sharing is irreversible consent rather than a delete,
+ * and it is gated on an explicit acknowledgement and on no run being live,
+ * neither of which that pattern carries. Its footer law is kept: Cancel stays
+ * on screen and the risk confirm is an outline, never a fill.
+ */
 export function ShareThreadDialog({
   open,
   onOpenChange,
@@ -19,74 +35,84 @@ export function ShareThreadDialog({
 }) {
   const [acknowledged, setAcknowledged] = useState(false)
   return (
-    <Dialog.Root
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         if (busy) return
         setAcknowledged(false)
         onOpenChange(next)
       }}
+      disablePointerDismissal={busy}
     >
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/70" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-compact border border-risk/50 bg-panel p-6 text-ink shadow-overlay">
-          <div className="flex flex-col gap-4">
-            <Dialog.Title className="flex items-center gap-2 font-semibold text-risk">
-              <WarningIcon className="size-6 shrink-0" weight="fill" />
+      <DialogContent showCloseButton={!busy} className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            <Inline gap="sm" align="center" ink="risk">
+              <Icon icon={AlertTriangle} />
               Expose this entire thread to the workspace?
-            </Dialog.Title>
-            <Dialog.Description className="text-body">
-              Everyone with workspace access will be able to read everything
-              already in this thread and anything added later: messages, private
-              tool results, attachments, plans, and sandbox files. This may
-              include secrets or sensitive personal information.
-            </Dialog.Description>
-            <p className="text-body font-semibold">
-              This cannot be undone. Continuing privately creates a new copy; it
-              does not hide this shared thread.
-            </p>
-            <p className="text-body text-ink-subtle">
-              Private-only tools, personal integrations, and private admin
-              capabilities will no longer be available in this thread.
-            </p>
-            {running && (
-              <p role="alert" className="text-body text-risk">
-                Stop the active run before sharing this thread.
-              </p>
-            )}
-            <label className="flex items-start gap-2 text-body">
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                onChange={(event) => setAcknowledged(event.target.checked)}
-                disabled={busy}
-                className="mt-1"
-              />
-              I understand that everything in this thread becomes visible to the
-              workspace.
-            </label>
-            <div className="mt-2 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setAcknowledged(false)
-                  onOpenChange(false)
-                }}
-                disabled={busy}
-              >
-                Keep private
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={onConfirm}
-                disabled={!acknowledged || busy || running}
-              >
-                {busy ? "Sharing..." : "Share entire thread"}
-              </Button>
-            </div>
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+            </Inline>
+          </DialogTitle>
+          <DialogDescription>
+            Everyone with workspace access will be able to read everything
+            already in this thread and anything added later: messages, private
+            tool results, attachments, plans, and sandbox files. This may
+            include secrets or sensitive personal information.
+          </DialogDescription>
+        </DialogHeader>
+        <Stack gap="md" className="text-label">
+          <Box render={<p />} className="font-medium text-ink">
+            This cannot be undone. Continuing privately creates a new copy; it
+            does not hide this shared thread.
+          </Box>
+          <Box render={<p />} className="text-ink-subtle">
+            Private-only tools, personal integrations, and private admin
+            capabilities will no longer be available in this thread.
+          </Box>
+          {running && (
+            <Box render={<p />} role="alert" className="text-risk">
+              Stop the active run before sharing this thread.
+            </Box>
+          )}
+          <Inline
+            render={<label />}
+            gap="sm"
+            align="start"
+            className="text-ink"
+          >
+            <Checkbox
+              checked={acknowledged}
+              onCheckedChange={setAcknowledged}
+              disabled={busy}
+              className="mt-px"
+            />
+            I understand that everything in this thread becomes visible to the
+            workspace.
+          </Inline>
+        </Stack>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setAcknowledged(false)
+              onOpenChange(false)
+            }}
+            disabled={busy}
+          >
+            Keep private
+          </Button>
+          <Button
+            variant="outline"
+            aria-label="Share entire thread"
+            className="border-risk text-risk hover:bg-risk-bg"
+            onClick={onConfirm}
+            disabled={!acknowledged || running}
+            loading={busy}
+          >
+            <Icon icon={Share2} />
+            Share entire thread
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

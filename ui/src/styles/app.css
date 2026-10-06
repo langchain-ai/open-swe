@@ -35,3 +35,22 @@
     background-position: calc(100% + 4.5rem) 0;
   }
 }
+
+/*
+ * On a phone the open rail floats over the work column instead of squeezing
+ * it; the closed 48px icon rail stays in flow. `useRailCollapsed` closes it
+ * again on the next navigation.
+ */
+@media (max-width: 767px) {
+  [data-slot="app-shell"] {
+    position: relative;
+  }
+
+  [data-slot="app-shell"][data-rail-collapsed="false"] > [data-slot="app-shell-rail"] {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    z-index: 40;
+    box-shadow: var(--gtm-shadow-overlay);
+  }
+}

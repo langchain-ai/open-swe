@@ -1,16 +1,26 @@
-import { CaretDownIcon, GlobeIcon, LockIcon } from "@phosphor-icons/react"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import type { Glyph } from "@/components/glyphs"
 import type { ThreadVisibility } from "@/lib/api"
+import { ChevronDown, Globe, Lock } from "@/components/glyphs"
 
-const OPTIONS: Record<
-  ThreadVisibility,
-  { label: string; Icon: typeof LockIcon }
-> = {
-  private: { label: "Private", Icon: LockIcon },
-  public: { label: "Workspace", Icon: GlobeIcon },
+const OPTIONS: Record<ThreadVisibility, { label: string; icon: Glyph }> = {
+  private: { label: "Private", icon: Lock },
+  public: { label: "Workspace", icon: Globe },
 }
-const ORDER: ThreadVisibility[] = ["private", "public"]
+const ORDER: ReadonlyArray<ThreadVisibility> = ["private", "public"]
+
+function isThreadVisibility(value: unknown): value is ThreadVisibility {
+  return value === "private" || value === "public"
+}
 
 export function ThreadVisibilityMenu({
   value,
@@ -20,46 +30,49 @@ export function ThreadVisibilityMenu({
 }: {
   value: ThreadVisibility
   onChange: (next: ThreadVisibility) => void
-  disabledValues?: ThreadVisibility[]
+  disabledValues?: ReadonlyArray<ThreadVisibility>
   busy?: boolean
 }) {
   const current = OPTIONS[value]
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label="Thread visibility"
-        aria-busy={busy}
-        disabled={busy}
-        data-no-drag=""
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-badge border border-line/60 px-2 text-label text-ink transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none disabled:opacity-60"
+        render={
+          <Button
+            variant="outline"
+            aria-label="Thread visibility"
+            aria-busy={busy}
+            disabled={busy}
+            data-no-drag=""
+          />
+        }
       >
-        <current.Icon className="size-3.5" />
+        <Icon icon={current.icon} size="sm" />
         {current.label}
-        <CaretDownIcon className="size-3 text-ink-subtle" />
+        <Icon icon={ChevronDown} size="sm" className="text-ink-subtle" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-36">
         <DropdownMenuRadioGroup
           value={value}
           onValueChange={(next) => {
-            if (next !== value) onChange(next as ThreadVisibility)
+            if (isThreadVisibility(next) && next !== value) onChange(next)
           }}
         >
-          {ORDER.map((option) => {
-            const { label, Icon } = OPTIONS[option]
-            return (
-              <DropdownMenuRadioItem
-                key={option}
-                value={option}
-                disabled={disabledValues.includes(option)}
-                closeOnClick
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Icon className="size-3.5 text-ink-subtle" />
-                  {label}
-                </span>
-              </DropdownMenuRadioItem>
-            )
-          })}
+          {ORDER.map((option) => (
+            <DropdownMenuRadioItem
+              key={option}
+              value={option}
+              disabled={disabledValues.includes(option)}
+              closeOnClick
+            >
+              <Icon
+                icon={OPTIONS[option].icon}
+                size="sm"
+                className="text-ink-subtle"
+              />
+              {OPTIONS[option].label}
+            </DropdownMenuRadioItem>
+          ))}
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -7,14 +7,20 @@ import {
   useRef,
   useState,
 } from "react"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import {
+  AlertTriangle,
   ArrowUpRight,
-  CircleAlert as CircleAlertIcon,
-  GitMerge as GitMergeIcon,
-  Laptop as LaptopIcon,
-  TriangleAlert as TriangleAlertIcon,
-} from "lucide-react"
-import { IoLogoSlack } from "react-icons/io5"
+  GitMerge,
+  Monitor,
+  TreeStructure,
+} from "@/components/glyphs"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { formatRelativeTime } from "@/lib/utils"
 
@@ -26,7 +32,10 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { Alert, AlertAction, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
@@ -104,16 +113,28 @@ function editedPaths(messages: Array<Message>): Array<string> {
 function CodeChannelLink({ url }: { url?: string | null }) {
   if (!url) return null
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="mb-2 flex w-fit items-center gap-1.5 rounded-badge px-2 py-1 text-meta text-ink-subtle transition-colors hover:bg-hover hover:text-ink"
-    >
-      <IoLogoSlack className="size-3.5" />
-      Open in Slack
-      <ArrowUpRight className="size-3" />
-    </a>
+    <Box className="pb-2">
+      <Button
+        variant="ghost"
+        size="compact"
+        nativeButton={false}
+        render={<a href={url} target="_blank" rel="noreferrer" />}
+        className="font-normal text-ink-subtle"
+      >
+        <ProviderLogo provider="slack" className="size-3.5" />
+        Open in Slack
+        <Icon icon={ArrowUpRight} size="sm" />
+      </Button>
+    </Box>
+  )
+}
+
+/** A notice above the transcript, on the thread's own measure. */
+function ThreadNotice({ children }: { children: React.ReactNode }) {
+  return (
+    <Box className="mx-auto w-full max-w-thread shrink-0 px-4 pt-3">
+      {children}
+    </Box>
   )
 }
 
@@ -627,9 +648,10 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   }, [isHydrating, thread.id, visibleMessages])
 
   return (
-    <div className="flex min-w-0 flex-1">
-      <div
-        className="flex min-w-0 flex-1 flex-col"
+    <Inline align="stretch" grow className="min-w-0">
+      <Stack
+        grow
+        className="min-w-0"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
@@ -648,57 +670,62 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
-        {(runsElsewhere || bridgeError) && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
-            <Alert
-              variant={bridgeError ? "error" : "info"}
-              controlAlignment="first-line"
-            >
-              <LaptopIcon />
-              <AlertDescription>
-                <span>
-                  {bridgeError
-                    ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                    : "This thread runs in a checkout on another Mac. Open it in the Open SWE app there to continue it."}
-                </span>
-              </AlertDescription>
-            </Alert>
-          </div>
-        )}
+        {bridgeError ? (
+          <ThreadNotice>
+            <StateNotice
+              tone="RISK"
+              icon={Monitor}
+              title="This Mac can't serve this thread's checkout"
+              description={bridgeError}
+            />
+          </ThreadNotice>
+        ) : runsElsewhere ? (
+          <ThreadNotice>
+            <StateNotice
+              tone="ATTENTION"
+              icon={Monitor}
+              title="This thread runs in a checkout on another Mac"
+              description="Open it in the Open SWE app there to continue it."
+            />
+          </ThreadNotice>
+        ) : null}
         {thread.status === "error" && !reconnect.label && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
-            <Alert variant="error" controlAlignment="first-line">
-              <CircleAlertIcon />
-              <AlertDescription>
-                <span>
-                  The last run hit an error before it could finish. Send another
-                  message to retry.
-                </span>
-              </AlertDescription>
-              {thread.traceUrl && (
-                <AlertAction>
-                  <a
-                    href={thread.traceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-badge px-2 py-1 text-label font-medium text-risk underline underline-offset-2 hover:bg-risk-bg"
+          <ThreadNotice>
+            <StateNotice
+              tone="ATTENTION"
+              icon={AlertTriangle}
+              title="The last run hit an error before it could finish"
+              description="Send another message to retry."
+              action={
+                thread.traceUrl ? (
+                  <Button
+                    variant="outline"
+                    size="compact"
+                    nativeButton={false}
+                    render={
+                      <a
+                        href={thread.traceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      />
+                    }
                   >
+                    <Icon icon={TreeStructure} size="sm" />
                     Open trace
-                  </a>
-                </AlertAction>
-              )}
-            </Alert>
-          </div>
+                  </Button>
+                ) : undefined
+              }
+            />
+          </ThreadNotice>
         )}
         {source.kind === "transcript" && source.workspaceStale && (
-          <div
+          <Box
             hidden={dismissedWarning === workspaceWarningKey}
-            className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
+            className="mx-auto w-full max-w-thread shrink-0 px-4 pt-3"
           >
-            <Alert variant="warning">
-              <TriangleAlertIcon />
-              <AlertDescription>
-                <span>
+            <Alert tone="attention" icon={AlertTriangle}>
+              <Inline gap="md" align="start" justify="between">
+                <AlertDescription>
                   The {source.workspaceStale.workspaceName} workspace image this
                   sandbox started from{" "}
                   {source.workspaceStale.capturedAt
@@ -706,36 +733,33 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                     : "has never been refreshed"}
                   , so its repositories may be out of date. Open SWE continued
                   anyway and is refreshing the image in the background.
-                </span>
-              </AlertDescription>
-              <AlertAction>
-                <button
-                  type="button"
+                </AlertDescription>
+                <Button
+                  variant="ghost"
+                  size="compact"
                   onClick={() => setDismissedWarning(workspaceWarningKey)}
-                  className="rounded-badge px-2 py-1 text-meta font-medium text-ink-subtle hover:bg-hover hover:text-ink"
+                  className="-my-1 shrink-0"
                 >
                   Dismiss
-                </button>
-              </AlertAction>
+                </Button>
+              </Inline>
             </Alert>
-          </div>
+          </Box>
         )}
         {thread.attentionReason === "prs_closed" && !thread.resolved && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
-            <Alert variant="info">
-              <GitMergeIcon />
+          <ThreadNotice>
+            <Alert tone="info" icon={GitMerge}>
               <AlertDescription>
-                <span>
-                  Every pull request from this thread is merged or closed.
-                  Resolve the thread if the work is done, or send a follow-up to
-                  keep going.
-                </span>
+                Every pull request from this thread is merged or closed.
+                Resolve the thread if the work is done, or send a follow-up to
+                keep going.
               </AlertDescription>
             </Alert>
-          </div>
+          </ThreadNotice>
         )}
-        <div
-          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        <Stack
+          grow
+          className="relative min-h-0 overflow-hidden"
           onDragOver={(event) => {
             if (canPost && event.dataTransfer.types.includes("Files"))
               event.preventDefault()
@@ -772,13 +796,19 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               }
             />
           ) : isHydrating ? (
-            <div className="flex flex-1 items-center justify-center px-6">
-              <img
-                src={`${import.meta.env.BASE_URL}logo-mark.png`}
-                alt="Loading conversation"
-                className="size-12 animate-pulse"
-              />
-            </div>
+            <Stack
+              aria-busy="true"
+              aria-label="Loading conversation"
+              gap="lg"
+              className="mx-auto w-full max-w-thread flex-1 px-4 pt-6"
+            >
+              <Skeleton className="ml-auto h-10 w-2/3 rounded-panel" />
+              <Stack gap="sm">
+                <Skeleton className="h-3 w-5/6" />
+                <Skeleton className="h-3 w-3/4" />
+                <Skeleton className="h-3 w-1/2" />
+              </Stack>
+            </Stack>
           ) : (
             <PullRequestPreviewProvider
               pullRequests={thread.pullRequests ?? []}
@@ -797,23 +827,16 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   scrollKey={thread.id}
                   showPlanArtifact={Boolean(thread.planStatus)}
                   emptyState={
-                    <div className="flex min-h-60 items-center justify-center">
-                      {hydrationFailed ? (
-                        <Alert variant="error" className="max-w-3xl">
-                          <CircleAlertIcon />
-                          <AlertDescription>
-                            <span>
-                              This thread&apos;s messages could not be loaded.
-                              Reload to try again.
-                            </span>
-                          </AlertDescription>
-                        </Alert>
-                      ) : (
-                        <p className="text-meta text-ink-subtle/70">
-                          This thread has no messages yet.
-                        </p>
-                      )}
-                    </div>
+                    hydrationFailed ? (
+                      <StateNotice
+                        tone="RISK"
+                        icon={AlertTriangle}
+                        title="This thread's messages could not be loaded"
+                        description="Reload to try again."
+                      />
+                    ) : (
+                      <EmptyState title="This thread has no messages yet." />
+                    )
                   }
                   onOpenFile={handleOpenFile}
                   loadEarlier={loadEarlier}
@@ -832,7 +855,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   reconnectLabel={reconnect.label}
                   settingUpSandbox={settingUpSandbox}
                   pollWorkflowApprovalsWhileActive={isStreaming}
-                  contentWidthClass="max-w-3xl"
+                  contentWidthClass="max-w-thread"
                   footer={
                     !isStreaming &&
                     !sendMessage.isPending &&
@@ -919,8 +942,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
               />
             </AgentComposerDock>
           )}
-        </div>
-      </div>
+        </Stack>
+      </Stack>
       <AgentGitPanel
         thread={thread}
         onComment={canPost ? commentOnDiff : undefined}
@@ -929,6 +952,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
         collapsed={panelCollapsed}
         onCollapsedChange={handlePanelCollapsedChange}
       />
-    </div>
+    </Inline>
   )
 }

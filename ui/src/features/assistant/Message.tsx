@@ -15,7 +15,8 @@ import {
 } from "@assistant-ui/react-langchain"
 import { useMessages } from "@langchain/react"
 import type { AnyStream, SubagentDiscoverySnapshot } from "@langchain/react"
-import { Copy } from "lucide-react"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Copy } from "@/components/glyphs"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { parseStructuredInput } from "@/features/agents/lib/structuredInputMessages"
 import {
@@ -58,7 +59,7 @@ export function ToolResult({
 }: ToolCallMessagePartProps) {
   return (
     <details
-      className={`my-2 rounded-control border p-3 text-body ${isError ? "border-risk text-risk" : "border-line"}`}
+      className={`my-2 rounded-panel border bg-panel p-3 text-label ${isError ? "border-risk/20 bg-risk-bg text-risk" : "border-line"}`}
       open={isError || undefined}
     >
       <summary className="cursor-pointer font-medium">
@@ -71,11 +72,11 @@ export function ToolResult({
               : "Complete"}
         </span>
       </summary>
-      <pre className="mt-2 max-h-48 overflow-auto text-label whitespace-pre-wrap">
+      <pre className="mt-2 max-h-48 overflow-auto font-mono text-meta whitespace-pre-wrap">
         {JSON.stringify(args, null, 2)}
       </pre>
       {result !== undefined && (
-        <pre className="mt-2 max-h-80 overflow-auto rounded-compact bg-muted p-3 text-label whitespace-pre-wrap">
+        <pre className="mt-2 max-h-80 overflow-auto rounded-compact bg-muted p-3 font-mono text-meta whitespace-pre-wrap">
           {outputText(result)}
         </pre>
       )}
@@ -116,7 +117,7 @@ function SubagentTool(props: ToolCallMessagePartProps) {
   const subagents = useLangChainSubagents()
   const target = subagents.get(props.toolCallId)
   return (
-    <details className="my-2 rounded-control border border-line p-3 text-body">
+    <details className="my-2 rounded-panel border border-line bg-panel p-3 text-label">
       <summary className="cursor-pointer">
         Subagent:{" "}
         {typeof props.args.description === "string"
@@ -194,7 +195,7 @@ export function AssistantMessage() {
   return (
     <MessagePrimitive.Root
       data-message-id={id}
-      className={`group/message my-6 min-w-0 ${role === "user" ? "ml-auto max-w-[85%] rounded-panel bg-muted px-4 py-3" : "w-full leading-7"}`}
+      className={`group/message my-6 min-w-0 ${role === "user" ? "ml-auto max-w-lg rounded-panel bg-muted px-4 py-3" : "w-full"}`}
     >
       <MessagePrimitive.GroupedParts groupBy={groupActivity}>
         {({ part, children }) => {
@@ -203,7 +204,7 @@ export function AssistantMessage() {
             const reading = part.type.startsWith("group-read:")
             const path = part.type.slice(part.type.indexOf(":") + 1)
             return (
-              <details className="my-2 rounded-control border border-line p-3 text-body">
+              <details className="my-2 rounded-panel border border-line bg-panel p-3 text-label">
                 <summary className="cursor-pointer font-medium break-all">
                   {reading ? "Read" : "Edit"} {path} · {part.indices.length}{" "}
                   calls
@@ -220,7 +221,7 @@ export function AssistantMessage() {
           switch (part.type) {
             case "group-activity":
               return (
-                <details className="my-3 rounded-control border border-line p-3 text-body text-ink-subtle">
+                <details className="my-3 rounded-panel border border-line p-3 text-label text-ink-subtle">
                   <summary className="cursor-pointer">
                     {part.status.type === "running"
                       ? "Working…"
@@ -276,9 +277,9 @@ export function AssistantMessage() {
         <ActionBarPrimitive.Root className="mt-2">
           <ActionBarPrimitive.Copy
             aria-label="Copy message"
-            className="rounded-tick p-1.5 text-ink-subtle opacity-0 group-hover/message:opacity-100 focus-visible:opacity-100"
+            className="inline-flex size-control-sm items-center justify-center rounded-compact text-ink-subtle opacity-0 transition-opacity duration-fast ease-out-quint group-hover/message:opacity-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
           >
-            <Copy className="size-3.5" />
+            <Icon icon={Copy} size="sm" />
           </ActionBarPrimitive.Copy>
         </ActionBarPrimitive.Root>
       )}

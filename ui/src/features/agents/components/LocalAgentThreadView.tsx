@@ -8,8 +8,14 @@ import {
 } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useSubmissionQueue } from "@langchain/react"
-import { CircleAlert, X } from "lucide-react"
 import { Link } from "@tanstack/react-router"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
 
 import type {
   DesktopLegacyLocalPromptInput,
@@ -21,7 +27,7 @@ import type {
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
+import { AlertTriangle, Terminal, X } from "@/components/glyphs"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
@@ -440,28 +446,40 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
 
   if (!thread) {
     return (
-      <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 text-meta text-ink-subtle">
-        {threadQuery.isPending
-          ? "Loading local Open SWE session…"
-          : threadQuery.error
-            ? errorMessage(threadQuery.error)
-            : "This local session no longer exists."}
-        {!threadQuery.isPending && (
-          <Link
-            className="text-ink underline underline-offset-4"
-            to="/agents"
-          >
-            Start a new task
-          </Link>
+      <Stack grow justify="center" align="center" className="min-w-0 p-6">
+        {threadQuery.isPending ? (
+          <Inline gap="sm" align="center" ink="ink-subtle" className="text-meta">
+            <Spinner size="sm" />
+            Loading local Open SWE session…
+          </Inline>
+        ) : (
+          <EmptyState
+            icon={Terminal}
+            title={
+              threadQuery.error
+                ? errorMessage(threadQuery.error)
+                : "This local session no longer exists."
+            }
+            action={
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<Link to="/agents" />}
+              >
+                Start a new task
+              </Button>
+            }
+          />
         )}
-      </div>
+      </Stack>
     )
   }
 
   return (
-    <div className="flex min-w-0 flex-1">
-      <div
-        className="flex min-w-0 flex-1 flex-col"
+    <Inline align="stretch" grow className="min-w-0">
+      <Stack
+        grow
+        className="min-w-0"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
@@ -491,18 +509,20 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           panelCollapsed={panelCollapsed}
         />
         {(shownError || activity === "error") && (
-          <div className="mx-auto w-full max-w-3xl px-4 pt-3">
-            <Alert variant="error">
-              <CircleAlert />
-              <AlertDescription>
-                {shownError || "The local Open SWE agent stopped unexpectedly."}
-              </AlertDescription>
-            </Alert>
-          </div>
+          <Box className="mx-auto w-full max-w-thread shrink-0 px-4 pt-3">
+            <StateNotice
+              tone="ATTENTION"
+              icon={AlertTriangle}
+              title="The local agent stopped"
+              description={
+                shownError || "The local Open SWE agent stopped unexpectedly."
+              }
+            />
+          </Box>
         )}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <Stack grow className="relative min-h-0 overflow-hidden">
           <Messages
-            contentWidthClass="max-w-3xl"
+            contentWidthClass="max-w-thread"
             isStreaming={isRunning}
             isThinking={isRunning}
             messages={messages}
@@ -519,30 +539,32 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               healthUnavailable
             />
             {terminalContexts.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-1.5">
+              <Inline gap="xs" wrap className="pb-2">
                 {terminalContexts.map((text, index) => (
-                  <span
+                  <Badge
                     key={`${text.slice(0, 24)}:${index}`}
-                    className="inline-flex max-w-full items-center gap-1 rounded-badge border border-line bg-panel px-2 py-1 text-meta text-ink-subtle"
+                    tier="quiet"
+                    tone="neutral"
                     title={text}
+                    className="pr-0.5"
                   >
-                    <span className="max-w-64 truncate">
-                      Terminal selection
-                    </span>
-                    <button
-                      type="button"
+                    <Icon icon={Terminal} size="sm" />
+                    Terminal selection
+                    <Box
+                      render={<button type="button" />}
                       aria-label="Remove terminal selection"
                       onClick={() =>
                         setTerminalContexts((current) =>
                           current.filter((_, itemIndex) => itemIndex !== index)
                         )
                       }
+                      className="inline-flex rounded-tick text-ink-subtle hover:text-ink"
                     >
-                      <X className="size-3" />
-                    </button>
-                  </span>
+                      <Icon icon={X} size="sm" />
+                    </Box>
+                  </Badge>
                 ))}
-              </div>
+              </Inline>
             )}
             <AgentPromptBar
               activeRun={{ threadId: thread.id, running: isRunning }}
@@ -588,8 +610,8 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               localWorktreeLabel="Worktree"
             />
           </AgentComposerDock>
-        </div>
-      </div>
+        </Stack>
+      </Stack>
       <AgentRightPanel
         threadRef={threadRef}
         terminals={terminals}
@@ -622,6 +644,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           />
         )}
       />
-    </div>
+    </Inline>
   )
 }

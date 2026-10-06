@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react"
 import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
-import { ArrowDown } from "lucide-react"
+import { PageBand } from "@langchain/gtm-platform-design-system/patterns/page-band"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
+import { ArrowDown, PanelRight } from "@/components/glyphs"
+import { OpenSweMarkTile } from "@/components/rail/OpenSweMark"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
@@ -50,44 +56,68 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
   }, [title])
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1">
+    <Inline align="stretch" grow className="min-h-0 min-w-0">
       {threadId && <ThreadLoadTiming key={threadId} threadId={threadId} />}
       <ThreadPrimitive.Root
         data-testid="assistant-ui-conversation"
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
-        <header className="flex items-center gap-3 border-b border-line px-5 py-3">
-          <h1 className="min-w-0 flex-1 truncate text-body font-medium">
-            {thread?.title ?? "New conversation"}
-          </h1>
-          {thread && (
-            <button
-              className="text-label"
-              onClick={() => setPanelCollapsed(!panelCollapsed)}
+        <Box
+          render={<header />}
+          data-desktop-drag-region=""
+          className="shrink-0"
+        >
+          <PageBand variant="toolbar" edge="none">
+            <Box
+              render={<h1 />}
+              className="min-w-0 flex-1 truncate px-2 font-medium text-ink"
             >
-              Files and terminal
-            </button>
-          )}
-        </header>
+              {thread?.title ?? "New conversation"}
+            </Box>
+            {thread && (
+              <Button
+                variant="ghost"
+                aria-pressed={!panelCollapsed}
+                data-no-drag=""
+                onClick={() => setPanelCollapsed(!panelCollapsed)}
+              >
+                <Icon icon={PanelRight} size="sm" />
+                Files and terminal
+              </Button>
+            )}
+          </PageBand>
+        </Box>
         <ThreadPrimitive.Viewport
           turnAnchor="top"
           aria-label="Conversation messages"
           className="min-h-0 flex-1 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto"
         >
-          <div className="mx-auto w-full max-w-3xl px-5 py-6 sm:px-8">
+          <Box className="mx-auto w-full max-w-thread px-4 py-6">
             {loading && empty ? (
-              <p
+              <Box
+                render={<p />}
                 role="status"
-                className="py-16 text-center text-body text-ink-subtle"
+                className="py-16 text-center text-label text-ink-subtle"
               >
                 Loading conversation…
-              </p>
+              </Box>
             ) : (
               empty &&
               !running && (
-                <h2 className="py-16 text-center text-page">
-                  What are we working on?
-                </h2>
+                <Inline
+                  gap="sm"
+                  align="center"
+                  justify="center"
+                  className="py-16"
+                >
+                  <OpenSweMarkTile />
+                  <Box
+                    render={<h2 />}
+                    className="text-page font-semibold tracking-tightish text-ink"
+                  >
+                    What are we working on?
+                  </Box>
+                </Inline>
               )
             )}
             <ThreadPrimitive.Messages>
@@ -104,19 +134,26 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
                 thread.planStatus === "shared") && (
                 <InlinePlanArtifact threadId={thread.id} />
               )}
-          </div>
+          </Box>
         </ThreadPrimitive.Viewport>
-        <div className="relative mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
+        <Stack
+          gap="sm"
+          className="relative mx-auto w-full max-w-thread px-4 pt-2 pb-4"
+        >
           <ThreadPrimitive.ScrollToBottom
             aria-label="Scroll to bottom"
-            className="absolute -top-10 left-1/2 rounded-full border border-line bg-canvas p-2 shadow-control disabled:invisible"
+            className="absolute -top-10 left-1/2 inline-flex size-control -translate-x-1/2 items-center justify-center rounded-control border border-line-strong bg-panel text-ink shadow-control hover:bg-hover disabled:invisible"
           >
-            <ArrowDown className="size-4" />
+            <Icon icon={ArrowDown} />
           </ThreadPrimitive.ScrollToBottom>
           {error && (
-            <p role="alert" className="mb-3 text-body text-risk">
+            <Box
+              render={<p />}
+              role="alert"
+              className="text-label text-risk"
+            >
               {error}
-            </p>
+            </Box>
           )}
           {thread && (
             <>
@@ -127,14 +164,24 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
                 />
               )}
               {thread.codeChannelUrl && (
-                <a
-                  href={thread.codeChannelUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mb-2 block text-label underline"
-                >
-                  Open code channel
-                </a>
+                <Box>
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    nativeButton={false}
+                    render={
+                      <a
+                        href={thread.codeChannelUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      />
+                    }
+                    className="font-normal text-ink-subtle"
+                  >
+                    <ProviderLogo provider="slack" className="size-3.5" />
+                    Open code channel
+                  </Button>
+                </Box>
               )}
               <ThreadPullRequests
                 pullRequests={thread.pullRequests ?? []}
@@ -154,7 +201,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
             </>
           )}
           <Composer initialRepo={initialRepo} />
-        </div>
+        </Stack>
       </ThreadPrimitive.Root>
       {thread && (
         <AgentGitPanel
@@ -163,6 +210,6 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
           onCollapsedChange={setPanelCollapsed}
         />
       )}
-    </div>
+    </Inline>
   )
 }

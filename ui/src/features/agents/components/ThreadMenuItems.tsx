@@ -1,21 +1,35 @@
-import { Menu } from "@base-ui/react/menu"
 import {
-  ArchiveIcon,
-  ArrowCounterClockwiseIcon,
-  CopyIcon,
-  PushPinIcon,
-  PushPinSlashIcon,
-  TrashIcon,
-  TreeStructureIcon,
-} from "@phosphor-icons/react"
-import { IoLogoSlack } from "react-icons/io5"
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
 
 import type { DesktopLegacyLocalThread } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
+import {
+  ArchiveBox,
+  Copy,
+  PinOff,
+  PushPin,
+  RotateCcw,
+  Trash2,
+  TreeStructure,
+} from "@/components/glyphs"
+import { reportError } from "@/lib/errorReporting"
 
-const menuItemClassName =
-  "flex cursor-default items-center gap-2 rounded-tick px-2 py-1.5 text-label outline-none select-none data-highlighted:bg-muted"
+function copyToClipboard(value: string, title: string) {
+  void navigator.clipboard
+    .writeText(value)
+    .catch((error: unknown) => reportError({ title, error }))
+}
 
+/**
+ * The thread's actions, shared by the rail row's menu, its context menu and
+ * the thread band. Grouped as the rail law asks: where the thread came from,
+ * how it is organised, then the verbs that take it off the list.
+ */
 export function ThreadMenuItems({
   thread,
   localThread,
@@ -36,94 +50,99 @@ export function ThreadMenuItems({
   onDelete: () => void
 }) {
   const threadId = thread?.id ?? localThread?.id
+  const hasSourceLinks = Boolean(
+    thread?.traceUrl || localThread || thread?.sourceUrl
+  )
   return (
     <>
-      {thread?.traceUrl && (
-        <Menu.LinkItem
-          href={thread.traceUrl}
-          target="_blank"
-          rel="noreferrer"
-          closeOnClick
-          className={menuItemClassName}
-        >
-          <TreeStructureIcon className="size-3.5" />
-          Open trace
-        </Menu.LinkItem>
+      {hasSourceLinks && (
+        <>
+          <DropdownMenuGroup>
+            {thread?.traceUrl && (
+              <DropdownMenuItem
+                render={
+                  <a href={thread.traceUrl} target="_blank" rel="noreferrer" />
+                }
+              >
+                <Icon icon={TreeStructure} size="sm" />
+                Open trace
+              </DropdownMenuItem>
+            )}
+            {localThread && (
+              <DropdownMenuItem
+                onClick={() => {
+                  void window.openSweDesktop
+                    ?.openLocalTrace(localThread.id)
+                    .catch((error: unknown) =>
+                      reportError({ title: "Couldn't open trace", error })
+                    )
+                }}
+              >
+                <Icon icon={TreeStructure} size="sm" />
+                Open trace
+              </DropdownMenuItem>
+            )}
+            {thread?.sourceUrl && (
+              <DropdownMenuItem
+                render={
+                  <a
+                    href={thread.sourceAppUrl ?? thread.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  />
+                }
+              >
+                <ProviderLogo provider="slack" className="size-3.5" />
+                Open in Slack
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+        </>
       )}
-      {localThread && (
-        <Menu.Item
-          onClick={() => {
-            void window.openSweDesktop?.openLocalTrace(localThread.id)
-          }}
-          className={menuItemClassName}
-        >
-          <TreeStructureIcon className="size-3.5" />
-          Open trace
-        </Menu.Item>
-      )}
-      {thread?.sourceUrl && (
-        <Menu.LinkItem
-          href={thread.sourceAppUrl ?? thread.sourceUrl}
-          target="_blank"
-          rel="noreferrer"
-          closeOnClick
-          className={menuItemClassName}
-        >
-          <IoLogoSlack className="size-3.5" />
-          Open in Slack
-        </Menu.LinkItem>
-      )}
-      <Menu.Item onClick={onTogglePin} className={menuItemClassName}>
-        {pinned ? (
-          <PushPinSlashIcon className="size-3.5" />
-        ) : (
-          <PushPinIcon className="size-3.5" />
+      <DropdownMenuGroup>
+        <DropdownMenuItem onClick={onTogglePin}>
+          <Icon icon={pinned ? PinOff : PushPin} size="sm" />
+          {pinned ? "Unpin thread" : "Pin thread"}
+        </DropdownMenuItem>
+        {thread && (
+          <DropdownMenuItem
+            disabled={!thread.sandboxId}
+            title={thread.sandboxId ?? undefined}
+            onClick={() => {
+              if (thread.sandboxId)
+                copyToClipboard(thread.sandboxId, "Couldn't copy sandbox ID")
+            }}
+          >
+            <Icon icon={Copy} size="sm" />
+            Copy sandbox ID
+          </DropdownMenuItem>
         )}
-        {pinned ? "Unpin thread" : "Pin thread"}
-      </Menu.Item>
-      {thread && (
-        <Menu.Item
-          disabled={!thread.sandboxId}
-          onClick={() => {
-            if (thread.sandboxId) {
-              void navigator.clipboard.writeText(thread.sandboxId)
-            }
-          }}
-          title={thread.sandboxId ?? undefined}
-          className={`${menuItemClassName} data-disabled:pointer-events-none data-disabled:opacity-50`}
-        >
-          <CopyIcon className="size-3.5" />
-          Copy sandbox ID
-        </Menu.Item>
-      )}
-      {threadId && (
-        <Menu.Item
-          onClick={() => {
-            void navigator.clipboard.writeText(threadId)
-          }}
-          title={threadId}
-          className={menuItemClassName}
-        >
-          <CopyIcon className="size-3.5" />
-          Copy thread ID
-        </Menu.Item>
-      )}
-      <Menu.Item onClick={onToggleArchived} className={menuItemClassName}>
-        {archived ? (
-          <ArrowCounterClockwiseIcon className="size-3.5" />
-        ) : (
-          <ArchiveIcon className="size-3.5" />
+        {threadId && (
+          <DropdownMenuItem
+            title={threadId}
+            onClick={() => copyToClipboard(threadId, "Couldn't copy thread ID")}
+          >
+            <Icon icon={Copy} size="sm" />
+            Copy thread ID
+          </DropdownMenuItem>
         )}
-        {archived ? "Unarchive thread" : "Archive thread"}
-      </Menu.Item>
-      <Menu.Item
-        onClick={onDelete}
-        disabled={isDeleting}
-        className={`${menuItemClassName} text-risk data-disabled:pointer-events-none data-disabled:opacity-50`}
-      >
-        <TrashIcon className="size-3.5" />
-        Delete thread
-      </Menu.Item>
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuGroup>
+        <DropdownMenuItem onClick={onToggleArchived}>
+          <Icon icon={archived ? RotateCcw : ArchiveBox} size="sm" />
+          {archived ? "Unarchive thread" : "Archive thread"}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={isDeleting}
+          onClick={onDelete}
+        >
+          <Icon icon={Trash2} size="sm" />
+          Delete thread
+        </DropdownMenuItem>
+      </DropdownMenuGroup>
     </>
   )
 }

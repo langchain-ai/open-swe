@@ -1,10 +1,20 @@
 import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 
+import { AlertTriangle } from "@/components/glyphs"
 import { normalizeBuildInfo } from "@/lib/api"
 import { useIsHydrated } from "@/lib/hydration"
 import { sessionQueryOptions } from "@/lib/session"
 
+const BANNER_LINK_CLASS =
+  "shrink-0 font-medium underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-primary"
+
+/*
+ * An app-wide strip rather than an Alert panel: it sits above every shell at a
+ * fixed 40px (`h-row-data`), which `styles.css` subtracts from `h-svh`.
+ */
 export function VersionMismatchBanner() {
   const hydrated = useIsHydrated()
   // `InvalidationStream` refetches the session when a stream reports another backend.
@@ -15,26 +25,27 @@ export function VersionMismatchBanner() {
     return null
 
   return (
-    <div
+    <Inline
       role="status"
-      className="version-mismatch-banner flex h-10 shrink-0 items-center justify-center gap-2 border-b border-attention/30 bg-attention-bg px-3 text-label text-attention"
+      gap="sm"
+      align="center"
+      justify="center"
+      className="version-mismatch-banner h-row-data shrink-0 border-b border-attention/20 bg-attention-bg px-3 text-label text-attention"
     >
-      <span className="truncate">
+      <Icon icon={AlertTriangle} size="sm" />
+      <Box render={<span />} className="truncate">
         Frontend version differs from the deployed backend.
-      </span>
-      <Link
-        to="/my-settings/about"
-        className="shrink-0 underline underline-offset-2"
-      >
+      </Box>
+      <Link to="/my-settings/about" className={BANNER_LINK_CLASS}>
         Details
       </Link>
-      <button
-        type="button"
+      <Box
+        render={<button type="button" />}
         onClick={() => window.location.reload()}
-        className="shrink-0 font-medium underline underline-offset-2"
+        className={BANNER_LINK_CLASS}
       >
         Reload
-      </button>
-    </div>
+      </Box>
+    </Inline>
   )
 }

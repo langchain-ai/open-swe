@@ -4,6 +4,7 @@ import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
 import { SubagentThreadView } from "@/features/agents/components/subagents/SubagentThreadView"
+import { Box, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -75,13 +76,7 @@ function AgentThreadContent({
     }
   }, [active, title])
 
-  if (threadQuery.isPending && !timedOut) {
-    return (
-      <main className="flex min-w-0 flex-1 items-center justify-center p-6">
-        <Skeleton className="h-40 w-full max-w-md" />
-      </main>
-    )
-  }
+  if (threadQuery.isPending && !timedOut) return <ThreadLoadingSkeleton />
 
   if (!threadQuery.data) {
     return (
@@ -110,5 +105,32 @@ function AgentThreadContent({
         )}
       </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
+  )
+}
+
+/**
+ * A thread that is still loading: the band's place and a few transcript lines
+ * on the thread measure, so the first paint already has the thread's shape.
+ */
+export function ThreadLoadingSkeleton() {
+  return (
+    <Stack
+      grow
+      aria-busy="true"
+      aria-label="Loading thread"
+      className="min-w-0"
+    >
+      <Box className="h-toolbar shrink-0 px-3 py-3">
+        <Skeleton className="h-full w-48" />
+      </Box>
+      <Stack gap="lg" className="mx-auto w-full max-w-thread px-4 pt-6">
+        <Skeleton className="ml-auto h-10 w-2/3 rounded-panel" />
+        <Stack gap="sm">
+          <Skeleton className="h-3 w-5/6" />
+          <Skeleton className="h-3 w-3/4" />
+          <Skeleton className="h-3 w-1/2" />
+        </Stack>
+      </Stack>
+    </Stack>
   )
 }

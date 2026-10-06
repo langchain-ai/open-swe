@@ -297,8 +297,8 @@ test.describe("optimistic thread edits", () => {
       .getByRole("link", { name: THREAD_TITLE })
       .first();
     await expect(row).toBeVisible();
-    await row.hover();
-    await row.getByRole("button", { name: "Pin thread" }).click();
+    await row.press("Shift+F10");
+    await page.getByRole("menuitem", { name: "Pin thread" }).click();
   }
 
   test("pinning shows at once and persists", async ({ page }) => {

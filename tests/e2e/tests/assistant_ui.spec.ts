@@ -196,10 +196,12 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
     "Keep this draft when opening a new thread.",
   );
 
+  // Collapse narrows the rail to the 48px icon rail; it never unmounts.
+  const shell = page.locator("[data-slot=app-shell]");
   await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
-  await expect(sidebar).toHaveCount(0);
+  await expect(shell).toHaveAttribute("data-rail-collapsed", "true");
   await page.getByRole("button", { name: "Expand sidebar" }).click();
-  await expect(sidebar).toBeVisible();
+  await expect(shell).toHaveAttribute("data-rail-collapsed", "false");
   await sidebar.getByRole("link", { name: "Skills", exact: true }).click();
   await expect(page).toHaveURL(/\/agents\/skills$/);
 });

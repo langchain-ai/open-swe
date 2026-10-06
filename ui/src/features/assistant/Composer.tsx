@@ -5,7 +5,8 @@ import {
   useAui,
   useAuiState,
 } from "@assistant-ui/react"
-import { ArrowUp, Plus, Square, X } from "lucide-react"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ArrowUp, Plus, Square, X } from "@/components/glyphs"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -27,18 +28,21 @@ function Attachment() {
   )
   const image = attachment.content?.find((part) => part.type === "image")
   return (
-    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-control border border-line p-2 text-label">
+    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-control border border-line bg-panel p-2 text-label">
       {(file || image?.image) && (
         <img
           ref={previewRef}
           src={image?.image}
           alt={attachment.name}
-          className="size-12 rounded-tick object-cover"
+          className="size-12 rounded-compact object-cover"
         />
       )}
       <span>{attachment.name}</span>
-      <AttachmentPrimitive.Remove aria-label={`Remove ${attachment.name}`}>
-        <X className="size-4" />
+      <AttachmentPrimitive.Remove
+        aria-label={`Remove ${attachment.name}`}
+        className="inline-flex size-control-sm items-center justify-center rounded-compact text-ink-subtle hover:bg-hover hover:text-ink"
+      >
+        <Icon icon={X} size="sm" />
       </AttachmentPrimitive.Remove>
     </AttachmentPrimitive.Root>
   )
@@ -98,7 +102,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
 
   return (
     <ComposerPrimitive.Root className="w-full">
-      <ComposerPrimitive.AttachmentDropzone className="rounded-shell border border-line bg-panel p-3 shadow-control focus-within:border-ink-subtle/40 data-[dragging=true]:border-primary">
+      <ComposerPrimitive.AttachmentDropzone className="rounded-shell border border-line bg-panel p-3 transition-colors duration-fast ease-out-quint focus-within:border-line-strong data-[dragging=true]:border-primary motion-reduce:transition-none">
         <div className="flex flex-wrap gap-2 empty:hidden">
           <ComposerPrimitive.Attachments>
             {() => <Attachment />}
@@ -114,14 +118,14 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                 : "Send a message…"
           }
           rows={2}
-          className="max-h-48 min-h-14 w-full resize-none bg-transparent px-2 py-2 text-body leading-6 outline-none"
+          className="max-h-48 min-h-14 w-full resize-none bg-transparent px-2 py-2 text-body text-ink outline-none placeholder:text-ink-subtle"
         />
         <div className="flex flex-wrap items-center gap-2">
           <ComposerPrimitive.AddAttachment
             aria-label="Attach images"
-            className="rounded-full p-2 hover:bg-muted"
+            className="inline-flex size-control items-center justify-center rounded-control text-ink-subtle hover:bg-hover hover:text-ink"
           >
-            <Plus className="size-4" />
+            <Icon icon={Plus} />
           </ComposerPrimitive.AddAttachment>
           <ModelPicker
             models={models}
@@ -137,7 +141,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             }
             disabled={disabled}
             requireImageSupport={hasAttachments}
-            triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-meta text-ink-subtle hover:bg-muted"
+            triggerClassName="h-control-sm max-w-48 rounded-compact px-2 text-label text-ink-subtle hover:bg-hover"
           />
           {!thread && (
             <>
@@ -153,7 +157,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                     repo_explicitly_none: !event.target.value,
                   })
                 }
-                className="max-w-40 bg-transparent text-label"
+                className="h-control-sm max-w-40 rounded-compact bg-transparent px-1 text-label text-ink-subtle hover:bg-hover"
               >
                 <option value="">No repository</option>
                 {repos.data?.repositories.map((repo) => (
@@ -173,7 +177,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                   onChange={(event) =>
                     update({ environment: event.target.value })
                   }
-                  className="max-w-32 bg-transparent text-label"
+                  className="h-control-sm max-w-32 rounded-compact bg-transparent px-1 text-label text-ink-subtle hover:bg-hover"
                 >
                   {workspaces.map((workspace) => (
                     <option key={workspace.slug} value={workspace.slug}>
@@ -188,16 +192,16 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             {running ? (
               <ComposerPrimitive.Cancel
                 aria-label="Stop run"
-                className="rounded-full bg-primary p-2.5 text-primary-ink disabled:opacity-40"
+                className="inline-flex size-control items-center justify-center rounded-control bg-primary text-primary-ink shadow-control disabled:opacity-50"
               >
-                <Square className="size-3.5 fill-current" />
+                <Icon icon={Square} size="sm" />
               </ComposerPrimitive.Cancel>
             ) : (
               <ComposerPrimitive.Send
                 aria-label="Send message"
-                className="rounded-full bg-primary p-2.5 text-primary-ink disabled:opacity-30"
+                className="inline-flex size-control items-center justify-center rounded-control bg-primary text-primary-ink shadow-control disabled:opacity-50"
               >
-                <ArrowUp className="size-4" />
+                <Icon icon={ArrowUp} />
               </ComposerPrimitive.Send>
             )}
           </div>

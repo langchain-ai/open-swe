@@ -1,31 +1,36 @@
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
-import {
-  CaretDownIcon,
-  CaretRightIcon,
-  CircleNotchIcon,
-  ChatCircleIcon,
-  DownloadSimpleIcon,
-  FolderIcon,
-  FolderOpenIcon,
-  GitPullRequestIcon,
-  LightningIcon,
-  MagnifyingGlassIcon,
-  NotePencilIcon,
-  PlusIcon,
-  RobotIcon,
-  TrashIcon,
-  PushPinIcon,
-  PushPinSlashIcon,
-  SparkleIcon,
-  StackIcon,
-} from "@phosphor-icons/react"
-import { Radar } from "lucide-react"
+import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { ReactNode, RefObject } from "react"
+import { AppShell } from "@langchain/gtm-platform-design-system/patterns/app-shell"
+import {
+  SidebarNav,
+  SidebarNavItem,
+} from "@langchain/gtm-platform-design-system/patterns/sidebar-nav"
+import { SidebarTreeGroup } from "@langchain/gtm-platform-design-system/patterns/sidebar-tree"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
+import {
+  DropdownMenuCheckboxItem,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
 
+import type { Glyph } from "@/components/glyphs"
 import type { DesktopUpdateState } from "@/desktop"
-import { api, type SessionUser } from "@/lib/api"
-import { useProfile } from "@/lib/profile"
+import type { SessionUser } from "@/lib/api"
 import type {
   PullRequestSnapshot,
   SidebarRepo,
@@ -36,30 +41,45 @@ import type {
   SidebarThreadItem,
   SidebarWorkspaceGroup,
 } from "@/features/agents/lib/sidebarThreads"
-import type { SidebarLayout } from "@/components/sidebar-layout"
-import { SidebarUserMenu } from "@/components/SidebarUserMenu"
-import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
-import {
-  SidebarSectionAction,
-  SidebarSectionHeader,
-  SidebarSectionMenu,
-} from "@/features/agents/components/SidebarSectionHeader"
-import { DropdownMenuCheckboxItem, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
-import {
-  SidebarCollapseButton,
-  SidebarFrame,
-  SidebarLayoutProvider,
-  useSidebarLayout,
-} from "@/components/sidebar-layout"
-import {
-  filterThreads,
-  hasActiveFilters,
-} from "@/features/agents/lib/sidebarFilter"
 import type {
   ChatSort,
   OrganizeMode,
   PinnedSort,
 } from "@/features/agents/lib/sidebarPrefs"
+import {
+  AlertTriangle,
+  Bot,
+  Download,
+  FileEdit,
+  Filter,
+  GitPullRequest,
+  MessageCircle,
+  Plus,
+  PushPin,
+  PinOff,
+  Search,
+  Sparkles,
+  Stack as StackGlyph,
+  Trash2,
+  Zap,
+} from "@/components/glyphs"
+import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { AppRailBrand } from "@/components/rail/AppRailBrand"
+import { useRailCollapsed } from "@/components/rail/useRailCollapsed"
+import {
+  SidebarThreadDot,
+  SidebarThreadRow,
+} from "@/features/agents/components/SidebarThreadRow"
+import {
+  REVEAL_ON_HEADING_CLASS,
+  SidebarSection,
+  SidebarSectionAction,
+  SidebarSectionMenu,
+} from "@/features/agents/components/SidebarSectionHeader"
+import {
+  filterThreads,
+  hasActiveFilters,
+} from "@/features/agents/lib/sidebarFilter"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   agentMutationKeys,
@@ -94,28 +114,17 @@ import {
   sidebarRepoOptions,
   sortSidebarThreads,
 } from "@/features/agents/lib/sidebarThreads"
-import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
-import { TooltipProvider } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import { api } from "@/lib/api"
 import {
   useAppCommandControls,
   useRegisterAppCommands,
 } from "@/lib/appCommands"
-import { cn } from "@/lib/utils"
+import type { SectionRoot } from "@/lib/appLocation"
+import { getLastSectionLocation, sectionOf } from "@/lib/appLocation"
 import { useChatRoutes } from "@/lib/chatRoutes"
-import {
-  getLastSectionLocation,
-  sectionOf,
-  useHrefLinkOptions,
-} from "@/lib/appLocation"
 import { reportError } from "@/lib/errorReporting"
 import { usePendingVariables } from "@/lib/optimistic"
-
-interface AgentsSidebarProps {
-  user: SessionUser
-  activeThreadId?: string
-  activeLocalSessionId?: string
-  layout: SidebarLayout
-}
+import { useProfile } from "@/lib/profile"
 
 interface HydratedRepoGroup extends SidebarRepoGroup {
   repoFullName: string | null
@@ -124,17 +133,33 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
   activeThread?: AgentThread
 }
 
-const NAV = [
-  { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
-  { to: "/agents/automations", label: "Automations", icon: LightningIcon },
-  { to: "/agents/bots", label: "Bots", icon: RobotIcon },
-  { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
-  { to: "/incidents", label: "Incidents", icon: Radar },
-] as const
+const DESTINATIONS: ReadonlyArray<{
+  to: SectionRoot
+  label: string
+  icon: Glyph
+}> = [
+  { to: "/agents/skills", label: "Skills", icon: Sparkles },
+  { to: "/agents/automations", label: "Automations", icon: Zap },
+  { to: "/agents/bots", label: "Bots", icon: Bot },
+  { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequest },
+  { to: "/incidents", label: "Incidents", icon: AlertTriangle },
+]
 
 /** Threads shown per repo before the group needs a "Show more". */
 const REPO_PREVIEW_COUNT = 5
 const NO_REPO_GROUP_KEY = "repo:no-repo"
+
+function isOrganizeMode(value: unknown): value is OrganizeMode {
+  return value === "workspace" || value === "repo" || value === "list"
+}
+
+function isChatSort(value: unknown): value is ChatSort {
+  return value === "created" || value === "updated"
+}
+
+function isPinnedSort(value: unknown): value is PinnedSort {
+  return value === "updated" || value === "manual"
+}
 
 function cloudRepoAliases(
   repos: ReadonlyArray<SidebarRepo>
@@ -152,62 +177,172 @@ function cloudRepoAliases(
   )
 }
 
-/**
- * Tracks whether the scroll container has content hidden above or below, so
- * the sidebar can show an edge hairline + fade only where there is more to
- * reach. Measured after every render because the thread list polls, and on
- * container resize.
- */
-function useScrollEdges() {
-  const viewport = useRef<HTMLDivElement>(null)
-  const [edges, setEdges] = useState({ top: false, bottom: false })
-
-  const measure = useCallback(() => {
-    const el = viewport.current
-    if (!el) return
-    const top = el.scrollTop > 0
-    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight > 1
-    // Returning the previous object when nothing moved lets React bail out —
-    // without it the dependency-free effect below would re-render forever.
-    setEdges((prev) =>
-      prev.top === top && prev.bottom === bottom ? prev : { top, bottom }
-    )
-  }, [])
-
-  useEffect(measure)
-  useEffect(() => {
-    const el = viewport.current
-    if (!el || typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [measure])
-
-  return { viewport, edges, measure }
-}
-
-export function AgentsSidebar({
-  user,
+/** The rail's agent features: one SidebarNav, the same rungs as the product rail. */
+function AgentFeatures({
+  login,
+  compact,
   activeThreadId,
-  activeLocalSessionId,
-  layout,
-}: AgentsSidebarProps) {
-  const navigate = useNavigate()
+}: {
+  login: string
+  compact: boolean
+  activeThreadId?: string
+}) {
   const chat = useChatRoutes()
   const profile = useProfile()
+  const { openPalette } = useAppCommandControls()
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  })
+  const activeSection = sectionOf(pathname)
+  const conciergeMode = Boolean(profile.data?.concierge_mode)
   const concierge = useQuery({
-    queryKey: ["concierge", user?.login],
+    queryKey: ["concierge", login],
     queryFn: api.concierge,
-    enabled: !!profile.data?.concierge_mode,
+    enabled: conciergeMode,
     refetchInterval: 30_000,
   })
-  const {
-    viewport: scrollViewport,
-    edges: scrollEdges,
-    measure: measureScrollEdges,
-  } = useScrollEdges()
-  const { openPalette } = useAppCommandControls()
+  const conciergeThreadId = concierge.data?.thread_id
+  const conciergeChannelId = concierge.data?.channel_id
+  const onHome = pathname === chat.home || pathname === `${chat.home}/`
+
+  return (
+    <SidebarNav label="Agent features" flush>
+      <SidebarNavItem
+        icon={FileEdit}
+        label="New Thread"
+        href={chat.home}
+        selected={onHome}
+        compact={compact}
+      />
+      <SidebarNavItem
+        icon={Search}
+        label="Search"
+        onSelect={openPalette}
+        compact={compact}
+      />
+      {conciergeMode && (
+        <SidebarNavItem
+          icon={MessageCircle}
+          label="Concierge"
+          href={
+            conciergeThreadId
+              ? `${chat.home}/${conciergeThreadId}`
+              : undefined
+          }
+          onSelect={
+            !conciergeThreadId && conciergeChannelId
+              ? () =>
+                  window.location.assign(
+                    `slack://channel?id=${conciergeChannelId}`
+                  )
+              : undefined
+          }
+          selected={
+            Boolean(conciergeThreadId) && activeThreadId === conciergeThreadId
+          }
+          compact={compact}
+        />
+      )}
+      {DESTINATIONS.map((destination) => {
+        const active = activeSection === destination.to
+        return (
+          <SidebarNavItem
+            key={destination.to}
+            icon={destination.icon}
+            label={destination.label}
+            href={
+              active ? destination.to : getLastSectionLocation(destination.to)
+            }
+            selected={active}
+            compact={compact}
+          />
+        )
+      })}
+    </SidebarNav>
+  )
+}
+
+/** The desktop app's pending update, beside the identity foot. */
+function useDesktopUpdate() {
+  const [updateState, setUpdateState] = useState<DesktopUpdateState>({
+    status: "idle",
+  })
+  useEffect(() => {
+    const desktop = window.openSweDesktop
+    if (!desktop) return
+    void desktop
+      .getUpdateState()
+      .then(setUpdateState)
+      .catch((error: unknown) =>
+        reportError({ title: "Couldn't read the app update state", error })
+      )
+    return desktop.onUpdateState(setUpdateState)
+  }, [])
+  const install = useCallback(async () => {
+    const desktop = window.openSweDesktop
+    if (!desktop || updateState.status !== "ready") return
+    const readyState = updateState
+    setUpdateState({ ...readyState, status: "installing" })
+    if (await desktop.installUpdate().catch(() => false)) return
+    setUpdateState((current) =>
+      current.status === "installing" ? readyState : current
+    )
+  }, [updateState])
+  return { status: updateState.status, install }
+}
+
+/** Identity and settings under the list, plus "Restart to update" on desktop. */
+function AgentsRailFoot({
+  user,
+  collapsed,
+}: {
+  user: SessionUser
+  collapsed: boolean
+}) {
+  const update = useDesktopUpdate()
+  const installing = update.status === "installing"
+  const label = installing ? "Installing update" : "Restart to update"
+  return (
+    <Stack gap="none" className="shrink-0">
+      {(update.status === "ready" || installing) && (
+        <Box className="px-2 pt-2">
+          <Button
+            size={collapsed ? "icon" : "control"}
+            aria-label={label}
+            title={label}
+            loading={installing}
+            onClick={() => void update.install()}
+            className="w-full"
+          >
+            <Icon icon={Download} />
+            {collapsed ? null : "Restart to update"}
+          </Button>
+        </Box>
+      )}
+      <SidebarUserMenu user={user} collapsed={collapsed} showSettingsLink />
+    </Stack>
+  )
+}
+
+/**
+ * The thread rail: agent features, then the grouped thread list. Status shows
+ * on each row, PINNED comes first, and repositories group the rest.
+ */
+function AgentsSidebar({
+  login,
+  activeThreadId,
+  activeLocalSessionId,
+  compact,
+}: {
+  login: string
+  activeThreadId?: string
+  activeLocalSessionId?: string
+  compact: boolean
+}) {
+  const navigate = useNavigate()
+  const chat = useChatRoutes()
   const queryClient = useQueryClient()
+  const scrollViewport = useRef<HTMLDivElement>(null)
   const openThread = useCallback(
     (threadId: string) => {
       const review = queryClient.getQueryData<AgentThread>(
@@ -231,30 +366,6 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const activeSection = useRouterState({
-    select: (state) => sectionOf(state.location.pathname),
-  })
-  const sectionLinkTarget = useHrefLinkOptions()
-  const [updateState, setUpdateState] = useState<DesktopUpdateState>({
-    status: "idle",
-  })
-  useEffect(() => {
-    const desktop = window.openSweDesktop
-    if (!desktop) return
-    void desktop.getUpdateState().then(setUpdateState)
-    return desktop.onUpdateState(setUpdateState)
-  }, [])
-  const installUpdate = useCallback(async () => {
-    const desktop = window.openSweDesktop
-    if (!desktop || updateState.status !== "ready") return
-    const readyState = updateState
-    setUpdateState({ ...readyState, status: "installing" })
-    if (await desktop.installUpdate().catch(() => false)) return
-    setUpdateState((current) =>
-      current.status === "installing" ? readyState : current
-    )
-  }, [updateState])
-  const updateInstalling = updateState.status === "installing"
   const workspaceOrganize = prefs.organize === "workspace"
   // "workspace" mode groups the same repo folders as "repo" mode; it
   // only changes how the unpinned ones are laid out (nested under a workspace
@@ -523,21 +634,23 @@ export function AgentsSidebar({
       ? `cloud:${activeThreadId}`
       : undefined
 
-  const rowProps = (
+  const renderRow = (
     item: SidebarThreadItem,
     live: PullRequestSnapshot | undefined = pullRequestFor(item)
-  ) => ({
-    item,
-    isActive: item.key === activeKey,
-    pinned: isPinned(item),
-    archived: isArchived(item),
-    live,
-    compact: prefs.compact,
-    onNavigate: layout.closeOnMobile,
-    onDeleteLocal: refreshLocalThreads,
-    onTogglePin: () => togglePin(item),
-    onToggleArchived: () => toggleArchived(item),
-  })
+  ) => (
+    <SidebarThreadRow
+      key={item.key}
+      item={item}
+      isActive={item.key === activeKey}
+      pinned={isPinned(item)}
+      archived={isArchived(item)}
+      live={live}
+      compact={prefs.compact}
+      onDeleteLocal={refreshLocalThreads}
+      onTogglePin={() => togglePin(item)}
+      onToggleArchived={() => toggleArchived(item)}
+    />
+  )
 
   const sectionCollapsed = (key: string) =>
     prefs.collapsedSectionKeys.includes(key)
@@ -555,7 +668,7 @@ export function AgentsSidebar({
       <DropdownMenuSeparator />
       <DropdownMenuSub>
         <DropdownMenuSubTrigger>
-          <TrashIcon />
+          <Icon icon={Trash2} size="sm" />
           Remove repository…
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="w-56">
@@ -566,8 +679,10 @@ export function AgentsSidebar({
                 onClick={() => void removeLocalRepo(repo.cwd)}
                 variant="destructive"
               >
-                <TrashIcon />
-                <span className="min-w-0 truncate">{repo.name}</span>
+                <Icon icon={Trash2} size="sm" />
+                <Box render={<span />} className="min-w-0 truncate">
+                  {repo.name}
+                </Box>
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
@@ -582,12 +697,16 @@ export function AgentsSidebar({
         <DropdownMenuLabel>Organize sidebar</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={prefs.organize}
-          onValueChange={(value) =>
-            setView({ organize: value as OrganizeMode })
-          }
+          onValueChange={(value) => {
+            if (isOrganizeMode(value)) setView({ organize: value })
+          }}
         >
-          <DropdownMenuRadioItem value="workspace">Workspaces</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="repo">By repository</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="workspace">
+            Workspaces
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="repo">
+            By repository
+          </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="list">In one list</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuGroup>
@@ -595,10 +714,14 @@ export function AgentsSidebar({
         <DropdownMenuLabel>Sort chats by</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={prefs.sortChats}
-          onValueChange={(value) => setView({ sortChats: value as ChatSort })}
+          onValueChange={(value) => {
+            if (isChatSort(value)) setView({ sortChats: value })
+          }}
         >
           <DropdownMenuRadioItem value="created">Created</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="updated">Last updated</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="updated">
+            Last updated
+          </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
@@ -619,7 +742,10 @@ export function AgentsSidebar({
         >
           Show automations
         </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem checked={prefs.compact} onCheckedChange={setCompact}>
+        <DropdownMenuCheckboxItem
+          checked={prefs.compact}
+          onCheckedChange={setCompact}
+        >
           Compact rows
         </DropdownMenuCheckboxItem>
       </DropdownMenuGroup>
@@ -653,7 +779,6 @@ export function AgentsSidebar({
       onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
       onExpand={() => expandRepo(group.key)}
       onCompose={() => {
-        layout.closeOnMobile()
         void navigate({
           to: group.localRepoPath ? "/agents" : chat.home,
           search: group.repoFullName
@@ -675,9 +800,7 @@ export function AgentsSidebar({
           ? recentsQuery.isFetchingNextPage
           : undefined
       }
-      renderRow={(item, live) => (
-        <SidebarThreadRow key={item.key} {...rowProps(item, live)} indent />
-      )}
+      renderRow={renderRow}
     />
   )
 
@@ -697,126 +820,61 @@ export function AgentsSidebar({
     repoGroups.length === 0 &&
     recents.length === 0
 
+  // The icon rail keeps one flat column of status dots: pinned first, then
+  // whatever the list has loaded, with the open thread always among them.
+  const dotItems = compact
+    ? [
+        ...filteredPinnedItems,
+        ...(activeInRepo && activeThread
+          ? [cloudSidebarThread(activeThread)]
+          : []),
+        ...recents,
+      ].filter(
+        (item, index, items) =>
+          items.findIndex((other) => other.key === item.key) === index
+      )
+    : []
+
   return (
-    <SidebarFrame {...layout} className="border-r border-line bg-sidebar">
-      <div
-        className={cn(
-          "flex items-center justify-between px-4 pb-4",
-          isDesktop ? "pt-13" : "pt-5"
-        )}
+    <Stack
+      data-slot="agents-thread-rail"
+      gap="sm"
+      className="h-full min-h-0 w-full px-2 pt-2 pb-2"
+    >
+      <AgentFeatures
+        login={login}
+        compact={compact}
+        activeThreadId={activeThreadId}
+      />
+      <ScrollArea
+        overflow="vertical"
+        viewportRef={scrollViewport}
+        className="-mr-2 min-h-0 flex-1"
       >
-        <Link
-          to="/my-settings"
-          className="flex items-center gap-2 text-body font-medium tracking-tightish text-ink"
-        >
-          <img
-            src={`${import.meta.env.BASE_URL}logo-mark.png`}
-            alt=""
-            className="size-5"
-          />
-          Open SWE
-        </Link>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Search"
-            title="Search"
-            onClick={() => {
-              layout.closeOnMobile()
-              openPalette()
-            }}
-            className="flex size-6 items-center justify-center rounded-tick text-ink-subtle hover:bg-hover hover:text-ink"
+        {compact ? (
+          <Stack
+            data-slot="thread-rail-dots"
+            gap="xs"
+            align="stretch"
+            className="pt-2 pr-2 pb-1"
           >
-            <MagnifyingGlassIcon className="size-4" />
-          </button>
-          <SidebarCollapseButton onToggle={layout.toggle} />
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-0.5 px-2 pb-1">
-        <Link
-          to={chat.home}
-          onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-badge px-2.5 py-1.5 text-body font-medium text-ink transition-colors hover:bg-hover"
-        >
-          <NotePencilIcon className="size-4" />
-          New Thread
-        </Link>
-        {profile.data?.concierge_mode && (
-          <a
-            href={
-              concierge.data?.thread_id
-                ? `${chat.home}/${concierge.data.thread_id}`
-                : concierge.data?.channel_id
-                  ? `slack://channel?id=${concierge.data.channel_id}`
-                  : undefined
-            }
-            onClick={layout.closeOnMobile}
-            aria-current={
-              !!concierge.data?.thread_id &&
-              activeThreadId === concierge.data.thread_id
-                ? "page"
-                : undefined
-            }
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-badge px-2.5 py-1.5 text-body font-medium text-ink transition-colors hover:bg-hover",
-              !!concierge.data?.thread_id &&
-                activeThreadId === concierge.data.thread_id &&
-                "bg-selected"
+            {sourcesLoading && dotItems.length === 0 && (
+              <ThreadListSkeleton compact />
             )}
+            {dotItems.map((item) => (
+              <SidebarThreadDot
+                key={item.key}
+                item={item}
+                isActive={item.key === activeKey}
+              />
+            ))}
+          </Stack>
+        ) : (
+          <Stack
+            gap="sm"
+            aria-busy={sourcesLoading || undefined}
+            className="pt-2 pr-2 pb-1"
           >
-            <ChatCircleIcon className="size-4" />
-            Concierge
-          </a>
-        )}
-      </div>
-
-      <TooltipProvider delay={500} closeDelay={100}>
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          {scrollEdges.top && (
-            <>
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-px bg-line" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
-            </>
-          )}
-          {scrollEdges.bottom && (
-            <>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-px bg-line" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
-            </>
-          )}
-          <div
-            ref={scrollViewport}
-            className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
-            onScroll={measureScrollEdges}
-          >
-            <nav
-              className={cn(
-                "flex flex-col gap-0.5",
-                isDesktop ? "pb-3" : "pb-4"
-              )}
-            >
-              {NAV.map((item) => {
-                const Icon = item.icon
-                const active = activeSection === item.to
-                return (
-                  <Link
-                    key={item.to}
-                    {...sectionLinkTarget(
-                      active ? item.to : getLastSectionLocation(item.to)
-                    )}
-                    onClick={layout.closeOnMobile}
-                    className={cn(
-                      "flex items-center gap-2.5 rounded-badge px-2.5 py-1.5 text-body text-ink transition-colors hover:bg-hover",
-                      active && "bg-hover font-medium"
-                    )}
-                  >
-                    <Icon className="size-4" />
-                    {item.label}
-                  </Link>
-                )
-              })}
-            </nav>
             {sourcesLoading && allItems.length === 0 && (
               <ThreadListSkeleton compact={prefs.compact} />
             )}
@@ -837,205 +895,147 @@ export function AgentsSidebar({
               />
             )}
             {sourcesLoading && allItems.length > 0 && (
-              <div className="flex items-center gap-1.5 px-2.5 py-2 text-meta text-ink-subtle/70">
-                <CircleNotchIcon className="size-3.5 animate-spin" />
+              <Inline
+                gap="sm"
+                align="center"
+                ink="ink-subtle"
+                className="px-2 text-meta"
+              >
+                <Spinner size="sm" />
                 Loading threads…
-              </div>
+              </Inline>
             )}
 
             {(filteredPinnedItems.length > 0 ||
               pinnedGroups.length > 0 ||
               (repoMode && noRepoPinned && noRepoAvailable)) && (
-              <section className="mb-3">
-                <SidebarSectionHeader
-                  label="Pinned"
-                  collapsed={sectionCollapsed("pinned")}
-                  onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
-                  menu={
-                    <SidebarSectionMenu label="Pinned options">
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel>Sort pinned by</DropdownMenuLabel>
-                        <DropdownMenuRadioGroup
-                          value={prefs.sortPinned}
-                          onValueChange={(value) =>
-                            setView({ sortPinned: value as PinnedSort })
-                          }
-                        >
-                          <DropdownMenuRadioItem value="updated">
-                            Last updated
-                          </DropdownMenuRadioItem>
-                          <DropdownMenuRadioItem value="manual">
-                            Manual order
-                          </DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuGroup>
-                    </SidebarSectionMenu>
-                  }
-                />
-                {!sectionCollapsed("pinned") && (
-                  <>
-                    {filteredPinnedItems.map((item) => (
-                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                    ))}
-                    {pinnedGroups.map(renderRepoGroup)}
-                    {repoMode &&
-                      noRepoPinned &&
-                      noRepoAvailable &&
-                      renderRepoGroup(noRepoGroup)}
-                  </>
-                )}
-              </section>
+              <SidebarSection
+                label="Pinned"
+                collapsed={sectionCollapsed("pinned")}
+                onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
+                menu={
+                  <SidebarSectionMenu label="Pinned options">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Sort pinned by</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={prefs.sortPinned}
+                        onValueChange={(value) => {
+                          if (isPinnedSort(value))
+                            setView({ sortPinned: value })
+                        }}
+                      >
+                        <DropdownMenuRadioItem value="updated">
+                          Last updated
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="manual">
+                          Manual order
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuGroup>
+                  </SidebarSectionMenu>
+                }
+              >
+                {filteredPinnedItems.map((item) => renderRow(item))}
+                {pinnedGroups.map(renderRepoGroup)}
+                {repoMode &&
+                  noRepoPinned &&
+                  noRepoAvailable &&
+                  renderRepoGroup(noRepoGroup)}
+              </SidebarSection>
             )}
 
             {repoMode &&
               (unpinnedGroups.length > 0 || noRepoAvailable || isDesktop) && (
-                <section className="mb-3">
-                  <SidebarSectionHeader
-                    label={workspaceMode ? "Workspaces" : "Repositories"}
-                    collapsed={sectionCollapsed("repos")}
-                    onToggleCollapsed={() => toggleSectionCollapsed("repos")}
-                    menu={
-                      <SidebarSectionMenu label="Repositories options">
-                        {viewMenuItems}
-                        {removeProjectItems}
-                      </SidebarSectionMenu>
-                    }
-                    action={
-                      isDesktop ? (
-                        <SidebarSectionAction
-                          label="Add repository"
-                          icon={<PlusIcon className="size-4" />}
-                          onClick={() => void addLocalRepo()}
-                        />
-                      ) : undefined
-                    }
-                  />
-                  {!sectionCollapsed("repos") && (
-                    <>
-                      {workspaceMode
-                        ? workspaceGroups.map((workspace) => (
-                            <WorkspaceGroupSection
-                              key={workspace.slug}
-                              workspace={workspace}
-                              collapsed={sectionCollapsed(
-                                `workspace:${workspace.slug}`
-                              )}
-                              onToggleCollapsed={() =>
-                                toggleSectionCollapsed(
-                                  `workspace:${workspace.slug}`
-                                )
-                              }
-                              renderRepoGroup={renderRepoGroup}
-                            />
-                          ))
-                        : unpinnedGroups.map(renderRepoGroup)}
-                      {!noRepoPinned &&
-                        noRepoAvailable &&
-                        renderRepoGroup(noRepoGroup)}
-                    </>
-                  )}
-                </section>
-              )}
-
-            {!repoMode && (
-              <section className="mb-3">
-                <SidebarSectionHeader
-                  label="Recents"
-                  collapsed={sectionCollapsed("recents")}
-                  onToggleCollapsed={() => toggleSectionCollapsed("recents")}
+                <SidebarSection
+                  label={workspaceMode ? "Workspaces" : "Repositories"}
+                  collapsed={sectionCollapsed("repos")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("repos")}
                   menu={
-                    <SidebarSectionMenu label="Recents options">
+                    <SidebarSectionMenu
+                      label="Repositories options"
+                      icon={Filter}
+                      reveal={false}
+                    >
                       {viewMenuItems}
+                      {removeProjectItems}
                     </SidebarSectionMenu>
                   }
                   action={
-                    <SidebarSectionAction
-                      label="New thread"
-                      icon={<NotePencilIcon className="size-4" />}
-                      onClick={() => {
-                        layout.closeOnMobile()
-                        void navigate({ to: chat.home })
-                      }}
-                    />
-                  }
-                />
-                {!sectionCollapsed("recents") && (
-                  <>
-                    {recents.map((item) => (
-                      <SidebarThreadRow key={item.key} {...rowProps(item)} />
-                    ))}
-                    {recentsQuery.hasMore && (
-                      <LoadMoreThreadsOnScroll
-                        label="Load more threads"
-                        root={scrollViewport}
-                        loading={recentsQuery.isFetchingNextPage}
-                        onLoadMore={recentsQuery.fetchNextPage}
+                    isDesktop ? (
+                      <SidebarSectionAction
+                        label="Add repository"
+                        icon={Plus}
+                        onClick={() => void addLocalRepo()}
                       />
-                    )}
-                  </>
+                    ) : undefined
+                  }
+                >
+                  {workspaceMode
+                    ? workspaceGroups.map((workspace) => (
+                        <WorkspaceGroupSection
+                          key={workspace.slug}
+                          workspace={workspace}
+                          collapsed={sectionCollapsed(
+                            `workspace:${workspace.slug}`
+                          )}
+                          onToggleCollapsed={() =>
+                            toggleSectionCollapsed(
+                              `workspace:${workspace.slug}`
+                            )
+                          }
+                          renderRepoGroup={renderRepoGroup}
+                        />
+                      ))
+                    : unpinnedGroups.map(renderRepoGroup)}
+                  {!noRepoPinned &&
+                    noRepoAvailable &&
+                    renderRepoGroup(noRepoGroup)}
+                </SidebarSection>
+              )}
+
+            {!repoMode && (
+              <SidebarSection
+                label="Recents"
+                collapsed={sectionCollapsed("recents")}
+                onToggleCollapsed={() => toggleSectionCollapsed("recents")}
+                menu={
+                  <SidebarSectionMenu
+                    label="Recents options"
+                    icon={Filter}
+                    reveal={false}
+                  >
+                    {viewMenuItems}
+                  </SidebarSectionMenu>
+                }
+              >
+                {recents.map((item) => renderRow(item))}
+                {recentsQuery.hasMore && (
+                  <LoadMoreThreads
+                    root={scrollViewport}
+                    loading={recentsQuery.isFetchingNextPage}
+                    onLoadMore={recentsQuery.fetchNextPage}
+                  />
                 )}
-              </section>
+              </SidebarSection>
             )}
             {isEmpty && !cloudError && !localThreads.isError && (
-              <p className="px-2.5 py-6 text-center text-meta text-ink-subtle/70">
+              <Box render={<p />} className="px-2 text-meta text-ink-subtle">
                 {hasActiveFilters(prefs.filters)
                   ? "No threads match these filters."
                   : "No threads yet."}
-              </p>
+              </Box>
             )}
-          </div>
-        </div>
-      </TooltipProvider>
-
-      <div className="flex items-center gap-2 p-2">
-        <div className="min-w-0 flex-1">
-          {user ? (
-            <SidebarUserMenu user={user} showSettingsLink />
-          ) : (
-            <Link
-              to="/login"
-              className="flex w-full items-center justify-center rounded-badge border border-line px-2 py-1.5 text-label font-medium hover:bg-hover"
-            >
-              Sign in for cloud mode
-            </Link>
-          )}
-        </div>
-        {(updateState.status === "ready" || updateInstalling) && (
-          <button
-            type="button"
-            title={
-              updateInstalling ? "Installing update…" : "Restart to update"
-            }
-            aria-label={
-              updateInstalling ? "Installing update" : "Restart to update"
-            }
-            disabled={updateInstalling}
-            onClick={() => void installUpdate()}
-            className="flex h-8 shrink-0 items-center justify-center gap-2 rounded-full bg-primary px-3 text-label font-medium text-primary-ink hover:bg-primary/90 disabled:opacity-60"
-          >
-            {updateInstalling ? (
-              <>
-                <CircleNotchIcon className="size-4 animate-spin" />
-                <span>Installing…</span>
-              </>
-            ) : (
-              <>
-                <DownloadSimpleIcon className="size-4" />
-                <span>Restart to update</span>
-              </>
-            )}
-          </button>
+          </Stack>
         )}
-      </div>
-    </SidebarFrame>
+      </ScrollArea>
+    </Stack>
   )
 }
 
 /**
- * A workspace header inside the "Workspaces" section, nesting the repo
- * folders that belong to it. Collapse state reuses the sidebar's generic
- * collapsed-section keys (`workspace:<slug>`), the same mechanism the
- * Pinned/Repositories/Recents headers use.
+ * A workspace inside the "Workspaces" section, nesting the repo folders that
+ * belong to it. Collapse state reuses the sidebar's generic collapsed-section
+ * keys (`workspace:<slug>`), the same mechanism the section headers use.
  */
 function WorkspaceGroupSection({
   workspace,
@@ -1046,33 +1046,30 @@ function WorkspaceGroupSection({
   workspace: SidebarWorkspaceGroup<HydratedRepoGroup>
   collapsed: boolean
   onToggleCollapsed: () => void
-  renderRepoGroup: (group: HydratedRepoGroup) => React.ReactNode
+  renderRepoGroup: (group: HydratedRepoGroup) => ReactNode
 }) {
-  const Caret = collapsed ? CaretRightIcon : CaretDownIcon
   return (
-    <div className="mb-1">
-      <button
-        type="button"
-        onClick={onToggleCollapsed}
-        aria-expanded={!collapsed}
-        className="group/workspace flex w-full items-center gap-1.5 rounded-badge px-2 py-1 text-left text-label font-medium text-ink-subtle/70 transition-colors hover:text-ink"
-      >
-        <StackIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
-        <Caret
-          className={cn(
-            "size-3.5 shrink-0",
-            collapsed ? "block" : "hidden group-hover/workspace:block"
-          )}
-        />
-      </button>
-      {!collapsed && (
-        <div className="pl-2">{workspace.repos.map(renderRepoGroup)}</div>
-      )}
-    </div>
+    <SidebarTreeGroup
+      label={workspace.name}
+      kind="directory"
+      glyph={StackGlyph}
+      open={!collapsed}
+      onOpenChange={(open) => {
+        if (open === collapsed) onToggleCollapsed()
+      }}
+    >
+      <Stack gap="none" className="gap-0.5">
+        {workspace.repos.map(renderRepoGroup)}
+      </Stack>
+    </SidebarTreeGroup>
   )
 }
 
+/**
+ * A repository folder: its identity glyph opens and closes it, Pin and
+ * Compose appear on the heading under the pointer, and its threads page in
+ * on their own.
+ */
 function RepoGroup({
   group,
   activeKey,
@@ -1115,9 +1112,8 @@ function RepoGroup({
   renderRow: (
     item: SidebarThreadItem,
     live: PullRequestSnapshot | undefined
-  ) => React.ReactNode
+  ) => ReactNode
 }) {
-  const Folder = collapsed ? FolderIcon : FolderOpenIcon
   const repo = useSidebarRepoThreads({
     repoFullName: group.repoFullName,
     includeResolved,
@@ -1155,151 +1151,151 @@ function RepoGroup({
     : threads.length > REPO_PREVIEW_COUNT || (externalHasMore ?? repo.hasMore)
 
   return (
-    <div className="mb-1">
-      <div className="group/folder flex items-center gap-1.5 rounded-badge pr-1 pl-2 text-body text-ink transition-colors hover:bg-hover">
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
-        >
-          <Folder className="size-4 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{group.label}</span>
-        </button>
-        <button
-          type="button"
-          aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
-          title={pinned ? "Unpin repository" : "Pin repository"}
-          onClick={onTogglePin}
-          className="hidden size-5 shrink-0 items-center justify-center rounded-tick text-ink-subtle/80 group-hover/folder:flex hover:bg-hover hover:text-ink"
-        >
-          {pinned ? (
-            <PushPinSlashIcon className="size-3.5" />
-          ) : (
-            <PushPinIcon className="size-3.5" />
-          )}
-        </button>
-        <button
-          type="button"
-          aria-label={`Compose message in ${group.label}`}
-          title="Compose message"
-          onClick={onCompose}
-          className="hidden size-5 shrink-0 items-center justify-center rounded-tick text-ink-subtle/80 group-hover/folder:flex hover:bg-hover hover:text-ink"
-        >
-          <NotePencilIcon className="size-3.5" />
-        </button>
-      </div>
-      {!collapsed && (
+    <SidebarTreeGroup
+      label={group.label}
+      kind="folder"
+      open={!collapsed}
+      onOpenChange={(open) => {
+        if (open === collapsed) onToggleCollapsed()
+      }}
+      trailing={
         <>
-          {shown.map((item) => renderRow(item, pullRequestFor(item)))}
-          {shown.length === 0 && loading && (
-            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-label text-ink-subtle/70">
-              <CircleNotchIcon className="size-3.5 animate-spin" />
-              Loading chats…
-            </div>
-          )}
-          {shown.length === 0 && !loading && !repo.isError && (
-            <p className="py-1 pr-2.5 pl-6 text-label text-ink-subtle/60">
-              No chats
-            </p>
-          )}
-          {repo.isError && (
-            <button
-              type="button"
-              onClick={() => void repo.refetch()}
-              className="w-full py-1 pr-2.5 pl-6 text-left text-label text-risk"
-            >
-              Retry loading chats
-            </button>
-          )}
-          {hasMore && (
-            <button
-              type="button"
-              onClick={() => {
-                if (!expanded) onExpand()
-                else if (onLoadMore) onLoadMore()
-                else repo.fetchNextPage()
-              }}
-              disabled={loading}
-              className="flex w-full items-center gap-1.5 rounded-compact py-1 pr-2.5 pl-6 text-left text-label text-ink-subtle/70 transition-colors hover:text-ink disabled:cursor-wait disabled:opacity-60"
-            >
-              {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
-              {loading ? "Loading…" : "Show more"}
-            </button>
-          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
+            title={pinned ? "Unpin repository" : "Pin repository"}
+            onClick={onTogglePin}
+            className={REVEAL_ON_HEADING_CLASS}
+          >
+            <Icon
+              icon={pinned ? PinOff : PushPin}
+              size="sm"
+              className="text-ink-subtle"
+            />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Compose message in ${group.label}`}
+            title="Compose message"
+            onClick={onCompose}
+            className={REVEAL_ON_HEADING_CLASS}
+          >
+            <Icon icon={FileEdit} size="sm" className="text-ink-subtle" />
+          </Button>
         </>
-      )}
-    </div>
+      }
+    >
+      <Stack gap="none" className="gap-0.5">
+        {shown.map((item) => renderRow(item, pullRequestFor(item)))}
+        {shown.length === 0 && loading && <ThreadListSkeleton rows={2} />}
+        {shown.length === 0 && !loading && !repo.isError && (
+          <Box render={<p />} className="px-2 py-1 text-meta text-ink-subtle">
+            No chats
+          </Box>
+        )}
+        {repo.isError && (
+          <ThreadSourceError
+            label="Chats unavailable"
+            retryLabel="Retry loading chats"
+            onRetry={() => void repo.refetch()}
+          />
+        )}
+        {hasMore && (
+          <Button
+            variant="ghost"
+            size="compact"
+            loading={loading}
+            onClick={() => {
+              if (!expanded) onExpand()
+              else if (onLoadMore) onLoadMore()
+              else repo.fetchNextPage()
+            }}
+            className="w-full justify-start px-2 font-normal text-ink-subtle"
+          >
+            Show more
+          </Button>
+        )}
+      </Stack>
+    </SidebarTreeGroup>
   )
 }
 
 /**
- * Mirrors the grouped thread list's shape so the sidebar reads as loading
- * rather than as an account with no threads. Widths vary per row because a
- * column of identical bars reads as a UI element, not as pending content.
+ * Keeps the rail's headers mounted and draws rows where threads will land, so
+ * the sidebar reads as loading rather than as an account with no threads.
  */
-function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
-  const groups = [
-    [90, 64, 76],
-    [72, 84],
-  ]
+function ThreadListSkeleton({
+  compact = false,
+  rows,
+}: {
+  compact?: boolean
+  rows?: number
+}) {
+  const widths = ["w-3/4", "w-1/2", "w-2/3", "w-3/5", "w-4/5"].slice(
+    0,
+    rows ?? 5
+  )
   return (
-    <div data-testid="sidebar-threads-skeleton">
-      <span className="sr-only" role="status">
-        Loading threads
-      </span>
-      {groups.map((widths, groupIndex) => (
-        <div key={groupIndex} className={compact ? "mb-2" : "mb-3"} aria-hidden>
-          <div className="flex items-center gap-1 px-2 py-1">
-            <Skeleton className="h-2 w-16 rounded-tick" />
-          </div>
-          {widths.map((width, rowIndex) => (
-            <div
-              key={rowIndex}
-              className={cn(
-                "mb-0.5 flex items-center gap-2 px-2.5",
-                compact ? "h-7 gap-1.5" : "h-8"
-              )}
-            >
-              <Skeleton className="size-3 shrink-0 rounded-full" />
-              <Skeleton className="h-2.5" style={{ width: `${width}%` }} />
-            </div>
-          ))}
-        </div>
+    <Stack
+      data-testid={rows === undefined ? "sidebar-threads-skeleton" : undefined}
+      gap="none"
+      className="gap-0.5 px-2"
+    >
+      {rows === undefined && (
+        <Box render={<span />} role="status" className="sr-only">
+          Loading threads
+        </Box>
+      )}
+      {widths.map((width) => (
+        <Inline
+          key={width}
+          aria-hidden
+          align="center"
+          className={compact ? "h-control-sm" : "h-control"}
+        >
+          <Skeleton className={cn("h-3", width)} />
+        </Inline>
       ))}
-    </div>
+    </Stack>
   )
 }
 
 function ThreadSourceError({
   label,
+  retryLabel = "Retry",
   onRetry,
 }: {
   label: string
+  retryLabel?: string
   onRetry: () => void
 }) {
   return (
-    <div className="flex items-center gap-2 px-2.5 py-2 text-meta text-ink-subtle">
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      <button
-        type="button"
-        className="shrink-0 font-medium text-ink hover:underline"
+    <Inline gap="sm" align="center" className="pl-2 text-meta">
+      <Icon icon={AlertTriangle} size="sm" className="text-attention" />
+      <Box render={<span />} className="min-w-0 flex-1 truncate text-ink-subtle">
+        {label}
+      </Box>
+      <Button
+        variant="ghost"
+        size="compact"
+        aria-label={retryLabel}
         onClick={onRetry}
       >
         Retry
-      </button>
-    </div>
+      </Button>
+    </Inline>
   )
 }
 
-function LoadMoreThreadsOnScroll({
-  label,
+/** The end-of-list control: loads as it scrolls into view, and stays operable directly. */
+function LoadMoreThreads({
   root,
   loading,
   onLoadMore,
 }: {
-  label: string
-  root: React.RefObject<HTMLDivElement | null>
+  root: RefObject<HTMLDivElement | null>
   loading: boolean
   onLoadMore: () => void
 }) {
@@ -1324,23 +1320,24 @@ function LoadMoreThreadsOnScroll({
   }, [loading, root])
 
   return (
-    <button
+    <Button
       ref={sentinel}
-      type="button"
+      variant="ghost"
+      size="compact"
+      loading={loading}
       onClick={() => load.current()}
-      disabled={loading}
-      aria-label={label}
-      className="flex w-full items-center justify-center gap-1.5 py-2 text-label text-ink-subtle/70"
+      className="w-full font-normal text-ink-subtle"
     >
-      {loading ? (
-        <CircleNotchIcon className="size-3.5 animate-spin" />
-      ) : (
-        <span className="sr-only">{label}</span>
-      )}
-    </button>
+      Load more threads
+    </Button>
   )
 }
 
+/**
+ * The agents surface's chrome: the system AppShell in focus posture, with the
+ * thread rail where the navigation rail would be, the brand row above it and
+ * the identity foot below.
+ */
 export function AgentsShell({
   user,
   activeThreadId,
@@ -1350,9 +1347,10 @@ export function AgentsShell({
   user: SessionUser
   activeThreadId?: string
   activeLocalSessionId?: string
-  children: React.ReactNode
+  children: ReactNode
 }) {
-  const layout = useSidebarLayout()
+  const rail = useRailCollapsed()
+  const toggleRail = rail.toggle
   // `useMutation` returns a fresh object every render; only `mutate` is stable,
   // and an unstable command array re-registers on every commit.
   const pinThread = usePinAgentThread().mutate
@@ -1374,7 +1372,7 @@ export function AgentsShell({
         aliases: ["show sidebar", "hide sidebar"],
         shortcuts: ["mod+b"],
         group: "Workspace",
-        run: layout.toggle,
+        run: toggleRail,
         desktopId: "toggle-sidebar" as const,
         desktopShortcuts: ["mod+b"],
       },
@@ -1426,28 +1424,66 @@ export function AgentsShell({
           }),
       },
     ]
-  }, [
-    activeThread,
-    layout.toggle,
-    pinThread,
-    pinnedThreads.data,
-    resolveThread,
-  ])
+  }, [activeThread, toggleRail, pinThread, pinnedThreads.data, resolveThread])
   useRegisterAppCommands(sidebarCommands)
 
   return (
-    <SidebarLayoutProvider value={layout}>
-      <div className="agents-ui flex h-svh overflow-hidden bg-canvas">
-        <AgentsSidebar
-          user={user}
-          activeThreadId={activeThreadId}
-          activeLocalSessionId={activeLocalSessionId}
-          layout={layout}
-        />
-        <main className="relative flex min-w-0 flex-1 overflow-hidden bg-canvas">
+    <Box className="h-svh">
+      <AppShell
+        mode="focus"
+        contentWidth="wide"
+        railCollapsed={rail.collapsed}
+        railHeader={
+          <AppRailBrand
+            collapsed={rail.collapsed}
+            onToggleCollapsed={toggleRail}
+          />
+        }
+        railFooter={<AgentsRailFoot user={user} collapsed={rail.collapsed} />}
+        threadRail={
+          <AgentsSidebar
+            login={user.login}
+            activeThreadId={activeThreadId}
+            activeLocalSessionId={activeLocalSessionId}
+            compact={rail.collapsed}
+          />
+        }
+      >
+        <Inline
+          align="stretch"
+          className="relative h-full min-h-0 min-w-0 overflow-hidden"
+        >
           {children}
-        </main>
-      </div>
-    </SidebarLayoutProvider>
+        </Inline>
+      </AppShell>
+    </Box>
+  )
+}
+
+/**
+ * The shell's geometry before the session is known: the desk, the rail at its
+ * resting width and an empty work column, so nothing jumps when it arrives.
+ */
+export function AgentsShellPlaceholder() {
+  return (
+    <Inline
+      align="stretch"
+      aria-busy="true"
+      aria-label="Loading"
+      className="h-svh bg-desk"
+    >
+      <Stack
+        gap="sm"
+        bg="sidebar"
+        className="w-61.5 shrink-0 border-r border-line px-3 pt-2"
+      >
+        <Inline align="center" className="h-control">
+          <Skeleton className="h-4 w-24" />
+        </Inline>
+        <Skeleton className="h-3 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+      </Stack>
+      <Box className="flex-1 bg-shell" />
+    </Inline>
   )
 }

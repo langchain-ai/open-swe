@@ -3,7 +3,7 @@ import { useEffect } from "react"
 
 import { LocalAgentThreadView } from "@/features/agents/components/LocalAgentThreadView"
 import { useReadyLegacyLocalThread } from "@/features/agents/lib/legacyLocal"
-import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { ThreadLoadingSkeleton } from "@/features/agents/components/AgentThreadPage"
 import {
   ensureThreadLoad,
   threadDetailFailed,
@@ -41,13 +41,7 @@ function LocalAgentThreadPage() {
   if (typeof window === "undefined" || !window.openSweDesktop) {
     return <Navigate to="/agents" />
   }
-  if (threadQuery.isPending) {
-    return (
-      <main className="flex min-w-0 flex-1 items-center justify-center p-6">
-        <Skeleton className="h-40 w-full max-w-md" />
-      </main>
-    )
-  }
+  if (threadQuery.isPending) return <ThreadLoadingSkeleton />
   if (threadQuery.isError || !threadQuery.data) {
     return <Navigate to="/agents" />
   }

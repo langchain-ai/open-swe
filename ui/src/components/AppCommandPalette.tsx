@@ -1,26 +1,41 @@
-import { Dialog } from "@base-ui/react/dialog"
 import { useNavigate } from "@tanstack/react-router"
-import {
-  Command as CommandIcon,
-  GitPullRequest,
-  Laptop,
-  LoaderCircle,
-  MessageSquare,
-  Search,
-} from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Command,
+  CommandEmpty,
+  CommandFooter,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@langchain/gtm-platform-design-system/ui/command"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@langchain/gtm-platform-design-system/ui/dialog"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
 
+import type { Glyph } from "@/components/glyphs"
 import type { AppCommand } from "@/lib/appCommands"
 import type { PullRequestSearchResult } from "@/lib/api"
-import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearch"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DesktopLegacyLocalThread } from "@/desktop"
-import { Kbd } from "@langchain/gtm-platform-design-system/ui/kbd"
+import {
+  GitPullRequest,
+  MessageSquare,
+  Monitor,
+  Terminal,
+} from "@/components/glyphs"
+import { ShortcutChord } from "@/components/AppShortcutReference"
+import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearch"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { useLegacyLocalThreads } from "@/features/agents/lib/legacyLocal"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
-import { useShortcutLabel } from "@/lib/hotkeys"
-import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 
 interface CommandResult {
@@ -57,9 +72,11 @@ type PaletteResult =
   | LocalThreadResult
   | PullRequestResult
 
-function ShortcutHint({ shortcut }: { shortcut: string }) {
-  const label = useShortcutLabel(shortcut)
-  return <Kbd className="ml-auto bg-canvas/70">{label}</Kbd>
+const RESULT_GLYPH: Record<PaletteResult["kind"], Glyph> = {
+  command: Terminal,
+  "cloud-thread": MessageSquare,
+  "local-thread": Monitor,
+  "pull-request": GitPullRequest,
 }
 
 function commandMatches(command: AppCommand, query: string): boolean {
@@ -148,7 +165,6 @@ export function AppCommandPalette({
   const chat = useChatRoutes()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
-  const [activeHighlight, setActiveHighlight] = useState({ key: "", index: 0 })
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -219,17 +235,6 @@ export function AppCommandPalette({
     }
     return [...grouped]
   }, [results])
-  const resultKey = results.map((result) => result.id).join("|")
-
-  const activeIndex =
-    activeHighlight.key === resultKey ? activeHighlight.index : 0
-  const setActiveIndex = (next: number | ((current: number) => number)) => {
-    setActiveHighlight({
-      key: resultKey,
-      index: typeof next === "function" ? next(activeIndex) : next,
-    })
-  }
-
   const runResult = (result: PaletteResult | undefined) => {
     if (!result) return
     onOpenChange(false)
@@ -257,172 +262,137 @@ export function AppCommandPalette({
     }
   }
 
-  const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault()
-      setActiveIndex((current) =>
-        results.length === 0 ? 0 : (current + 1) % results.length
-      )
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault()
-      setActiveIndex((current) =>
-        results.length === 0
-          ? 0
-          : (current - 1 + results.length) % results.length
-      )
-    } else if (event.key === "Home") {
-      event.preventDefault()
-      setActiveIndex(0)
-    } else if (event.key === "End") {
-      event.preventDefault()
-      setActiveIndex(Math.max(0, results.length - 1))
-    } else if (event.key === "Enter") {
-      event.preventDefault()
-      runResult(results[activeIndex])
-    }
-  }
-
   const showLoading =
     (cloudThreads.isFetching || pullRequests.isSearching) &&
     results.length === 0
   const showError = cloudThreads.isError && results.length === 0
 
+  const showPullRequestMore =
+    pullRequests.hasNextPage && !query.trim().startsWith(">")
+  const showPullRequestError =
+    query.trim() && !query.trim().startsWith(">") && pullRequests.isError
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/45 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <Dialog.Popup
-          className="fixed top-[18%] left-1/2 z-50 flex max-h-[min(34rem,70vh)] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-control border border-line bg-panel text-ink shadow-overlay outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
-          data-hotkeys="ignore"
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        data-hotkeys="ignore"
+        className="top-24 w-full max-w-xl translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-xl"
+      >
+        <DialogTitle className="sr-only">
+          Search commands, threads, and pull requests
+        </DialogTitle>
+        <DialogDescription className="sr-only">
+          Search commands, threads, and pull request titles and descriptions.
+        </DialogDescription>
+        <Command
+          size="palette"
+          shouldFilter={false}
+          loop
+          className="rounded-none bg-transparent"
         >
-          <Dialog.Title className="sr-only">
-            Search commands, threads, and pull requests
-          </Dialog.Title>
-          <Dialog.Description className="sr-only">
-            Search commands, threads, and pull request titles and descriptions.
-          </Dialog.Description>
-          <div className="flex items-center gap-2 border-b border-line px-4">
-            <Search className="size-4 shrink-0 text-ink-subtle" />
-            <input
-              autoFocus
-              aria-activedescendant={results[activeIndex]?.id}
-              aria-autocomplete="list"
-              aria-controls="app-command-results"
-              className="h-12 min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-ink-subtle"
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={onInputKeyDown}
-              placeholder="Search commands, threads, and pull requests…"
-              role="combobox"
-              value={query}
-            />
-            <Kbd>Esc</Kbd>
-          </div>
-          <div
-            className="min-h-20 overflow-y-auto p-2"
-            id="app-command-results"
-            role="listbox"
-          >
-            {showLoading ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-meta text-ink-subtle">
-                <LoaderCircle className="size-4 animate-spin" />
-                Searching threads and pull requests…
-              </div>
-            ) : showError ? (
-              <p className="py-10 text-center text-label text-risk">
-                Thread search is unavailable.
-              </p>
-            ) : results.length === 0 ? (
-              <p className="py-10 text-center text-meta text-ink-subtle">
-                No commands, threads, or pull requests found.
-              </p>
-            ) : (
-              <>
-                {resultGroups.map(([group, groupResults]) => (
-                  <div aria-label={group} key={group} role="group">
-                    <div className="px-3 pt-2 pb-1 text-meta font-semibold tracking-wide text-ink-subtle uppercase">
-                      {group}
-                    </div>
-                    {groupResults.map((result) => {
-                      const index = results.indexOf(result)
-                      const command =
-                        result.kind === "command" ? result.command : null
-                      const Icon =
-                        result.kind === "command"
-                          ? CommandIcon
-                          : result.kind === "local-thread"
-                            ? Laptop
-                            : result.kind === "pull-request"
-                              ? GitPullRequest
-                              : MessageSquare
-                      return (
-                        <button
-                          aria-selected={index === activeIndex}
-                          className={cn(
-                            "flex w-full items-center gap-3 rounded-compact px-3 py-2 text-left text-body",
-                            index === activeIndex
-                              ? "bg-hover text-ink"
-                              : "text-ink"
-                          )}
-                          id={result.id}
-                          key={result.id}
-                          onClick={() => runResult(result)}
-                          onMouseEnter={() => setActiveIndex(index)}
-                          role="option"
-                          type="button"
-                        >
-                          <Icon className="size-4 shrink-0 text-ink-subtle" />
-                          <span className="min-w-0 flex-1 truncate">
-                            {result.label}
-                            {result.kind === "pull-request" && (
-                              <span className="ml-2 text-meta text-ink-subtle">
-                                {result.pr.repo} #{result.pr.number} ·{" "}
-                                {result.pr.state}
-                              </span>
-                            )}
-                          </span>
-                          {command?.shortcuts?.[0] && (
-                            <ShortcutHint shortcut={command.shortcuts[0]} />
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                ))}
-                {pullRequests.hasNextPage && !query.trim().startsWith(">") && (
-                  <button
-                    className="flex w-full items-center justify-center gap-2 rounded-compact px-3 py-2 text-meta text-ink-subtle hover:bg-hover hover:text-ink"
-                    disabled={pullRequests.isFetchingNextPage}
-                    onClick={() => void pullRequests.fetchNextPage()}
-                    type="button"
-                  >
-                    Load more pull requests
-                  </button>
-                )}
-                {cloudThreads.hasNextPage && (
-                  <button
-                    className="flex w-full items-center justify-center gap-2 rounded-compact px-3 py-2 text-meta text-ink-subtle hover:bg-hover hover:text-ink"
-                    disabled={cloudThreads.isFetchingNextPage}
-                    onClick={() => void cloudThreads.fetchNextPage()}
-                    type="button"
-                  >
-                    {cloudThreads.isFetchingNextPage && (
-                      <LoaderCircle className="size-3.5 animate-spin" />
-                    )}
-                    Load more threads
-                  </button>
-                )}
-              </>
-            )}
-            {query.trim() &&
-              !query.trim().startsWith(">") &&
-              pullRequests.isError && (
-                <p role="alert" className="px-3 py-2 text-label text-risk">
-                  Pull request search is unavailable.
-                </p>
+          <CommandInput
+            autoFocus
+            value={query}
+            onValueChange={setQuery}
+            placeholder="Search commands, threads, and pull requests…"
+            shortcut={["esc"]}
+          />
+          <CommandList>
+            <CommandEmpty>
+              {showLoading ? (
+                <Inline
+                  gap="sm"
+                  align="center"
+                  justify="center"
+                  ink="ink-subtle"
+                >
+                  <Spinner size="sm" />
+                  Searching threads and pull requests…
+                </Inline>
+              ) : showError ? (
+                <Box render={<span />} className="text-risk">
+                  Thread search is unavailable.
+                </Box>
+              ) : (
+                "No commands, threads, or pull requests found."
               )}
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+            </CommandEmpty>
+            {resultGroups.map(([group, groupResults]) => (
+              <CommandGroup key={group} heading={group}>
+                {groupResults.map((result) => {
+                  const command =
+                    result.kind === "command" ? result.command : null
+                  return (
+                    <CommandItem
+                      key={result.id}
+                      value={result.id}
+                      onSelect={() => runResult(result)}
+                    >
+                      <Icon
+                        icon={RESULT_GLYPH[result.kind]}
+                        className="text-ink-subtle"
+                      />
+                      <Box
+                        render={<span />}
+                        className="min-w-0 flex-1 truncate"
+                      >
+                        {result.label}
+                        {result.kind === "pull-request" && (
+                          <Box
+                            render={<span />}
+                            className="ml-2 text-meta text-ink-subtle"
+                          >
+                            {result.pr.repo} #{result.pr.number} ·{" "}
+                            {result.pr.state}
+                          </Box>
+                        )}
+                      </Box>
+                      {command?.shortcuts?.[0] && (
+                        <ShortcutChord shortcut={command.shortcuts[0]} />
+                      )}
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
+            ))}
+            {showPullRequestError && (
+              <Box
+                render={<p />}
+                role="alert"
+                className="px-4 py-2 text-label text-risk"
+              >
+                Pull request search is unavailable.
+              </Box>
+            )}
+          </CommandList>
+        </Command>
+        {(showPullRequestMore || cloudThreads.hasNextPage) && (
+          <CommandFooter className="justify-center">
+            {showPullRequestMore && (
+              <Button
+                variant="ghost"
+                size="compact"
+                loading={pullRequests.isFetchingNextPage}
+                onClick={() => void pullRequests.fetchNextPage()}
+              >
+                Load more pull requests
+              </Button>
+            )}
+            {cloudThreads.hasNextPage && (
+              <Button
+                variant="ghost"
+                size="compact"
+                aria-label="Load more threads"
+                loading={cloudThreads.isFetchingNextPage}
+                onClick={() => void cloudThreads.fetchNextPage()}
+              >
+                Load more threads
+              </Button>
+            )}
+          </CommandFooter>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
