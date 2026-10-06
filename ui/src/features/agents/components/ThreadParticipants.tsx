@@ -36,7 +36,6 @@ export function ThreadParticipants({ threadId }: { threadId: string }) {
   const { data: people = [] } = useQuery({
     queryKey: ["agent-threads", threadId, "participants"],
     queryFn: () => agentsApi.threadParticipants(threadId),
-    refetchInterval: 30_000,
   })
   if (!people.length) return null
   return (
