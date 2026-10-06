@@ -97,6 +97,32 @@ def test_a_failing_check_github_does_not_require_does_not_block_the_request() ->
     assert request_blockers(snapshot) == []
 
 
+@pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
+async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expected: str) -> None:
+    from agent.human_review.standard import AutoAssignResult, run_deadline
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        state="open",
+    )
+    request.created_at = datetime.now(UTC) - timedelta(minutes=30)
+    request.pull_request = pr
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("agent.human_review.standard._assignment_minutes", AsyncMock(return_value=minutes)),
+        patch("agent.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("agent.human_review.standard._github_approvers", AsyncMock(return_value=[])),
+        patch(
+            "agent.human_review.standard.start_auto_assign",
+            AsyncMock(return_value=AutoAssignResult("woken")),
+        ),
+    ):
+        assert await run_deadline(str(request.id), "unclaimed") == {"status": expected}
+
+
 def test_nothing_merges_without_an_approval() -> None:
     long_ago = _NOW - timedelta(days=1)
     assert merge_wait([], long_ago, {}, _NOW) == "an approval on GitHub"

@@ -11,7 +11,7 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoSlack } from "react-icons/io5"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
+import type { DesktopLegacyLocalThread } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 
 const menuItemClassName =
@@ -28,7 +28,7 @@ export function ThreadMenuItems({
   onDelete,
 }: {
   thread: AgentThread | null
-  localThread?: DesktopLocalThreadSummary
+  localThread?: DesktopLegacyLocalThread
   pinned: boolean
   archived: boolean
   isDeleting: boolean

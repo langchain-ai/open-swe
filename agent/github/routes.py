@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
+from agent.human_review.completed_reviews import CompletedReview
 from agent.schedules import store as schedules
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
@@ -11,13 +12,15 @@ from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
 router = APIRouter()
 
 
-async def _launch_issue_automations(payload: dict[str, object], delivery_id: str) -> None:
+async def _launch_automations(
+    event_type: str, payload: dict[str, object], delivery_id: str
+) -> None:
     try:
-        await schedules.launch_github_issue_automations(payload, delivery_id)
+        await schedules.launch_github_automations(event_type, payload, delivery_id)
     except Exception:
         common.logger.exception(
-            "Failed to launch GitHub issue automations",
-            extra={"github_delivery": delivery_id},
+            "Failed to launch GitHub automations",
+            extra={"github_delivery": delivery_id, "github_event": event_type},
         )
 
 
@@ -105,6 +108,9 @@ async def github_webhook(
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
+        # The same repository allowlist as issue automations, checked below for them.
+        if action in {"opened", "closed"} and common.is_repo_allowed(webhook_repo_config):
+            background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
         if action in {"opened", "edited"} or action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
         if action == "opened" or action in common.GH_PR_AGENT_STATE_ACTIONS:
@@ -166,6 +172,8 @@ async def github_webhook(
     if event_type == "pull_request_review" and payload.get("action") in {"submitted", "dismissed"}:
         # Any reviewer's verdict can complete a review request, registered with Open SWE or not.
         background_tasks.add_task(service.settle_human_reviews, payload)
+        if payload.get("action") == "submitted":
+            background_tasks.add_task(CompletedReview.record, payload)
 
     if is_issue_event:
         action = payload.get("action", "")
@@ -178,7 +186,7 @@ async def github_webhook(
                 common.logger.info("Ignoring GitHub issue edit without title/body changes")
                 return {"status": "ignored", "reason": "Issue edit did not change title or body"}
         if action == "opened":
-            background_tasks.add_task(_launch_issue_automations, payload, delivery_id)
+            background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
 
         issue_text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}"
         if not common.mentions_open_swe(issue_text):

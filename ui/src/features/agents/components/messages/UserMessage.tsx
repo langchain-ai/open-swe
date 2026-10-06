@@ -3,6 +3,8 @@ import { IoLogoSlack } from "react-icons/io5"
 import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
+import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
+import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { SlackMrkdwn } from "./SlackMrkdwn"
@@ -13,12 +15,15 @@ const COLLAPSED_MAX_HEIGHT_PX = 250
 export function UserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
-  const text = message.chunks
-    .filter((c) => c.kind === "text")
-    .map((c) => c.text)
-    .join("")
+  const { excerpts, text } = parseExcerpts(
+    message.chunks
+      .filter((c) => c.kind === "text")
+      .map((c) => c.text)
+      .join("")
+  )
 
   const images = message.chunks.filter((c) => c.kind === "image")
+  const hasBody = Boolean(text) || images.length > 0 || excerpts.length > 0
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
@@ -92,12 +97,20 @@ export function UserMessage({ message }: { message: Message }) {
             </div>
           )
         )}
-        {(!isSystem || expanded) && (text || images.length > 0) && (
+        {(!isSystem || expanded) && hasBody && (
           <div
             className={`relative overflow-hidden rounded-2xl p-3 ${
               isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
             }`}
           >
+            {excerpts.map((excerpt, i) => (
+              <CodeBlock
+                key={i}
+                title={excerpt.location}
+                language={excerpt.language}
+                text={excerpt.code}
+              />
+            ))}
             {images.length > 0 && (
               <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                 {images.map((img, i) => (

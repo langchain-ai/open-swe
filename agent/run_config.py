@@ -84,15 +84,6 @@ class GitHubPROrIssueRef(BaseModel):
     repo: Repo | None = None
 
 
-class AutomationSlackNotification(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    channel_id: str = ""
-    mode: str = ""
-    schedule_id: str = ""
-    schedule_name: str | None = None
-
-
 class RunConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -202,8 +193,6 @@ class RunConfig(BaseModel):
     watch_key: str | None = None
     schedule_id: str | None = None
     background_task_completion: bool | None = None
-    automation_slack_notification: AutomationSlackNotification | None = None
-    automation_dm_user_id: str | None = None
 
     @classmethod
     def parse(cls, raw: Any) -> Self:

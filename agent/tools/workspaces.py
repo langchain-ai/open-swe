@@ -140,6 +140,7 @@ async def publish_workspace(
         if existing is None:
             definition = store.WorkspaceCreate(
                 name=name,
+                inherit_default_sandbox=False,
                 prompt=prompt,
                 setup_script=setup_script or "",
                 update_script=update_script or "",
@@ -152,7 +153,12 @@ async def publish_workspace(
                 create_params=create_params or {},
             )
         else:
-            update_values: dict[str, Any] = {"name": name, "prompt": prompt, "repos": repos}
+            update_values: dict[str, Any] = {
+                "name": name,
+                "prompt": prompt,
+                "repos": repos,
+                "inherit_default_sandbox": False,
+            }
             update_values.update(
                 dict.fromkeys(sizing)
                 if clear_sizing

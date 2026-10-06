@@ -902,7 +902,7 @@ async def _plan_reference_line(cfg: RunConfig) -> str | None:
     plan_url = dashboard_plan_url(thread_id)
     if not plan_url:
         return None
-    return f"- Plan: {plan_url}"
+    return f"- [Plan]({plan_url})"
 
 
 async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
@@ -924,18 +924,19 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
             if channel_id and thread_ts:
                 permalink = await get_slack_permalink(channel_id, thread_ts)
         if isinstance(permalink, str) and permalink.strip():
-            lines.append(f"- Slack thread: {permalink.strip()}")
+            lines.append(f"- [Slack thread]({permalink.strip()})")
     elif cfg.source == "linear" and cfg.linear_issue:
         url, identifier = cfg.linear_issue.url, cfg.linear_issue.identifier
         if url:
-            lines.append(f"- Linear ticket: [{identifier or url}]({url})")
+            label = f"Linear ticket {identifier}" if identifier else "Linear ticket"
+            lines.append(f"- [{label}]({url})")
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
     elif cfg.source in ("github", "github_issue") and cfg.github_issue:
         url, number = cfg.github_issue.url, cfg.github_issue.number
         if url:
-            label = f"#{number}" if number else url
-            lines.append(f"- GitHub issue: [{label}]({url})")
+            label = f"GitHub issue #{number}" if number else "GitHub issue"
+            lines.append(f"- [{label}]({url})")
         elif number:
             lines.append(f"- GitHub issue: #{number}")
 
