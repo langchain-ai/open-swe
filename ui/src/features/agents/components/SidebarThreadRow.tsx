@@ -206,7 +206,7 @@ function sidebarRowClassName({
     compact ? "h-7 gap-1.5" : "h-8",
     "text-foreground",
     active
-      ? "bg-blue-100 dark:bg-accent"
+      ? "bg-zinc-200 dark:bg-accent"
       : "group-hover/row:bg-sidebar-row-hover"
   )
 }
