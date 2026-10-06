@@ -7966,7 +7966,8 @@
                 "merged_prs",
                 "merged_prs_per_thread",
                 "agent_loc",
-                "feedback_given"
+                "feedback_given",
+                "prs_reviewed"
               ],
               "title": "Sort",
               "type": "string"

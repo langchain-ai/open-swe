@@ -438,6 +438,7 @@ export type UsageLeaderboardSort =
   | "merged_prs_per_thread"
   | "agent_loc"
   | "feedback_given"
+  | "prs_reviewed"
 export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
@@ -486,6 +487,7 @@ export interface UsageLeaderboardRow {
   merged_prs: number
   merged_prs_per_thread?: number
   agent_loc: number
+  prs_reviewed?: number
   feedback_given: number
   is_top_feedback_contributor?: boolean
   additions: number
