@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.audit_logs import tools as audit_tools
+from agent.audit_logs.context import current_audit_log
+from agent.audit_logs.models import AuditLog
 from agent.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_workspace_settings,
@@ -103,8 +106,14 @@ async def test_private_admin_gate_rejects_other_surfaces(
 
 
 async def test_sole_writer_sets_flags_but_cannot_read_them(
-    fake_store: FakeStore, grant_tool_access: Callable[..., None]
+    fake_store: FakeStore, grant_tool_access: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    entries: list[AuditLog] = []
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    monkeypatch.setattr(audit_tools, "append_safely", append)
     grant_tool_access(admin=True, sole=True)
     assert await manage_feature_flags("set", {"gateway_enabled": True}) == {
         "ok": True,
@@ -112,3 +121,11 @@ async def test_sole_writer_sets_flags_but_cannot_read_them(
     }
     assert (await get_workspace_settings())["gateway_enabled"] is True
     assert "not available in this thread" in str((await manage_feature_flags("read"))["error"])
+    (entry,) = entries
+    assert entry.operation_succeeded is True
+    assert entry.enrichments.source == "tool"
+    assert entry.enrichments.settings_scope == "instance"
+    assert entry.enrichments.settings_changes == {
+        "gateway_enabled": {"before": None, "after": True}
+    }
+    assert current_audit_log.get() is None

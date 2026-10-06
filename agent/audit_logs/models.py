@@ -1,15 +1,20 @@
 """LangSmith's audit envelope adapted to Open SWE identities."""
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, TypedDict
 from uuid import UUID, uuid7
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, field_serializer
 from sqlalchemy import String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from agent.database.orm import Base
+
+
+class SettingsChange(TypedDict):
+    before: bool | int | Literal["[REDACTED]"] | None
+    after: bool | int | Literal["[REDACTED]"] | None
 
 
 class AuditLogEnrichments(BaseModel):
@@ -25,6 +30,23 @@ class AuditLogEnrichments(BaseModel):
     workspace: str | None = None
     thread_id: str | None = None
     delegated_from_sandbox_id: str | None = None
+    settings_scope: Literal["instance", "workspace"] | None = None
+    settings_changes: dict[str, SettingsChange] | None = None
+
+    @field_serializer("settings_changes")
+    def _serialize_settings_changes(
+        self, changes: dict[str, SettingsChange] | None
+    ) -> (
+        dict[str, dict[Literal["before", "after"], bool | int | Literal["[REDACTED]"] | None]]
+        | None
+    ):
+        """Preserve null overrides even when the envelope excludes absent metadata."""
+        if changes is None:
+            return None
+        return {
+            field: {"before": change["before"], "after": change["after"]}
+            for field, change in changes.items()
+        }
 
 
 class AuditLog(BaseModel):
