@@ -247,7 +247,7 @@ class EventLog:
 
             channel_id = refs.slack_channel_id if refs else ""
             try:
-                channel = await SlackChannel.load(channel_id, use_cache=False)
+                channel = await SlackChannel.load(channel_id)
             except Exception:
                 logger.warning("Checking event log Slack channel failed", exc_info=True)
                 return
