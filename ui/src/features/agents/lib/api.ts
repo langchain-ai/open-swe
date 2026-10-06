@@ -105,7 +105,7 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
-export type ThreadScope = "all" | "interactive" | "automation"
+export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
@@ -119,6 +119,8 @@ export interface ThreadsPageParams {
   q?: string
   scope?: ThreadScope
   automationId?: string
+  /** An allowed Slack bot's `team_id:bot_id`, with `scope: "bot"`. */
+  bot?: string
   repo?: string
   ownerless?: boolean
   sortBy?: ThreadSortBy
@@ -235,6 +237,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.q) search.set("q", params.q)
   if (params.scope) search.set("scope", params.scope)
   if (params.automationId) search.set("automation_id", params.automationId)
+  if (params.bot) search.set("bot", params.bot)
   if (params.repo) search.set("repo", params.repo)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))

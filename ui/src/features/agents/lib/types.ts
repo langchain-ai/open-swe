@@ -42,6 +42,7 @@ export type AgentTriggerKind =
   | "reviewer"
   | "analyzer"
   | "ci_autofix"
+  | "slack_bot"
 
 export interface TodoItem {
   content: string
@@ -513,6 +514,8 @@ export interface AgentThread {
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string
   triggerKind?: AgentTriggerKind | string
+  /** The allowed Slack bot that started the thread; the dashboard cannot steer it. */
+  triggeringBot?: { key: string; name: string } | null
   automationId?: string | null
   automationName?: string | null
   automationActionPosted?: boolean

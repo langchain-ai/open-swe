@@ -299,6 +299,13 @@ export interface AllowedSlackBot {
   image_url: string
 }
 
+/** What any signed-in user may see of an allowed bot; `key` is `team_id:bot_id`. */
+export interface AllowedSlackBotEntry {
+  key: string
+  name: string
+  image_url: string
+}
+
 /** The settings record at either tier: the instance, or what a workspace's runs see. */
 export interface WorkspaceSettings {
   review_draft_prs: boolean
@@ -1583,6 +1590,8 @@ export const api = {
       `/slack/channels${refresh ? "?refresh=true" : ""}`
     ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
+  listAllowedSlackBotDirectory: () =>
+    request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
       method: "POST",
