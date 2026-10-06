@@ -33,6 +33,7 @@ from agent.github.ci import fetch_pr
 from agent.github.http import github_client
 from agent.github.pull_requests import PullRequestPayload
 from agent.github.repo_files import RepoSettings
+from agent.github.repositories import Repository
 from agent.github.sdk import github_sdk
 from agent.human_review import card as standard_card
 from agent.human_review.people import Outcome, repo_token
@@ -43,7 +44,7 @@ from agent.human_review.requests import (
     RequestState,
 )
 from agent.run_config import RunConfig
-from agent.slack.blocks import Block, block_payload, escape, section
+from agent.slack.blocks import Block, block_payload, context, escape, section
 from agent.slack.cards import origin_footer, repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
@@ -141,6 +142,25 @@ async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile])
     return file_id
 
 
+async def _warn_target(
+    request: HumanReviewRequest, card: tuple[str, list[Block]]
+) -> tuple[str, list[Block]]:
+    pr = request.pull_request
+    if not pr.base_ref:
+        return card
+    default_branch = await Repository.resolve_default_branch(
+        pr.repo_full_name, token=await repo_token(pr.owner, pr.repo)
+    )
+    if not default_branch or pr.base_ref == default_branch:
+        return card
+    warning = (
+        f":warning: Targets non-default branch `{escape(pr.base_ref)}` "
+        f"(default: `{escape(default_branch)}`)."
+    )
+    text, blocks = card
+    return f"{text}\n{warning}", [context(warning), *blocks]
+
+
 def _requester_login(request: HumanReviewRequest) -> str:
     if request.requested_by is not None:
         return request.requested_by.github_login
@@ -170,6 +190,7 @@ async def post_card(
         diff_image_id=approval.slack_diff_file_id or None,
         choices=await _channel_choices(approval),
     )
+    text, blocks = await _warn_target(approval, (text, blocks))
     return await post_slack_thread_reply_with_ts(
         location[0],
         location[1],
@@ -209,6 +230,7 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
     )
+    text, blocks = await _warn_target(approval, (text, blocks))
     dm_location = await send_dm_with_location(
         author.slack_user_id,
         text,
@@ -304,6 +326,12 @@ async def _render(
     request: HumanReviewRequest, outcome: str | None, *, copy: bool = False
 ) -> tuple[str, list[Block]]:
     """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
+    return await _warn_target(request, await _render_card(request, outcome, copy=copy))
+
+
+async def _render_card(
+    request: HumanReviewRequest, outcome: str | None, *, copy: bool
+) -> tuple[str, list[Block]]:
     pr = request.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if request.kind == "standard":
