@@ -25,7 +25,7 @@ from agent.github.http import GITHUB_API_BASE, github_request
 logger = logging.getLogger(__name__)
 
 _PAGE_SIZE = 100
-_MAX_PAGES = 3
+_MAX_PAGES = 10
 
 
 class CheckRunPayload(BaseModel):
