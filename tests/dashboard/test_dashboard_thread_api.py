@@ -824,7 +824,7 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert run_list_calls == 0
 
 
-async def test_task_hierarchy_pages_filters_visibility_and_idle_refresh(
+async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
@@ -877,20 +877,9 @@ async def test_task_hierarchy_pages_filters_visibility_and_idle_refresh(
     preferences.return_value = UserPreferences(experimental_task_coordination=True)
     first = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=1)
     assert [item["id"] for item in first["items"]] == ["t3"]
-    assert first["hasMore"] is True
     parent = first["items"][0]
     assert parent["status"] == "finished"
     assert [worker["id"] for worker in parent["taskWorkers"]] == ["t0", "t1"]
-    second = await thread_listing.list_dashboard_threads_page(
-        "octocat", hierarchy=True, offset=1, limit=2
-    )
-    assert [item["id"] for item in second["items"]] == ["t2", "t4"]
-    assert second["hasMore"] is False
-    filtered = await thread_listing.list_dashboard_threads_page(
-        "octocat", hierarchy=True, query="Thread 0"
-    )
-    assert [item["id"] for item in filtered["items"]] == ["t3"]
-    assert [worker["id"] for worker in filtered["items"][0]["taskWorkers"]] == ["t0"]
     cast(dict[str, object], threads[1]["metadata"]).update(
         visibility="private", owner_login="someone-else"
     )

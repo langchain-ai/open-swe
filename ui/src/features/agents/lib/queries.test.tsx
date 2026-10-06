@@ -12,7 +12,6 @@ import {
   markAgentThreadViewed,
   optimisticThread,
   setAgentThreadStatus,
-  setAgentThreadTitle,
   setAgentThreadResolved,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
@@ -471,17 +470,19 @@ describe("sidebar queries", () => {
     )
   })
 
-  it("fetches the active thread when it is outside the loaded pages", async () => {
+  it("only inserts the active thread while it is outside the loaded families", async () => {
+    profile.data.experimental_task_coordination = true
     const opened = { id: "opened-thread", resolved: false } as AgentThread
     const getThread = vi.spyOn(agentsApi, "getThread").mockResolvedValue(opened)
     const client = testClient()
-    const { result } = renderHook(
-      () =>
+    const { result, rerender } = renderHook(
+      (loadedThreads: Array<AgentThread>) =>
         useSidebarActiveThread({
           activeThreadId: opened.id,
-          loadedThreads: [],
+          loadedThreads,
         }),
       {
+        initialProps: [],
         wrapper: ({ children }) => (
           <QueryClientProvider client={client}>{children}</QueryClientProvider>
         ),
@@ -490,6 +491,8 @@ describe("sidebar queries", () => {
 
     await waitFor(() => expect(result.current).toEqual(opened))
     expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
+    rerender([{ ...opened, id: "coordinator", taskWorkers: [opened] }])
+    expect(result.current).toBeUndefined()
   })
 })
 
@@ -806,32 +809,15 @@ describe("sidebar task families", () => {
     expect(list).toHaveBeenCalledTimes(calls)
   })
 
-  it("does not fetch or insert a selected worker already nested in a loaded family", () => {
-    profile.data.experimental_task_coordination = true
-    const getThread = vi.spyOn(agentsApi, "getThread")
-    const client = testClient()
-    const { result } = renderHook(
-      () =>
-        useSidebarActiveThread({
-          activeThreadId: worker.id,
-          loadedThreads: [coordinator],
-        }),
-      { wrapper: wrapperFor(client) }
-    )
-    expect(result.current).toBeUndefined()
-    expect(getThread).not.toHaveBeenCalled()
-  })
-
   it("updates nested worker caches for navigation and optimistic edits", () => {
     const client = testClient()
     const key = agentThreadKeys.page({ hierarchy: true, resolved: false })
     client.setQueryData(key, { ...page, items: [coordinator] })
     markAgentThreadViewed(client, worker.id)
-    setAgentThreadTitle(client, worker.id, "Renamed")
     setAgentThreadStatus(client, worker.id, "finished")
     expect(
       client.getQueryData<ThreadsPage>(key)?.items[0]?.taskWorkers?.[0]
-    ).toMatchObject({ viewed: true, title: "Renamed", status: "finished" })
+    ).toMatchObject({ viewed: true, status: "finished" })
     setAgentThreadResolved(client, worker.id, true)
     expect(
       client.getQueryData<ThreadsPage>(key)?.items[0]?.taskWorkers

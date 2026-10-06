@@ -138,12 +138,17 @@ describe("sidebar thread adapters", () => {
 })
 
 describe("sortSidebarThreads", () => {
-  it("sorts chats by creation time without moving recently updated chats", () => {
+  it("sorts chats and task families by creation or update time", () => {
     const olderUpdated = cloudSidebarThread(
       cloudThread({ id: "older-updated", createdAt: 10, updatedAt: 50 })
     )
     const newer = cloudSidebarThread(
-      cloudThread({ id: "newer", createdAt: 20, updatedAt: 20 })
+      cloudThread({
+        id: "newer",
+        createdAt: 5,
+        updatedAt: 20,
+        taskWorkers: [cloudThread({ id: "worker", createdAt: 20 })],
+      })
     )
 
     expect(
@@ -290,14 +295,4 @@ describe("groupSidebarThreadsByWorkspace", () => {
       },
     ])
   })
-})
-
-it("orders task families by their worker activity", () => {
-  const worker = cloudThread({ id: "worker", createdAt: 200, updatedAt: 200 })
-  const parent = cloudThread({ id: "parent", taskWorkers: [worker] })
-  const other = cloudThread({ id: "other", createdAt: 100, updatedAt: 100 })
-  expect(
-    sortSidebarThreads([other, parent].map(cloudSidebarThread), "created")[0]
-      ?.id
-  ).toBe("parent")
 })
