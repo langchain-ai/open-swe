@@ -289,6 +289,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     ]
   )
 
+  const commentOnDiff = useCallback(
+    (content: string) => submitMessage(content, []),
+    [submitMessage]
+  )
+
   const restoreQueuedAutoSelection = autoIntent.restore
 
   const queuedText = (entry: QueuedTurn) =>
@@ -913,6 +918,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       </div>
       <AgentGitPanel
         thread={thread}
+        onComment={canPost ? commentOnDiff : undefined}
         revealFilePath={revealFilePath}
         revealChangesKey={revealChangesKey}
         collapsed={panelCollapsed}
