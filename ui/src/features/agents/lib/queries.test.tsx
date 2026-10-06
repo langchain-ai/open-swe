@@ -461,17 +461,24 @@ describe("sidebar queries", () => {
     )
   })
 
-  it("fetches the active thread when it is outside the loaded pages", async () => {
-    const opened = { id: "opened-thread", resolved: false } as AgentThread
+  it("keeps the deep-linked active thread available as cached pages catch up", async () => {
+    const opened = {
+      id: "opened-thread",
+      source: "slack",
+      repoFullName: "langchain-ai/deepagents",
+      status: "finished",
+      resolved: false,
+    } as AgentThread
     const getThread = vi.spyOn(agentsApi, "getThread").mockResolvedValue(opened)
     const client = testClient()
-    const { result } = renderHook(
-      () =>
+    const { result, rerender } = renderHook(
+      ({ loadedThreads }: { loadedThreads: Array<AgentThread> }) =>
         useSidebarActiveThread({
           activeThreadId: opened.id,
-          loadedThreads: [],
+          loadedThreads,
         }),
       {
+        initialProps: { loadedThreads: [] as Array<AgentThread> },
         wrapper: ({ children }) => (
           <QueryClientProvider client={client}>{children}</QueryClientProvider>
         ),
@@ -480,6 +487,15 @@ describe("sidebar queries", () => {
 
     await waitFor(() => expect(result.current).toEqual(opened))
     expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
+
+    const cached = { ...opened, title: "Updated title" }
+    rerender({ loadedThreads: [cached] })
+    expect(result.current).toEqual(cached)
+
+    const archived = { ...cached, resolved: true }
+    getThread.mockResolvedValue(archived)
+    rerender({ loadedThreads: [] })
+    await waitFor(() => expect(result.current).toEqual(archived))
   })
 })
 

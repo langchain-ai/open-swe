@@ -337,12 +337,13 @@ export function AgentsSidebar({
   const activeThread = useSidebarActiveThread({
     activeThreadId,
     loadedThreads: [...pinnedThreads, ...pageThreads],
-    includeResolved: prefs.filters.includeResolved,
     enabled: true,
   })
   const activeInRepo = Boolean(repoMode && activeThread?.repoFullName.trim())
   const recentThreads = [
-    ...(activeThread && !activeInRepo ? [activeThread] : []),
+    ...(activeThread && !activeInRepo && !cloudPinnedIds.has(activeThread.id)
+      ? [activeThread]
+      : []),
     ...pageThreads.filter((thread) => thread.id !== activeThread?.id),
   ]
   const visibleThreads = [...pinnedThreads, ...recentThreads]
@@ -407,11 +408,11 @@ export function AgentsSidebar({
   ]
   const allItems = [...pinnedItems, ...threadItems]
   const filteredPinnedItems = sortSidebarThreads(
-    filterThreads(pinnedItems, prefs.filters),
+    filterThreads(pinnedItems, prefs.filters, activeThreadId),
     prefs.sortPinned
   )
   const recents = sortSidebarThreads(
-    filterThreads(threadItems, prefs.filters),
+    filterThreads(threadItems, prefs.filters, activeThreadId),
     prefs.sortChats
   )
   const unpinnedLocalItems = alignedLocalItems.filter(
@@ -555,7 +556,8 @@ export function AgentsSidebar({
       threads
         .filter((thread) => !cloudPinnedIds.has(thread.id))
         .map(cloudSidebarThread),
-      prefs.filters
+      prefs.filters,
+      activeThreadId
     )
 
   // Repositories and Recents share one menu: both control the same list.
@@ -1372,7 +1374,6 @@ export function AgentsShell({
   const activeThread = useSidebarActiveThread({
     activeThreadId,
     loadedThreads: [],
-    includeResolved: true,
     enabled: Boolean(activeThreadId),
   })
   const sidebarCommands = useMemo(() => {
