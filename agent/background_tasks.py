@@ -294,7 +294,12 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
             continue
         message = _notification(task)
         try:
-            configurable = _dispatch_config(metadata, thread_id)
+            if metadata.get("task_id"):
+                from agent.tasks.service import recipient_config
+
+                configurable = await recipient_config(thread_id)
+            else:
+                configurable = _dispatch_config(metadata, thread_id)
             configurable["background_task_completion"] = True
             # A completion run can change task state before delivery finishes.
             status_metadata = None

@@ -19,6 +19,8 @@ from agent import background_tasks
 from agent.background_tasks import monitor_background_tasks, reconcile_background_tasks
 from agent.sandboxes import tool_access, tool_routes
 from agent.slack import thinking as slack_thinking
+from agent.tasks import service as task_service
+from agent.tools import task_threads, threads
 from agent.tools.background_execute import (
     TASK_ROOT,
     _launch_command,
@@ -466,10 +468,15 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
     }
 
 
-@pytest.mark.parametrize("tracking_failure", [False, True])
-async def test_reconcile_enqueues_one_claimed_completion(tracking_failure: bool) -> None:
+@pytest.mark.parametrize(
+    ("tracking_failure", "worker"), [(False, False), (True, False), (False, True)]
+)
+async def test_reconcile_enqueues_one_claimed_completion(
+    monkeypatch: pytest.MonkeyPatch, tracking_failure: bool, worker: bool
+) -> None:
     task = {
         "task_id": "task-1",
+        "owner_thread_id": "thread-1",
         "status": "completed",
         "exit_code": 0,
         "duration_seconds": 1,
@@ -487,6 +494,20 @@ async def test_reconcile_enqueues_one_claimed_completion(tracking_failure: bool)
             "running_background_tasks": ["task-1"],
         }
     }
+    if worker:
+        client.threads.get.return_value["metadata"].update(
+            source="dashboard",
+            source_context={},
+            task_id=str(uuid.uuid4()),
+            sandbox_host_thread_id="coordinator",
+            owner_type="user",
+            owner_login="worker-owner",
+        )
+        monkeypatch.setattr(task_service, "langgraph_client", lambda: client)
+        monkeypatch.setattr(task_service, "enforce_github_login_gate", AsyncMock())
+        monkeypatch.setattr(task_service, "get_profile", AsyncMock(return_value={}))
+        monkeypatch.setattr(task_service, "resolve_run_email", AsyncMock(return_value=None))
+        monkeypatch.setattr(threads, "enforce_github_login_gate", AsyncMock())
 
     with (
         patch("agent.background_tasks._client", return_value=client),
@@ -508,9 +529,17 @@ async def test_reconcile_enqueues_one_claimed_completion(tracking_failure: bool)
     dispatch.assert_awaited_once()
     assert dispatch.await_args is not None
     configurable = dispatch.await_args.args[2]
-    assert configurable["source"] == "slack"
+    source = "dashboard" if worker else "slack"
+    assert configurable["source"] == source
     assert configurable["background_task_completion"] is True
-    assert dispatch.await_args.kwargs["source"] == "slack"
+    assert dispatch.await_args.kwargs["source"] == source
+    if worker:
+        config = {"configurable": configurable}
+        monkeypatch.setattr(threads, "get_config", lambda: config)
+        monkeypatch.setattr(task_threads, "get_config", lambda: config)
+        assert await task_threads.actor_from_state({}) == task_service.Actor(
+            thread_id="thread-1", login="worker-owner"
+        )
     assert dispatch.await_args.kwargs["context"] == {
         "sender_id": "system:background-task",
         "surface": "automation",
