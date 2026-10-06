@@ -63,7 +63,7 @@ class Revisions(BaseModel):
 
 class LogLine(BaseModel):
     message: str = ""
-    timestamp: str | None = None
+    timestamp: str | int | None = None
     level: str | None = None
 
 
@@ -128,7 +128,13 @@ class Deployer:
             return
         print(f"::group::last {LOG_LINES} {log_type} log lines")
         for line in reversed(Logs.model_validate_json(response.content).logs):
-            print(" ".join(part for part in (line.timestamp, line.level, line.message) if part))
+            print(
+                " ".join(
+                    str(part)
+                    for part in (line.timestamp, line.level, line.message)
+                    if part is not None and part != ""
+                )
+            )
         print("::endgroup::", flush=True)
 
     async def deploy(self) -> None:

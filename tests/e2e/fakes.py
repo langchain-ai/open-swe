@@ -65,6 +65,7 @@ def add_slack_message(
             "thread_ts": actual_thread_ts,
             "blocks": blocks,
             "is_bot": is_bot,
+            **({"subtype": "bot_message", "bot_id": "B_OPEN_SWE"} if is_bot else {}),
             "reply_broadcast": reply_broadcast,
         }
     )
@@ -317,6 +318,26 @@ def resolve_ref(owner: str, repo: str, ref: str) -> str:
 
 def base_sha(pull: dict[str, Any]) -> str:
     return _branch_tip(pull["owner"], pull["repo"], pull["base"])
+
+
+def commit_author_emails(owner: str, repo: str, path: str, ref: str) -> list[str]:
+    """Author emails of the commits touching ``path`` at ``ref``, newest first."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return []
+    try:
+        out = _git(
+            "--git-dir",
+            str(remote),
+            "log",
+            "--format=%ae",
+            resolve_ref(owner, repo, ref),
+            "--",
+            path,
+        )
+    except subprocess.CalledProcessError:
+        return []
+    return [line for line in out.splitlines() if line]
 
 
 def file_at_ref(owner: str, repo: str, path: str, ref: str) -> str | None:

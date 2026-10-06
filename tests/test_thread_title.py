@@ -157,7 +157,7 @@ async def test_title_generation_renames_channel_promoted_during_update(
         }
     )
     client = type("Client", (), {"threads": threads})()
-    rename = AsyncMock(return_value=(True, None))
+    rename = AsyncMock(return_value=None)
     monkeypatch.setattr("agent.thread_title.rename_session", rename)
     monkeypatch.setattr("agent.thread_title.is_code_channel", AsyncMock(return_value=True))
 
@@ -169,6 +169,46 @@ async def test_title_generation_renames_channel_promoted_during_update(
     )
 
     rename.assert_awaited_once_with("C-code", "Review thread title generation")
+
+
+@pytest.mark.parametrize("suffix", [None, "", " · <https://slack/source|(source)> · <@U1>"])
+async def test_generated_title_updates_only_manual_breakout_roots(
+    monkeypatch: pytest.MonkeyPatch, suffix: str | None
+) -> None:
+    threads = _Threads(
+        {
+            "source": "slack",
+            "title": "fix it",
+            "title_seed": "fix it",
+            "source_context": {
+                "slack_thread": {
+                    "channel_id": "C1",
+                    "thread_ts": "200.0",
+                    "breakout_root_suffix": suffix,
+                }
+            },
+        }
+    )
+    update = AsyncMock(return_value=None)
+    monkeypatch.setattr("agent.thread_title.update_slack_message", update)
+
+    await generate_and_store_thread_title(
+        thread_id="thread-123",
+        conversation="fix it",
+        model=cast(BaseChatModel, _Model()),
+        client=SimpleNamespace(threads=threads),
+    )
+
+    if suffix is None:
+        update.assert_not_awaited()
+    else:
+        update.assert_awaited_once_with(
+            "C1",
+            "200.0",
+            f"`/breakout`: Review thread title generation{suffix}",
+            unfurl_links=False,
+            unfurl_media=False,
+        )
 
 
 @pytest.mark.asyncio

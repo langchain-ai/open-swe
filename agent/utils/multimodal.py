@@ -83,19 +83,12 @@ async def fetch_image_block(
     """Fetch image bytes and build a model content block."""
     try:
         logger.debug("Fetching image from %s", image_url)
-        response, blocked = await request_with_safe_redirects(
+        response = await request_with_safe_redirects(
             client,
             "GET",
             image_url,
             headers_for_url=_image_auth_headers_for_url,
         )
-        if blocked:
-            logger.warning(
-                "Refusing to fetch image (SSRF guard) %s: %s", image_url, blocked["content"]
-            )
-            return None
-        if response is None:
-            return None
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
         if not content_type:

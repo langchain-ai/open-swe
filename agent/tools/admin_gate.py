@@ -36,7 +36,7 @@ async def participant_is_admin(login: str) -> bool:
 
 def is_private_admin_surface(cfg: RunConfig) -> bool:
     """Whether this run comes from a private surface stamped for admin use."""
-    dashboard = cfg.source in {None, "dashboard"}
+    dashboard = cfg.source in {None, "dashboard", "mcp"}
     slack_dm = (
         cfg.source == "slack"
         and cfg.slack_thread is not None

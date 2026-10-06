@@ -61,7 +61,7 @@ def _setup(
         yield current[-1]
 
     monkeypatch.setattr(attach_tool, "slack_thread_mutation_lock", unlocked)
-    upload = AsyncMock(return_value=("F1", None))
+    upload = AsyncMock(return_value="F1")
     monkeypatch.setattr(attach_tool, "upload_slack_thread_file", upload)
     return upload
 
