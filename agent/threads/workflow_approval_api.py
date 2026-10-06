@@ -10,8 +10,8 @@ from agent.dispatch import dispatch_agent_run
 from agent.source_context import SourceContext
 from agent.threads.plan_api import fetch_thread_metadata
 from agent.threads.summary import (
+    _assert_thread_promptable,
     repo_config_from_metadata,
-    thread_is_promptable,
     thread_is_readable,
     thread_source,
 )
@@ -48,8 +48,7 @@ async def approve_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_promptable(metadata, session["sub"]):
-        raise HTTPException(404, "thread not found")
+    _assert_thread_promptable(metadata, session["sub"])
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
@@ -70,8 +69,7 @@ async def reject_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_promptable(metadata, session["sub"]):
-        raise HTTPException(404, "thread not found")
+    _assert_thread_promptable(metadata, session["sub"])
     record = await decide_workflow_push_approval(
         thread_id, fingerprint, approved=False, actor=session["sub"]
     )

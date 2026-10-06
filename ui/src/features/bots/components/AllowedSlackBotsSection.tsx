@@ -15,6 +15,8 @@ import { api } from "@/lib/api"
 import type { AllowedSlackBot } from "@/lib/api"
 
 const QUERY_KEY = ["allowedSlackBots"]
+/** What every user's Bots page lists; it follows the allowlist. */
+const DIRECTORY_QUERY_KEY = ["allowedSlackBotDirectory"]
 
 const sameBot = (a: AllowedSlackBot, b: AllowedSlackBot) =>
   a.team_id === b.team_id && a.bot_id === b.bot_id
@@ -41,6 +43,7 @@ export function AllowedSlackBotsSection() {
     mutationFn: api.allowSlackBot,
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: QUERY_KEY })
+      void qc.invalidateQueries({ queryKey: DIRECTORY_QUERY_KEY })
       setOpen(false)
       setBotId("")
       setSearch("")
@@ -62,7 +65,11 @@ export function AllowedSlackBotsSection() {
           ? [...current, bot]
           : current
       ),
-    onSettled: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: QUERY_KEY }),
+        qc.invalidateQueries({ queryKey: DIRECTORY_QUERY_KEY }),
+      ]),
   })
 
   const pending = add.isPending

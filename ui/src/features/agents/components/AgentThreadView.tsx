@@ -133,8 +133,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   // started it. Everywhere else it is read-only.
   const localThread = useLocalThread(thread.id)
   const runsElsewhere = runsOnAMac(thread) && !localThread
+  // A Slack bot's thread is steered from its Slack thread, never from here.
+  const botThread = thread.triggerKind === "slack_bot"
   const canPost =
     !runsElsewhere &&
+    !botThread &&
     ((thread.threadCategory !== "automation" && !thread.adminThread) ||
       session.data?.is_admin === true)
   // The bridge outlives a thread view but not the app; serve the checkout
@@ -867,11 +870,13 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 placeholder={
                   runsElsewhere
                     ? "This thread runs on another Mac"
-                    : canPost
-                      ? hasConversation
-                        ? "Add a follow up"
-                        : "Send the first message"
-                      : "Only workspace admins can send messages in this thread"
+                    : botThread
+                      ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
+                      : canPost
+                        ? hasConversation
+                          ? "Add a follow up"
+                          : "Send the first message"
+                        : "Only workspace admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
                 compact

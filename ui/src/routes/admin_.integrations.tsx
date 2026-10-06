@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage } from "@/components/AppShell"
-import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { SlackIntegrationSection } from "@/features/settings/components/AdminSections"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { pageTitle } from "@/lib/pageTitle"
@@ -18,9 +17,7 @@ export const Route = createFileRoute("/admin_/integrations")({
         <>
           <SlackIntegrationSection
             backendUrl={user.slack_base_url ?? user.api_base_url}
-          >
-            <AllowedSlackBotsSection />
-          </SlackIntegrationSection>
+          />
           <MCPConnectionsSection scope="instance" />
         </>
       )}
