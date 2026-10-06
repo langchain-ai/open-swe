@@ -42,6 +42,7 @@ export function ThreadParticipants({ threadId }: { threadId: string }) {
   return (
     <Popover>
       <PopoverTrigger
+        openOnHover
         aria-label={`View ${people.length} thread participant${people.length === 1 ? "" : "s"}`}
         data-no-drag=""
         className="rounded-full p-1 hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
