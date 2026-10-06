@@ -462,6 +462,22 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update({"source": "schedule", "slack_thread": None})
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+
+    tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
+    # A prompt can ask it to report somewhere; the thread-bound tools stay out.
+    assert tool_names & SLACK_TOOL_NAMES == {"slack_list_channels", "slack_post_message"}
+
+
+@pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     config = _base_config()
     configurable = config.get("configurable")

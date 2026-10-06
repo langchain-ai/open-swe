@@ -951,7 +951,7 @@ async def test_the_startup_import_moves_store_automations_into_postgres(
     )
     # Schedules no longer name a repository; the prompt says where to work.
     assert "repo" not in first["triggers"][0]["config"]
-    assert first["prompt"].endswith("Work in the `langchain-ai/open-swe` repository.")
+    assert first["prompt"].endswith("Scheduled runs work in `langchain-ai/open-swe`.")
     assert second["triggers"][0]["config"] == {
         "kind": "github",
         "repo": "langchain-ai/open-swe",

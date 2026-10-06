@@ -660,7 +660,7 @@ def _report_to_slack(record: dict[str, Any], prompt_text: str) -> str:
 
 def _work_in_repo(prompt_text: str, repo: str | None) -> str:
     """``prompt_text`` naming ``repo``, for a schedule that used to start runs there."""
-    return f"{prompt_text}\n\nWork in the `{repo}` repository." if repo else prompt_text
+    return f"{prompt_text}\n\nScheduled runs work in `{repo}`." if repo else prompt_text
 
 
 async def create_agent_schedule(
@@ -1448,6 +1448,28 @@ def _slack_event_prompt(
     )
 
 
+async def _claim_delivery(
+    claim_key: str, group: str, max_runs_per_hour: object, schedule_id: str
+) -> bool:
+    """Claim a delivery for one automation, within its trigger's hourly run cap."""
+    if not isinstance(max_runs_per_hour, int):
+        return await event_claims.claim(_DELIVERY_CLAIM_SCOPE, claim_key, ttl=_DELIVERY_CLAIM_TTL)
+    outcome = await event_claims.claim_within_limit(
+        _DELIVERY_CLAIM_SCOPE,
+        claim_key,
+        ttl=_DELIVERY_CLAIM_TTL,
+        group=group,
+        limit=max_runs_per_hour,
+        within=_RATE_WINDOW,
+    )
+    if outcome == "limited":
+        logger.warning(
+            "Automation trigger hit its hourly run limit",
+            extra={"schedule_id": schedule_id, "claim_group": group},
+        )
+    return outcome == "claimed"
+
+
 async def slack_channel_watched(channel_id: str) -> bool:
     """Whether an enabled automation has a Slack trigger on ``channel_id``."""
     if not postgres.configured():
@@ -1519,20 +1541,10 @@ async def launch_slack_automations(
         if fired is None:
             continue
         claim_prefix = f"{schedule_id}:{channel_id}:"
-        cap = fired.get("max_runs_per_hour")
-        if isinstance(cap, int) and (
-            await event_claims.count_recent(
-                _DELIVERY_CLAIM_SCOPE, claim_prefix, within=_RATE_WINDOW
-            )
-            >= cap
-        ):
-            logger.warning(
-                "Slack automation hit its hourly run limit",
-                extra={"schedule_id": schedule_id, "slack_channel": channel_id},
-            )
-            continue
         claim_key = f"{claim_prefix}{event.ts}"
-        if not await event_claims.claim(_DELIVERY_CLAIM_SCOPE, claim_key, ttl=_DELIVERY_CLAIM_TTL):
+        if not await _claim_delivery(
+            claim_key, claim_prefix, fired.get("max_runs_per_hour"), schedule_id
+        ):
             continue
         try:
             result = await _launch_agent_schedule_record(
@@ -1696,20 +1708,10 @@ async def launch_linear_automations(
             continue
         config, event = match
         claim_prefix = f"{schedule_id}:linear:{team}:"
-        cap = config.get("max_runs_per_hour")
-        if isinstance(cap, int) and (
-            await event_claims.count_recent(
-                _DELIVERY_CLAIM_SCOPE, claim_prefix, within=_RATE_WINDOW
-            )
-            >= cap
-        ):
-            logger.warning(
-                "Linear automation hit its hourly run limit",
-                extra={"schedule_id": schedule_id, "linear_team": team},
-            )
-            continue
         claim_key = f"{claim_prefix}{delivery_id}"
-        if not await event_claims.claim(_DELIVERY_CLAIM_SCOPE, claim_key, ttl=_DELIVERY_CLAIM_TTL):
+        if not await _claim_delivery(
+            claim_key, claim_prefix, config.get("max_runs_per_hour"), schedule_id
+        ):
             continue
         try:
             result = await _launch_agent_schedule_record(

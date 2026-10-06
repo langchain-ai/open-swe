@@ -15,14 +15,21 @@ def upgrade() -> None:
         "CHECK (kind IN ('schedule', 'github', 'slack', 'linear'))"
     )
     # Schedules stop naming the repository their runs start in; say it in the
-    # prompt instead, so an automation keeps working where it did.
+    # prompt instead, so an automation keeps working where it did. Every
+    # schedule's repository is kept, and the line is about scheduled runs only:
+    # event-triggered runs keep working in their event's repository.
     op.execute(
         """
         UPDATE automation a
-        SET prompt = a.prompt || E'\n\nWork in the `' || (t.config->>'repo') || '` repository.'
-        FROM automation_trigger t
-        WHERE t.automation_id = a.id AND t.kind = 'schedule'
-            AND coalesce(t.config->>'repo', '') <> ''
+        SET prompt = a.prompt || E'\n\nScheduled runs work in ' || r.repos || '.'
+        FROM (
+            SELECT automation_id,
+                string_agg(DISTINCT '`' || (config->>'repo') || '`', ', ') AS repos
+            FROM automation_trigger
+            WHERE kind = 'schedule' AND coalesce(config->>'repo', '') <> ''
+            GROUP BY automation_id
+        ) r
+        WHERE r.automation_id = a.id
         """
     )
     op.execute("UPDATE automation_trigger SET config = config - 'repo' WHERE kind = 'schedule'")
