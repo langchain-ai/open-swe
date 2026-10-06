@@ -1677,6 +1677,19 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HumanReviewAvailability": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "HumanReviewAvailability",
+        "type": "object"
+      },
       "HumanReviewDismissBody": {
         "properties": {
           "reason": {
@@ -12013,7 +12026,7 @@
     },
     "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review": {
       "get": {
-        "operationId": "api_human_review_status_dashboard_api_repos__owner___repo__pulls__number__human_review_get",
+        "operationId": "api_human_review_availability_dashboard_api_repos__owner___repo__pulls__number__human_review_get",
         "parameters": [
           {
             "in": "path",
@@ -12048,7 +12061,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HumanReviewStatus"
+                  "$ref": "#/components/schemas/HumanReviewAvailability"
                 }
               }
             },
@@ -12070,7 +12083,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Human Review Status",
+        "summary": "Api Human Review Availability",
         "tags": [
           "dashboard",
           "human-review"
@@ -12236,6 +12249,72 @@
           }
         ],
         "summary": "Api Dismiss Human Review Request",
+        "tags": [
+          "dashboard",
+          "human-review"
+        ]
+      }
+    },
+    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review/status": {
+      "get": {
+        "operationId": "api_human_review_status_dashboard_api_repos__owner___repo__pulls__number__human_review_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanReviewStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Human Review Status",
         "tags": [
           "dashboard",
           "human-review"

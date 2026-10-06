@@ -275,6 +275,7 @@ async def _render_standard(
     request: HumanReviewRequest, outcome: str | None, token: str | None
 ) -> tuple[str, list[Block]]:
     pr = request.pull_request
+    author = await request.author_mention()
     states: dict[str, str] = {}
     if token is not None and outcome in (None, "merged"):
         async with github_client(token=token) as client:
@@ -283,7 +284,7 @@ async def _render_standard(
             )
     if outcome is not None:
         return standard_card.closed_card(
-            request, title=pr.title, outcome=outcome, review_states=states
+            request, title=pr.title, author=author, outcome=outcome, review_states=states
         )
     from agent.human_review.standard import merge_wait
 
@@ -298,13 +299,13 @@ async def _render_standard(
         is None
     ):
         return standard_card.closed_card(
-            request, title=pr.title, outcome="approved", review_states=states
+            request, title=pr.title, author=author, outcome="approved", review_states=states
         )
     requester = request.requested_by
     return standard_card.open_card(
         request,
         title=pr.title,
-        author=await request.author_mention(),
+        author=author,
         requester=standard_card.mention(requester) if requester is not None else None,
         review_states=states,
     )

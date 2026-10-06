@@ -1798,7 +1798,11 @@ export const api = {
     pullRequestAction(pr, { action: "mark-ready" }),
   humanReviewStatus: (repo: string, number: number) =>
     request<{ active: boolean }>(
-      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/human-review`
+      `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/pulls/${number}/human-review/status`
+    ),
+  humanReviewAvailability: (pr: OpenPullRequest) =>
+    request<{ available: boolean }>(
+      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
   requestHumanReview: (pr: OpenPullRequest) =>
     request<HumanReviewRequestResult>(
