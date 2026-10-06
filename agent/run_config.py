@@ -101,6 +101,12 @@ class RunConfig(BaseModel):
     workspace: str | None = None
     local_project_path: str | None = None
 
+    # Cross-repository documentation runs
+    code_review_enabled: bool = True
+    docs_enabled: bool = False
+    docs_job_key: str | None = None
+    docs_fingerprint: str | None = None
+
     # Actor
     github_login: str | None = None
     github_user_id: str | None = None

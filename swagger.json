@@ -1453,6 +1453,64 @@
         "title": "DesktopHandoffExchange",
         "type": "object"
       },
+      "DocsRepoUpdate": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "full_name",
+          "enabled"
+        ],
+        "title": "DocsRepoUpdate",
+        "type": "object"
+      },
+      "DocsSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "docs_base_branch": {
+            "default": "main",
+            "title": "Docs Base Branch",
+            "type": "string"
+          },
+          "docs_mcp_url": {
+            "default": "",
+            "title": "Docs Mcp Url",
+            "type": "string"
+          },
+          "docs_repository": {
+            "default": "",
+            "title": "Docs Repository",
+            "type": "string"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "revision": {
+            "default": "",
+            "title": "Revision",
+            "type": "string"
+          },
+          "source_repositories": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Source Repositories",
+            "type": "array"
+          }
+        },
+        "title": "DocsSettings",
+        "type": "object"
+      },
       "DuplicateIncidentResponse": {
         "properties": {
           "status": {
@@ -9070,6 +9128,160 @@
           }
         ],
         "summary": "Api Report Client Error",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/docs-settings": {
+      "get": {
+        "operationId": "get_docs_settings_dashboard_api_docs_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocsSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Docs Settings",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "put_docs_settings_dashboard_api_docs_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocsSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocsSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Put Docs Settings",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/enabled-docs-repos": {
+      "get": {
+        "operationId": "get_docs_repositories_dashboard_api_enabled_docs_repos_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "title": "Response Get Docs Repositories Dashboard Api Enabled Docs Repos Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Get Docs Repositories",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "put": {
+        "operationId": "put_docs_repository_dashboard_api_enabled_docs_repos_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocsRepoUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "title": "Response Put Docs Repository Dashboard Api Enabled Docs Repos Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Put Docs Repository",
         "tags": [
           "dashboard"
         ]

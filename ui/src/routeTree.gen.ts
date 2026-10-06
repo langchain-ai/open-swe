@@ -9,94 +9,45 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AdminRouteImport } from './routes/admin'
-import { Route as AgentsRouteImport } from './routes/agents'
-import { Route as AssistantRouteImport } from './routes/assistant'
-import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
-import { Route as FeatureFlagsRouteImport } from './routes/feature-flags'
-import { Route as IncidentsRouteImport } from './routes/incidents'
-import { Route as IntegrationsRouteImport } from './routes/integrations'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as MySettingsRouteImport } from './routes/my-settings'
-import { Route as ReviewRouteImport } from './routes/review'
-import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
-import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
-import { Route as AgentsIndexRouteImport } from './routes/agents/index'
-import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
-import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
-import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
-import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
-import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
-import { Route as AssistantThreadIdRouteImport } from './routes/assistant/$threadId'
+import { Route as UsageRouteImport } from './routes/usage'
+import { Route as ReviewRouteImport } from './routes/review'
+import { Route as MySettingsRouteImport } from './routes/my-settings'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as IncidentsRouteImport } from './routes/incidents'
+import { Route as FeatureFlagsRouteImport } from './routes/feature-flags'
+import { Route as DocsRouteImport } from './routes/docs'
+import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
+import { Route as AssistantRouteImport } from './routes/assistant'
+import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
-import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
-import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
+import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
+import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as WorkspacesSlugRouteImport } from './routes/workspaces_.$slug'
-import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
-import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
-import { Route as AgentsAutomationsScheduleIdRouteImport } from './routes/agents/automations/$scheduleId'
-import { Route as AgentsAutomationsNewRouteImport } from './routes/agents/automations/new'
-import { Route as AgentsLocalSessionIdRouteImport } from './routes/agents/local/$sessionId'
+import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
+import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
+import { Route as AssistantThreadIdRouteImport } from './routes/assistant/$threadId'
+import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
+import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
+import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
+import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
+import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
 import { Route as AgentsReviewsIndexRouteImport } from './routes/agents/reviews/index'
+import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
+import { Route as AgentsLocalSessionIdRouteImport } from './routes/agents/local/$sessionId'
+import { Route as AgentsAutomationsNewRouteImport } from './routes/agents/automations/new'
+import { Route as AgentsAutomationsScheduleIdRouteImport } from './routes/agents/automations/$scheduleId'
+import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
 import { Route as OwnerRepoPullNumberRouteImport } from './routes/$owner.$repo.pull.$number'
 import { Route as AgentsReviewsOwnerRepoNumberRouteImport } from './routes/agents/reviews/$owner.$repo.$number'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AdminRoute = AdminRouteImport.update({
-  id: '/admin',
-  path: '/admin',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsRoute = AgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssistantRoute = AssistantRouteImport.update({
-  id: '/assistant',
-  path: '/assistant',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CloudAgentsRoute = CloudAgentsRouteImport.update({
-  id: '/cloud-agents',
-  path: '/cloud-agents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FeatureFlagsRoute = FeatureFlagsRouteImport.update({
-  id: '/feature-flags',
-  path: '/feature-flags',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IncidentsRoute = IncidentsRouteImport.update({
-  id: '/incidents',
-  path: '/incidents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IntegrationsRoute = IntegrationsRouteImport.update({
-  id: '/integrations',
-  path: '/integrations',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MySettingsRoute = MySettingsRouteImport.update({
-  id: '/my-settings',
-  path: '/my-settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReviewRoute = ReviewRouteImport.update({
-  id: '/review',
-  path: '/review',
+const WorkspacesRoute = WorkspacesRouteImport.update({
+  id: '/workspaces',
+  path: '/workspaces',
   getParentRoute: () => rootRouteImport,
 } as any)
 const UsageRoute = UsageRouteImport.update({
@@ -104,19 +55,114 @@ const UsageRoute = UsageRouteImport.update({
   path: '/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkspacesRoute = WorkspacesRouteImport.update({
-  id: '/workspaces',
-  path: '/workspaces',
+const ReviewRoute = ReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminEvalsRoute = AdminEvalsRouteImport.update({
-  id: '/admin_/evals',
-  path: '/admin/evals',
+const MySettingsRoute = MySettingsRouteImport.update({
+  id: '/my-settings',
+  path: '/my-settings',
   getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IntegrationsRoute = IntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IncidentsRoute = IncidentsRouteImport.update({
+  id: '/incidents',
+  path: '/incidents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeatureFlagsRoute = FeatureFlagsRouteImport.update({
+  id: '/feature-flags',
+  path: '/feature-flags',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CloudAgentsRoute = CloudAgentsRouteImport.update({
+  id: '/cloud-agents',
+  path: '/cloud-agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssistantRoute = AssistantRouteImport.update({
+  id: '/assistant',
+  path: '/assistant',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IncidentsIndexRoute = IncidentsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => IncidentsRoute,
+} as any)
+const AssistantIndexRoute = AssistantIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AssistantRoute,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const WorkspacesSlugRoute = WorkspacesSlugRouteImport.update({
+  id: '/workspaces_/$slug',
+  path: '/workspaces/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewStylesRoute = ReviewStylesRouteImport.update({
+  id: '/review_/styles',
+  path: '/review/styles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
+  id: '/$incidentId',
+  path: '/$incidentId',
+  getParentRoute: () => IncidentsRoute,
+} as any)
+const AssistantThreadIdRoute = AssistantThreadIdRouteImport.update({
+  id: '/$threadId',
+  path: '/$threadId',
+  getParentRoute: () => AssistantRoute,
+} as any)
+const AgentsWorkspacesRoute = AgentsWorkspacesRouteImport.update({
+  id: '/agents_/workspaces',
+  path: '/agents/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
+  id: '/agents_/instructions',
+  path: '/agents/instructions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsSkillsRoute = AgentsSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
@@ -124,59 +170,34 @@ const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
   path: '/$threadId',
   getParentRoute: () => AgentsRoute,
 } as any)
-const AgentsSkillsRoute = AgentsSkillsRouteImport.update({
-  id: '/skills',
-  path: '/skills',
-  getParentRoute: () => AgentsRoute,
-} as any)
-const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
-  id: '/agents_/instructions',
-  path: '/agents/instructions',
+const AdminEvalsRoute = AdminEvalsRouteImport.update({
+  id: '/admin_/evals',
+  path: '/admin/evals',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsWorkspacesRoute = AgentsWorkspacesRouteImport.update({
-  id: '/agents_/workspaces',
-  path: '/agents/workspaces',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AssistantIndexRoute = AssistantIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AssistantRoute,
-} as any)
-const AssistantThreadIdRoute = AssistantThreadIdRouteImport.update({
-  id: '/$threadId',
-  path: '/$threadId',
-  getParentRoute: () => AssistantRoute,
-} as any)
-const IncidentsIndexRoute = IncidentsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => IncidentsRoute,
-} as any)
-const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
-  id: '/$incidentId',
-  path: '/$incidentId',
-  getParentRoute: () => IncidentsRoute,
-} as any)
-const ReviewStylesRoute = ReviewStylesRouteImport.update({
-  id: '/review_/styles',
-  path: '/review/styles',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkspacesSlugRoute = WorkspacesSlugRouteImport.update({
-  id: '/workspaces_/$slug',
-  path: '/workspaces/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsThreadIdPlanRoute = AgentsThreadIdPlanRouteImport.update({
-  id: '/$threadId_/plan',
-  path: '/$threadId/plan',
+const AgentsReviewsIndexRoute = AgentsReviewsIndexRouteImport.update({
+  id: '/reviews/',
+  path: '/reviews/',
   getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsAutomationsIndexRoute = AgentsAutomationsIndexRouteImport.update({
   id: '/automations/',
   path: '/automations/',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const ReviewRepositoriesOwnerRoute = ReviewRepositoriesOwnerRouteImport.update({
+  id: '/review_/repositories/$owner',
+  path: '/review/repositories/$owner',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsLocalSessionIdRoute = AgentsLocalSessionIdRouteImport.update({
+  id: '/local/$sessionId',
+  path: '/local/$sessionId',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const AgentsAutomationsNewRoute = AgentsAutomationsNewRouteImport.update({
+  id: '/automations/new',
+  path: '/automations/new',
   getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsAutomationsScheduleIdRoute =
@@ -185,25 +206,10 @@ const AgentsAutomationsScheduleIdRoute =
     path: '/automations/$scheduleId',
     getParentRoute: () => AgentsRoute,
   } as any)
-const AgentsAutomationsNewRoute = AgentsAutomationsNewRouteImport.update({
-  id: '/automations/new',
-  path: '/automations/new',
+const AgentsThreadIdPlanRoute = AgentsThreadIdPlanRouteImport.update({
+  id: '/$threadId_/plan',
+  path: '/$threadId/plan',
   getParentRoute: () => AgentsRoute,
-} as any)
-const AgentsLocalSessionIdRoute = AgentsLocalSessionIdRouteImport.update({
-  id: '/local/$sessionId',
-  path: '/local/$sessionId',
-  getParentRoute: () => AgentsRoute,
-} as any)
-const AgentsReviewsIndexRoute = AgentsReviewsIndexRouteImport.update({
-  id: '/reviews/',
-  path: '/reviews/',
-  getParentRoute: () => AgentsRoute,
-} as any)
-const ReviewRepositoriesOwnerRoute = ReviewRepositoriesOwnerRouteImport.update({
-  id: '/review_/repositories/$owner',
-  path: '/review/repositories/$owner',
-  getParentRoute: () => rootRouteImport,
 } as any)
 const OwnerRepoPullNumberRoute = OwnerRepoPullNumberRouteImport.update({
   id: '/$owner/$repo/pull/$number',
@@ -223,6 +229,7 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRouteWithChildren
   '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
+  '/docs': typeof DocsRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
@@ -257,6 +264,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/cloud-agents': typeof CloudAgentsRoute
+  '/docs': typeof DocsRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -293,6 +301,7 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRouteWithChildren
   '/assistant': typeof AssistantRouteWithChildren
   '/cloud-agents': typeof CloudAgentsRoute
+  '/docs': typeof DocsRoute
   '/feature-flags': typeof FeatureFlagsRoute
   '/incidents': typeof IncidentsRouteWithChildren
   '/integrations': typeof IntegrationsRoute
@@ -331,6 +340,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/assistant'
     | '/cloud-agents'
+    | '/docs'
     | '/feature-flags'
     | '/incidents'
     | '/integrations'
@@ -365,6 +375,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/cloud-agents'
+    | '/docs'
     | '/feature-flags'
     | '/integrations'
     | '/login'
@@ -400,6 +411,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/assistant'
     | '/cloud-agents'
+    | '/docs'
     | '/feature-flags'
     | '/incidents'
     | '/integrations'
@@ -437,6 +449,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRouteWithChildren
   AssistantRoute: typeof AssistantRouteWithChildren
   CloudAgentsRoute: typeof CloudAgentsRoute
+  DocsRoute: typeof DocsRoute
   FeatureFlagsRoute: typeof FeatureFlagsRoute
   IncidentsRoute: typeof IncidentsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRoute
@@ -456,81 +469,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/admin': {
-      id: '/admin'
-      path: '/admin'
-      fullPath: '/admin'
-      preLoaderRoute: typeof AdminRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agents': {
-      id: '/agents'
-      path: '/agents'
-      fullPath: '/agents'
-      preLoaderRoute: typeof AgentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assistant': {
-      id: '/assistant'
-      path: '/assistant'
-      fullPath: '/assistant'
-      preLoaderRoute: typeof AssistantRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cloud-agents': {
-      id: '/cloud-agents'
-      path: '/cloud-agents'
-      fullPath: '/cloud-agents'
-      preLoaderRoute: typeof CloudAgentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/feature-flags': {
-      id: '/feature-flags'
-      path: '/feature-flags'
-      fullPath: '/feature-flags'
-      preLoaderRoute: typeof FeatureFlagsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/incidents': {
-      id: '/incidents'
-      path: '/incidents'
-      fullPath: '/incidents'
-      preLoaderRoute: typeof IncidentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/integrations': {
-      id: '/integrations'
-      path: '/integrations'
-      fullPath: '/integrations'
-      preLoaderRoute: typeof IntegrationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/my-settings': {
-      id: '/my-settings'
-      path: '/my-settings'
-      fullPath: '/my-settings'
-      preLoaderRoute: typeof MySettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/review': {
-      id: '/review'
-      path: '/review'
-      fullPath: '/review'
-      preLoaderRoute: typeof ReviewRouteImport
+    '/workspaces': {
+      id: '/workspaces'
+      path: '/workspaces'
+      fullPath: '/workspaces'
+      preLoaderRoute: typeof WorkspacesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/usage': {
@@ -540,25 +483,158 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workspaces': {
-      id: '/workspaces'
-      path: '/workspaces'
-      fullPath: '/workspaces'
-      preLoaderRoute: typeof WorkspacesRouteImport
+    '/review': {
+      id: '/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof ReviewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin_/evals': {
-      id: '/admin_/evals'
-      path: '/admin/evals'
-      fullPath: '/admin/evals'
-      preLoaderRoute: typeof AdminEvalsRouteImport
+    '/my-settings': {
+      id: '/my-settings'
+      path: '/my-settings'
+      fullPath: '/my-settings'
+      preLoaderRoute: typeof MySettingsRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations': {
+      id: '/integrations'
+      path: '/integrations'
+      fullPath: '/integrations'
+      preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/incidents': {
+      id: '/incidents'
+      path: '/incidents'
+      fullPath: '/incidents'
+      preLoaderRoute: typeof IncidentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feature-flags': {
+      id: '/feature-flags'
+      path: '/feature-flags'
+      fullPath: '/feature-flags'
+      preLoaderRoute: typeof FeatureFlagsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cloud-agents': {
+      id: '/cloud-agents'
+      path: '/cloud-agents'
+      fullPath: '/cloud-agents'
+      preLoaderRoute: typeof CloudAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assistant': {
+      id: '/assistant'
+      path: '/assistant'
+      fullPath: '/assistant'
+      preLoaderRoute: typeof AssistantRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents': {
+      id: '/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/incidents/': {
+      id: '/incidents/'
+      path: '/'
+      fullPath: '/incidents/'
+      preLoaderRoute: typeof IncidentsIndexRouteImport
+      parentRoute: typeof IncidentsRoute
+    }
+    '/assistant/': {
+      id: '/assistant/'
+      path: '/'
+      fullPath: '/assistant/'
+      preLoaderRoute: typeof AssistantIndexRouteImport
+      parentRoute: typeof AssistantRoute
     }
     '/agents/': {
       id: '/agents/'
       path: '/'
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/workspaces_/$slug': {
+      id: '/workspaces_/$slug'
+      path: '/workspaces/$slug'
+      fullPath: '/workspaces/$slug'
+      preLoaderRoute: typeof WorkspacesSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/review_/styles': {
+      id: '/review_/styles'
+      path: '/review/styles'
+      fullPath: '/review/styles'
+      preLoaderRoute: typeof ReviewStylesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/incidents/$incidentId': {
+      id: '/incidents/$incidentId'
+      path: '/$incidentId'
+      fullPath: '/incidents/$incidentId'
+      preLoaderRoute: typeof IncidentsIncidentIdRouteImport
+      parentRoute: typeof IncidentsRoute
+    }
+    '/assistant/$threadId': {
+      id: '/assistant/$threadId'
+      path: '/$threadId'
+      fullPath: '/assistant/$threadId'
+      preLoaderRoute: typeof AssistantThreadIdRouteImport
+      parentRoute: typeof AssistantRoute
+    }
+    '/agents_/workspaces': {
+      id: '/agents_/workspaces'
+      path: '/agents/workspaces'
+      fullPath: '/agents/workspaces'
+      preLoaderRoute: typeof AgentsWorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents_/instructions': {
+      id: '/agents_/instructions'
+      path: '/agents/instructions'
+      fullPath: '/agents/instructions'
+      preLoaderRoute: typeof AgentsInstructionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/skills': {
+      id: '/agents/skills'
+      path: '/skills'
+      fullPath: '/agents/skills'
+      preLoaderRoute: typeof AgentsSkillsRouteImport
       parentRoute: typeof AgentsRoute
     }
     '/agents/$threadId': {
@@ -568,74 +644,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsThreadIdRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents/skills': {
-      id: '/agents/skills'
-      path: '/skills'
-      fullPath: '/agents/skills'
-      preLoaderRoute: typeof AgentsSkillsRouteImport
-      parentRoute: typeof AgentsRoute
-    }
-    '/agents_/instructions': {
-      id: '/agents_/instructions'
-      path: '/agents/instructions'
-      fullPath: '/agents/instructions'
-      preLoaderRoute: typeof AgentsInstructionsRouteImport
+    '/admin_/evals': {
+      id: '/admin_/evals'
+      path: '/admin/evals'
+      fullPath: '/admin/evals'
+      preLoaderRoute: typeof AdminEvalsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents_/workspaces': {
-      id: '/agents_/workspaces'
-      path: '/agents/workspaces'
-      fullPath: '/agents/workspaces'
-      preLoaderRoute: typeof AgentsWorkspacesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/assistant/': {
-      id: '/assistant/'
-      path: '/'
-      fullPath: '/assistant/'
-      preLoaderRoute: typeof AssistantIndexRouteImport
-      parentRoute: typeof AssistantRoute
-    }
-    '/assistant/$threadId': {
-      id: '/assistant/$threadId'
-      path: '/$threadId'
-      fullPath: '/assistant/$threadId'
-      preLoaderRoute: typeof AssistantThreadIdRouteImport
-      parentRoute: typeof AssistantRoute
-    }
-    '/incidents/': {
-      id: '/incidents/'
-      path: '/'
-      fullPath: '/incidents/'
-      preLoaderRoute: typeof IncidentsIndexRouteImport
-      parentRoute: typeof IncidentsRoute
-    }
-    '/incidents/$incidentId': {
-      id: '/incidents/$incidentId'
-      path: '/$incidentId'
-      fullPath: '/incidents/$incidentId'
-      preLoaderRoute: typeof IncidentsIncidentIdRouteImport
-      parentRoute: typeof IncidentsRoute
-    }
-    '/review_/styles': {
-      id: '/review_/styles'
-      path: '/review/styles'
-      fullPath: '/review/styles'
-      preLoaderRoute: typeof ReviewStylesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/workspaces_/$slug': {
-      id: '/workspaces_/$slug'
-      path: '/workspaces/$slug'
-      fullPath: '/workspaces/$slug'
-      preLoaderRoute: typeof WorkspacesSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agents/$threadId_/plan': {
-      id: '/agents/$threadId_/plan'
-      path: '/$threadId/plan'
-      fullPath: '/agents/$threadId/plan'
-      preLoaderRoute: typeof AgentsThreadIdPlanRouteImport
+    '/agents/reviews/': {
+      id: '/agents/reviews/'
+      path: '/reviews'
+      fullPath: '/agents/reviews/'
+      preLoaderRoute: typeof AgentsReviewsIndexRouteImport
       parentRoute: typeof AgentsRoute
     }
     '/agents/automations/': {
@@ -645,11 +665,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAutomationsIndexRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents/automations/$scheduleId': {
-      id: '/agents/automations/$scheduleId'
-      path: '/automations/$scheduleId'
-      fullPath: '/agents/automations/$scheduleId'
-      preLoaderRoute: typeof AgentsAutomationsScheduleIdRouteImport
+    '/review_/repositories/$owner': {
+      id: '/review_/repositories/$owner'
+      path: '/review/repositories/$owner'
+      fullPath: '/review/repositories/$owner'
+      preLoaderRoute: typeof ReviewRepositoriesOwnerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/local/$sessionId': {
+      id: '/agents/local/$sessionId'
+      path: '/local/$sessionId'
+      fullPath: '/agents/local/$sessionId'
+      preLoaderRoute: typeof AgentsLocalSessionIdRouteImport
       parentRoute: typeof AgentsRoute
     }
     '/agents/automations/new': {
@@ -659,26 +686,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAutomationsNewRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents/local/$sessionId': {
-      id: '/agents/local/$sessionId'
-      path: '/local/$sessionId'
-      fullPath: '/agents/local/$sessionId'
-      preLoaderRoute: typeof AgentsLocalSessionIdRouteImport
+    '/agents/automations/$scheduleId': {
+      id: '/agents/automations/$scheduleId'
+      path: '/automations/$scheduleId'
+      fullPath: '/agents/automations/$scheduleId'
+      preLoaderRoute: typeof AgentsAutomationsScheduleIdRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents/reviews/': {
-      id: '/agents/reviews/'
-      path: '/reviews'
-      fullPath: '/agents/reviews/'
-      preLoaderRoute: typeof AgentsReviewsIndexRouteImport
+    '/agents/$threadId_/plan': {
+      id: '/agents/$threadId_/plan'
+      path: '/$threadId/plan'
+      fullPath: '/agents/$threadId/plan'
+      preLoaderRoute: typeof AgentsThreadIdPlanRouteImport
       parentRoute: typeof AgentsRoute
-    }
-    '/review_/repositories/$owner': {
-      id: '/review_/repositories/$owner'
-      path: '/review/repositories/$owner'
-      fullPath: '/review/repositories/$owner'
-      preLoaderRoute: typeof ReviewRepositoriesOwnerRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/$owner/$repo/pull/$number': {
       id: '/$owner/$repo/pull/$number'
@@ -760,6 +780,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRouteWithChildren,
   AssistantRoute: AssistantRouteWithChildren,
   CloudAgentsRoute: CloudAgentsRoute,
+  DocsRoute: DocsRoute,
   FeatureFlagsRoute: FeatureFlagsRoute,
   IncidentsRoute: IncidentsRouteWithChildren,
   IntegrationsRoute: IntegrationsRoute,

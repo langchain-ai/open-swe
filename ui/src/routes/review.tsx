@@ -8,6 +8,7 @@ import {
   SettingsNavRow,
   SettingsSection,
 } from "@/components/AppShell"
+import { DocsTargetSection } from "@/components/DocsTargetSection"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -37,9 +38,10 @@ function ReviewPage() {
     <AppShell
       user={session.data}
       title="Open SWE Review"
-      description="Review pull requests for bugs and issues on demand, or run reviews automatically. Runs are billed based on underlying agent usage."
+      description="Review code and documentation on demand or automatically. Enable either capability per repository; both use one review thread. Runs are billed based on underlying agent usage."
     >
       <RepositoriesSection canEdit={canEdit} />
+      <DocsTargetSection />
 
       <SettingsSection title="Rules">
         <SettingsNavRow
@@ -64,6 +66,11 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
     queryFn: api.listAutoReviewRepos,
   })
 
+  const autoDocs = useQuery({
+    queryKey: ["autoDocsRepos"],
+    queryFn: api.listAutoDocsRepos,
+  })
+  const autoDocsSet = new Set(autoDocs.data?.repos ?? [])
   const autoReviewSet = useMemo(
     () => new Set(autoReview.data?.repos ?? []),
     [autoReview.data?.repos]
@@ -84,7 +91,7 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
     return Array.from(byOwner.entries()).sort(([a], [b]) => a.localeCompare(b))
   }, [repos.data?.repositories])
 
-  const loading = repos.isLoading || autoReview.isLoading
+  const loading = repos.isLoading || autoReview.isLoading || autoDocs.isLoading
 
   return (
     <SettingsSection
@@ -125,7 +132,12 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>
-                  {autoReviewCount}/{list.length} Run Automatically
+                  Review {autoReviewCount} · Docs{" "}
+                  {
+                    list.filter((r) =>
+                      autoDocsSet.has(r.full_name.toLowerCase())
+                    ).length
+                  }
                 </span>
                 <CaretRightIcon className="size-3.5" />
               </div>

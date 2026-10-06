@@ -88,11 +88,67 @@ async def github_webhook(
             response.status_code = 503
             return {"status": "error", "reason": "workspace ownership is temporarily unreadable"}
         if not routable:
+            from agent.docs.models import settings as docs_settings
+
+            config = (
+                await docs_settings()
+                if event_type
+                in {
+                    "pull_request",
+                    "issue_comment",
+                    "pull_request_review_comment",
+                    "pull_request_review",
+                }
+                else None
+            )
+            if config is not None and repository.lower() == config.docs_repository:
+                from agent.docs.coordinator import handle_event
+
+                rejection = await common.enforce_public_repo_org_gate(payload, event_type)
+                if await handle_event(payload, event_type, allow_dispatch=rejection is None):
+                    return {
+                        "status": "accepted",
+                        "message": "Processing linked documentation PR event",
+                    }
             common.logger.info(
                 "Ignoring GitHub event for a repository no workspace owns",
                 extra={"repository": repository},
             )
             return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
+
+    repository = f"{webhook_repo_config['owner']}/{webhook_repo_config['name']}"
+    # The shared coordinator handles both capabilities for docs-enabled repositories.
+    # Store/API failures remain visible for redelivery.
+    from agent.docs.coordinator import handle_event as handle_docs_event
+
+    try:
+        docs_event = False
+        is_docs_repo = False
+        if event_type in {
+            "pull_request",
+            "issue_comment",
+            "pull_request_review_comment",
+            "pull_request_review",
+        }:
+            from agent.docs.models import settings as docs_settings
+
+            docs_config = await docs_settings()
+            is_docs_repo = repository.lower() == docs_config.docs_repository
+            if is_docs_repo or repository.lower() in docs_config.source_repositories:
+                gate_rejection = await common.enforce_public_repo_org_gate(payload, event_type)
+                # Dispatch retains the public-repo gate; cancellation uses authoritative
+                # PR state regardless of who delivered a close/draft/skip event.
+                docs_event = await handle_docs_event(
+                    payload, event_type, allow_dispatch=gate_rejection is None
+                )
+    except Exception:
+        common.logger.exception(
+            "Docs webhook dispatch failed", extra={"github_delivery": delivery_id}
+        )
+        response.status_code = 503
+        return {"status": "error", "reason": "docs dispatch temporarily unavailable"}
+    if docs_event and is_docs_repo:
+        return {"status": "accepted", "message": "Processing documentation PR event"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
@@ -122,6 +178,10 @@ async def github_webhook(
             background_tasks.add_task(service.settle_human_review_on_close, payload)
         elif action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(service.settle_human_reviews, payload)
+        if docs_event:
+            if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
+                background_tasks.add_task(service.process_github_pr_close, payload)
+            return {"status": "accepted", "message": "Processing PR review capabilities"}
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
             common.logger.info(
                 "Accepted GitHub PR %s webhook, scheduling reviewer watch update", action
@@ -146,6 +206,14 @@ async def github_webhook(
         }
 
     if event_type == "push":
+        from agent.docs.models import settings as docs_settings
+
+        config = await docs_settings()
+        if config.enabled and repository.lower() in config.source_repositories:
+            return {
+                "status": "accepted",
+                "message": "Review updates use pull_request synchronize events",
+            }
         if not await common.is_repo_auto_review_enabled(webhook_repo_config):
             return {"status": "ignored", "reason": "Automatic review disabled for repository"}
         common.logger.info("Accepted GitHub push webhook, scheduling reviewer watch evaluation")

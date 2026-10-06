@@ -104,6 +104,9 @@ async def api_set_enabled_review_repo(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, list[str]]:
     repos = await set_review_repo_enabled(update.full_name, update.enabled)
+    from agent.docs.coordinator import invalidate_repository
+
+    await invalidate_repository(normalize_repo_full_name(update.full_name))
     return {"repos": repos}
 
 

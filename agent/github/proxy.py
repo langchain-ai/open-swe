@@ -166,6 +166,9 @@ async def refresh_proxy_token(
         permissions=dict(permission_key) if permission_key else None,
     )
 
+    if permission_key and access.token and not access.expires_at:
+        raise RuntimeError("Scoped sandbox permissions require GitHub App credentials")
+
     from agent.sandboxes.providers.langsmith import configure_sandbox_proxy
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)

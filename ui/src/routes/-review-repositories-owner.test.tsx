@@ -9,7 +9,7 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { Suspense, type ComponentType, type ReactNode } from "react"
-import { afterEach, beforeAll, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest"
 
 import { api } from "@/lib/api"
 import { Route } from "./review_.repositories.$owner"
@@ -41,6 +41,10 @@ vi.mock("@/lib/profile", () => ({
     isLoading: false,
   }),
 }))
+
+beforeEach(() => {
+  vi.spyOn(api, "listAutoDocsRepos").mockResolvedValue({ repos: [] })
+})
 
 afterEach(() => {
   cleanup()
@@ -123,4 +127,28 @@ it("turns the switch back off when the save fails", async () => {
     expect(toggle("acme/api").getAttribute("aria-checked")).toBe("false")
   )
   expect(toggle("acme/web").getAttribute("aria-checked")).toBe("true")
+})
+
+it("enables docs independently from code review and rolls back a failed save", async () => {
+  vi.spyOn(api, "listAutoReviewRepos").mockResolvedValue({
+    repos: ["acme/web"],
+  })
+  const failure: { reject: (error: Error) => void } = { reject: () => {} }
+  const write = vi.spyOn(api, "setAutoDocsRepo").mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        failure.reject = reject
+      })
+  )
+  renderPage()
+  const docs = await screen.findByRole("switch", {
+    name: "Run docs automatically for acme/api",
+  })
+  fireEvent.click(docs)
+  await waitFor(() => expect(docs.getAttribute("aria-checked")).toBe("true"))
+  expect(toggle("acme/api").getAttribute("aria-checked")).toBe("false")
+  expect(toggle("acme/web").getAttribute("aria-checked")).toBe("true")
+  expect(write).toHaveBeenCalledWith("acme/api", true)
+  failure.reject(new Error("Docs target unavailable"))
+  await waitFor(() => expect(docs.getAttribute("aria-checked")).toBe("false"))
 })

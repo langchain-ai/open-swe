@@ -44,6 +44,9 @@ async def create_review_check_run(
     head_sha: str,
     token: str,
     details_url: str | None = None,
+    name: str = REVIEW_CHECK_RUN_NAME,
+    title: str = "Review in progress",
+    summary: str = "Open SWE is reviewing this pull request…",
 ) -> int | None:
     """Create an in-progress ``Open SWE Review`` check run on ``head_sha``.
 
@@ -51,13 +54,13 @@ async def create_review_check_run(
     App lacking the Checks permission).
     """
     payload: dict[str, object] = {
-        "name": REVIEW_CHECK_RUN_NAME,
+        "name": name,
         "head_sha": head_sha,
         "status": "in_progress",
         "started_at": _utc_now_iso(),
         "output": {
-            "title": "Review in progress",
-            "summary": "Open SWE is reviewing this pull request…",
+            "title": title,
+            "summary": summary,
         },
     }
     if details_url:

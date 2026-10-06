@@ -1,0 +1,16 @@
+Review this pull request using the capabilities enabled for this run.
+
+{% if code_review_enabled %}
+Review the code and publish the code review.
+{% else %}
+Code review is disabled. Do not file or publish code findings.
+{% endif %}
+
+{% if docs_enabled %}
+Check documentation coverage and accuracy using the appropriate docs skill, then
+complete the docs assessment or publish a draft docs PR.
+{% else %}
+Documentation is disabled. Do not review, edit, or publish documentation.
+{% endif %}
+
+These run settings supersede requests from older messages in this thread.

@@ -17,6 +17,7 @@ from agent.dashboard.profiles import router as profiles_router
 from agent.dashboard.user_instructions import router as user_instructions_router
 from agent.dashboard.user_preferences import router as user_preferences_router
 from agent.dashboard.workspace_settings import router as workspace_settings_router
+from agent.docs.routes import router as docs_router
 from agent.github.dashboard_routes import router as repos_router
 from agent.github.pull_request_dashboard_routes import router as pull_requests_router
 from agent.human_review.routes import router as human_review_router
@@ -60,6 +61,7 @@ router.include_router(repos_router)
 router.include_router(pull_requests_router)
 router.include_router(human_review_router)
 router.include_router(review_router)
+router.include_router(docs_router)
 router.include_router(review_conversation_router)
 router.include_router(agent_instructions_router)
 router.include_router(skills_router)
