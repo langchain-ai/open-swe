@@ -255,7 +255,8 @@ async def test_draft_card_is_not_posted_until_ready(
     approval = await approval.save()
     deleted = AsyncMock(return_value=True)
     monkeypatch.setattr(lifecycle, "delete_slack_message", deleted)
-    monkeypatch.setattr(lifecycle, "note_for_concierge", AsyncMock())
+    notes = AsyncMock()
+    monkeypatch.setattr(lifecycle, "note_for_concierge", notes)
     updated = AsyncMock(return_value=(True, None))
     monkeypatch.setattr(lifecycle, "update_slack_message", updated)
     monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://origin"))
@@ -284,13 +285,19 @@ async def test_draft_card_is_not_posted_until_ready(
     assert "Ready for review" in str(updated.call_args)
     assert "https://origin" in str(updated.call_args)
     assert "actions" not in str(updated.call_args)
+    assert await lifecycle.refresh_author_dm_card(await _stored(approval), None)
+    assert await lifecycle.refresh_author_dm_card(approval, None)
+    assert updated.await_count == notes.await_count == 1
     approval.state = "cancelled"
     approval.detail = "dismissed by <@U_ADA>"
     await approval.save()
     await lifecycle.refresh_card(approval)
     await lifecycle.prompt_author_ready(approval)
-    assert "dismissed by" in str(updated.call_args)
-    assert "actions" not in str(updated.call_args)
+    assert notes.await_count == 2
+    assert sum(call.args[0] == "D_ADA" for call in updated.await_args_list) == 2
+    dm_updates = [call for call in updated.await_args_list if call.args[0] == "D_ADA"]
+    assert "dismissed by" in str(dm_updates[-1])
+    assert "actions" not in str(dm_updates[-1])
     deleted.assert_not_awaited()
     assert "open_swe_option_select_approve" in str(posted.call_args)
 

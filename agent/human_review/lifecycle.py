@@ -343,6 +343,18 @@ async def refresh_author_dm_card(request: HumanReviewRequest, outcome: str | Non
                 else "Ready for review. Someone else can approve it now."
             )
         )
+        status_key = [
+            status,
+            current.pull_request.url,
+            current.pull_request.title,
+            current.slack_channel_id,
+            current.slack_thread_ts,
+            current.slack_dm_channel_id,
+            current.slack_dm_message_ts,
+        ]
+        if current.run_config.get("author_dm_status") == status_key:
+            request.run_config = current.run_config
+            return True
         origin_url = (
             await get_slack_permalink(current.slack_channel_id, current.slack_thread_ts)
             if current.slack_channel_id and current.slack_thread_ts
@@ -370,6 +382,8 @@ async def refresh_author_dm_card(request: HumanReviewRequest, outcome: str | Non
         )
         if author is not None and author.slack_user_id:
             await note_for_concierge(author.slack_user_id, current.slack_dm_channel_id, text)
+        current.run_config = {**current.run_config, "author_dm_status": status_key}
+        request.run_config = current.run_config
         return True
 
 
