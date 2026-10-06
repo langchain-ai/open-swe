@@ -12,7 +12,8 @@ const DECLARATIONS: ReadonlyArray<RegExp> = [
   /^(describe|it|test|context)(\.\w+)?\(/,
 ]
 
-const CONTROL_FLOW = /^(if|else|for|foreach|while|do|switch|case|catch|try|with|return|await|yield|throw|new)\b/
+const CONTROL_FLOW =
+  /^(if|else|for|foreach|while|do|switch|case|catch|try|with|return|await|yield|throw|new)\b/
 
 const CLOSER = /^([)\]}]|end\b)/
 
@@ -76,7 +77,11 @@ function hunkScope(fileDiff: FileDiffMetadata, hunk: Hunk): string | null {
   )
   if (change == null) return null
   return change.additions > 0
-    ? enclosingScope(fileDiff.additionLines, change.additionLineIndex, fileDiff.name)
+    ? enclosingScope(
+        fileDiff.additionLines,
+        change.additionLineIndex,
+        fileDiff.name
+      )
     : enclosingScope(
         fileDiff.deletionLines,
         change.deletionLineIndex,
