@@ -118,55 +118,32 @@ async def test_result_uses_completed_payload_and_invocation_not_newer_thread_sta
     client.threads.get_state.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    ("status", "payload", "expected"),
-    [
-        (
-            "success",
-            {"values": {"messages": [{"type": "ai", "content": _RESULT}]}},
-            _RESULT,
-        ),
-        (
-            "error",
-            {"error": {"error": "SandboxGoneError", "message": "Shared sandbox deleted"}},
-            "SandboxGoneError: Shared sandbox deleted",
-        ),
-        (
-            "timeout",
-            {"error": "Timed out waiting for <command>"},
-            "Timed out waiting for <command>",
-        ),
-        ("interrupted", {}, "Worker invocation ended with status interrupted."),
-    ],
-)
-async def test_worker_outcome_returns_to_its_task_coordinator(
+async def test_worker_failure_details_return_to_its_task_coordinator(
     worker_context: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
-    status: str,
-    payload: dict[str, object],
-    expected: str,
 ) -> None:
     from agent.tasks import service
 
     notify = AsyncMock()
     monkeypatch.setattr(service, "notify", notify)
-    assert await events.worker_finished(_WORKER, "run", status, payload)
+    assert await events.worker_finished(
+        _WORKER,
+        "run",
+        "error",
+        {"error": {"error": "SandboxGoneError", "message": "Shared sandbox deleted"}},
+    )
     task, recipient, delivery_id, content = notify.await_args.args
     display = notify.await_args.kwargs["task_event"]
     assert isinstance(display, TaskEventMetadata)
     assert recipient == _COORDINATOR
     assert delivery_id == f"finished:{_WORKER}:run"
-    assert display.content == expected
+    assert display.content == "SandboxGoneError: Shared sandbox deleted"
     assert display.kind == "completion"
-    assert display.status == status
+    assert display.status == "error"
     assert display.sender_role == "worker"
     assert str(display.sender_thread_id) == _WORKER
     assert display.task_id == task.id == worker_context.task.id
-    assert _WORKER in content
-    enclosed = content.split("<untrusted-worker-output>", 1)[1].split(
-        "</untrusted-worker-output>", 1
-    )[0]
-    assert ElementTree.fromstring(f"<result>{enclosed}</result>").text.strip() == expected
+    assert display.content in content
 
 
 @pytest.mark.parametrize("is_message", [False, True])

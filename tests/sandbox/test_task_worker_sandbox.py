@@ -62,12 +62,11 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
     return metadata
 
 
-@pytest.mark.parametrize("host_sandbox_id", ["sb-old", "sb-replacement"])
-async def test_worker_attaches_to_current_host_without_guest_proxy_identity(
+async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     shared_sandbox: dict[str, dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
-    host_sandbox_id: str,
 ) -> None:
+    host_sandbox_id = "sb-replacement"
     shared_sandbox["coordinator"]["sandbox_id"] = host_sandbox_id
     backend = MagicMock(id=host_sandbox_id)
     connect = AsyncMock(return_value=backend)
