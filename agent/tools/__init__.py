@@ -70,7 +70,7 @@ _TOOL_MODULES = {
     "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_reply": "agent.slack.tools.reply",
-    "slack_start_new_thread": "agent.slack.tools.start_new_thread",
+    "slack_breakout_thread": "agent.slack.tools.start_new_thread",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
@@ -147,7 +147,7 @@ __all__ = [
     "slack_read_channel_messages",
     "slack_read_thread_messages",
     "slack_reply",
-    "slack_start_new_thread",
+    "slack_breakout_thread",
     "submit_thread_feedback",
     "suggest_task",
     "trigger_automation",
@@ -174,7 +174,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
     from agent.slack.tools.reply import slack_reply
     from agent.slack.tools.request_pr_review import request_pr_review
-    from agent.slack.tools.start_new_thread import slack_start_new_thread
+    from agent.slack.tools.start_new_thread import slack_breakout_thread
     from agent.tools.add_finding import add_finding
     from agent.tools.automations import (
         create_automation,

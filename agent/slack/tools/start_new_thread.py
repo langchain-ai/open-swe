@@ -163,13 +163,13 @@ def _new_slack_thread_context(
     }
 
 
-async def slack_start_new_thread(
+async def slack_breakout_thread(
     title: str,
     instructions: str,
     default_repo: str | None = None,
     channel_id: str | None = None,
 ) -> dict[str, Any]:
-    """Implement the `slack_start_new_thread` tool."""
+    """Implement the `slack_breakout_thread` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:
         return {"success": False, "error": "Missing slack_thread config"}

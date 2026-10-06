@@ -35,7 +35,7 @@ def public_channel(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("private_source", [True, False])
-async def test_slack_start_new_thread_refuses_private_channel(
+async def test_slack_breakout_thread_refuses_private_channel(
     monkeypatch: pytest.MonkeyPatch,
     private_source: bool,
 ) -> None:
@@ -52,7 +52,7 @@ async def test_slack_start_new_thread_refuses_private_channel(
     post = AsyncMock()
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
 
-    result = await slack_breakout_tool.slack_start_new_thread(
+    result = await slack_breakout_tool.slack_breakout_thread(
         "Title", "Do the thing.", channel_id="C2"
     )
 
@@ -119,7 +119,7 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
     ("explicit", "target"),
     [(None, "C1"), ("C3", "C3")],
 )
-async def test_slack_start_new_thread_success(
+async def test_slack_breakout_thread_success(
     monkeypatch: pytest.MonkeyPatch, explicit: str | None, target: str
 ) -> None:
     permalink = None
@@ -239,7 +239,7 @@ async def test_slack_start_new_thread_success(
     monkeypatch.setattr(slack_breakout_tool, "source_thread_line", source_line)
     monkeypatch.setattr(slack_breakout_tool, "mark_broken_out", react)
 
-    result = await slack_breakout_tool.slack_start_new_thread(
+    result = await slack_breakout_tool.slack_breakout_thread(
         "Investigate follow-up",
         "Use the same repo and investigate the follow-up aspect in detail.",
         channel_id=explicit,
@@ -380,7 +380,7 @@ async def test_breakout_preserves_requester_and_credential_scope(
     monkeypatch.setattr(slack_breakout_tool, "get_langsmith_trace_url", _fake_trace_url)
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", dispatch)
 
-    result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
+    result = await slack_breakout_tool.slack_breakout_thread("Title", "Instructions")
 
     assert result["success"] is allowed
     if not allowed:
@@ -422,11 +422,11 @@ async def test_breakout_rejects_unreadable_parent_scope(monkeypatch: pytest.Monk
     monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
 
     with pytest.raises(RuntimeError, match="store unavailable"):
-        await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
+        await slack_breakout_tool.slack_breakout_thread("Title", "Instructions")
     post.assert_not_awaited()
 
 
-async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
+async def test_slack_breakout_thread_returns_detail_failure_without_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {"dispatched": False, "detail_posts": 0, "sleeps": []}
@@ -455,7 +455,7 @@ async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
     monkeypatch.setattr(slack_breakout_tool, "dispatch_agent_run", fake_dispatch_agent_run)
     monkeypatch.setattr(slack_breakout_tool.asyncio, "sleep", fake_sleep)
 
-    result = await slack_breakout_tool.slack_start_new_thread("Title", "Instructions")
+    result = await slack_breakout_tool.slack_breakout_thread("Title", "Instructions")
 
     assert result["success"] is False
     assert result["error"] == "rate_limited: 30"
