@@ -41,7 +41,6 @@ _MAX_COMMITS = 5000
 _MAX_SUBSCRIPTIONS = 5
 _LISTEN_DAYS = 7
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
-_MERGE_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 _CONFIG_KEYS = (
     "source",
@@ -203,7 +202,7 @@ async def subscribe_merged_thread(
     rest.
     """
     merge_sha = sha.strip().lower()
-    if not _MERGE_SHA_RE.fullmatch(merge_sha) or not configured():
+    if not _SHA_RE.fullmatch(merge_sha) or not configured():
         return
     try:
         repository = await Repository.get(f"{owner}/{repo}")
