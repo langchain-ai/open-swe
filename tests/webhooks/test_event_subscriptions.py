@@ -12,10 +12,10 @@ from agent.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
 )
-from agent.webhooks import event_log
-from agent.webhooks.event_log import EventLog, EventRefs
+from agent.webhooks import event_log, event_subscriptions
+from agent.webhooks.event_log import EventLog, EventRefs, LoggedEvent
 from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
-from agent.webhooks.event_subscriptions import EventSubscription
+from agent.webhooks.event_subscriptions import EventSubscription, EventSummary
 
 _THREAD = "thread-1"
 
@@ -147,6 +147,68 @@ async def test_payload_match_filters_ci_results_on_the_subscribed_pull_request(
     assert delivered == [(_THREAD, "enqueue")]
     (subscription,) = await EventSubscription.for_thread(_THREAD)
     assert subscription.trigger_count == 1
+
+
+async def test_configured_open_swe_login_does_not_wake_subscriptions(
+    workspace: dict[str, UUID],
+    delivered: list[tuple[str, MultitaskStrategy]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        event_subscriptions,
+        "OPEN_SWE_GITHUB_LOGINS",
+        frozenset({"open-swe-preview[bot]"}),
+    )
+    await _subscribe(workspace, event_types=["issue_comment.created"])
+
+    payload = {
+        "action": "created",
+        "repository": {"full_name": "acme/widgets"},
+        "sender": {"login": "Open-SWE-Preview[bot]"},
+        "issue": {"number": 7},
+        "comment": {"body": "status", "html_url": "https://github.com/acme/widgets"},
+    }
+    assert EventSummary.of(
+        LoggedEvent(
+            source="github",
+            event_type="issue_comment.created",
+            delivery_id="d-own-comment",
+            received_at=datetime.now(UTC),
+            user_id=None,
+            workspace_id=workspace["workspace"],
+            repository_id=workspace["repository"],
+            pull_request_id=workspace["pull_request"],
+            payload=payload,
+        )
+    ).from_open_swe
+    await _github(
+        "issue_comment",
+        payload,
+        "d-own-comment",
+    )
+
+    assert await _owed() == []
+    assert delivered == []
+
+
+async def test_configured_open_swe_login_ci_results_are_delivered(
+    workspace: dict[str, UUID],
+    delivered: list[tuple[str, MultitaskStrategy]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        event_subscriptions,
+        "OPEN_SWE_GITHUB_LOGINS",
+        frozenset({"open-swe-preview[bot]"}),
+    )
+    await _subscribe(workspace, event_types=["check_suite.completed"])
+    payload = _check_suite("failure")
+    payload["sender"] = {"login": "Open-SWE-Preview[bot]"}
+
+    await _github("check_suite", payload, "d-own-ci")
+
+    assert [match.delivery_id for match in await _owed()] == ["d-own-ci"]
+    assert delivered == [(_THREAD, "enqueue")]
 
 
 async def test_a_one_shot_matches_once_and_ends(

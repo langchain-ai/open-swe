@@ -858,8 +858,9 @@ async def test_linear_triggers_fire_on_created_and_labeled_issues_within_their_f
 
 
 async def test_open_swe_events_do_not_trigger_automations(
-    fake_client: _FakeClient, auth: None
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(schedules, "OPEN_SWE_GITHUB_LOGINS", frozenset({"open-swe-preview[bot]"}))
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
@@ -872,7 +873,7 @@ async def test_open_swe_events_do_not_trigger_automations(
         "action": "opened",
         "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe", "private": True},
         "pull_request": {"number": 9},
-        "sender": {"login": "open-swe[bot]"},
+        "sender": {"login": "Open-SWE-Preview[bot]"},
     }
 
     assert await schedules.launch_github_automations("pull_request", payload, "d-1") == []

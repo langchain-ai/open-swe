@@ -1298,7 +1298,8 @@ async def launch_github_automations(
     if not events:
         return []
     sender_value = payload.get("sender")
-    sender = sender_value.get("login") if isinstance(sender_value, dict) else None
+    sender_login = sender_value.get("login") if isinstance(sender_value, dict) else None
+    sender = sender_login.lower() if isinstance(sender_login, str) else ""
     if sender in OPEN_SWE_GITHUB_LOGINS:
         # A run that opens or closes a pull request would otherwise trigger itself.
         logger.info(

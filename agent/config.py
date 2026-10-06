@@ -256,6 +256,10 @@ ENV.var(
     "USER_ID_API_KEY_MAP", "Legacy per-user API key map for the brokered GitHub auth.", secret=True
 )
 ENV.var("OPEN_SWE_MENTION_TAGS", "Comma-separated handles this deployment answers to.")
+ENV.var(
+    "OPEN_SWE_GITHUB_BOT_LOGINS",
+    "Comma-separated GitHub logins this deployment's App posts as.",
+)
 ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as internal commenters.")
 ENV.var(
     "ALLOWED_GITHUB_ORGS", "Comma-separated GitHub orgs allowed for webhooks and dashboard login."

@@ -258,6 +258,7 @@ GITHUB_APP_CLIENT_SECRET=""
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"   # one line with \n between the PEM lines, or the multi-line value your platform accepts
 GITHUB_WEBHOOK_SECRET=""
 GITHUB_APP_INSTALLATION_ID=""
+OPEN_SWE_GITHUB_BOT_LOGINS=""       # comma-separated logins this deployment's App posts as
 ALLOWED_GITHUB_ORGS=""               # required unless ALLOWED_GITHUB_USERS is set
 ALLOWED_GITHUB_USERS=""              # required unless ALLOWED_GITHUB_ORGS is set
 
@@ -405,7 +406,7 @@ The bundled dashboard needs none of this. Read on only if the dashboard is deplo
 <details id="repository-allowlists-mention-handles-and-user-mapping">
 <summary><strong>Repository allowlists, mention handles, and users</strong></summary>
 
-**Mention handles.** The handles this deployment answers to default to `@openswe,@open-swe,@openswe-dev`; set `OPEN_SWE_MENTION_TAGS` to change them. Handles match on a word boundary, so `@openswe` does not fire on `@openswe-staging`. Set `EXTRA_INTERNAL_BOT_LOGINS` (e.g. `openswe-staging[bot]`) to treat other Open SWE deployments' comments as internal rather than untrusted.
+**Mention handles.** The handles this deployment answers to default to `@openswe,@open-swe,@openswe-dev`; set `OPEN_SWE_MENTION_TAGS` to change them. Handles match on a word boundary, so `@openswe` does not fire on `@openswe-staging`. Set `OPEN_SWE_GITHUB_BOT_LOGINS` (e.g. `open-swe-preview[bot]`) for the GitHub App login used by this deployment. Set `EXTRA_INTERNAL_BOT_LOGINS` to treat other Open SWE deployments' comments as internal rather than untrusted.
 
 **Allowlists.**
 
