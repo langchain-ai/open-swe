@@ -8,7 +8,7 @@ import {
 import { Text } from "@langchain/macaw-components/Text"
 import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
@@ -29,13 +29,24 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const reason = blockers.length
     ? `A review can't be requested yet: ${blockers.join("; ")}.`
     : null
+  const queryClient = useQueryClient()
+  const queryKey = ["humanReviewStatus", pr.repo, pr.number]
+  const status = useQuery({
+    queryKey,
+    queryFn: () => api.humanReviewStatus(pr.repo, pr.number),
+    enabled: pr.reviewDecision !== "approved",
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  })
   const requestReview = useMutation({
     mutationFn: () =>
       api.requestHumanReview(pr, needsChannel ? (channel ?? "") : ""),
     meta: {
       errorTitle: `Could not request a review of ${pullRequestKey(pr)}`,
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
+      await queryClient.cancelQueries({ queryKey })
+      queryClient.setQueryData(queryKey, { active: true })
       toast.success(
         result.reused
           ? `${pullRequestKey(pr)} already has a review request in Slack`
@@ -58,8 +69,17 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     retry: false,
   })
   if (pr.reviewDecision === "approved") return null
+  if (status.isPending) return null
+  if (!status.data)
+    return (
+      <PullRequestActionButton
+        label="Retry review status"
+        disabled={status.isFetching}
+        onClick={() => void status.refetch()}
+      />
+    )
   const label =
-    requestReview.isPending || requestReview.isSuccess
+    requestReview.isPending || status.data.active
       ? "Review requested"
       : requestReview.isError
         ? "Retry review request"
@@ -87,7 +107,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           availability.isPending ||
           (needsChannel && !channel) ||
           requestReview.isPending ||
-          requestReview.isSuccess
+          status.data.active
         }
         onClick={() => requestReview.mutate()}
       />
