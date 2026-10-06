@@ -233,18 +233,42 @@ export interface LocalRepo {
 }
 
 export type SlackNotificationMode = "always" | "on_action"
-export type AutomationTrigger = "schedule" | "github_issue_opened"
+export type GitHubTriggerEvent =
+  | "issues.opened"
+  | "pull_request.opened"
+  | "pull_request.closed"
+  | "pull_request.merged"
+
+/** One way an automation fires; `kind` names the provider, the rest are its filters. */
+export type AutomationTriggerConfig =
+  /** `repo` is where runs start: a cron carries no event to say. */
+  | { kind: "schedule"; cron: string; repo?: string | null }
+  | { kind: "github"; repo: string; events: Array<GitHubTriggerEvent> }
+
+export type AutomationTriggerProvider = AutomationTriggerConfig["kind"]
+
+/** The event providers an automation can run on, each with its events' labels. */
+export const AUTOMATION_EVENT_PROVIDERS = {
+  github: {
+    label: "GitHub",
+    events: {
+      "issues.opened": "Issue opened",
+      "pull_request.opened": "PR opened",
+      "pull_request.closed": "PR closed",
+      "pull_request.merged": "PR merged",
+    } satisfies Record<GitHubTriggerEvent, string>,
+  },
+} as const
 
 export interface AgentSchedule {
   id: string
   name: string
   prompt: string
   schedule: string | null
-  trigger: AutomationTrigger
+  triggers: Array<AutomationTriggerConfig & { id: string }>
   scope: "workspace"
   /** Slug of the workspace every run launches in. */
   workspace: string
-  repo: string | null
   slackChannelId?: string | null
   slackNotificationMode: SlackNotificationMode
   adminThread: boolean

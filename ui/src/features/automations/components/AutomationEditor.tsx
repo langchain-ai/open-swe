@@ -1,19 +1,27 @@
 import { useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { ClockIcon, TrashIcon } from "@phosphor-icons/react"
+import {
+  CheckIcon,
+  ClockIcon,
+  GithubLogoIcon,
+  PencilSimpleIcon,
+  PlusIcon,
+  TrashIcon,
+} from "@phosphor-icons/react"
 
 import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
-  AutomationTrigger,
+  GitHubTriggerEvent,
   SlackNotificationMode,
 } from "@/features/agents/lib/types"
+import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { WorkspaceSelector } from "@/features/agents/components/composer/WorkspaceSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
-import { ScheduleTriggerPicker } from "@/features/automations/components/ScheduleTriggerPicker"
+import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { SlackUserMention } from "@/features/agents/components/messages/SlackMrkdwn"
@@ -26,10 +34,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { describeCron } from "@/features/automations/lib/cron"
+import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
-  describeCron,
-  isDescribableCron,
-} from "@/features/automations/lib/cron"
+  draftProblem,
+  draftsFor,
+  githubDraft,
+  scheduleDraft,
+  toTriggers,
+} from "@/features/automations/lib/triggers"
 import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
@@ -42,11 +55,12 @@ import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedC
 import { useRepos } from "@/lib/profile"
 import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
 
-const TRIGGER_ITEMS: Array<{ value: AutomationTrigger; label: string }> = [
-  { value: "schedule", label: "Schedule" },
-  { value: "github_issue_opened", label: "GitHub issue opened" },
-]
+const GITHUB = AUTOMATION_EVENT_PROVIDERS.github
+const GITHUB_EVENT_ITEMS = (
+  Object.entries(GITHUB.events) as Array<[GitHubTriggerEvent, string]>
+).map(([value, label]) => ({ value, label }))
 
 const NOTIFICATION_ITEMS: Array<{
   value: SlackNotificationMode
@@ -91,18 +105,14 @@ export function AutomationEditor({
   const updateSchedule = useUpdateAgentSchedule()
   const deleteSchedule = useDeleteAgentSchedule()
 
-  const initialCron = schedule?.schedule ?? template?.schedule ?? null
-  const initialTrigger = schedule?.trigger ?? "schedule"
-  const [trigger, setTrigger] = useState<AutomationTrigger>(initialTrigger)
+  const [initialDrafts] = useState(() =>
+    draftsFor(schedule, template?.schedule)
+  )
+  const [drafts, setDrafts] = useState<Array<TriggerDraft>>(initialDrafts)
   const [name, setName] = useState(schedule?.name ?? template?.name ?? "")
   const [prompt, setPrompt] = useState(
     schedule?.prompt ?? template?.prompt ?? ""
   )
-  const [cron, setCron] = useState<string | null>(initialCron)
-  const [customMode, setCustomMode] = useState(
-    initialCron ? !isDescribableCron(initialCron) : false
-  )
-  const [repo, setRepo] = useState<string | null>(schedule?.repo ?? null)
   const [slackChannelId, setSlackChannelId] = useState(
     schedule?.slackChannelId ?? ""
   )
@@ -144,9 +154,9 @@ export function AutomationEditor({
     canManage &&
     (name !== (schedule?.name ?? template?.name ?? "") ||
       prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
-      trigger !== initialTrigger ||
-      cron !== initialCron ||
-      repo !== (schedule?.repo ?? null) ||
+      JSON.stringify(toTriggers(drafts)) !==
+        JSON.stringify(toTriggers(initialDrafts)) ||
+      drafts.length !== initialDrafts.length ||
       slackChannelId !== (schedule?.slackChannelId ?? "") ||
       slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
       enabled !== (schedule?.enabled ?? true) ||
@@ -164,17 +174,50 @@ export function AutomationEditor({
     prompt.trim().length > 0 &&
     workspace !== null &&
     !savedWorkspaceMissing &&
-    (trigger === "github_issue_opened" ? !!repo : !!cron)
+    drafts.length > 0 &&
+    drafts.every((draft) => draftProblem(draft) === null)
 
-  const onPickTrigger = (value: string | null) => {
-    if (value === null) {
-      setCustomMode(true)
-      setCron((current) => current ?? "0 9 * * *")
-    } else {
-      setCustomMode(false)
-      setCron(value)
+  const updateDraft = (
+    key: string,
+    change: (draft: TriggerDraft) => TriggerDraft
+  ) =>
+    setDrafts((current) =>
+      current.map((draft) => (draft.key === key ? change(draft) : draft))
+    )
+  const removeDraft = (key: string) =>
+    setDrafts((current) => current.filter((draft) => draft.key !== key))
+  // A preset sets the cron; Custom (null) keeps it and switches to text editing.
+  const pickSchedule = (key: string | null, cron: string | null) => {
+    if (key === null) {
+      const draft = scheduleDraft(cron ?? "0 9 * * *")
+      setDrafts((current) => [
+        ...current,
+        cron === null ? { ...draft, custom: true } : draft,
+      ])
+      return
     }
+    updateDraft(key, (draft) =>
+      draft.kind === "schedule"
+        ? cron === null
+          ? { ...draft, custom: true }
+          : { ...draft, cron, custom: false }
+        : draft
+    )
   }
+  const toggleEvent = (key: string, event: GitHubTriggerEvent) =>
+    updateDraft(key, (draft) =>
+      draft.kind === "github"
+        ? {
+            ...draft,
+            events: GITHUB_EVENT_ITEMS.map((item) => item.value).filter(
+              (value) =>
+                value === event
+                  ? !draft.events.includes(value)
+                  : draft.events.includes(value)
+            ),
+          }
+        : draft
+    )
 
   const handleSave = () => {
     if (!canSave || workspace === null) return
@@ -187,9 +230,7 @@ export function AutomationEditor({
         {
           name: name.trim(),
           prompt: prompt.trim(),
-          schedule: trigger === "schedule" ? cron?.trim() : null,
-          trigger,
-          repo,
+          triggers: toTriggers(drafts),
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
           admin_thread: adminThread,
@@ -213,9 +254,7 @@ export function AutomationEditor({
         body: {
           name: name.trim(),
           prompt: prompt.trim(),
-          schedule: trigger === "schedule" ? cron?.trim() : null,
-          trigger,
-          repo: repo ?? "",
+          triggers: toTriggers(drafts),
           slack_channel_id: slackChannelId.trim() || null,
           slack_notification_mode: slackNotificationMode,
           admin_thread: adminThread,
@@ -314,15 +353,6 @@ export function AutomationEditor({
             </span>
           </div>
           <span className="text-border">|</span>
-          <RepoSelector
-            repos={reposQuery.data?.repositories}
-            selectedRepo={repo}
-            onRepoChange={setRepo}
-            placeholder="No repository"
-            triggerClassName="text-muted-foreground"
-            disabled={!canManage}
-          />
-          <span className="text-border">|</span>
           <WorkspaceSelector
             workspaces={workspaces}
             selectedSlug={workspace}
@@ -340,64 +370,134 @@ export function AutomationEditor({
         )}
 
         <SectionLabel>Triggers</SectionLabel>
-        <div className="rounded-xl border border-border bg-card p-1.5">
-          <Select
-            items={TRIGGER_ITEMS}
-            value={trigger}
-            onValueChange={(value) =>
-              value && setTrigger(value as AutomationTrigger)
-            }
-            disabled={!canManage}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TRIGGER_ITEMS.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {trigger === "schedule" && cron && (
-            <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
-              <ClockIcon className="size-4 shrink-0 text-muted-foreground" />
-              {customMode ? (
-                <input
-                  value={cron}
-                  onChange={(e) => setCron(e.target.value)}
-                  disabled={!canManage}
-                  placeholder="0 9 * * 1-5"
-                  className="flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
-                />
-              ) : (
-                <span className="flex-1 text-sm text-foreground">
-                  {describeCron(cron)}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setCron(null)
-                  setCustomMode(false)
-                }}
-                aria-label="Remove trigger"
+        <div className="flex flex-col gap-2">
+          {drafts.map((draft) => {
+            const repoPicker = (placeholder: string) => (
+              <RepoSelector
+                repos={reposQuery.data?.repositories}
+                selectedRepo={draft.repo}
+                onRepoChange={(repo) =>
+                  updateDraft(draft.key, (current) => ({ ...current, repo }))
+                }
+                placeholder={placeholder}
+                triggerClassName="text-muted-foreground"
                 disabled={!canManage}
-                className="shrink-0 rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+              />
+            )
+            const problem = draftProblem(draft)
+            if (draft.kind === "schedule") {
+              return (
+                <TriggerCard
+                  key={draft.key}
+                  icon={<ClockIcon className="size-4" />}
+                  removeLabel="Remove schedule"
+                  onRemove={() => removeDraft(draft.key)}
+                  canManage={canManage}
+                  actions={
+                    canManage && (
+                      <TriggerMenu
+                        onSchedule={(cron) => pickSchedule(draft.key, cron)}
+                        aria-label="Change schedule"
+                        className={CARD_ACTION}
+                      >
+                        <PencilSimpleIcon className="size-3.5" />
+                      </TriggerMenu>
+                    )
+                  }
+                >
+                  {draft.custom ? (
+                    <input
+                      value={draft.cron}
+                      onChange={(e) =>
+                        updateDraft(draft.key, (current) => ({
+                          ...current,
+                          cron: e.target.value,
+                        }))
+                      }
+                      disabled={!canManage}
+                      placeholder="0 9 * * 1-5"
+                      aria-label="Cron schedule"
+                      className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+                    />
+                  ) : (
+                    <p className="text-sm text-foreground">
+                      {describeCron(draft.cron)}{" "}
+                      <span className="font-mono text-xs text-muted-foreground/70">
+                        {draft.cron}
+                      </span>
+                    </p>
+                  )}
+                  <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/70">
+                    Runs in {repoPicker("no repository")}
+                  </div>
+                  {problem && (
+                    <p className="mt-1 text-xs text-destructive">{problem}</p>
+                  )}
+                </TriggerCard>
+              )
+            }
+            return (
+              <TriggerCard
+                key={draft.key}
+                icon={<GithubLogoIcon className="size-4" />}
+                removeLabel="Remove GitHub trigger"
+                onRemove={() => removeDraft(draft.key)}
+                canManage={canManage}
               >
-                <TrashIcon className="size-3.5" />
-              </button>
-            </div>
+                <div className="text-sm text-foreground">
+                  {repoPicker("Choose repository")}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {GITHUB_EVENT_ITEMS.map((item) => {
+                    const on = draft.events.includes(item.value)
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => toggleEvent(draft.key, item.value)}
+                        disabled={!canManage}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:pointer-events-none",
+                          on
+                            ? "border-primary/60 bg-primary/20 text-foreground"
+                            : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                        )}
+                      >
+                        {on && <CheckIcon className="size-3 text-primary" />}
+                        {item.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p
+                  className={cn(
+                    "mt-2 text-xs",
+                    problem ? "text-destructive" : "text-muted-foreground/70"
+                  )}
+                >
+                  {problem ??
+                    (draft.events.includes("pull_request.closed")
+                      ? "PR closed also fires when a pull request is merged."
+                      : "Event details reach the run as untrusted context.")}
+                </p>
+              </TriggerCard>
+            )
+          })}
+          {canManage && (
+            <TriggerMenu
+              onSchedule={(cron) => pickSchedule(null, cron)}
+              onGitHub={() =>
+                setDrafts((current) => [...current, githubDraft()])
+              }
+              className="flex items-center gap-1.5 self-start rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+            >
+              <PlusIcon className="size-3.5" />
+              Add trigger
+            </TriggerMenu>
           )}
-          {trigger === "schedule" && cron && (
-            <div className="mx-3 h-px bg-border/60" />
-          )}
-          {canManage && trigger === "schedule" && (
-            <ScheduleTriggerPicker
-              onSelect={onPickTrigger}
-              triggerLabel={cron ? "Change trigger" : "Add Trigger"}
-            />
+          {!canManage && drafts.length === 0 && (
+            <p className="text-xs text-muted-foreground/70">No triggers.</p>
           )}
         </div>
 
@@ -511,6 +611,47 @@ export function AutomationEditor({
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+const CARD_ACTION =
+  "rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+
+function TriggerCard({
+  icon,
+  children,
+  actions,
+  removeLabel,
+  onRemove,
+  canManage,
+}: {
+  icon: React.ReactNode
+  children: React.ReactNode
+  actions?: React.ReactNode
+  removeLabel: string
+  onRemove: () => void
+  canManage: boolean
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-3 py-2.5">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1 py-0.5">{children}</div>
+      {canManage && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {actions}
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={removeLabel}
+            className={CARD_ACTION}
+          >
+            <TrashIcon className="size-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
