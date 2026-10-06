@@ -62,8 +62,9 @@ export function AutomationsList({
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
         <h1 className="text-base font-medium text-foreground">Automations</h1>
         <p className="mt-1 text-xs text-muted-foreground">
-          Run Open SWE on a recurring schedule. Each run starts a fresh agent
-          thread. {!canManage && "Workspace admins manage automation setup."}
+          Run Open SWE on a schedule or when GitHub events happen. Each run
+          starts a fresh agent thread.{" "}
+          {!canManage && "Workspace admins manage automation setup."}
         </p>
         {canManage && (
           <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
@@ -182,8 +183,8 @@ function EmptyState({ canManage }: { canManage: boolean }) {
         No automations yet
       </h3>
       <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-        Schedule Open SWE to run on a recurring cadence — review code, triage
-        issues, or keep docs up to date.
+        Run Open SWE on a schedule or when GitHub events happen — review code,
+        triage new issues, or write release notes when a pull request merges.
       </p>
       {canManage && (
         <Link
