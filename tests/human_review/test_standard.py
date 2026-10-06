@@ -65,6 +65,17 @@ def test_a_ready_pull_request_can_be_put_up_for_review() -> None:
     assert request_blockers(_snapshot()) == []
 
 
+def test_stale_failed_check_does_not_block_review_after_newer_success() -> None:
+    snapshot = _snapshot(
+        check_state="success",
+        mergeable_state="blocked",
+        failing_checks=[],
+        failures_are_required=True,
+    )
+
+    assert "required checks are failing" not in " ".join(request_blockers(snapshot))
+
+
 def test_pending_checks_and_unresolved_threads_do_not_block_the_request() -> None:
     assert request_blockers(_snapshot(check_state="pending", unresolved_threads=3)) == []
 

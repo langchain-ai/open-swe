@@ -799,6 +799,9 @@ async def load_open_pull_request(
     result.unresolved_threads = review_state.unresolved_threads
     if runs is None or statuses is None:
         return result
+    from agent.baby_sit import latest_check_runs
+
+    runs = latest_check_runs(runs)
     failed, _, _ = _normalize_checks(runs, statuses)
     failures = [_as_str(check["name"], "Unnamed check") for check in failed]
     failures.extend(

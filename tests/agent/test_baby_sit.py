@@ -355,3 +355,43 @@ async def test_new_head_resets_retry_budget(
     assert watch is not None
     assert watch.head_sha == "head-2"
     assert watch.retry_count == 0
+
+
+@pytest.mark.parametrize(
+    ("older_conclusion", "newer_conclusion", "expected_state", "expected_failures"),
+    [
+        ("failure", "success", "success", []),
+        ("success", "failure", "failure", ["lint-frontend"]),
+    ],
+)
+def test_aggregate_check_state_uses_latest_run_across_check_suites(
+    older_conclusion: str,
+    newer_conclusion: str,
+    expected_state: str,
+    expected_failures: list[str],
+) -> None:
+    runs = [
+        {
+            "id": 1,
+            "name": "lint-frontend",
+            "app": {"id": 100},
+            "status": "completed",
+            "conclusion": older_conclusion,
+            "completed_at": "2026-10-06T10:00:00Z",
+            "started_at": "2026-10-06T09:00:00Z",
+        },
+        {
+            "id": 2,
+            "name": "lint-frontend",
+            "app": {"id": 100},
+            "status": "completed",
+            "conclusion": newer_conclusion,
+            "completed_at": "2026-10-06T11:00:00Z",
+            "started_at": "2026-10-06T10:00:00Z",
+        },
+    ]
+
+    state, failures = baby_sit.aggregate_check_state(runs, [])
+
+    assert state == expected_state
+    assert [failure["name"] for failure in failures] == expected_failures

@@ -4,6 +4,7 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -389,6 +390,38 @@ def _failure_signals(
     return failures
 
 
+def latest_check_runs(check_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep only the latest run for each check app and name."""
+    latest: dict[
+        tuple[int | None, str | None],
+        tuple[tuple[int, datetime, int, datetime, int], dict[str, Any]],
+    ] = {}
+
+    def timestamp(value: Any) -> tuple[int, datetime]:
+        if not isinstance(value, str):
+            return 0, datetime.min.replace(tzinfo=UTC)
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return 0, datetime.min.replace(tzinfo=UTC)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return 1, parsed.astimezone(UTC)
+
+    for run in check_runs:
+        app = run.get("app")
+        app_id = app.get("id") if isinstance(app, dict) and isinstance(app.get("id"), int) else None
+        name = run.get("name") if isinstance(run.get("name"), str) else None
+        completed_present, completed_at = timestamp(run.get("completed_at"))
+        started_present, started_at = timestamp(run.get("started_at"))
+        run_id = run.get("id") if isinstance(run.get("id"), int) else 0
+        key = (app_id, name)
+        sort_key = (completed_present, completed_at, started_present, started_at, run_id)
+        if key not in latest or sort_key > latest[key][0]:
+            latest[key] = (sort_key, run)
+    return [entry[1] for entry in latest.values()]
+
+
 def _failure_key(head_sha: str, retry_count: int) -> str:
     return hashlib.sha256(f"{head_sha}|retry:{retry_count}".encode()).hexdigest()
 
@@ -397,6 +430,7 @@ def aggregate_check_state(
     check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
 ) -> tuple[str, list[dict[str, Any]]]:
     """``(pending | success | blocked | failure, failing signals)`` for one check set."""
+    check_runs = latest_check_runs(check_runs)
     failures = _failure_signals(check_runs, statuses)
     if failures:
         return "failure", failures
