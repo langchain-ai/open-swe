@@ -12,6 +12,10 @@ import {
 import { CaretDownIcon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
 import { useDiffLineSelection } from "@/features/agents/utils/diffSelection"
+import {
+  selectionExcerpts,
+  serializeExcerpts,
+} from "@/features/agents/utils/codeExcerpt"
 import { DiffSelectionPopover } from "@/features/agents/components/DiffSelectionPopover"
 import { reportError } from "@/lib/errorReporting"
 import { Button } from "@/components/ui/button"
@@ -307,42 +311,14 @@ const FileDiffSection = memo(
     )
     const submitComment = async () => {
       if (!draft || !onComment || !comment.trim() || sending) return
-      const side = draft.side ?? "additions"
-      const endSide = draft.endSide ?? side
-      const excerpt = (source: string, start: number, end: number) =>
-        source
-          .split("\n")
-          .slice(Math.min(start, end) - 1, Math.max(start, end))
-          .join("\n")
-      const ranges =
-        side === endSide
-          ? [{ side, start: draft.start, end: draft.end }]
-          : [
-              { side, start: draft.start, end: draft.start },
-              { side: endSide, start: draft.end, end: draft.end },
-            ]
-      const context = ranges
-        .map(({ side: rangeSide, start, end }) => {
-          const code = excerpt(
-            rangeSide === "deletions"
-              ? file.originalContent
-              : file.modifiedContent,
-            start,
-            end
-          )
-          // Outlast any backtick run in the code so it can't close the fence.
-          const fence = "`".repeat(
-            Math.max(
-              3,
-              ...(code.match(/`+/g) ?? []).map((run) => run.length + 1)
-            )
-          )
-          return `${file.filePath} (${rangeSide} lines ${Math.min(start, end)}–${Math.max(start, end)})\n${fence}\n${code}\n${fence}`
-        })
-        .join("\n\n")
       setSending(true)
       try {
-        await onComment(`${comment.trim()}\n\n${context}`)
+        await onComment(
+          serializeExcerpts(
+            comment,
+            selectionExcerpts(file.filePath, file, draft)
+          )
+        )
         lineSelection.close()
         setComment("")
       } catch (error) {

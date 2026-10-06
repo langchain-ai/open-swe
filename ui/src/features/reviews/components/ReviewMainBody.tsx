@@ -70,7 +70,6 @@ import type {
   ReviewCommentsPayload,
   ReviewDetail,
   ReviewDiffFile,
-  ReviewFileContents,
   ReviewFinding,
   PendingReviewComment,
   ReviewUserRef,
@@ -80,7 +79,7 @@ import type {
   ReviewSidebarGroup,
   ReviewSidebarView,
 } from "@/features/reviews/components/ReviewSidebar"
-import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
+import { selectionExcerpts } from "@/features/agents/utils/codeExcerpt"
 import type {
   DiffRange,
   ProposedComment,
@@ -161,74 +160,6 @@ function readStoredDiffStyle(): DiffStyle {
   return window.localStorage.getItem(REVIEW_DIFF_STYLE_STORAGE_KEY) === "split"
     ? "split"
     : "unified"
-}
-
-// One attachment for a single-side line range. Deletions resolve against the
-// original file, additions against the modified file.
-const SELECTION_CONTEXT_LINES = 2
-
-function makeSideAttachment(
-  file: ReviewDiffFile,
-  contents: ReviewFileContents,
-  side: "deletions" | "additions",
-  fromLine: number,
-  toLine: number
-): ChatAttachment {
-  const source =
-    (side === "deletions"
-      ? contents.originalContent
-      : contents.modifiedContent) ?? ""
-  const lines = source.split("\n")
-  const start = Math.max(1, Math.min(fromLine, toLine))
-  const end = Math.min(lines.length, Math.max(fromLine, toLine))
-  const first = Math.max(1, start - SELECTION_CONTEXT_LINES)
-  const last = Math.min(lines.length, end + SELECTION_CONTEXT_LINES)
-  const width = String(last).length
-  const snippet = lines
-    .slice(first - 1, last)
-    .map((text, i) => {
-      const n = first + i
-      const marker = n >= start && n <= end ? ">" : " "
-      return `${marker} ${String(n).padStart(width)} | ${text}`
-    })
-    .join("\n")
-  const sideLabel = side === "deletions" ? "L" : "R"
-  const lineLabel =
-    start === end ? `${sideLabel}${start}` : `${sideLabel}${start}-${end}`
-  const language = file.path.includes(".")
-    ? (file.path.split(".").pop() ?? "")
-    : ""
-  return {
-    id: crypto.randomUUID(),
-    path: file.path,
-    lineLabel,
-    language,
-    snippet,
-  }
-}
-
-// Build chat attachments from the selected range. A range can span from a
-// deletion to an addition (side !== endSide) when dragging across a replaced
-// block; slicing one file by start..end would paste the wrong lines, so each
-// side is collected separately.
-function buildSelectionAttachments(
-  file: ReviewDiffFile,
-  contents: ReviewFileContents,
-  range: SelectedLineRange
-): Array<ChatAttachment> {
-  const startSide = range.side ?? "additions"
-  const endSide = range.endSide ?? startSide
-  if (startSide === endSide) {
-    return [
-      makeSideAttachment(file, contents, startSide, range.start, range.end),
-    ]
-  }
-  const deletionLine = startSide === "deletions" ? range.start : range.end
-  const additionLine = startSide === "additions" ? range.start : range.end
-  return [
-    makeSideAttachment(file, contents, "deletions", deletionLine, deletionLine),
-    makeSideAttachment(file, contents, "additions", additionLine, additionLine),
-  ]
 }
 
 // Scroll a file card / group flush to the top of the diff scroller (fallback
@@ -1039,12 +970,8 @@ function ReviewBodyInner({
           detail.number,
           file
         )
-        for (const attachment of buildSelectionAttachments(
-          file,
-          contents,
-          range
-        )) {
-          composer?.addAttachment(attachment)
+        for (const excerpt of selectionExcerpts(file.path, contents, range)) {
+          composer?.addAttachment({ id: crypto.randomUUID(), ...excerpt })
         }
         setUserSelection(null)
       } catch (error) {
