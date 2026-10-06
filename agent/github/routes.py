@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response
 from agent.github import webhook as service
 from agent.human_review.completed_reviews import CompletedReview
 from agent.schedules import store as schedules
+from agent.ui_invalidations import Topic
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
 from agent.workspaces.routing import WorkspaceLookupError, repo_is_routable
@@ -38,14 +39,17 @@ async def github_webhook(
 
     event_type = request.headers.get("X-GitHub-Event", "")
     delivery_id = request.headers.get("X-GitHub-Delivery", "")
+    refs = EventRefs.github(body)
     await EventLog.record(
         request,
         body,
         "github",
         event_type=event_type,
         delivery_id=delivery_id,
-        refs=EventRefs.github(body),
+        refs=refs,
     )
+    if refs.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
     common.logger.info(
         "GitHub webhook received",
         extra={

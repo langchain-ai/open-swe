@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query"
 
 import { api, type OpenPullRequest } from "@/lib/api"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
 
 type PullRequestRef = { repo: string; number: number }
@@ -17,11 +18,20 @@ export function pullRequestPreviewQuery(pr: PullRequestRef) {
   } as const
 }
 
+/** Invalidated whenever the pull request or its review changes; `repo` is `owner/name`. */
+export function pullRequestTopic(pr: PullRequestRef) {
+  return invalidationTopic(
+    "pull-requests",
+    `${pr.repo}/${pr.number}`.toLowerCase()
+  )
+}
+
 /** A pull request's live state on GitHub, shared by every page that shows it. */
 export function pullRequestStatusQuery(login: string, pr: PullRequestRef) {
   return {
     queryKey: [PULL_REQUEST_STATUS, login, pr.repo, pr.number],
     queryFn: () => api.pullRequestStatus(pr.repo, pr.number),
+    meta: { invalidatedBy: [pullRequestTopic(pr)] },
   } as const
 }
 

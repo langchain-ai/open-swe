@@ -14,6 +14,7 @@ from agent.database import postgres
 from agent.expedited_review.reviews import REVIEW_BODY_PREFIX
 from agent.github.comments import GitHubAuthError
 from agent.github.notifications import notify_slack_review
+from agent.github.pull_request_key import pull_request_key
 from agent.github.pull_requests import PullRequest, PullRequestEvent
 from agent.human_review.lifecycle import close_for_pull_request
 from agent.human_review.requests import HumanReviewRequest
@@ -377,6 +378,7 @@ async def trigger_pr_review_from_ref(
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
+        pull_request=pull_request_key(pr_ref.owner, pr_ref.repo, pr_ref.number),
     )
     await common.store_current_reviewer_run_id(thread_id, run)
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
@@ -511,6 +513,9 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
+        pull_request=pull_request_key(
+            repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+        ),
     )
     await common.store_current_reviewer_run_id(thread_id, run)
     common.logger.info("Reviewer run dispatched for thread %s (source=%s)", thread_id, source)
@@ -866,6 +871,7 @@ async def process_github_push_event(payload: dict[str, Any]) -> None:
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
+        pull_request=pull_request_key(repo_config["owner"], repo_config["name"], pr_number),
     )
     await common.store_current_reviewer_run_id(thread_id, run)
 

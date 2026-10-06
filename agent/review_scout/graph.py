@@ -23,6 +23,7 @@ from langgraph.runtime import Runtime
 from agent.dashboard.options import gate_fable_model
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.github.app import get_github_app_installation_token_with_expiry
+from agent.github.pull_request_key import PullRequestKey, pull_request_key
 from agent.github.thread_token import cache_github_token_for_thread
 from agent.middleware import (
     BasePrepareRunMiddleware,
@@ -54,6 +55,7 @@ from agent.runtime import (
 from agent.sandboxes.repo_prep import prepare_review_repo
 from agent.tools.commit_walkthrough_step import commit_walkthrough_step
 from agent.tools.record_human_input import record_human_input
+from agent.ui_invalidations import Topic
 from agent.utils.deferred_model import make_deferred_error_model
 from agent.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
@@ -217,6 +219,18 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
         logger.info("Stored review walkthrough", extra={**extra, "scout_steps": len(steps)})
 
 
+class InvalidateReviewPageMiddleware(OpenSWEMiddleware[ReviewScoutState]):
+    """Every model turn moves the walkthrough progress the review page shows."""
+
+    state_schema = ReviewScoutState
+
+    def __init__(self, pull_request: PullRequestKey) -> None:
+        self._pull_request = pull_request
+
+    async def aafter_model(self, state: ReviewScoutState, runtime: Runtime) -> None:  # noqa: ARG002
+        await Topic.PULL_REQUESTS.invalidate(key=self._pull_request)
+
+
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
     try:
         return make_model(model_id, use_gateway=use_gateway, **kwargs)
@@ -275,6 +289,15 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
                 ModelErrorMiddleware(),
                 ModelCallTimeoutMiddleware(),
                 StoreWalkthroughMiddleware(thread_id=thread_id, config=config),
+                *(
+                    [
+                        InvalidateReviewPageMiddleware(
+                            pull_request_key(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
+                        )
+                    ]
+                    if cfg.repo is not None and cfg.pr_number is not None
+                    else []
+                ),
             ],
         ),
     ).with_config(bindable_config(config))
