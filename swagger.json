@@ -5065,26 +5065,6 @@
             "title": "Prompt",
             "type": "string"
           },
-          "slack_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Channel Id"
-          },
-          "slack_notification_mode": {
-            "default": "always",
-            "enum": [
-              "always",
-              "on_action"
-            ],
-            "title": "Slack Notification Mode",
-            "type": "string"
-          },
           "triggers": {
             "items": {
               "discriminator": {
@@ -5221,32 +5201,6 @@
               }
             ],
             "title": "Prompt"
-          },
-          "slack_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Channel Id"
-          },
-          "slack_notification_mode": {
-            "anyOf": [
-              {
-                "enum": [
-                  "always",
-                  "on_action"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Notification Mode"
           },
           "triggers": {
             "anyOf": [

@@ -232,7 +232,6 @@ export interface LocalRepo {
   gitBranch?: string
 }
 
-export type SlackNotificationMode = "always" | "on_action"
 export type GitHubTriggerEvent =
   | "issues.opened"
   | "pull_request.opened"
@@ -303,8 +302,6 @@ export interface AgentSchedule {
   scope: "workspace"
   /** Slug of the workspace every run launches in. */
   workspace: string
-  slackChannelId?: string | null
-  slackNotificationMode: SlackNotificationMode
   adminThread: boolean
   model: string
   effort?: string | null

@@ -485,7 +485,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     slack_names = {
         "manage_code_channel",
         "manage_incident",
-        "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_list_channel_members",

@@ -1,7 +1,8 @@
 Create a workspace automation.
 
 Args:
-    prompt: Complete instructions for every run.
+    prompt: Complete instructions for every run. Runs post nowhere on their own;
+        say in the prompt if a run should report to a Slack channel.
     workspace: Slug of the workspace every run launches in, with its settings,
         MCP connections, and sandbox image. Required; ask which workspace when
         it is not clear.
@@ -29,9 +30,6 @@ Args:
     name: Short display name.
     model_id: Optional supported model ID.
     effort: Optional reasoning effort for the model.
-    slack_channel_id: Optional Slack channel ID starting with C or G, or a
-        Slack member ID starting with U or W to DM that person instead.
-    slack_notification_mode: Post every run or only when the run takes action.
     admin_thread: Give runs workspace-admin capabilities while the creator remains an admin.
         Not allowed with GitHub triggers on public repositories, whose event text
         anyone can write.

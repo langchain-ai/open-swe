@@ -1,4 +1,4 @@
-"""Slack and Linear automation triggers, and schedules without repositories"""
+"""Slack and Linear automation triggers; schedules without repositories; no Slack destination"""
 
 from alembic import op
 
@@ -26,6 +26,23 @@ def upgrade() -> None:
         """
     )
     op.execute("UPDATE automation_trigger SET config = config - 'repo' WHERE kind = 'schedule'")
+    # Automations stop posting to a Slack destination themselves; a channel
+    # destination becomes an instruction the run follows with its Slack tool.
+    # A DM destination has no such tool and is dropped.
+    op.execute(
+        """
+        UPDATE automation
+        SET prompt = prompt || E'\n\n'
+            || CASE WHEN slack_notification_mode = 'on_action'
+                THEN 'When a run takes a concrete action, post'
+                ELSE 'Post' END
+            || ' a short summary of the outcome to <#' || upper(slack_channel_id) || '>.'
+        WHERE slack_channel_id ~* '^[CG]'
+        """
+    )
+    op.execute(
+        "ALTER TABLE automation DROP COLUMN slack_channel_id, DROP COLUMN slack_notification_mode"
+    )
     op.execute(
         "COMMENT ON COLUMN automation_trigger.match_key IS 'What a delivery is matched on: "
         "the lowercased repository for GitHub triggers, the channel ID for Slack triggers, "

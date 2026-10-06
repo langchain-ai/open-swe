@@ -16,7 +16,6 @@ import type {
   AgentSchedule,
   GitHubTriggerEvent,
   LinearTriggerEvent,
-  SlackNotificationMode,
   SlackTriggerEvent,
   SlackTriggerSenders,
 } from "@/features/agents/lib/types"
@@ -29,16 +28,8 @@ import { AutomationRuns } from "@/features/automations/components/AutomationRuns
 import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
-import { SlackUserMention } from "@/features/agents/components/messages/SlackMrkdwn"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
@@ -94,14 +85,6 @@ function toggled<T>(list: Array<T>, item: T, order: Array<T>): Array<T> {
   )
 }
 
-const NOTIFICATION_ITEMS: Array<{
-  value: SlackNotificationMode
-  label: string
-}> = [
-  { value: "always", label: "Every run" },
-  { value: "on_action", label: "Only when action is taken" },
-]
-
 interface AutomationEditorProps {
   mode: "create" | "edit"
   schedule?: AgentSchedule
@@ -145,13 +128,6 @@ export function AutomationEditor({
   const [prompt, setPrompt] = useState(
     schedule?.prompt ?? template?.prompt ?? ""
   )
-  const [slackChannelId, setSlackChannelId] = useState(
-    schedule?.slackChannelId ?? ""
-  )
-  const mySlackUserId = session.data?.slack_user_id
-  const isDm = /^[UW]/.test(slackChannelId)
-  const [slackNotificationMode, setSlackNotificationMode] =
-    useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
   // null = untouched: an existing automation keeps its workspace, and a new
@@ -189,8 +165,6 @@ export function AutomationEditor({
       JSON.stringify(toTriggers(drafts)) !==
         JSON.stringify(toTriggers(initialDrafts)) ||
       drafts.length !== initialDrafts.length ||
-      slackChannelId !== (schedule?.slackChannelId ?? "") ||
-      slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
       (workspaceOverride !== null &&
@@ -283,8 +257,6 @@ export function AutomationEditor({
           name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
-          slack_channel_id: slackChannelId.trim() || null,
-          slack_notification_mode: slackNotificationMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -307,8 +279,6 @@ export function AutomationEditor({
           name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
-          slack_channel_id: slackChannelId.trim() || null,
-          slack_notification_mode: slackNotificationMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -656,69 +626,6 @@ export function AutomationEditor({
           {!canManage && drafts.length === 0 && (
             <p className="text-xs text-muted-foreground/70">No triggers.</p>
           )}
-        </div>
-
-        <SectionLabel>Slack destination</SectionLabel>
-        <div className="rounded-xl border border-border bg-card p-3">
-          <div className="flex items-center gap-2">
-            {isDm ? (
-              <span className="flex-1 text-sm">
-                Direct message to <SlackUserMention userId={slackChannelId} />
-              </span>
-            ) : (
-              <SlackChannelCombobox
-                value={slackChannelId.trim() || null}
-                onValueChange={(id) => setSlackChannelId(id ?? "")}
-                disabled={!canManage}
-                placeholder="Search channels or paste a channel ID"
-                aria-label="Slack channel"
-                className="w-full"
-              />
-            )}
-            {(isDm || mySlackUserId) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!canManage}
-                onClick={() =>
-                  setSlackChannelId(isDm ? "" : (mySlackUserId ?? ""))
-                }
-              >
-                {isDm ? "Use a channel" : "DM me"}
-              </Button>
-            )}
-          </div>
-          <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-            <span className="text-xs text-muted-foreground">
-              {isDm ? "Notify" : "Notify channel"}
-            </span>
-            <Select
-              items={NOTIFICATION_ITEMS}
-              value={slackNotificationMode}
-              onValueChange={(value) =>
-                value && setSlackNotificationMode(value)
-              }
-              disabled={!canManage || !slackChannelId.trim()}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {NOTIFICATION_ITEMS.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground/70">
-            {slackNotificationMode === "on_action"
-              ? "The agent decides whether it performed an action; read-only and no-op runs stay silent."
-              : `Each run starts a new thread in the ${isDm ? "DM" : "channel"}.`}
-            {!isDm && " The Open SWE bot must be a member of the channel."}
-          </p>
         </div>
 
         <SectionLabel>Agent Instructions</SectionLabel>

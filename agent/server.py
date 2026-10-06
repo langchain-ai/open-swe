@@ -209,7 +209,6 @@ from agent.tools import (
     manage_incident,
     manage_thread,
     merge_expedited_pr,
-    notify_automation_channel,
     open_pull_request,
     output_iframe,
     publish_workspace,
@@ -607,7 +606,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "list_threads",
         "listen_events",
         "manage_thread",
-        "notify_automation_channel",
         "read_incident",
         "read_only_sql",
         "read_user_settings",
@@ -1729,7 +1727,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         assign_human_reviewer,
         auto_assign_human_reviewer,
         dismiss_human_review_request,
-        notify_automation_channel,
         open_pull_request,
         link_pull_request,
         *(

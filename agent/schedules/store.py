@@ -43,14 +43,7 @@ from agent.prompts import prompt
 from agent.review.styles import normalize_repo_full_name
 from agent.run_config import RunConfig
 from agent.slack.channels import SlackChannel
-from agent.slack.client import (
-    bind_slack_thread_id,
-    post_slack_top_level_message_with_ts,
-    store_slack_run_mapping,
-)
-from agent.slack.dm import note_for_concierge, open_dm
 from agent.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
-from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.threads.creation import create_thread
@@ -69,12 +62,9 @@ SCHEDULE_RUN_STATE_NAMESPACE: list[str] = ["agent_schedule_run_state"]
 _AGENT_ASSISTANT_ID = "agent"
 _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
-_SLACK_CHANNEL_ID_RE = re.compile(r"^[CGUW][A-Z0-9]{8,}$")
-SlackNotificationMode = Literal["always", "on_action"]
 GitHubEvent = Literal[
     "issues.opened", "pull_request.opened", "pull_request.closed", "pull_request.merged"
 ]
-_DEFAULT_SLACK_NOTIFICATION_MODE: SlackNotificationMode = "always"
 # How a run's prompt names each GitHub event; "closed" also fires for merges.
 GITHUB_EVENT_DESCRIPTIONS: dict[GitHubEvent, str] = {
     "issues.opened": "an issue was opened",
@@ -100,27 +90,6 @@ _RATE_WINDOW = timedelta(hours=1)
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
 _NEW_CRON_GRACE = timedelta(minutes=5)
-
-
-def _normalize_slack_channel_id(value: str | None) -> str | None:
-    channel_id = value.strip().upper() if isinstance(value, str) else ""
-    if not channel_id:
-        return None
-    if not _SLACK_CHANNEL_ID_RE.fullmatch(channel_id):
-        raise ValueError(
-            "slack_channel_id must be a Slack channel ID starting with C or G, "
-            "or a member ID starting with U or W to send DMs"
-        )
-    return channel_id
-
-
-def _slack_dm_user_id(record: dict[str, Any]) -> str | None:
-    target = record.get("slack_channel_id")
-    return target if isinstance(target, str) and target[:1] in ("U", "W") else None
-
-
-def _slack_notification_mode(record: dict[str, Any]) -> SlackNotificationMode:
-    return "on_action" if record.get("slack_notification_mode") == "on_action" else "always"
 
 
 def _normalized_repo(value: str) -> str:
@@ -224,16 +193,9 @@ class ScheduleCreateBody(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     model_id: str | None = None
     effort: str | None = None
-    slack_channel_id: str | None = None
-    slack_notification_mode: SlackNotificationMode = _DEFAULT_SLACK_NOTIFICATION_MODE
     admin_thread: bool = False
     # The workspace its runs launch in, always chosen explicitly.
     workspace: str = Field(min_length=1, max_length=120)
-
-    @field_validator("slack_channel_id")
-    @classmethod
-    def _valid_slack_channel_id(cls, value: str | None) -> str | None:
-        return _normalize_slack_channel_id(value)
 
 
 class ScheduleUpdateBody(BaseModel):
@@ -244,15 +206,8 @@ class ScheduleUpdateBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     enabled: bool | None = None
-    slack_channel_id: str | None = None
-    slack_notification_mode: SlackNotificationMode | None = None
     admin_thread: bool | None = None
     workspace: str | None = None
-
-    @field_validator("slack_channel_id")
-    @classmethod
-    def _valid_slack_channel_id(cls, value: str | None) -> str | None:
-        return _normalize_slack_channel_id(value)
 
 
 def _validate_cron_value(value: str, low: int, high: int) -> None:
@@ -320,8 +275,6 @@ def _schedule_summary(record: dict[str, Any]) -> dict[str, Any]:
         "triggers": [{"id": t["id"], **(t.get("config") or {})} for t in triggers],
         "scope": "workspace",
         "workspace": _record_workspace(record),
-        "slackChannelId": record.get("slack_channel_id"),
-        "slackNotificationMode": _slack_notification_mode(record),
         "adminThread": record.get("admin_thread") is True,
         "model": record.get("model"),
         "effort": record.get("effort"),
@@ -422,8 +375,6 @@ async def _load_records(
                 "workspace": row["workspace_slug"],
                 "name": row["name"],
                 "prompt": row["prompt"],
-                "slack_channel_id": row["slack_channel_id"],
-                "slack_notification_mode": row["slack_notification_mode"],
                 "admin_thread": row["admin_thread"],
                 "model": row["model"],
                 "effort": row["effort"],
@@ -694,6 +645,19 @@ def _test_run_repo(record: dict[str, Any]) -> str | None:
     return None
 
 
+def _report_to_slack(record: dict[str, Any], prompt_text: str) -> str:
+    """``prompt_text`` asking for the Slack report a stored destination used to post."""
+    channel = record.get("slack_channel_id")
+    if not isinstance(channel, str) or not channel.upper().startswith(("C", "G")):
+        return prompt_text
+    when = (
+        "When a run takes a concrete action, post"
+        if record.get("slack_notification_mode") == "on_action"
+        else "Post"
+    )
+    return f"{prompt_text}\n\n{when} a short summary of the outcome to <#{channel.upper()}>."
+
+
 def _work_in_repo(prompt_text: str, repo: str | None) -> str:
     """``prompt_text`` naming ``repo``, for a schedule that used to start runs there."""
     return f"{prompt_text}\n\nWork in the `{repo}` repository." if repo else prompt_text
@@ -734,21 +698,17 @@ async def create_agent_schedule(
         async with transaction() as conn:
             await conn.execute(
                 text(
-                    "INSERT INTO automation (id, workspace_id, name, prompt, "
-                    "slack_channel_id, slack_notification_mode, admin_thread, model, "
-                    "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
-                    "user_email) VALUES (:id, :workspace_id, :name, :prompt, "
-                    ":slack_channel_id, :slack_notification_mode, :admin_thread, "
-                    ":model, :effort, :base_branch, :branch_prefix, true, :login, :login, "
-                    ":user_email)"
+                    "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, "
+                    "model, effort, base_branch, branch_prefix, enabled, created_by, "
+                    "updated_by, user_email) VALUES (:id, :workspace_id, :name, :prompt, "
+                    ":admin_thread, :model, :effort, :base_branch, :branch_prefix, true, "
+                    ":login, :login, :user_email)"
                 ),
                 {
                     "id": uuid.UUID(automation_id),
                     "workspace_id": workspace_id,
                     "name": (body.name or _derive_name(body.prompt)).strip(),
                     "prompt": body.prompt.strip(),
-                    "slack_channel_id": body.slack_channel_id,
-                    "slack_notification_mode": body.slack_notification_mode,
                     "admin_thread": body.admin_thread,
                     "model": chosen_model or profile.get("default_model") or "Default",
                     "effort": chosen_effort or profile.get("reasoning_effort"),
@@ -801,12 +761,6 @@ async def update_agent_schedule(
             columns["effort"] = effort
     if body.enabled is not None:
         columns["enabled"] = body.enabled
-    if "slack_channel_id" in body.model_fields_set:
-        columns["slack_channel_id"] = body.slack_channel_id
-    if "slack_notification_mode" in body.model_fields_set:
-        columns["slack_notification_mode"] = (
-            body.slack_notification_mode or _DEFAULT_SLACK_NOTIFICATION_MODE
-        )
     if body.admin_thread is not None:
         columns["admin_thread"] = body.admin_thread
     if body.workspace is not None:
@@ -946,13 +900,11 @@ async def _import_store_automation(
     async with transaction() as conn:
         inserted = await conn.execute(
             text(
-                "INSERT INTO automation (id, workspace_id, name, prompt, "
-                "slack_channel_id, slack_notification_mode, admin_thread, model, "
+                "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, model, "
                 "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
                 "user_email, last_thread_id, last_run_id, last_triggered_at, last_error, "
                 "last_error_at) VALUES (:id, "
-                ":workspace_id, :name, :prompt, :slack_channel_id, "
-                ":slack_notification_mode, :admin_thread, :model, :effort, :base_branch, "
+                ":workspace_id, :name, :prompt, :admin_thread, :model, :effort, :base_branch, "
                 ":branch_prefix, :enabled, :created_by, :updated_by, :user_email, "
                 ":last_thread_id, :last_run_id, :last_triggered_at, :last_error, "
                 ":last_error_at) ON CONFLICT (id) DO NOTHING "
@@ -962,17 +914,19 @@ async def _import_store_automation(
                 "id": uuid.UUID(schedule_id),
                 "workspace_id": workspace_id,
                 "name": str(record.get("name") or _derive_name(str(record.get("prompt") or ""))),
-                # Schedules no longer name a repository; keep where runs used to start.
-                "prompt": _work_in_repo(
-                    str(record.get("prompt") or ""),
-                    None
-                    if record.get("trigger") not in (None, "schedule")
-                    else _repo_full_name(
-                        record.get("repo") if isinstance(record.get("repo"), dict) else None
+                # Schedules no longer name a repository and automations no longer
+                # post to Slack themselves; the prompt keeps both.
+                "prompt": _report_to_slack(
+                    record,
+                    _work_in_repo(
+                        str(record.get("prompt") or ""),
+                        None
+                        if record.get("trigger") not in (None, "schedule")
+                        else _repo_full_name(
+                            record.get("repo") if isinstance(record.get("repo"), dict) else None
+                        ),
                     ),
                 ),
-                "slack_channel_id": record.get("slack_channel_id"),
-                "slack_notification_mode": _slack_notification_mode(record),
                 "admin_thread": record.get("admin_thread") is True,
                 "model": record.get("model") or "Default",
                 "effort": record.get("effort"),
@@ -1029,42 +983,6 @@ async def import_store_automations() -> int:
     return imported
 
 
-def _slack_root_message(
-    record: dict[str, Any],
-    repo: str | None,
-    *,
-    test_run: bool = False,
-    concierge: bool = False,
-) -> str:
-    repo_line = f"\n*Repository:* `{repo}`" if repo else ""
-    run_kind = "test" if test_run else "scheduled"
-    follow_up = (
-        "Its updates are shared with this DM; message me here to follow up."
-        if concierge
-        else "Reply in this thread to follow up with the agent."
-    )
-    return (
-        f"*Open SWE automation:* {record.get('name') or 'Scheduled agent'}{repo_line}\n\n"
-        f"A {run_kind} run started. {follow_up}"
-    )
-
-
-def _scheduled_prompt(
-    record: dict[str, Any], slack_thread: dict[str, Any] | None, *, task: str | None = None
-) -> str:
-    task = str(record["prompt"]) if task is None else task
-    if slack_thread:
-        return prompt("runs/scheduled-slack-thread", prompt=task)
-    slack_channel_id = record.get("slack_channel_id")
-    if (
-        _slack_notification_mode(record) == "on_action"
-        and isinstance(slack_channel_id, str)
-        and slack_channel_id
-    ):
-        return prompt("runs/scheduled-notify-on-action", prompt=task)
-    return task
-
-
 def _admin_thread_enabled(record: dict[str, Any]) -> bool:
     email = record.get("user_email")
     login = record.get("created_by")
@@ -1105,7 +1023,6 @@ def _agent_run_metadata(
     record: dict[str, Any],
     thread_id: str,
     repo: dict[str, str] | None,
-    slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
     admin_thread: bool = False,
@@ -1136,8 +1053,6 @@ def _agent_run_metadata(
     if repo:
         metadata["repo_owner"] = repo["owner"]
         metadata["repo_name"] = repo["name"]
-    if slack_thread:
-        metadata["source_context"] = SourceContext.parse({"slack_thread": slack_thread}).dump()
     if admin_thread:
         metadata["admin_thread"] = True
     return metadata
@@ -1147,7 +1062,6 @@ async def _agent_run_config(
     record: dict[str, Any],
     thread_id: str,
     repo: dict[str, str] | None,
-    slack_thread: dict[str, Any] | None = None,
     *,
     test_run: bool = False,
     admin_thread: bool = False,
@@ -1166,24 +1080,8 @@ async def _agent_run_config(
     workspace = _record_workspace(record)
     configurable["workspace"] = workspace
     configurable["environment"] = workspace
-    if slack_thread:
-        configurable["slack_thread"] = slack_thread
     if admin_thread:
         configurable["admin_thread"] = True
-    slack_channel_id = record.get("slack_channel_id")
-    if (
-        _slack_notification_mode(record) == "on_action"
-        and isinstance(slack_channel_id, str)
-        and slack_channel_id
-    ):
-        configurable["automation_slack_notification"] = {
-            "channel_id": slack_channel_id,
-            "mode": "on_action",
-            "schedule_id": record["id"],
-            "schedule_name": record.get("name"),
-        }
-    if dm_user_id := record.get("slack_dm_user_id"):
-        configurable["automation_dm_user_id"] = dm_user_id
     model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
@@ -1232,59 +1130,15 @@ async def _launch_agent_schedule_record(
                 "status_code": exc.status_code,
             }
 
-    if dm_user_id := _slack_dm_user_id(record):
-        dm_channel_id = await open_dm(dm_user_id)
-        if not dm_channel_id:
-            error = "Slack DM could not be opened"
-            await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
-            return {"status": "error", "schedule_id": schedule_id, "error": error}
-        record = {**record, "slack_channel_id": dm_channel_id, "slack_dm_user_id": dm_user_id}
-
     client = langgraph_client()
     thread_id = str(uuid.uuid4())
-    slack_thread: dict[str, Any] | None = None
-    slack_channel_id = record.get("slack_channel_id")
-    if (
-        _slack_notification_mode(record) == "always"
-        and isinstance(slack_channel_id, str)
-        and slack_channel_id
-    ):
-        concierge = dm_user_id is not None and await User.concierge_mode_for_slack(dm_user_id)
-        root_message = _slack_root_message(record, repo, test_run=test_run, concierge=concierge)
-        message_ts, slack_error = await post_slack_top_level_message_with_ts(
-            slack_channel_id,
-            root_message,
-            unfurl_links=False,
-            unfurl_media=False,
-        )
-        if not message_ts:
-            error = f"Slack post failed: {slack_error or 'unknown error'}"
-            await _put_run_state(
-                record,
-                {"last_error": error, "last_error_at": now_iso()},
-            )
-            return {"status": "error", "schedule_id": schedule_id, "error": error}
-        slack_thread = {
-            "channel_id": slack_channel_id,
-            "thread_ts": message_ts,
-            "triggering_event_ts": message_ts,
-        }
-        await bind_slack_thread_id(client, slack_channel_id, message_ts, thread_id)
-        if dm_user_id:
-            await note_for_concierge(dm_user_id, slack_channel_id, root_message)
-
     admin_thread = _admin_thread_enabled(record)
     repo_config = _repo_dict(repo)
     run_config = await _agent_run_config(
-        record, thread_id, repo_config, slack_thread, test_run=test_run, admin_thread=admin_thread
+        record, thread_id, repo_config, test_run=test_run, admin_thread=admin_thread
     )
     metadata = _agent_run_metadata(
-        record,
-        thread_id,
-        repo_config,
-        slack_thread,
-        test_run=test_run,
-        admin_thread=admin_thread,
+        record, thread_id, repo_config, test_run=test_run, admin_thread=admin_thread
     )
     if token_repositories is not None:
         metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = token_repositories
@@ -1302,13 +1156,11 @@ async def _launch_agent_schedule_record(
         "surface": "automation",
         "kind": "system",
     }
-    if isinstance(slack_channel_id, str) and slack_channel_id:
-        input_context["channel_id"] = f"slack:{slack_channel_id}"
     run = await create_durable_run(
         thread_id,
         _AGENT_ASSISTANT_ID,
         input=build_run_input(
-            _scheduled_prompt(record, slack_thread, task=prompt),
+            str(record["prompt"]) if prompt is None else prompt,
             input_context,
             systems=[
                 {
@@ -1317,11 +1169,6 @@ async def _launch_agent_schedule_record(
                     "platform": "open-swe",
                 }
             ],
-            channels=(
-                [{"id": f"slack:{slack_channel_id}", "platform": "slack"}]
-                if isinstance(slack_channel_id, str) and slack_channel_id
-                else None
-            ),
         ),
         source="schedule",
         thread_title=None,
@@ -1332,19 +1179,6 @@ async def _launch_agent_schedule_record(
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     # The run is durable now; bookkeeping failures must not release delivery claims.
     log_context = {"schedule_id": schedule_id, "thread_id": thread_id, "run_id": run_id}
-    if slack_thread and isinstance(run_id, str) and run_id:
-        try:
-            await store_slack_run_mapping(
-                client,
-                slack_thread["channel_id"],
-                slack_thread["thread_ts"],
-                run_id,
-                message_ts=slack_thread["thread_ts"],
-            )
-        except Exception:
-            logger.exception(
-                "Failed to save dispatched automation Slack mapping", extra=log_context
-            )
     try:
         await client.threads.update(
             thread_id=thread_id,
