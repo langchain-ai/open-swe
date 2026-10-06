@@ -82,6 +82,11 @@ class SourceContext(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     slack_thread: SlackThreadRef | None = None
+    # One-off Slack requests have no thread_ts; wakeups still need their reply route.
+    slack_ask: bool | None = None
+    slack_ask_response_url: str | None = None
+    slack_by_the_way_thread_ts: str | None = None
+    slack_by_the_way_message_ts: str | None = None
     linear_issue: LinearIssueRef | None = None
     github_issue: GitHubIssueRef | None = None
     pr_number: int | None = None
