@@ -267,7 +267,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_router_failure_uses_same_model_as_routing_off() -> None:
+async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     config = _base_config()
     config["configurable"]["thread_id"] = "thread-1"
     profile = {
@@ -285,7 +285,7 @@ async def test_router_failure_uses_same_model_as_routing_off() -> None:
 
     assert route == "default"
     assert model_selection._models[route] is agent["model"]
-    assert agent["make_model_calls"][0][0] == "anthropic:claude-opus-5-5"
+    assert agent["make_model_calls"][0][0] == "google_genai:gemini-3.8-flash"
 
 
 @pytest.mark.asyncio
@@ -622,7 +622,10 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
             "effort": "medium",
             "model_handoff_complete": True,
             "model_routing_enabled": True,
-            "routing_models": {route: {"model_id": model_id, "effort": "high"}},
+            "routing_models": {
+                "fast": {"model_id": "openai:gpt-6.1-sol", "effort": "medium"},
+                route: {"model_id": model_id, "effort": "high"},
+            },
         },
         make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
@@ -665,11 +668,11 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
 @pytest.mark.parametrize(
     ("profile", "expected_model", "expected_effort"),
     [
-        (None, "openai:gpt-6.1-sol", "medium"),
+        (None, "google_genai:gemini-3.8-flash", "low"),
         (
-            {"default_model": "google_genai:gemini-3.8-flash", "reasoning_effort": "high"},
+            {"default_model": "anthropic:claude-opus-5-5", "reasoning_effort": "high"},
             "google_genai:gemini-3.8-flash",
-            "high",
+            "low",
         ),
     ],
 )
@@ -701,8 +704,8 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     assert snapshot["model_handoff_complete"] is True
     assert snapshot["model_id"] == expected_model
     assert snapshot["effort"] == expected_effort
-    assert snapshot["subagent_model_id"] == expected_model
-    assert snapshot["subagent_effort"] == (expected_effort if profile else "low")
+    assert snapshot["subagent_model_id"] == (expected_model if profile else "openai:gpt-6.1-sol")
+    assert snapshot["subagent_effort"] == "low"
 
     followup = _base_config()
     followup["configurable"].update(source="dashboard", model_selection="auto")

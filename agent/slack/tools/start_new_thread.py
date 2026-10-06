@@ -9,9 +9,13 @@ from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import prompt
 from agent.run_config import RunConfig
+from agent.slack.blocks import block_payload, section
+from agent.slack.breakout_destination import resolve_breakout_destination
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
+    append_slack_web_link_footer,
     bind_slack_thread_id,
     get_active_slack_thread,
     get_slack_permalink,
@@ -162,6 +166,7 @@ async def slack_start_new_thread(
     title: str,
     instructions: str,
     default_repo: str | None = None,
+    channel_id: str | None = None,
 ) -> dict[str, Any]:
     """Implement the `slack_start_new_thread` tool."""
     cfg = RunConfig.from_runtime()
@@ -176,11 +181,12 @@ async def slack_start_new_thread(
     if not current_slack_thread:
         return {"success": False, "error": "Current Slack location is unavailable"}
 
-    channel_id = current_slack_thread.get("channel_id")
+    source_channel = current_slack_thread.get("channel_id")
     current_thread_ts = current_slack_thread.get("thread_ts")
-    if not isinstance(channel_id, str) or not channel_id.strip():
+    if not isinstance(source_channel, str) or not source_channel.strip():
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
-    channel = await SlackChannel.load(channel_id.strip(), use_cache=False)
+    source_channel = source_channel.strip()
+    channel = await SlackChannel.load(source_channel, use_cache=False)
     if channel is None or not channel.public:
         return {
             "success": False,
@@ -266,14 +272,25 @@ async def slack_start_new_thread(
                     "error": "Only the private thread owner can start a breakout",
                 }
 
-    clean_channel_id = channel_id.strip()
+    destination = await resolve_breakout_destination(
+        source_channel, channel_id, workspace=cfg.workspace_slug
+    )
+    clean_channel_id = destination.channel_id
+    if clean_channel_id != source_channel:
+        channel = await SlackChannel.load(clean_channel_id, use_cache=False)
+        if visibility == "private" or channel is None or not channel.public:
+            return {
+                "success": False,
+                "error": "Breakouts between channels require a public source thread and destination.",
+            }
     source_line = (
         await source_thread_line(
-            clean_channel_id, cfg.slack_thread.triggering_event_ts or current_thread_ts
+            source_channel, cfg.slack_thread.triggering_event_ts or current_thread_ts
         )
         if isinstance(current_thread_ts, str) and current_thread_ts
         else ""
     )
+    thread_id = str(uuid.uuid4())
     requester = cfg.slack_thread.triggering_user_id
     root_parts = (
         _visible_message(clean_title),
@@ -282,7 +299,15 @@ async def slack_start_new_thread(
     )
     message_ts, slack_error = await post_slack_top_level_message_with_ts(
         clean_channel_id,
-        " · ".join(part for part in root_parts if part),
+        append_slack_web_link_footer(
+            " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
+        ),
+        blocks=block_payload(
+            [
+                section(" · ".join(part for part in root_parts if part)),
+                *await origin_footer(cfg.thread_id),
+            ]
+        ),
         unfurl_links=False,
         unfurl_media=False,
     )
@@ -294,7 +319,6 @@ async def slack_start_new_thread(
             "hint": _failure_hint(slack_error),
         }
 
-    thread_id = str(uuid.uuid4())
     details_ts: str | None = None
     details_error: str | None = None
     for attempt in range(2):
@@ -327,7 +351,7 @@ async def slack_start_new_thread(
         thread_ts=message_ts,
     )
     breakout_from = {
-        "channel_id": clean_channel_id,
+        "channel_id": source_channel,
         "thread_ts": current_thread_ts or "",
         "message_ts": cfg.slack_thread.triggering_event_ts,
     }
@@ -335,6 +359,7 @@ async def slack_start_new_thread(
     thread_title = clean_title[:80]
     metadata: dict[str, Any] = {
         "source": "slack",
+        "workspace": destination.workspace,
         "title": thread_title,
         "visibility": visibility,
         "owner_type": owner_type,
@@ -363,6 +388,8 @@ async def slack_start_new_thread(
         "source": "slack",
         "slack_kickoff_eligible": False,
         "slack_breakout": True,
+        "workspace": destination.workspace,
+        "environment": destination.workspace,
     }
     if repo:
         new_configurable["repo"] = repo
@@ -407,7 +434,7 @@ async def slack_start_new_thread(
         request_ts = breakout_from["message_ts"]
         if request_ts:
             await mark_broken_out(
-                clean_channel_id, current_thread_ts, request_ts, clean_channel_id, message_ts
+                source_channel, current_thread_ts, request_ts, clean_channel_id, message_ts
             )
         result["next_step"] = (
             "End the turn with slack_no_reply_needed; do not reply in the current thread."

@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run lint
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run format check
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Regenerate swagger.json
@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Install dependencies
         run: uv sync --locked --extra dev
       - name: Run typecheck
@@ -85,7 +85,7 @@ jobs:
       TEST_ANALYTICS_POSTGRES_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Install dependencies
         run: uv sync --locked --extra dev
       # Every DROP DATABASE forces a checkpoint; without fsync, parallel workers stop queueing on them.
@@ -201,7 +201,9 @@ jobs:
         with:
           bun-version: latest
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --filter open-swe-cli --filter open-swe
+        run: pnpm install --frozen-lockfile --filter "open-swe-cli..." --filter open-swe-bridge-client --filter open-swe
+      - name: Run bridge client checks
+        run: pnpm --filter open-swe-bridge-client run check
       - name: Run CLI checks
         run: pnpm --filter open-swe-cli run check
       - name: Build CLI binary
@@ -242,7 +244,7 @@ jobs:
           else
             echo "browser=true" >> "$GITHUB_OUTPUT"
           fi
-          if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}" desktop; then
+          if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}" desktop bridge-client; then
             echo "desktop=false" >> "$GITHUB_OUTPUT"
           else
             echo "desktop=true" >> "$GITHUB_OUTPUT"
@@ -274,7 +276,7 @@ jobs:
       POSTGRES_URI: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
@@ -338,7 +340,7 @@ jobs:
       POSTGRES_URI: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24

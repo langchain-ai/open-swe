@@ -60,6 +60,7 @@ export type AcpToolKind =
   | "slack"
   | "linear"
   | "sql"
+  | "service-connection"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
@@ -366,6 +367,9 @@ export interface AgentPullRequestStatusResponse {
   pullRequests: Array<AgentPullRequestHealth>
 }
 
+/** One kind of PR problem a thread-view fix prompt covers, and nothing else. */
+export type ThreadFixScope = "conflicts" | "checks" | "comments"
+
 export interface AgentPullRequestContextResponse {
   context: {
     repoFullName: string
@@ -470,6 +474,8 @@ export interface AgentThread {
   sourceAppUrl?: string | null
   codeChannelUrl?: string | null
   sandboxId?: string | null
+  /** For a thread bridged to someone's machine: which app serves it. */
+  sandboxBridgeClient?: "cli" | "desktop" | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

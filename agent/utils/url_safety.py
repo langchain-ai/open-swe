@@ -48,12 +48,6 @@ def resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
         return False, f"URL validation error: {e}", None, None
 
 
-def is_url_safe(url: str) -> tuple[bool, str]:
-    """Check if a URL is safe to request."""
-    is_safe, reason, _, _ = resolve_and_validate(url)
-    return is_safe, reason
-
-
 def _blocked_response(url: str, reason: str) -> dict[str, Any]:
     return {
         "success": False,

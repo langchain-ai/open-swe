@@ -1,19 +1,46 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import httpx2
 import pytest
+from githubkit import GitHub
 
 from agent.expedited_review.readiness import PullRequestSnapshot
+from agent.github.pull_requests import PullRequest
 from agent.github.repo_files import RepoSettings
+from agent.human_review.lifecycle import _render_standard, _unrequest_github_review
+from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.human_review.standard import (
     SUMMARY_MAX_CHARS,
     merge_wait,
     request_blockers,
     summary_line,
 )
+from agent.slack.blocks import block_payload
+from agent.users import User, UserIdentity
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("status", [200, 503])
+async def test_reviewer_removal_sends_delete_body_without_aborting(status: int) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    received: list[httpx.Request] = []
+
+    def respond(outgoing: httpx.Request) -> httpx.Response:
+        received.append(outgoing)
+        return httpx.Response(status, json={})
+
+    client = GitHub("token", async_transport=httpx.MockTransport(respond), auto_retry=False)
+    with patch("agent.human_review.lifecycle.github_sdk", return_value=client):
+        await _unrequest_github_review(request, "grace", "token")
+    assert len(received) == 1
+    assert received[0].method == "DELETE"
+    assert received[0].url.path == "/repos/lc/repo/pulls/7/requested_reviewers"
+    assert received[0].content == b'{"reviewers":["grace"]}'
 
 
 def _snapshot(**overrides: object) -> PullRequestSnapshot:
@@ -92,6 +119,37 @@ def test_one_approval_waits_for_the_other_reviewers_until_the_deadline() -> None
 
 def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
     assert merge_wait([], _NOW, {"hopper": "APPROVED"}, _NOW) is None
+
+
+@pytest.mark.parametrize(
+    "states", [{"Grace": "APPROVED", "hopper": "APPROVED", "linus": "DISMISSED"}, None]
+)
+async def test_merged_card_names_only_actual_approvers(states: dict[str, str] | None) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    for login in ("grace", "linus"):
+        user = User(
+            identities=[
+                UserIdentity(provider="github", external_id=login, login=login),
+                UserIdentity(provider="slack", external_id=f"U_{login}"),
+            ]
+        )
+        participant = HumanReviewParticipant(user_id=user.id, decision="review")
+        participant.user = user
+        request.participants.append(participant)
+    with patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)):
+        text, blocks = await _render_standard(request, "merged", "token")
+    payload = block_payload(blocks)
+    assert payload is not None
+    rendered = str(payload)
+    for message in (text, rendered):
+        assert "merged" in message
+        if states:
+            assert "approved by <@U_grace>, @hopper" in message
+        else:
+            assert "approved by" not in message
+        assert "linus" not in message
 
 
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:

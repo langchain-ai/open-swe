@@ -29,25 +29,6 @@ def admin_session(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
 ADMIN_DEP = Depends(admin_session)
 
 
-async def filter_repo_records_for_user(
-    login: str,
-    records: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for record in records:
-        full_name = record.get("full_name")
-        if not isinstance(full_name, str):
-            continue
-        try:
-            await require_repo_access_for_user(login, full_name)
-        except HTTPException as exc:
-            if exc.status_code in {403, 404}:
-                continue
-            raise
-        out.append(record)
-    return out
-
-
 class RepoScopedRecord(Protocol):
     full_name: str
 

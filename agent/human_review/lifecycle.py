@@ -10,35 +10,55 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from githubkit.auth import TokenAuthStrategy
 from langgraph_sdk import get_client
 
 from agent.dispatch import dispatch_agent_run
 from agent.expedited_review import card as expedited_card
-from agent.expedited_review.channels import channel_choices, own_choices
+from agent.expedited_review.channels import (
+    channel_choices,
+    own_choices,
+    sendable_channel,
+    still_internal,
+)
 from agent.expedited_review.diff_image import render_diff_png
 from agent.expedited_review.eligibility import ChangedFile, fetch_changed_files
-from agent.expedited_review.readiness import latest_review_states
+from agent.expedited_review.readiness import (
+    PullRequestSnapshot,
+    latest_review_states,
+    review_authors,
+)
 from agent.expedited_review.reviews import dismiss_approval
 from agent.github.ci import fetch_pr
 from agent.github.http import github_client
 from agent.github.pull_requests import PullRequestPayload
+from agent.github.repo_files import RepoSettings
+from agent.github.sdk import github_sdk
 from agent.human_review import card as standard_card
 from agent.human_review.people import Outcome, repo_token
-from agent.human_review.requests import ChannelChoice, HumanReviewRequest, RequestState
-from agent.slack.blocks import Block, block_payload, escape
-from agent.slack.cards import repost_thread_card
+from agent.human_review.requests import (
+    ChannelChoice,
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestState,
+)
+from agent.run_config import RunConfig
+from agent.slack.blocks import Block, block_payload, escape, section
+from agent.slack.cards import origin_footer, repost_thread_card
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     add_slack_reaction,
     delete_slack_message,
     get_slack_permalink,
     post_slack_thread_reply_with_ts,
+    remove_slack_reaction,
     update_slack_message,
     upload_slack_thread_file,
     wait_for_slack_file,
 )
-from agent.slack.dm import send_dm
+from agent.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from agent.users import User
+from agent.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +141,12 @@ async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile])
     return file_id
 
 
+def _requester_login(request: HumanReviewRequest) -> str:
+    if request.requested_by is not None:
+        return request.requested_by.github_login
+    return RunConfig.parse(request.run_config).github_login or ""
+
+
 async def post_card(
     approval: HumanReviewRequest, *, title: str, files: list[ChangedFile]
 ) -> tuple[str | None, str | None]:
@@ -128,18 +154,21 @@ async def post_card(
 
     Sets ``slack_diff_file_id`` on ``approval``; the caller saves it with the message ts.
     """
+    if approval.awaiting_ready:
+        return None, "draft card is author-only"
     location = approval.slack_location
     if location is None:
         return None, "no Slack thread"
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
-    approval.slack_channel_choices = await channel_choices(approval)
+    if not approval.slack_channel_choices:
+        approval.slack_channel_choices = await channel_choices(approval)
     text, blocks = expedited_card.open_card(
         approval,
         title=title,
         author=await approval.author_mention(),
         files=files,
         diff_image_id=approval.slack_diff_file_id or None,
-        choices=approval.slack_channel_choices,
+        choices=await _channel_choices(approval),
     )
     return await post_slack_thread_reply_with_ts(
         location[0],
@@ -147,6 +176,7 @@ async def post_card(
         text,
         blocks=block_payload(blocks),
         agent_thread_id=approval.thread_id or None,
+        login=_requester_login(approval),
     )
 
 
@@ -162,9 +192,32 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
     )
     if author is None or not author.slack_user_id:
         return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
-    text, blocks = expedited_card.readiness_prompt(approval)
-    if not await send_dm(author.slack_user_id, text, blocks=block_payload(blocks)):
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return "Could not read the diff for the author-only card; try again."
+    files = await fetch_changed_files(
+        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
+    )
+    if files is None:
+        return "Could not read the diff for the author-only card; try again."
+    approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
+    await approval.save()
+    text, blocks = expedited_card.readiness_prompt(
+        approval,
+        title=pr.title,
+        author=await approval.author_mention(),
+        files=files,
+        diff_image_id=approval.slack_diff_file_id or None,
+    )
+    dm_location = await send_dm_with_location(
+        author.slack_user_id,
+        text,
+        blocks=block_payload([*blocks, *await origin_footer(approval.thread_id)]),
+    )
+    if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
+    approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
+    await approval.save()
     return None
 
 
@@ -180,15 +233,22 @@ async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, s
             blocks=block_payload(blocks),
             agent_thread_id=request.thread_id or None,
             reply_broadcast=True,
+            login=_requester_login(request),
         )
     channel = await SlackChannel.load(request.slack_channel_id)
     if channel is None:
         return None, "channel_not_found"
-    return await channel.post(text, blocks=block_payload(blocks))
+    return await channel.post(text, blocks=block_payload(blocks), login=_requester_login(request))
 
 
 async def _channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
-    # Cards posted before choices were stored still offer their own channel.
+    pr = approval.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if (
+        token is not None
+        and (await RepoSettings.cached(pr.owner, pr.repo, token=token)).review_channel.strip()
+    ):
+        return []
     return approval.slack_channel_choices or await own_choices(approval)
 
 
@@ -196,14 +256,16 @@ async def _render_standard(
     request: HumanReviewRequest, outcome: str | None, token: str | None
 ) -> tuple[str, list[Block]]:
     pr = request.pull_request
-    if outcome is not None:
-        return standard_card.closed_card(request, title=pr.title, outcome=outcome)
     states: dict[str, str] = {}
-    if token is not None:
+    if token is not None and outcome in (None, "merged"):
         async with github_client(token=token) as client:
             states = (
                 await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author) or {}
             )
+    if outcome is not None:
+        return standard_card.closed_card(
+            request, title=pr.title, outcome=outcome, review_states=states
+        )
     from agent.human_review.standard import merge_wait
 
     if (
@@ -216,7 +278,9 @@ async def _render_standard(
         )
         is None
     ):
-        return standard_card.closed_card(request, title=pr.title, outcome="approved")
+        return standard_card.closed_card(
+            request, title=pr.title, outcome="approved", review_states=states
+        )
     requester = request.requested_by
     return standard_card.open_card(
         request,
@@ -228,6 +292,15 @@ async def _render_standard(
 
 
 async def render(
+    request: HumanReviewRequest, outcome: str | None, *, copy: bool = False, dm: bool = False
+) -> tuple[str, list[Block]]:
+    text, blocks = await _render(request, outcome, copy=copy)
+    if copy or dm or (request.kind == "standard" and not request.slack_thread_ts):
+        blocks.extend(await origin_footer(request.thread_id))
+    return text, blocks
+
+
+async def _render(
     request: HumanReviewRequest, outcome: str | None, *, copy: bool = False
 ) -> tuple[str, list[Block]]:
     """The card's text and blocks; ``copy`` renders the open copy posted in another channel."""
@@ -262,13 +335,89 @@ async def render(
     )
 
 
+async def _refresh_dm_card(request: HumanReviewRequest, outcome: str | None) -> None:
+    if not request.slack_dm_channel_id or not request.slack_dm_message_ts:
+        return
+    if request.awaiting_ready and outcome is None:
+        return
+    channel_id = request.slack_dm_channel_id
+    if not await delete_slack_message(channel_id, request.slack_dm_message_ts):
+        logger.warning("Could not delete author DM card", extra={"request_id": str(request.id)})
+        return
+    request.slack_dm_channel_id = ""
+    request.slack_dm_message_ts = ""
+    await request.save()
+    pr = request.pull_request
+    author = await User.get(pr.author_user_id) if pr.author_user_id else None
+    if author is not None and author.slack_user_id:
+        await note_for_concierge(
+            author.slack_user_id, channel_id, f"Removed the author-only draft card for {pr.url}."
+        )
+
+
+async def broadcast_configured(approval: HumanReviewRequest) -> None:
+    if approval.sent_elsewhere or approval.approved or approval.awaiting_ready:
+        return
+    pr = approval.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        logger.warning("Could not resolve expedited review broadcast channel without a token")
+        return
+    configured = (await RepoSettings.cached(pr.owner, pr.repo, token=token)).review_channel.strip()
+    if not configured:
+        return
+    channel = await SlackChannel.resolve(configured)
+    if channel is None:
+        logger.warning(
+            "Configured expedited review channel is unavailable", extra={"channel": configured}
+        )
+        return
+    if not await still_internal(approval.slack_channel_id):
+        logger.warning("Cannot broadcast expedited review from an externally shared channel")
+        return
+    if (channel := await sendable_channel(channel.id)) is None:
+        logger.warning("Configured expedited review channel cannot receive cards")
+        return
+    if channel.id == approval.slack_channel_id:
+        if not await broadcast_card(approval):
+            logger.warning("Could not broadcast expedited review card to its channel")
+    elif error := await copy_card(approval, channel):
+        logger.warning("Could not broadcast expedited review card", extra={"slack_error": error})
+
+
 async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = None) -> None:
     """Re-render the posted card from current state; used after clicks and outcomes."""
+    await _refresh_dm_card(request, outcome)
+    if (
+        request.kind == "expedited"
+        and request.state == "open"
+        and not request.awaiting_ready
+        and not request.slack_message_ts
+        and outcome is None
+    ):
+        token = await repo_token(request.pull_request.owner, request.pull_request.repo)
+        if token is None:
+            logger.warning("Could not publish ready expedited card without a GitHub token")
+            return
+        message_ts, error = await post_card(
+            request, title=request.pull_request.title, files=await _files_for(request, token)
+        )
+        if message_ts:
+            request.slack_message_ts = message_ts
+            await request.save()
+            await broadcast_configured(request)
+        else:
+            logger.warning("Could not publish ready expedited card", extra={"slack_error": error})
+        return
     if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
         return
     text, blocks = await render(request, outcome)
     ok, error = await update_slack_message(
-        request.slack_channel_id, request.slack_message_ts, text, blocks=block_payload(blocks)
+        request.slack_channel_id,
+        request.slack_message_ts,
+        text,
+        blocks=block_payload(blocks),
+        login=_requester_login(request),
     )
     if not ok:
         logger.warning(
@@ -277,7 +426,9 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
         )
     if outcome is None and (copy := request.slack_copy) is not None:
         text, blocks = await render(request, None, copy=True)
-        ok, error = await update_slack_message(*copy, text, blocks=block_payload(blocks))
+        ok, error = await update_slack_message(
+            *copy, text, blocks=block_payload(blocks), login=_requester_login(request)
+        )
         if not ok:
             logger.warning(
                 "Failed to update the copy of a human review card",
@@ -310,6 +461,7 @@ async def _repost(
                 row.slack_broadcast = broadcast
             return kept
 
+    await _refresh_dm_card(request, outcome)
     return await repost_thread_card(
         location,
         old_ts,
@@ -318,6 +470,7 @@ async def _repost(
         broadcast=broadcast,
         agent_thread_id=request.thread_id or None,
         adopt=adopt,
+        login=_requester_login(request),
     )
 
 
@@ -331,7 +484,9 @@ async def broadcast_card(approval: HumanReviewRequest) -> bool:
 async def copy_card(approval: HumanReviewRequest, channel: SlackChannel) -> str | None:
     """Post the open card at the top of another channel; why it was not, or ``None``."""
     text, blocks = await render(approval, None, copy=True)
-    message_ts, error = await channel.post(text, blocks=block_payload(blocks))
+    message_ts, error = await channel.post(
+        text, blocks=block_payload(blocks), login=_requester_login(approval)
+    )
     if not message_ts:
         logger.warning(
             "Could not copy an expedited review card to another channel",
@@ -416,6 +571,7 @@ async def retire(
     updated = await transition(request.id, expected=("open",), state=state, detail=outcome)
     if updated is None:
         return None
+    await update_blocked_reactions(updated)
     if state != "merged" and updated.kind == "expedited":
         await withdraw_reviews(updated)
     await refresh_card_in_thread(updated, outcome=outcome)
@@ -469,6 +625,8 @@ async def remove_superseded_cards(approval: HumanReviewRequest) -> None:
 
 async def _react(request: HumanReviewRequest, emoji: str, fallback: str | None = None) -> None:
     """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
+    if skip_on_preview("pr_reaction"):
+        return
     location = request.slack_location or (
         (request.slack_channel_id, request.slack_message_ts)
         if request.slack_channel_id and request.slack_message_ts
@@ -480,11 +638,48 @@ async def _react(request: HumanReviewRequest, emoji: str, fallback: str | None =
         await add_slack_reaction(location[0], location[1], fallback)
 
 
+async def update_blocked_reactions(
+    request: HumanReviewRequest, snapshot: PullRequestSnapshot | None = None
+) -> None:
+    """Keep a watched post's failure and conflict reactions in step with GitHub."""
+    if skip_on_preview("update_blocked_reactions"):
+        return
+    if request.kind != "posted" or not request.slack_channel_id or not request.slack_message_ts:
+        return
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None:
+            return
+        failing = conflicted = False
+        if (
+            row.state == "open"
+            and snapshot is not None
+            and snapshot.state == "open"
+            and not snapshot.merged
+        ):
+            author = snapshot.author or row.pull_request.author
+            preferences = await User.preferences_for_login(author)
+            failing = preferences.pr_failure_reactions and snapshot.check_state in {
+                "failure",
+                "blocked",
+            }
+            conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
+        for emoji, blocked in (("x", failing), ("construction", conflicted)):
+            react = add_slack_reaction if blocked else remove_slack_reaction
+            await react(row.slack_channel_id, row.slack_message_ts, emoji)
+
+
 async def mark_merged(request: HumanReviewRequest) -> None:
     updated = await retire(request, "merged", "merged")
     if updated is not None:
         # ✅ means approved, so a workspace without :merged: gets 🔀 instead.
         await _react(updated, "merged", "twisted_rightwards_arrows")
+        await release_picks(updated, "it was merged")
+
+
+async def mark_closed(request: HumanReviewRequest) -> None:
+    updated = await retire(request, "cancelled", "the pull request was closed")
+    if updated is not None:
+        await release_picks(updated, "it was closed")
 
 
 async def mark_approved(request: HumanReviewRequest) -> None:
@@ -494,6 +689,84 @@ async def mark_approved(request: HumanReviewRequest) -> None:
             return
         row.approved_at = datetime.now(UTC)
     await _react(request, "white_check_mark")
+
+
+def idle_picks(
+    reviewers: list[HumanReviewParticipant], reviewed: set[str]
+) -> list[HumanReviewParticipant]:
+    """Reviewers Open SWE picked whose lowercased login is not among ``reviewed``."""
+    return [
+        reviewer
+        for reviewer in reviewers
+        if reviewer.assigned_by_agent and reviewer.github_login.lower() not in reviewed
+    ]
+
+
+async def _unrequest_github_review(request: HumanReviewRequest, login: str, token: str) -> None:
+    pr = request.pull_request
+    try:
+        async with github_sdk(TokenAuthStrategy(token)) as client:
+            await client.rest.pulls.async_remove_requested_reviewers(
+                pr.owner, pr.repo, pr.number, data={"reviewers": [login]}
+            )
+    except Exception:
+        logger.warning(
+            "GitHub review request removal did not complete",
+            extra={"request_id": str(request.id)},
+            exc_info=True,
+        )
+        return
+
+
+async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReviewRequest:
+    """Take reviewers Open SWE picked who have not reviewed off the pull request, and tell them."""
+    if not any(reviewer.assigned_by_agent for reviewer in request.reviewers):
+        return request
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        logger.warning(
+            "No GitHub App token to release Open SWE's reviewer picks",
+            extra={"request_id": str(request.id)},
+        )
+        return request
+    async with github_client(token=token) as client:
+        reviewed = await review_authors(client, pr.owner, pr.repo, pr.number)
+    if reviewed is None:
+        logger.warning(
+            "Could not read reviews to release Open SWE's reviewer picks",
+            extra={"request_id": str(request.id)},
+        )
+        return request
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None:
+            return request
+        released = idle_picks(row.reviewers, reviewed)
+        for reviewer in released:
+            row.participants.remove(reviewer)
+    if not released:
+        return request
+    current = await HumanReviewRequest.get(request.id) or request
+    if current.state == "open":
+        await refresh_card(current)
+    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    for reviewer in released:
+        logger.info(
+            "Released a reviewer Open SWE picked",
+            extra={"request_id": str(request.id), "github_login": reviewer.github_login},
+        )
+        await _unrequest_github_review(request, reviewer.github_login, token)
+        if reviewer.user.slack_user_id:
+            text = (
+                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
+                "Open SWE removed you as a reviewer."
+            )
+            await send_dm(
+                reviewer.user.slack_user_id,
+                text,
+                blocks=block_payload([section(text), *await origin_footer(request.thread_id)]),
+            )
+    return await HumanReviewRequest.get(request.id) or current
 
 
 async def withdraw_reviews(approval: HumanReviewRequest) -> None:
@@ -541,4 +814,4 @@ async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
     if current.merged:
         await mark_merged(request)
     elif current.state == "closed":
-        await retire(request, "cancelled", "the pull request was closed")
+        await mark_closed(request)

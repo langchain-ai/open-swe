@@ -89,7 +89,7 @@ jobs:
         with:
           bun-version: "1.4.2"
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       - run: corepack enable
 
@@ -140,11 +140,16 @@ jobs:
           VITE_DATADOG_SESSION_SAMPLE_RATE: "100"
           VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE: "20"
         run: |
-          test -n "$APPLE_PROVISIONING_PROFILE_B64"
-          printf '%s' "$APPLE_PROVISIONING_PROFILE_B64" | base64 --decode > "$RUNNER_TEMP/open-swe.provisionprofile"
+          signing_args=(--config.mac.entitlements=entitlements.mac.inherit.plist)
+          if [ -n "$APPLE_PROVISIONING_PROFILE_B64" ]; then
+            printf '%s' "$APPLE_PROVISIONING_PROFILE_B64" | base64 --decode > "$RUNNER_TEMP/open-swe.provisionprofile"
+            signing_args=(--config.mac.provisioningProfile="$RUNNER_TEMP/open-swe.provisionprofile")
+          else
+            echo "::warning::APPLE_PROVISIONING_PROFILE is not set; building without Universal Links."
+          fi
           pnpm run build
           pnpm --filter open-swe-desktop run build:local-backend
-          pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never --config.mac.provisioningProfile="$RUNNER_TEMP/open-swe.provisionprofile"
+          pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never "${signing_args[@]}"
 
       - name: Verify and package release assets
         id: assets
@@ -173,6 +178,9 @@ jobs:
           fi
 
           test -x "${apps[0]}/Contents/Resources/local-backend/runtime/bin/python3"
+          # "This Mac" threads are served by the bridge client the main process requires.
+          pnpm dlx @electron/asar list "${apps[0]}/Contents/Resources/app.asar" \
+            | grep -q '/node_modules/open-swe-bridge-client/dist/index.js'
           test "$("${apps[0]}/Contents/Resources/bin/oswe" --version)" = "$VERSION"
           codesign --verify --deep --strict --verbose=2 "${apps[0]}"
           xcrun stapler validate "${apps[0]}"

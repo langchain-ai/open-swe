@@ -91,12 +91,6 @@ async def _mapped_slack_logins(messages: list[dict[str, Any]]) -> tuple[set[str]
     return {login for login in mapped if login}, sum(login is None for login in mapped)
 
 
-async def _mapped_email_logins(emails: set[str]) -> tuple[set[str], int]:
-    resolved = await asyncio.gather(*(User.login_for_email(email) for email in emails))
-    mapped = await asyncio.gather(*(_active_mapping_login(login) for login in resolved))
-    return {login for login in mapped if login}, sum(login is None for login in mapped)
-
-
 async def _mapped_github_logins(logins: set[str]) -> tuple[set[str], int]:
     return {login.strip() for login in logins if login.strip()}, 0
 

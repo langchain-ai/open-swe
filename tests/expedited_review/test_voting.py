@@ -205,12 +205,26 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     approval = await open_approval(awaiting_ready=True)
     private_messages: list[tuple[str, object]] = []
 
-    async def deliver(user: str, text: str, *, blocks: object) -> bool:
+    async def deliver(user: str, text: str, *, blocks: object) -> tuple[str, str]:
         private_messages.append((user, blocks))
-        return True
+        return "D_ADA", "4.0"
 
-    monkeypatch.setattr(lifecycle, "send_dm", deliver)
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
+    ephemeral = AsyncMock(return_value=True)
+    monkeypatch.setattr("agent.slack.client.post_slack_ephemeral_message", ephemeral)
+    monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+    from agent.expedited_review.eligibility import ChangedFile
+
+    monkeypatch.setattr(
+        lifecycle,
+        "fetch_changed_files",
+        AsyncMock(
+            return_value=[
+                ChangedFile(filename="agent/example.py", additions=1, deletions=0, patch="+fixed")
+            ]
+        ),
+    )
     current = await _stored(approval)
 
     assert await lifecycle.prompt_author_ready(current) is None
@@ -219,6 +233,8 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert len(private_messages) == 1
     recipient, private_blocks = private_messages[0]
     assert recipient == "U_ADA"
+    assert "+fixed" in str(private_blocks)
+    ephemeral.assert_not_awaited()
     assert "open_swe_option_select_ready" in str(private_blocks)
     assert "open_swe_option_select_ready" not in str(shared_blocks)
     assert "open_swe_option_select_approve" not in str(shared_blocks)
@@ -229,11 +245,50 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert len(private_messages) == 1
 
 
+async def test_draft_card_is_not_posted_until_ready(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    approval.slack_message_ts = ""
+    approval.slack_dm_channel_id = "D_ADA"
+    approval.slack_dm_message_ts = "4.0"
+    approval = await approval.save()
+    deleted = AsyncMock(return_value=True)
+    monkeypatch.setattr(lifecycle, "delete_slack_message", deleted)
+    monkeypatch.setattr(lifecycle, "note_for_concierge", AsyncMock())
+    posted = AsyncMock(return_value=("3.0", None))
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
+
+    assert await lifecycle.post_card(approval, title="Fix", files=[]) == (
+        None,
+        "draft card is author-only",
+    )
+    await lifecycle.refresh_card(approval)
+    posted.assert_not_called()
+    deleted.assert_not_awaited()
+    approval.awaiting_ready = False
+    await approval.save()
+    await lifecycle.refresh_card(approval)
+
+    stored = await _stored(approval)
+    assert stored.slack_message_ts == "3.0"
+    assert not stored.slack_dm_channel_id and not stored.slack_dm_message_ts
+    deleted.assert_awaited_once_with("D_ADA", "4.0")
+    assert "open_swe_option_select_approve" in str(posted.call_args)
+
+
 async def test_author_only_prompt_delivery_failure_is_reported(
     open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
-    monkeypatch.setattr(lifecycle, "send_dm", AsyncMock(return_value=False))
+    monkeypatch.setattr(lifecycle, "send_dm_with_location", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(lifecycle, "fetch_changed_files", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
 
     problem = await lifecycle.prompt_author_ready(await _stored(approval))
 
@@ -363,7 +418,9 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_is_approved(
 class _OtherChannel:
     id = "C_OTHER"
 
-    async def post(self, text: str, *, blocks: object = None) -> tuple[str, None]:
+    async def post(
+        self, text: str, *, blocks: object = None, login: str | None = None
+    ) -> tuple[str, None]:
         return "9.0", None
 
 
@@ -401,3 +458,25 @@ async def test_only_one_open_approval_per_pull_request(open_approval: OpenApprov
     with pytest.raises(IntegrityError):
         await duplicate.save()
     assert await HumanReviewRequest.active_for("lc", "repo", 7) is not None
+
+
+async def test_broadcast_to_configured_review_channel(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval()
+    async with HumanReviewRequest.locked(approval.id) as (_, row):
+        assert row is not None
+        row.slack_channel_choices = [{"id": "C_REVIEW", "name": "review"}]
+    approval = await _stored(approval)
+    monkeypatch.setattr(voting, "still_internal", AsyncMock(return_value=True))
+    monkeypatch.setattr(voting, "sendable_channel", AsyncMock(return_value=_OtherChannel()))
+    monkeypatch.setattr(lifecycle, "render", AsyncMock(return_value=("card", [])))
+    monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
+
+    sent = await voting.request_broadcast(approval)
+    assert sent.message == "Sent to <#C_OTHER>."
+    stored = await _stored(approval)
+    assert stored.slack_channel_id == "C1"
+    assert stored.slack_copy_channel_id == "C_OTHER"
+    assert stored.slack_copy_ts == "9.0"
+    assert stored.slack_broadcast is False

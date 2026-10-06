@@ -9,8 +9,13 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.dashboard.options import SUPPORTED_MODEL_IDS
 from agent.github.pull_requests import PullRequest
+from agent.review.findings import (
+    REVIEWER_THREAD_KIND,
+    REVIEWER_UNTITLED,
+    reviewer_thread_title,
+)
 from agent.review.session import ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
@@ -86,9 +91,6 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
         model = metadata.get(key)
         if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
             return model
-        canonical = canonical_model_pair(model)
-        if canonical is not None:
-            return canonical[0]
     return None
 
 
@@ -252,6 +254,24 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def metadata_title(metadata: Mapping[str, Any]) -> str:
+    """The thread's sidebar title, naming reviewer threads that were never titled.
+
+    A reviewer thread's PR identity lives in ``pr`` metadata, which
+    ``set_reviewer_thread_metadata`` mirrors into ``title``; older threads
+    predate that mirror and get ``Review: #nn <PR title>`` derived here.
+    """
+    raw_title = metadata.get("title")
+    if isinstance(raw_title, str) and raw_title.strip():
+        return raw_title
+    if metadata.get("kind") == REVIEWER_THREAD_KIND:
+        pr = metadata.get("pr")
+        if isinstance(pr, Mapping) and (pr.get("number") is not None or pr.get("title")):
+            return reviewer_thread_title(pr)
+        return REVIEWER_UNTITLED
+    return "Untitled agent"
+
+
 def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
     return (
         _metadata_string(metadata, "thread_category") == "automation"
@@ -372,7 +392,9 @@ async def _thread_summary(
     if not isinstance(updated_at, (int, float)):
         updated_at = _thread_timestamp_ms(thread, "updated_at")
     raw_title = metadata.get("title")
-    title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
+    title: str = (
+        raw_title if isinstance(raw_title, str) and raw_title.strip() else metadata_title(metadata)
+    )
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
     effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
     thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"
@@ -454,6 +476,13 @@ async def _thread_summary(
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
+        # Which app serves a bridged thread's machine, so a client can tell
+        # whether it is the one that can run the thread.
+        "sandboxBridgeClient": (
+            (metadata.get("sandbox_bridge_client") or "cli")
+            if metadata.get("sandbox_kind") == "bridge"
+            else None
+        ),
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

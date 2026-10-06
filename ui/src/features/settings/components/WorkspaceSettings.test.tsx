@@ -20,6 +20,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
+import { INVALIDATION_TOPICS } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -65,6 +66,7 @@ const SETTINGS: WorkspaceSettings = {
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
+  fable_enabled: false,
 }
 
 const clients: Array<QueryClient> = []
@@ -110,6 +112,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     default_agent_subagent_model: "anthropic:claude-opus-5-5",
     default_agent_subagent_reasoning_effort: "medium",
   })
+  vi.spyOn(api, "getInstanceSettings").mockResolvedValue(SETTINGS)
   vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue({
     effective: SETTINGS,
     overrides: {},
@@ -148,13 +151,75 @@ function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
   )
 }
 
+/** What `InvalidationTab` does when the stream invalidates `workspaces`. */
+async function invalidateWorkspaces() {
+  await act(async () => {
+    await clients.at(-1)?.invalidateQueries({
+      predicate: (query) =>
+        query.meta?.invalidatedBy?.includes(INVALIDATION_TOPICS.workspaces) ??
+        false,
+    })
+    await vi.advanceTimersByTimeAsync(1)
+  })
+}
+
 describe("WorkspaceSettingsPanel", () => {
+  it("shows model labels before the dropdown opens and after it closes", async () => {
+    mockApis()
+    vi.mocked(api.options).mockResolvedValue({
+      models: [
+        {
+          id: "openai:gpt-6.1-sol",
+          label: "GPT-6.1 Sol",
+          supports_images: true,
+          efforts: ["medium"],
+          default_effort: "medium",
+        },
+      ],
+      default_agent_model: "openai:gpt-6.1-sol",
+      default_agent_reasoning_effort: "medium",
+      default_agent_subagent_model: "openai:gpt-6.1-sol",
+      default_agent_subagent_reasoning_effort: "medium",
+    })
+    vi.mocked(api.getWorkspaceSettings).mockResolvedValue({
+      effective: {
+        ...SETTINGS,
+        default_agent_model: "openai:gpt-6.1-sol",
+        default_agent_reasoning_effort: "medium",
+      },
+      overrides: {},
+    })
+    renderPage()
+
+    const trigger = (await screen.findByText("GPT-6.1 Sol")).closest("button")!
+    const models = screen
+      .getByRole("heading", { name: "Model defaults" })
+      .closest("section")!
+    expect(within(models).getByText("Inherit instance setting")).toBeTruthy()
+    expect(screen.queryByRole("listbox")).toBeNull()
+    fireEvent.click(trigger)
+    expect(
+      await screen.findByRole("option", { name: "GPT-6.1 Sol" })
+    ).toBeTruthy()
+    fireEvent.keyDown(trigger, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(within(trigger).getByText("GPT-6.1 Sol")).toBeTruthy()
+  })
+
   it("offers no way to delete the default workspace", async () => {
     mockApis({ ...RECORD, slug: "default", name: "Default" })
     renderPage(true, vi.fn(), "default")
 
     expect(await screen.findByRole("heading", { name: "General" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Delete Default" })).toBeNull()
+    const repository = screen.getByRole("link", { name: "acme/oss" })
+    expect(repository.getAttribute("href")).toBe("https://github.com/acme/oss")
+    expect(repository.getAttribute("target")).toBe("_blank")
+    const channel = await screen.findByRole("link", { name: "#oss-help" })
+    expect(channel.getAttribute("href")).toBe(
+      "https://slack.com/app_redirect?channel=C1"
+    )
+    expect(channel.getAttribute("target")).toBe("_blank")
   })
 
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
@@ -273,7 +338,7 @@ describe("WorkspaceSettingsPanel", () => {
     ["refreshing", "unknown"],
     ["success", "unknown"],
   ] as const)(
-    "follows a repository rebuild from a %s save response through stale polls to %s",
+    "follows a repository rebuild from a %s save response through invalidations to %s",
     async (savedStatus, outcome) => {
       const initial = {
         ...RECORD,
@@ -337,9 +402,7 @@ describe("WorkspaceSettingsPanel", () => {
           .mocked(api.getWorkspace)
           .mockResolvedValue(saved)
         const reads = getWorkspace.mock.calls.length
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
         expect(screen.getByRole("status").textContent).toContain(
           "rebuild queued"
@@ -349,6 +412,7 @@ describe("WorkspaceSettingsPanel", () => {
           ...saved,
           refresh_status: outcome === "unknown" ? "success" : "refreshing",
         })
+        await invalidateWorkspaces()
         await act(async () => {
           await vi.advanceTimersByTimeAsync(65_001)
         })
@@ -370,9 +434,7 @@ describe("WorkspaceSettingsPanel", () => {
               : "2026-01-01T00:01:00Z",
           refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
         })
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(
           within(general).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
@@ -549,12 +611,11 @@ describe("WorkspaceSettingsPanel", () => {
       .closest("section")!
     expect(within(sandbox).queryByRole("button", { name: "Cancel" })).toBeNull()
     expect(screen.queryByLabelText("Setup script")).toBeNull()
-    expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
-    expect(screen.queryByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')).toBeNull()
-    for (const trigger of screen.getAllByRole("button", {
-      name: "OPENSWE_WORKSPACE_REPOS",
-    })) {
-      fireEvent.click(trigger)
+    for (const name of ["Edit setup script", "Edit update script"]) {
+      fireEvent.click(screen.getByRole("button", { name }))
+      fireEvent.click(
+        await screen.findByRole("button", { name: "OPENSWE_WORKSPACE_REPOS" })
+      )
       const popup = await screen.findByRole("dialog", {
         name: "Expanded value",
       })
@@ -562,6 +623,12 @@ describe("WorkspaceSettingsPanel", () => {
         within(popup).getByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')
       ).toBeTruthy()
       fireEvent.keyDown(popup, { key: "Escape" })
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: "Expanded value" })
+        ).toBeNull()
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Done" }))
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     }
     fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
@@ -707,26 +774,32 @@ describe("WorkspaceSettingsPanel", () => {
       })
     renderPage()
 
-    const fable = (
-      await screen.findByRole("heading", { name: "Fable" })
-    ).closest("section")
-    if (!fable) throw new Error("no Fable section")
-    const toggle = within(fable).getByRole("switch")
+    const row = (await screen.findByText("Review Draft PRs")).closest(
+      "label"
+    )!.parentElement!
+    const toggle = within(row).getByRole("switch")
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false))
-    expect(within(fable).getByText("Inherited")).toBeTruthy()
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
 
     fireEvent.click(toggle)
     await waitFor(() =>
-      expect(save).toHaveBeenCalledWith("oss", { fable_enabled: true })
+      expect(save).toHaveBeenCalledWith("oss", { review_draft_prs: true })
     )
-    expect(await within(fable).findByText("Overridden")).toBeTruthy()
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
 
     fireEvent.click(
-      within(fable).getByRole("button", {
-        name: "Reset Allow Fable models to the instance value",
+      await screen.findByRole("button", {
+        name: "Reset Review Draft PRs to the instance value",
       })
     )
     await waitFor(() => expect(save).toHaveBeenLastCalledWith("oss", {}))
-    expect(await within(fable).findByText("Inherited")).toBeTruthy()
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe("false")
+    )
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset Review Draft PRs to the instance value",
+      })
+    ).toBeNull()
   })
 })

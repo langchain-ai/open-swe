@@ -9,15 +9,17 @@ from fastapi import BackgroundTasks
 from agent.act_as.records import ActAsRequest, ThreadActAs
 from agent.prompts import prompt
 from agent.slack.blocks import Block, actions, block_payload, button, context, section
+from agent.slack.cards import origin_footer
 from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_message,
-    post_slack_thread_reply,
     update_slack_message,
 )
 from agent.slack.dm import note_for_concierge
 from agent.slack.payloads import SlackButtonValue, SlackInteraction
 from agent.slack.responses import WebhookResponse, accepted, ignored
+from agent.threads.plan_api import fetch_thread_metadata
+from agent.threads.workflow_approval_api import dispatch_followup
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
@@ -98,7 +100,7 @@ async def handle_button(
             channel_id, user_id, "You already answered this request; the first answer stands."
         )
         return ignored("act-as request already answered")
-    background_tasks.add_task(_close_card, interaction, _LABELS[action])
+    background_tasks.add_task(_close_card, interaction, _LABELS[action], button.thread_id)
     await note_for_concierge(
         user_id,
         channel_id,
@@ -111,24 +113,49 @@ async def handle_button(
     source = await get_active_slack_thread(langgraph_client(), button.thread_id)
     source_channel = (source or {}).get("channel_id")
     source_ts = (source or {}).get("thread_ts")
+    verdict = "approved" if approved else "denied"
     if isinstance(source_channel, str) and isinstance(source_ts, str):
-        verdict = "approved" if approved else "denied"
-        await post_slack_thread_reply(
+        await post_slack_ephemeral_message(
             source_channel,
-            source_ts,
+            user_id,
             f"`{request.login}` {verdict} Open SWE opening PRs as them in this thread.",
-            agent_thread_id=button.thread_id,
+            thread_ts=source_ts,
         )
+    current = (await ThreadActAs.load(button.thread_id)).requests.get(button.fingerprint)
+    if current is not None and current.wake_on_answer:
+        background_tasks.add_task(_wake_thread, button.thread_id, request.login, approved)
     return accepted("act-as request decided")
 
 
-async def _close_card(interaction: SlackInteraction, label: str) -> None:
+async def _wake_thread(thread_id: str, login: str, approved: bool) -> None:
+    try:
+        await dispatch_followup(
+            thread_id,
+            await fetch_thread_metadata(thread_id),
+            prompt("runs/act-as-decided", login=login, approved=approved),
+            github_login=login,
+            multitask_strategy="enqueue",
+        )
+    except Exception:
+        logger.exception(
+            "Could not wake the thread after an act-as answer",
+            extra={"agent_thread_id": thread_id, "login": login},
+        )
+
+
+async def _close_card(interaction: SlackInteraction, label: str, thread_id: str) -> None:
     text = interaction.message.text or label
     ok, error = await update_slack_message(
         interaction.channel_id,
         interaction.message_ts,
         text,
-        blocks=block_payload([section(text), context(label)]),
+        blocks=block_payload(
+            [
+                section(text),
+                context(label),
+                *await origin_footer(thread_id),
+            ]
+        ),
     )
     if not ok:
         logger.warning(

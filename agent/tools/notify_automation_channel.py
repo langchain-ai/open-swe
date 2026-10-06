@@ -12,6 +12,7 @@ from agent.slack.client import (
     post_slack_thread_reply_with_ts,
     post_slack_top_level_message_with_ts,
 )
+from agent.slack.dm import note_for_concierge
 from agent.store import TypedStore, now_iso
 from agent.utils.dashboard_links import dashboard_thread_url
 
@@ -193,6 +194,8 @@ async def notify_automation_channel(content: str, summary: str = "") -> dict[str
                     "slack_error": slack_error,
                 }
 
+            if cfg.automation_dm_user_id:
+                await note_for_concierge(cfg.automation_dm_user_id, channel_id, text)
             record = record.model_copy(update={"status": "posted", "message_ts": posted_ts})
             try:
                 await store.put(thread_id, record)

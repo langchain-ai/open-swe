@@ -25,6 +25,7 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { api } from "@/lib/api"
 import type {
@@ -96,11 +97,7 @@ export function PreferencesSection() {
         ? undefined
         : qc.invalidateQueries({ queryKey: PREFERENCES_KEY }),
   })
-  const workspaceOptions = useQuery({
-    queryKey: ["workspace-options"],
-    queryFn: api.listWorkspaceOptions,
-    staleTime: 60_000,
-  })
+  const workspaceOptions = useWorkspaceOptions()
   const workspaceItems = [
     { value: NO_DEFAULT_WORKSPACE, label: "Workspace default" },
     ...(workspaceOptions.data?.workspaces ?? []).map((workspace) => ({
@@ -242,26 +239,28 @@ export function PreferencesSection() {
           </Select>
         }
       />
-      <SettingsRow
-        label="Local tracing project"
-        description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
-        control={
-          <Input
-            className="w-56"
-            placeholder={
-              preferences.data?.default_local_tracing_project ??
-              "Shared cloud project"
-            }
-            defaultValue={preferences.data?.local_tracing_project ?? ""}
-            disabled={preferences.isLoading}
-            onBlur={(event) =>
-              savePreferences.mutate({
-                local_tracing_project: event.target.value.trim() || null,
-              })
-            }
-          />
-        }
-      />
+      {typeof window !== "undefined" && window.openSweDesktop && (
+        <SettingsRow
+          label="Local tracing project"
+          description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
+          control={
+            <Input
+              className="w-56"
+              placeholder={
+                preferences.data?.default_local_tracing_project ??
+                "Shared cloud project"
+              }
+              defaultValue={preferences.data?.local_tracing_project ?? ""}
+              disabled={preferences.isLoading}
+              onBlur={(event) =>
+                savePreferences.mutate({
+                  local_tracing_project: event.target.value.trim() || null,
+                })
+              }
+            />
+          }
+        />
+      )}
       <SettingsRow
         label="Collapse subagent threads by default"
         description="Keep nested subagent threads folded in the sidebar until you expand them."

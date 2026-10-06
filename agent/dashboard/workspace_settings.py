@@ -12,9 +12,10 @@ import logging
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from agent.audit_logs.context import bind_workspace
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
@@ -22,7 +23,6 @@ from agent.dashboard.options import (
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
     default_model_pair,
     gate_fable_model,
     model_supports_effort,
@@ -30,6 +30,8 @@ from agent.dashboard.options import (
 )
 from agent.run_config import RunConfig
 from agent.store import delete_value, get_value, now_iso, put_value
+from agent.ui_invalidations.outbox import invalidate_standalone
+from agent.ui_invalidations.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
@@ -261,9 +263,6 @@ def _normalize_stale_model_pair(
 ) -> tuple[str | None, str | None]:
     if model in DEPRECATED_MODEL_IDS:
         return None, None
-    canonical = canonical_model_pair(model, effort)
-    if canonical is not None:
-        return canonical
     return model, effort
 
 
@@ -476,6 +475,7 @@ async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str,
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
+    await invalidate_standalone(WORKSPACES_TOPIC)
     return value
 
 
@@ -495,6 +495,7 @@ async def upsert_workspace_overrides(
     await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await invalidate_standalone(WORKSPACES_TOPIC)
     return await workspace_settings_view(slug)
 
 
@@ -503,6 +504,7 @@ async def delete_workspace_settings(slug: str) -> None:
     await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await invalidate_standalone(WORKSPACES_TOPIC)
 
 
 def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
@@ -750,9 +752,12 @@ async def api_get_workspace_settings(
 async def api_put_workspace_settings(
     workspace: str,
     body: WorkspaceSettingsUpdate,
+    request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> WorkspaceSettingsView:
     try:
-        return await upsert_workspace_overrides(await _existing_workspace(workspace), body)
+        slug = await _existing_workspace(workspace)
+        await bind_workspace(request, slug)
+        return await upsert_workspace_overrides(slug, body)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

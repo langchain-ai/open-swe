@@ -17,8 +17,8 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 
-import { SlackIntegrationSection } from "./admin"
-import { FableSection } from "@/features/settings/components/WorkspaceSettingsSections"
+import { SlackIntegrationSection, UsersSection } from "./admin"
+import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 
 afterEach(cleanup)
 
@@ -77,15 +77,73 @@ describe("SlackIntegrationSection", () => {
   })
 })
 
-describe("FableSection", () => {
-  const settings = (fable_enabled: boolean): WorkspaceSettings => ({
-    review_draft_prs: false,
+describe("UsersSection", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("resets pagination when searching or changing page size", async () => {
+    const people = Array.from({ length: 30 }, (_, index) => ({
+      user_id: String(index),
+      github_login: `user-${index}`,
+      display_name: "",
+      email: `user-${index}@example.com`,
+      slack_user_id: null,
+      is_admin: false,
+    }))
+    vi.spyOn(api, "adminListUsers").mockImplementation(
+      async (page = 1, pageSize = 20, search = "") => {
+        const matches = people.filter((user) =>
+          user.github_login.includes(search)
+        )
+        return {
+          items: matches.slice((page - 1) * pageSize, page * pageSize),
+          total: matches.length,
+          page,
+          page_size: pageSize,
+        }
+      }
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <UsersSection enabled />
+      </QueryClientProvider>
+    )
+
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }))
+    expect(await screen.findByText("Page 2 of 3")).toBeTruthy()
+    fireEvent.click(screen.getByRole("combobox", { name: "Rows per page" }))
+    fireEvent.keyDown(await screen.findByRole("option", { name: "25" }), {
+      key: "Enter",
+    })
+    expect(await screen.findByText("1–25 of 30")).toBeTruthy()
+    expect(screen.getByText("Page 1 of 2")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }))
+    expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
+    fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), {
+      target: { value: "user-24" },
+    })
+    expect(await screen.findByText("user-24")).toBeTruthy()
+    expect(screen.queryByText("user-25")).toBeNull()
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), {
+      target: { value: "nobody" },
+    })
+    expect(await screen.findByText("No users match your search.")).toBeTruthy()
+    client.clear()
+  })
+})
+
+describe("ReviewSettings", () => {
+  const settings = (review_draft_prs: boolean): WorkspaceSettings => ({
     pr_summaries: false,
     review_trace_links: false,
-    fable_enabled,
+    review_draft_prs,
   })
-  const loaded = (fable_enabled: boolean): WorkspaceSettingsView => ({
-    effective: settings(fable_enabled),
+  const loaded = (review_draft_prs: boolean): WorkspaceSettingsView => ({
+    effective: settings(review_draft_prs),
     overrides: {},
   })
 
@@ -95,6 +153,7 @@ describe("FableSection", () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
+    vi.spyOn(api, "getInstanceSettings").mockResolvedValue(settings(false))
     vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () =>
       loaded(false)
     )
@@ -109,13 +168,15 @@ describe("FableSection", () => {
       )
     const section = (slug: string) => (
       <QueryClientProvider client={qc}>
-        <FableSection scope={{ kind: "workspace", slug }} />
+        <ReviewSettings scope={{ kind: "workspace", slug }} canEdit />
       </QueryClientProvider>
     )
 
     const view = render(section("alpha"))
-    // The section renders a single switch, disabled until the settings load.
-    const toggle = await within(view.container).findByRole("switch")
+    const row = (
+      await within(view.container).findByText("Review Draft PRs")
+    ).closest("label")!.parentElement!
+    const toggle = within(row).getByRole("switch")
     await waitFor(() => {
       expect(toggle.hasAttribute("disabled")).toBe(false)
       expect(toggle.hasAttribute("data-disabled")).toBe(false)
@@ -123,13 +184,13 @@ describe("FableSection", () => {
     })
     fireEvent.click(toggle)
     await waitFor(() =>
-      expect(save).toHaveBeenCalledWith("alpha", { fable_enabled: true })
+      expect(save).toHaveBeenCalledWith("alpha", { review_draft_prs: true })
     )
 
     view.rerender(section("beta"))
     const saved: WorkspaceSettingsView = {
       effective: settings(true),
-      overrides: { fable_enabled: true },
+      overrides: { review_draft_prs: true },
     }
     finishSave(saved)
 

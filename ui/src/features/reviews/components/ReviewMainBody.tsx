@@ -65,7 +65,6 @@ import type {
 import type {
   PrReviewComment,
   ReviewCheckRun,
-  ReviewCommentCreate,
   ReviewCommentsPayload,
   ReviewDetail,
   ReviewDiffFile,
@@ -90,6 +89,10 @@ import { ReviewPageActions } from "@/features/reviews/components/ReviewPageActio
 import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
 import { ReviewConversation } from "@/features/reviews/components/ReviewConversation"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import {
+  buildCommentPayload,
+  commentRangeLabel,
+} from "@/features/reviews/lib/lineRange"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
@@ -476,52 +479,6 @@ function findingSelectedRange(
     side,
     endSide: side,
   }
-}
-
-function selectionSideToGithub(
-  side: SelectionSide | undefined
-): "LEFT" | "RIGHT" {
-  return side === "deletions" ? "LEFT" : "RIGHT"
-}
-
-// Map a Pierre selection range to a GitHub inline-comment payload. GitHub
-// forbids multi-line ranges that span sides, so a cross-side selection collapses
-// to a single line on the end side; same-side ranges keep their start_line.
-function buildCommentPayload(
-  path: string,
-  range: SelectedLineRange,
-  body: string
-): ReviewCommentCreate {
-  const startSide = range.side ?? "additions"
-  const endSide = range.endSide ?? startSide
-  if (startSide !== endSide) {
-    return {
-      path,
-      line: range.end,
-      side: selectionSideToGithub(endSide),
-      body,
-      start_line: null,
-      start_side: null,
-    }
-  }
-  const side = selectionSideToGithub(endSide)
-  const lo = Math.min(range.start, range.end)
-  const hi = Math.max(range.start, range.end)
-  return {
-    path,
-    line: hi,
-    side,
-    body,
-    start_line: lo < hi ? lo : null,
-    start_side: lo < hi ? side : null,
-  }
-}
-
-function commentRangeLabel(range: SelectedLineRange): string {
-  const side = (range.endSide ?? range.side) === "deletions" ? "L" : "R"
-  const lo = Math.min(range.start, range.end)
-  const hi = Math.max(range.start, range.end)
-  return lo === hi ? `${side}${hi}` : `${side}${lo}-${hi}`
 }
 
 function findingClipboardText(finding: ReviewFinding): string {

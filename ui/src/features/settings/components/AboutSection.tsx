@@ -21,7 +21,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
   }, [])
 
   return (
-    <SettingsSection title="About">
+    <SettingsSection id="about" title="About">
       {version ? (
         <SettingsRow
           label="Open SWE Desktop"
@@ -35,6 +35,9 @@ export function AboutSection({ user }: { user: SessionUser }) {
       <div className="space-y-2 p-4 text-xs break-words text-muted-foreground">
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
+        </p>
+        <p>
+          OPENSWE_ENV: <IdentityValue value={buildInfo?.backend.environment} />
         </p>
         <BuildIdentityDetails buildInfo={buildInfo} />
         <CopyDiagnosticsButton

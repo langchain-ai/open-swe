@@ -72,7 +72,7 @@ async def enqueue_event(
         producer_event_id=producer_event_id,
         occurred_at=occurred_at or datetime.now(UTC),
         payload=payload,
-        environment=ENV.ANALYTICS_ENVIRONMENT.get(),
+        environment=ENV.DD_ENV.get(),
         source_version=source_version,
         entry_point=entry_point(source),
         **identifiers,

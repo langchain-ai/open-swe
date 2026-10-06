@@ -46,6 +46,7 @@ _TOOL_MODULES = {
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "agent.slack.tools.request_pr_review",
+    "request_service_connection": ".request_service_connection",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -57,6 +58,7 @@ _TOOL_MODULES = {
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
+    "search_pull_requests": ".search_pull_requests",
     "search_repo_code": "agent.github.tools.search_repo_code",
     "start_thread": ".threads",
     "slack_add_reaction": "agent.slack.tools.add_reaction",
@@ -121,6 +123,7 @@ __all__ = [
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
+    "request_service_connection",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -132,6 +135,7 @@ __all__ = [
     "save_user_skill",
     "delete_user_skill",
     "schedule_thread_wakeup",
+    "search_pull_requests",
     "search_repo_code",
     "start_thread",
     "slack_add_reaction",
@@ -209,11 +213,13 @@ if TYPE_CHECKING:
         dismiss_human_review_request,
         request_human_review,
     )
+    from agent.tools.request_service_connection import request_service_connection
     from agent.tools.resolve_finding_thread import resolve_finding_thread
     from agent.tools.save_plan import save_plan
     from agent.tools.save_user_instructions import save_user_instructions
     from agent.tools.save_user_settings import save_user_settings
     from agent.tools.schedule_thread_wakeup import schedule_thread_wakeup
+    from agent.tools.search_pull_requests import search_pull_requests
     from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.threads import get_thread, list_threads, manage_thread, start_thread
     from agent.tools.update_finding import update_finding

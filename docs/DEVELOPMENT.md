@@ -211,10 +211,12 @@ The shared [preview environment](https://open-swe-preview-cc53e8fbe667565d843d08
 1. Add the **`preview`** label to your PR.
 2. Run [Deploy open-swe preview](https://github.com/langchain-ai/langchainplus/actions/workflows/deploy_open_swe_preview.yaml) on `main` with **force** unchecked, or wait for a scheduled run at :04, :19, :34, or :49 each hour. Labeling alone does not deploy.
 3. In the run summary, confirm your PR and head commit appear under **Preview tree → Merged**, not **Skipped**. A successful run may still omit a PR.
-4. Wait for the dashboard rollout, then confirm in LangSmith Deployments that the preview backend revision matches the published `preview` commit and deployed successfully.
+4. Wait for the run's **Deploy the preview tree** job. It rolls the preview deployment to the published `preview` commit and fails, with the revision's build or server logs, unless the revision deploys.
 5. Open [preview](https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app/agents) and test with non-production tasks and repositories. For local UI iteration against that backend, see [Dashboard against a deployed backend](#dashboard-against-a-deployed-backend).
 
 When PRs conflict with the preview tree, the run makes one `oswe` call (an Open SWE agent on the backend in the `OPEN_SWE_BACKEND_URL` repository variable) that merges all of them; the summary marks those PRs `conflicts resolved by oswe`, and later runs replay the resolution from a git rerere cache. PRs the agent cannot resolve are skipped, unlabeled, and receive resolution instructions for the shared `preview-manual` branch. Resolve the conflict before reapplying the label. Use **force** only to rebuild an unchanged preview tree.
+
+Before publishing a changed tree, the run typechecks the dashboard. On failure it reassembles once without the rerere cache, then asks `oswe` to commit a fix-up (`preview: fix typecheck errors (oswe)`), which later runs replay while the tree underneath is unchanged. If the typecheck still fails, nothing is published, the run fails, and `refs/preview-failed` records the tree so later runs fail fast until it changes.
 
 The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
 

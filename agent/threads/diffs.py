@@ -3,10 +3,9 @@
 import base64
 import json
 import logging
-import posixpath
 from functools import cache
 from importlib import resources
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx2
 from fastapi import HTTPException
@@ -22,6 +21,9 @@ from agent.threads.proxy import _PROXY_REQUEST_TIMEOUT
 from agent.threads.summary import _metadata_repo
 from agent.utils.json_types import thread_metadata
 
+if TYPE_CHECKING:
+    from deepagents.backends.protocol import SandboxBackendProtocol
+
 logger = logging.getLogger(__name__)
 
 _RECOVERY_PATCH_LIMIT_BYTES = 25 * 1024 * 1024
@@ -29,11 +31,11 @@ _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
 _UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)}
 
 
-async def create_sandbox(*args: Any, **kwargs: Any) -> Any:
+async def connect_sandbox(sandbox_id: str, *, thread_id: str) -> SandboxBackendProtocol:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
-    from agent.sandboxes.providers.registry import create_sandbox as _create_sandbox
+    from agent.sandboxes.connect import connect_sandbox as _connect_sandbox
 
-    return await _create_sandbox(*args, **kwargs)
+    return await _connect_sandbox(sandbox_id, thread_id=thread_id)
 
 
 @cache
@@ -108,7 +110,7 @@ async def get_dashboard_thread_recovery_patch(
         raise HTTPException(404, "thread has no recoverable sandbox")
 
     try:
-        sandbox = await create_sandbox(sandbox_id)
+        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for recovery", sandbox_id, exc_info=True)
         raise HTTPException(502, "could not connect to thread sandbox") from exc
@@ -172,7 +174,7 @@ async def get_dashboard_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
-    from agent.sandboxes.paths import resolve_sandbox_work_dir
+    from agent.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
     from agent.utils.turn_checkpoint import read_turn_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
@@ -180,13 +182,13 @@ async def get_dashboard_thread_working_tree_diff(
     if not isinstance(sandbox_id, str) or not sandbox_id:
         return _missing_diff()
     try:
-        sandbox = await create_sandbox(sandbox_id)
+        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Could not connect to sandbox %s for working tree diff", sandbox_id)
         raise HTTPException(503, "Could not connect to the workspace.") from exc
     work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)
-    repo_path = posixpath.join(work_dir, repo_name) if repo_name else None
+    repo_path = await resolve_checkout_dir(sandbox, work_dir, repo_name) if repo_name else None
     return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)
 
 

@@ -62,7 +62,9 @@ class _DisableInheritedMiddleware(AgentMiddleware):
 
 from agent.analytics.usage import record_agent_invocation_usage
 from agent.bridge.cli_result import cli_result
+from agent.bridge.constants import BridgeClient
 from agent.bridge.store import Bridge
+from agent.bridge.worktree_branch import schedule_worktree_branch_rename
 from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_overrides import (
     load_profile,
@@ -76,16 +78,20 @@ from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
     ModelOption,
     available_requested_models,
-    canonical_model_pair,
     default_vision_model_pair,
     gate_fable_model,
     model_supports_effort,
     model_supports_images,
 )
+from agent.dashboard.user_credentials import get_notion_status
 from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
-from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
-from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.desktop import (
+    create_desktop_backend,
+    desktop_artifact_routes,
+    is_desktop_run,
+    is_desktop_worktree,
+)
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     dynamic_context_hash,
@@ -164,12 +170,13 @@ from agent.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from agent.sandboxes.tool_access import tools_base_url
+from agent.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
 from agent.sandboxes.tool_runtime import ToolSurface, save_tool_context
 from agent.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
 from agent.slack.dm import is_concierge_thread, is_dm_channel
 from agent.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from agent.threads.blobs import blob_namespace
+from agent.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from agent.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from agent.threads.summary import DASHBOARD_SOURCE
 from agent.tool_loaders.notion_mcp import load_notion_tools
@@ -213,12 +220,14 @@ from agent.tools import (
     report_platform_issue,
     request_human_review,
     request_pr_review,
+    request_service_connection,
     save_organization_skill,
     save_plan,
     save_user_instructions,
     save_user_settings,
     save_user_skill,
     schedule_thread_wakeup,
+    search_pull_requests,
     slack_add_reaction,
     slack_attach_html,
     slack_list_channel_members,
@@ -239,11 +248,11 @@ from agent.tools import (
 from agent.tools.access import permitted, resolve_access
 from agent.tools.admin_gate import (
     actor_has_admin_context,
-    actor_is_admin,
     participant_is_admin,
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
+from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
 from agent.utils import ttl_cache
@@ -389,20 +398,6 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
-async def _human_review_requests_enabled(login: str | None) -> bool:
-    if not login:
-        return False
-    try:
-        return (await User.preferences_for_login(login)).human_review_requests
-    except Exception:
-        logger.warning(
-            "Could not load the human review preference; leaving the tool out",
-            extra={"profile_login": login},
-            exc_info=True,
-        )
-        return False
-
-
 async def _user_for_login(login: str) -> User | None:
     """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
     try:
@@ -422,10 +417,16 @@ async def _thread_participant(
     *,
     person_id: str | None = None,
     timezone: str = "",
+    slack_user_id: str = "",
 ) -> ThreadParticipant:
     login = identity.github_login or None
     if login is None:
-        return ThreadParticipant(identity=identity, person_id=person_id or "", timezone=timezone)
+        return ThreadParticipant(
+            identity=identity,
+            person_id=person_id or "",
+            timezone=timezone,
+            slack_user_id=slack_user_id,
+        )
     user, profile, workspace_admin, instructions = await asyncio.gather(
         _user_for_login(login),
         load_profile(login),
@@ -447,6 +448,7 @@ async def _thread_participant(
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
+        slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
     )
 
 
@@ -458,6 +460,7 @@ async def _thread_participants(
     sender_person_id: str,
     sender_display_name: str = "",
     sender_timezone: str = "",
+    sender_slack_user_id: str = "",
 ) -> list[ThreadParticipant]:
     """Everyone in the thread, each with the settings the agent acts under for them.
 
@@ -482,7 +485,11 @@ async def _thread_participants(
     return list(
         await asyncio.gather(
             _thread_participant(
-                resolved_sender, config, person_id=sender_person_id, timezone=sender_timezone
+                resolved_sender,
+                config,
+                person_id=sender_person_id,
+                timezone=sender_timezone,
+                slack_user_id=sender_slack_user_id,
             ),
             *(_thread_participant(identity, config) for identity in others),
         )
@@ -604,6 +611,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
+        "request_service_connection",
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -685,30 +693,30 @@ def workspace_slug(cfg: RunConfig) -> str | None:
     return cfg.workspace_slug
 
 
-async def _workspace_admin(config: RunnableConfig, profile_login: str | None) -> bool:
-    return await actor_is_admin(RunConfig.from_config(config), login=profile_login)
-
-
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
 
 
-async def _bridged_thread(thread_id: str | None) -> bool:
-    """Whether this thread's sandbox is a CLI bridge on the user's machine."""
+async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
+    """The app serving this thread's bridge to the user's machine, if it has one."""
     if not thread_id:
-        return False
+        return None
     try:
         thread = await client.threads.get(thread_id=thread_id)
     except Exception:
         logger.warning(
-            "Could not read the thread's sandbox; omitting cli_result",
+            "Could not read the thread's sandbox; treating it as hosted",
             extra={"agent_thread_id": thread_id},
             exc_info=True,
         )
-        return False
-    sandbox_id = thread_metadata(thread).get("sandbox_id")
-    return isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
+        return None
+    metadata = thread_metadata(thread)
+    sandbox_id = metadata.get("sandbox_id")
+    if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is None:
+        return None
+    # Bound before bridges recorded their client, which only the CLI served then.
+    return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
 async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
@@ -728,8 +736,15 @@ async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list
 async def _notion_tools_for(profile_login: str | None) -> list[Any]:
     if not profile_login:
         return []
+    try:
+        status = (await get_notion_status(profile_login))["notion"]
+    except Exception:
+        logger.warning("Could not read Notion connection status", exc_info=True)
+        return []
+    if not status.get("connected"):
+        return []
     return await _cached_tool_loader(
-        f"tools:notion:{profile_login}",
+        f"tools:notion:{profile_login}:{status.get('updated_at')}",
         300,
         lambda: load_notion_tools(profile_login),
     )
@@ -759,11 +774,15 @@ async def _cached_profile(profile_login: str | None):
     )
 
 
-def _sandbox_file_downloads_enabled(cfg: RunConfig) -> bool:
-    """Return whether signed sandbox file downloads are available for this run."""
+def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
+    """Return whether signed sandbox file downloads are available for this run.
+
+    They are served by the LangSmith box itself, which a bridged thread does not have.
+    """
     return (
         ENV.SANDBOX_TYPE.get() == "langsmith"
         and cfg.stop_summary is not True
+        and not bridged
         and not is_desktop_run(cfg)
     )
 
@@ -852,8 +871,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         credential_login: str | None = None,
         requested_models: Mapping[str, ModelOption] | None = None,
         saved_requested_model: str | None = None,
+        bridge_client: BridgeClient | None = None,
+        prefer_tools_in_sandbox: bool = False,
     ) -> None:
+        self._bridge_client = bridge_client
         self._saved_requested_model = saved_requested_model
+        self._prefer_tools_in_sandbox = prefer_tools_in_sandbox
         self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
@@ -967,6 +990,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     outputs={
                         "requested_model": decision.requested_model,
                         "classifier": vars(decision.classifier),
+                        "requested_effort": decision.requested_effort,
+                        "effort_classifier": vars(decision.effort_classifier),
                         "outcome": decision.outcome,
                         "reason": decision.reason,
                         "pin_persisted": decision.pin_persisted,
@@ -987,6 +1012,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             client=client,
         )
         requested_model: str | None = None
+        requested_effort: str | None = None
         if self._requested_models is not None and self._model_selection is not None:
             settings = (await load_thread_settings(client, self._thread_id)).copy()
             if not settings.get("model_handoff_complete"):
@@ -995,6 +1021,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     messages=state.get("messages") or [],
                     requested_models=self._requested_models,
                     decision=decision.classifier,
+                    effort_decision=decision.effort_classifier,
                     slack_event_ts=(
                         handoff_config.slack_thread.triggering_event_ts
                         if handoff_config.slack_thread is not None
@@ -1009,6 +1036,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     decision.outcome = "low_confidence"
                 if handoff is not None:
                     requested_model = handoff.requested_model
+                    requested_effort = handoff.requested_effort
+                    decision.requested_effort = requested_effort
                     decision.requested_model = requested_model
                     if handoff.unavailable_model or (
                         requested_model and requested_model not in self._requested_models
@@ -1017,6 +1046,27 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         decision.reason = "model_unavailable"
                         raise ValueError(
                             "The requested runtime model is unavailable; select an available model."
+                        )
+                if handoff is not None and handoff.unavailable_effort:
+                    decision.outcome = "unavailable_request"
+                    decision.reason = "effort_unavailable"
+                    raise ValueError("The requested reasoning effort is unavailable.")
+                if requested_effort is not None:
+                    requested_model = requested_model or self._model_id
+                    decision.requested_model = requested_model
+                    option = self._requested_models.get(requested_model)
+                    if option is None:
+                        decision.outcome = "unavailable_request"
+                        decision.reason = "model_unavailable"
+                        raise ValueError(
+                            "Choose an available runtime model to set its reasoning effort."
+                        )
+                    if requested_effort not in option["efforts"]:
+                        decision.outcome = "incompatible_request"
+                        decision.reason = "effort_unsupported"
+                        raise ValueError(
+                            f"The requested reasoning effort {requested_effort!r} is not supported "
+                            f"by {option['label']}; choose from {', '.join(option['efforts'])}."
                         )
                 settings["model_handoff_complete"] = True
                 settings["requested_model"] = requested_model
@@ -1036,7 +1086,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         )
                     settings.update(
                         model_id=requested_model,
-                        effort=option["default_effort"],
+                        effort=requested_effort or option["default_effort"],
                         model_routing_enabled=False,
                     )
                 try:
@@ -1056,8 +1106,10 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 decision.pin_persisted = bool(requested_model)
             if requested_model:
                 option = self._requested_models[requested_model]
+                requested_effort = settings.get("effort") or option["default_effort"]
+                decision.requested_effort = requested_effort
                 try:
-                    self._model_selection.use_requested_model(requested_model)
+                    self._model_selection.use_requested_model(requested_model, requested_effort)
                 except Exception:
                     decision.outcome = "selection_failure"
                     decision.reason = "model_initialization_failed"
@@ -1066,17 +1118,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
                 self._model_id = requested_model
-                self._effort = option["default_effort"]
+                self._effort = requested_effort
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
         if is_desktop_run(cfg):
-            if cfg.local_project_path:
-                schedule_worktree_branch_rename(
-                    worktree_path=cfg.local_project_path,
-                    messages=state.get("messages") or [],
-                    model=self._title_model,
-                )
             async with aphase(self._thread_id, "prepare.await_sandbox"):
                 try:
                     sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
@@ -1093,6 +1139,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                         else None,
                     )
                     raise
+            if cfg.local_project_path and is_desktop_worktree(cfg.local_project_path):
+                schedule_worktree_branch_rename(
+                    thread_id=self._thread_id,
+                    backend=sandbox_backend,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
+                )
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             return {
@@ -1135,6 +1188,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
+        if bridged and self._bridge_client == "desktop":
+            schedule_worktree_branch_rename(
+                thread_id=self._thread_id,
+                backend=sandbox_backend,
+                messages=state.get("messages") or [],
+                model=self._title_model,
+            )
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
@@ -1199,6 +1259,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     sender_timezone=(
                         cfg.slack_thread.triggering_user_timezone if cfg.slack_thread else ""
                     ),
+                    sender_slack_user_id=(
+                        cfg.slack_thread.triggering_user_id if cfg.slack_thread else ""
+                    ),
                 )
                 sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
@@ -1254,6 +1317,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         return {
             "work_dir": work_dir,
             "requested_model": requested_model,
+            "requested_effort": requested_effort,
             "selected_model_id": attribution_model_id,
             "selected_effort": attribution_effort,
             **({"messages": sender_messages} if sender_messages else {}),
@@ -1276,9 +1340,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
-                sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg),
+                sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
+                prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
+                local_checkout_client=self._bridge_client or "cli",
                 recent_thread_context=recent_thread_context,
             ),
         }
@@ -1350,9 +1416,19 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Every settings read below is keyed by this slug. A factory runs outside the
     # graph's own context, so the settings module cannot recover it on its own.
     settings_workspace = workspace_slug(cfg)
+    async with aphase(thread_id, "factory.bridged_thread"):
+        bridge_client = await _bridge_client(thread_id)
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             {} if local_run else await load_thread_settings(client, thread_id)
+        )
+        # Bridged threads and deployments without a tools endpoint have no way to
+        # reach sandbox-only tools, so they keep every tool direct.
+        prefer_tools_in_sandbox = (
+            not local_run
+            and bridge_client is None
+            and tools_endpoint_configured()
+            and await OsweThread.prefers_tools_in_sandbox(client, thread_id)
         )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
@@ -1450,13 +1526,22 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             settings_changed = True
         adaptive_model_routing = not bool(thread_settings.get("requested_model"))
 
+    if cfg.source == "incidents_agent":
+        adaptive_model_routing = False
+        if not cfg.agent_model_id:
+            model_id, profile_effort = routing_defaults["performance"]
+            subagent_model_id, subagent_effort = routing_defaults["performance"]
+
+    # Auto never falls back outside its tiers: an uncertain route uses Fast.
+    if adaptive_model_routing and not slack_ask_mode:
+        if (subagent_model_id, subagent_effort) == (model_id, profile_effort):
+            subagent_model_id, subagent_effort = routing_defaults["fast"]
+        model_id, profile_effort = routing_defaults["fast"]
+
     # Capability fallbacks can temporarily replace a pinned text-only model.
     image_model_override: tuple[str, str] | None = None
     per_thread_model = cfg.agent_model_id
     per_thread_effort = cfg.agent_effort
-    canonical_per_thread = canonical_model_pair(per_thread_model, per_thread_effort)
-    if canonical_per_thread is not None:
-        per_thread_model, per_thread_effort = canonical_per_thread
     if (
         (
             not thread_settings.get("requested_model")
@@ -1530,6 +1615,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
+        PREFER_TOOLS_IN_SANDBOX_KEY: prefer_tools_in_sandbox,
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1586,11 +1672,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         tool_access = await resolve_access(cfg, login=profile_login)
 
     stop_summary_mode = cfg.stop_summary is True
-    async with aphase(thread_id, "factory.bridged_thread"):
-        cli_result_required = (
-            not local_run and not stop_summary_mode and await _bridged_thread(thread_id)
-        )
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg)
+    cli_result_required = not stop_summary_mode and bridge_client == "cli"
+    sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
     mcp_tools: list[Any] = []
     notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run and credential_scope_known:
@@ -1635,6 +1718,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         save_user_skill,
         delete_user_skill,
         list_threads,
+        search_pull_requests,
         get_thread,
         manage_thread,
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
@@ -1655,6 +1739,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ),
         read_user_settings,
         request_pr_review,
+        request_service_connection,
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
@@ -1700,8 +1785,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 dismiss_human_review_request,
             )
         ]
-    elif not await _human_review_requests_enabled(profile_login):
-        static_tools = [tool for tool in static_tools if tool is not request_human_review]
     if (
         local_run
         or not ENV.SLACK_BOT_TOKEN.get()
@@ -1721,12 +1804,21 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ]
     static_tools = apply_tool_descriptions(
         static_tools,
-        {"expose_port": {"jwks_url": service_identity_jwks_url()}},
+        {
+            "expose_port": {
+                "jwks_url": service_identity_jwks_url(),
+                "port": "<port>",
+            }
+        },
     )
     if local_run:
         static_tools = apply_tool_descriptions([http_request, fetch_url, web_search])
     elif stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
+    if prefer_tools_in_sandbox:
+        static_tools = [
+            tool for tool in static_tools if _registered_tool_name(tool) not in CURL_REPLACED_TOOLS
+        ]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
         STOP_SUMMARY_EXCLUDED_TOOLS
@@ -1737,6 +1829,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if incident_automatic
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
+    sandbox_only_tools = (
+        frozenset(SANDBOX_ONLY_TOOLS)
+        if prefer_tools_in_sandbox and not stop_summary_mode
+        else frozenset()
+    )
+    excluded_tools |= sandbox_only_tools
     # A client's tool replaces any server tool of the same name, so the endpoint's
     # view of which calls the client runs matches the graph's.
     client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
@@ -1758,6 +1856,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         candidate = DynamicToolMiddleware(
             integration_tool_groups,
             reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
+            model_visible=not prefer_tools_in_sandbox,
         )
         if candidate.has_groups:
             dynamic_tool_middleware = candidate
@@ -1832,13 +1931,17 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
 
     configurable["image_model_fallback_enabled"] = image_fallback is not None
 
-    def requested_model_factory(requested_model: str) -> BaseChatModel:
+    def requested_model_factory(
+        requested_model: str, requested_effort: str | None
+    ) -> BaseChatModel:
         option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
         model = _make_model_or_defer(
             requested_model,
             use_gateway=use_gateway,
             **provider_model_kwargs(
-                requested_model, option["default_effort"], max_tokens=DEFAULT_LLM_MAX_TOKENS
+                requested_model,
+                requested_effort or option["default_effort"],
+                max_tokens=DEFAULT_LLM_MAX_TOKENS,
             ),
         )
         if image_fallback is not None and not option["supports_images"]:
@@ -1897,7 +2000,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
-                    tools=[tool for tool in static_tools if tool is not save_user_settings],
+                    tools=[
+                        tool
+                        for tool in static_tools
+                        if tool is not save_user_settings
+                        and _registered_tool_name(tool) not in sandbox_only_tools
+                    ],
                     workspace_skills=workspace_skills,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
@@ -1947,6 +2055,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         routing_defaults=routing_defaults,
                         requested_models=requested_models,
                         saved_requested_model=thread_settings.get("requested_model"),
+                        bridge_client=bridge_client,
+                        prefer_tools_in_sandbox=prefer_tools_in_sandbox,
                     ),
                     TranscriptMiddleware(),
                     *([client_tools] if client_tools else []),

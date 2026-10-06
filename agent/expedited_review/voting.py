@@ -176,12 +176,17 @@ async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
         return Outcome("This expedited review is no longer waiting for approval.")
     if approval.sent_elsewhere:
         return Outcome("This expedited review was already sent to a channel.")
+    choices = approval.slack_channel_choices
+    if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
+        return await request_copy(approval, choices[0]["id"], None, configured=True)
     if not await broadcast_card(approval):
         return Outcome("Open SWE could not send this expedited review to the channel.")
     return Outcome("Sent to the channel.")
 
 
-async def request_copy(approval: HumanReviewRequest, channel_id: str, user: User | None) -> Outcome:
+async def request_copy(
+    approval: HumanReviewRequest, channel_id: str, user: User | None, *, configured: bool = False
+) -> Outcome:
     """Only someone with write access may show the diff to another channel's members."""
     # A modal can be submitted long after it opened, past the click's own channel check.
     if not await still_internal(approval.slack_channel_id):
@@ -192,9 +197,10 @@ async def request_copy(approval: HumanReviewRequest, channel_id: str, user: User
         return Outcome("This expedited review is no longer waiting for approval.")
     if approval.sent_elsewhere:
         return Outcome("This expedited review was already sent to a channel.")
-    sender = await resolve_writer(approval, user)
-    if isinstance(sender, Outcome):
-        return sender
+    if not configured:
+        sender = await resolve_writer(approval, user)
+        if isinstance(sender, Outcome):
+            return sender
     channel = await sendable_channel(channel_id)
     if channel is None:
         return Outcome(

@@ -369,13 +369,10 @@ async def test_github_webhook_context_always_uses_workspace_bot(monkeypatch, cre
         "get_github_app_installation_token_with_expiry",
         AsyncMock(return_value=("bot-token", None)),
     )
-    personal = AsyncMock(return_value={"token": "personal-token"})
-    monkeypatch.setattr(auth, "resolve_github_token_from_email", personal)
     assert (
         await common.get_or_resolve_thread_github_token("thread-1", "alice@example.com")
         == "bot-token"
     )
-    personal.assert_not_awaited()
 
 
 @pytest.mark.asyncio

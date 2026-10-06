@@ -88,6 +88,7 @@ async def disconnect_my_notion(
 
 @router.get("/notion/login")
 async def notion_login(
+    redirect_to: str | None = None,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     session: dict[str, Any] = SESSION_DEP,
@@ -96,7 +97,7 @@ async def notion_login(
     nonce = new_state_nonce()
     nonce_hash = hash_state_nonce(nonce)
     state = issue_state(
-        redirect_to=f"{frontend_base_url()}/my-settings",
+        redirect_to=sanitize_redirect_to(redirect_to or f"{frontend_base_url()}/my-settings"),
         nonce_hash=nonce_hash,
         handoff_challenge=valid_handoff_challenge(desktop_handoff),
         handoff_port=desktop_port,

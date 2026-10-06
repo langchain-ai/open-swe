@@ -510,7 +510,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     assert captured["thread_create_kwargs"] == {
         "thread_id": captured["thread_id"],
         "if_exists": "do_nothing",
-        "metadata": {"title": "Review #1244"},
+        "metadata": {"title": "Review: #1244"},
     }
     assert captured["metadata_token"] == "app-token"
     assert "<base_sha>base-sha</base_sha>" in prompt

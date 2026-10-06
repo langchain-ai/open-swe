@@ -1,18 +1,20 @@
 import { useState, type ReactNode } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { SettingsSection } from "@/components/AppShell"
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
+  slackChannelHref,
   slackChannelLabel,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import {
   Chips,
   EMPTY_DRAFT,
+  githubRepoHref,
   WorkspaceEditor,
-  type ChipHref,
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
 import {
@@ -60,12 +62,6 @@ function refreshedAt(timestamp: string | null | undefined): string | null {
   const parsed = Date.parse(timestamp)
   return Number.isNaN(parsed) ? null : formatRelativeTime(parsed)
 }
-
-// Repositories are stored as `owner/name`; anything else (an unlinked Slack
-// id, a future format) stays an inert chip.
-const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
-const githubRepoHref: ChipHref = (repo) =>
-  REPO_PATTERN.test(repo) ? `https://github.com/${repo}` : null
 
 const STEP_MARK: Record<WorkspaceRefreshStep["status"], string> = {
   running: "…",
@@ -151,7 +147,11 @@ function WorkspaceRow({
         </div>
       </div>
       <Chips values={workspace.repos} hrefFor={githubRepoHref} />
-      <Chips values={workspace.slack_channel_ids.map(channelLabel)} />
+      <Chips
+        values={workspace.slack_channel_ids}
+        labelFor={channelLabel}
+        hrefFor={slackChannelHref}
+      />
       {steps.length > 0 && <RefreshSteps steps={steps} />}
       {workspace.refresh_error && (
         <p className="text-xs/relaxed text-destructive">
@@ -181,12 +181,7 @@ export function WorkspacesSection({
   renderConfigure?: (workspace: WorkspaceOption) => ReactNode
 }) {
   const qc = useQueryClient()
-  const workspaces = useQuery({
-    queryKey: WORKSPACE_OPTIONS_KEY,
-    queryFn: api.listWorkspaceOptions,
-    staleTime: 60_000,
-    refetchInterval: 5000,
-  })
+  const workspaces = useWorkspaceOptions()
   const options = workspaces.data
   // Channel names are an admin's view; everyone else sees the stored ids.
   const channelDirectory = useSlackChannelDirectory(isAdmin)

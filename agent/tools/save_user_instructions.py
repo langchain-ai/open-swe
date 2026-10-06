@@ -5,6 +5,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from agent.audit_logs.tools import audit_tool
 from agent.dashboard.agent_overrides import resolve_github_login
 from agent.dashboard.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
 from agent.tools.access import Policy, access, unchanged
@@ -13,6 +14,7 @@ from agent.utils.json_types import as_json_object
 logger = logging.getLogger(__name__)
 
 
+@audit_tool()
 @access(Policy(trusted="private", actor="owner", sole=unchanged))
 async def save_user_instructions(instructions: str) -> dict[str, Any]:
     """Implement the `save_user_instructions` tool."""

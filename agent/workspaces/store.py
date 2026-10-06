@@ -59,6 +59,8 @@ from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
 from agent.store import now_iso
+from agent.ui_invalidations.outbox import invalidate
+from agent.ui_invalidations.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -259,17 +261,6 @@ def script_log_path(label: str) -> str:
     return f"{script_root()}/logs/{label}.log"
 
 
-def script_log_paths() -> dict[str, str]:
-    """Every script log path, for handing to a caller that wants to read them later.
-
-    These are paths *inside a sandbox*. A refresh writes them on its own
-    throwaway builder, which is reclaimed once the capture lands — so they are
-    not readable from the thread that started the refresh. They are captured
-    into the snapshot, so any sandbox booted from it afterwards has them.
-    """
-    return {label: script_log_path(label) for label in ("setup", "update")}
-
-
 def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
     """Shell command that writes one of a workspace's scripts, runs it, and logs it.
 
@@ -431,6 +422,7 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
 
 
 class WorkspaceCreate(BaseModel):
+    inherit_default_sandbox: bool = True
     name: str
     prompt: str = ""
     setup_script: str = ""
@@ -493,6 +485,8 @@ class WorkspaceCreate(BaseModel):
 
 class WorkspaceUpdate(BaseModel):
     """Partial update: only the fields present are written."""
+
+    inherit_default_sandbox: bool | None = None
 
     name: str | None = None
     prompt: str | None = None
@@ -582,6 +576,7 @@ class Workspace(BaseModel):
     model_config = ConfigDict(extra="ignore", validate_assignment=True)
 
     slug: str
+    inherit_default_sandbox: bool = False
     name: str = ""
     prompt: str = ""
     setup_script: str = ""
@@ -638,6 +633,9 @@ class Workspace(BaseModel):
         now = now_iso()
         return cls(
             slug=slugify(create.name),
+            inherit_default_sandbox=(
+                create.inherit_default_sandbox and slugify(create.name) != DEFAULT_WORKSPACE_SLUG
+            ),
             name=create.name.strip(),
             prompt=create.prompt,
             setup_script=create.setup_script,
@@ -845,6 +843,7 @@ class WorkspaceStore:
                 await session.flush()
                 stored_repos = await _bound_repos(session, row.id)
                 stored_channels = await _bound_channels(session, row.id)
+                await invalidate(session, WORKSPACES_TOPIC)
                 if definition_only:
                     await session.refresh(row)
                     return to_workspace(
@@ -889,6 +888,7 @@ class WorkspaceStore:
     async def delete(self, slug: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(WorkspaceRow).where(WorkspaceRow.slug == slug))
+            await invalidate(session, WORKSPACES_TOPIC)
 
     async def owner_of_repo(self, full_name: str) -> str | None:
         """The slug of the workspace this repository belongs to, if any."""
@@ -1093,6 +1093,7 @@ class WorkspaceStore:
             record.updated_at = now_iso()
             apply_state(row, record)
             stamp_updated(row, record)
+            await invalidate(session, WORKSPACES_TOPIC)
             return record
 
     async def assert_publishable(
@@ -1474,6 +1475,10 @@ async def _channel_owners(
 
 def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
     """Apply a partial update in memory; only the fields present are written."""
+    if update.inherit_default_sandbox is not None:
+        if record.slug == DEFAULT_WORKSPACE_SLUG and update.inherit_default_sandbox:
+            raise ValueError("The default workspace cannot inherit its own sandbox")
+        record.inherit_default_sandbox = update.inherit_default_sandbox
     if update.name is not None:
         record.name = update.name.strip()
     if update.prompt is not None:

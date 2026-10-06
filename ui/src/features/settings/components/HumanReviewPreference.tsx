@@ -12,18 +12,18 @@ export function HumanReviewPreference() {
   return (
     <>
       <SettingsRow
-        label="Request human reviews in Slack"
-        htmlFor="human-review-requests"
-        description="Ask a repository's Slack review channel to review a pull request, from the dashboard or by asking Open SWE. The pull request merges once its reviewers approve."
+        label="Link to Open SWE reviews in Slack"
+        htmlFor="pr-review-links"
+        description="When Open SWE posts pull request links for you in Slack, open the Open SWE review page instead of GitHub."
         control={
           <Switch
-            id="human-review-requests"
-            checked={profile.data?.human_review_requests ?? false}
+            id="pr-review-links"
+            checked={profile.data?.pr_review_links ?? false}
             disabled={disabled}
             onCheckedChange={(value) => {
               if (!defaults) return
               save.patch(
-                { human_review_requests: value },
+                { pr_review_links: value },
                 defaults.default_agent_model,
                 defaults.default_agent_reasoning_effort
               )
@@ -32,18 +32,18 @@ export function HumanReviewPreference() {
         }
       />
       <SettingsRow
-        label="Watch pull requests I post for review"
-        htmlFor="review-channel-watch"
-        description="When you link a pull request in any Slack channel Open SWE is in, Open SWE reacts once it is approved and once it merges. If it sits green without an approval for 30 minutes, Open SWE bumps it and picks a reviewer."
+        label="React to failing PR checks in Slack"
+        htmlFor="pr-failure-reactions"
+        description="Add ❌ to watched pull request posts in Slack when checks fail on a PR you own. Off by default."
         control={
           <Switch
-            id="review-channel-watch"
-            checked={profile.data?.review_channel_watch ?? false}
+            id="pr-failure-reactions"
+            checked={profile.data?.pr_failure_reactions ?? false}
             disabled={disabled}
             onCheckedChange={(value) => {
               if (!defaults) return
               save.patch(
-                { review_channel_watch: value },
+                { pr_failure_reactions: value },
                 defaults.default_agent_model,
                 defaults.default_agent_reasoning_effort
               )
