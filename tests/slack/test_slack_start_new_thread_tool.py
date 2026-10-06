@@ -12,6 +12,7 @@ from agent.credential_scope import (
     private_credential_login,
 )
 from agent.slack.channels import SlackChannel
+from agent.slack.http import SlackRequestError
 
 slack_breakout_tool = importlib.import_module("agent.slack.tools.start_new_thread")
 
@@ -132,7 +133,7 @@ async def test_slack_start_new_thread_success(
         unfurl_links: bool = True,
         unfurl_media: bool = True,
         blocks: list[dict[str, Any]] | None = None,
-    ) -> tuple[str | None, str | None]:
+    ) -> str:
         captured["top_level_post"] = {
             "channel_id": channel_id,
             "text": text,
@@ -140,7 +141,7 @@ async def test_slack_start_new_thread_success(
             "unfurl_media": unfurl_media,
             "blocks": blocks,
         }
-        return new_ts, None
+        return new_ts
 
     async def fake_post_thread_reply(
         channel_id: str,
@@ -152,7 +153,7 @@ async def test_slack_start_new_thread_success(
         blocks: list[dict[str, Any]] | None = None,
         usage: Any = None,
         **kwargs: Any,
-    ) -> tuple[str | None, str | None]:
+    ) -> str:
         captured["thread_reply"] = {
             "channel_id": channel_id,
             "thread_ts": thread_ts,
@@ -163,7 +164,7 @@ async def test_slack_start_new_thread_success(
             "usage": usage,
             "agent_thread_id": kwargs.get("agent_thread_id"),
         }
-        return "1700000000.222222", None
+        return "1700000000.222222"
 
     async def fake_dispatch_agent_run(
         thread_id: str,
@@ -368,7 +369,7 @@ async def test_breakout_preserves_requester_and_credential_scope(
     client = SimpleNamespace(
         threads=SimpleNamespace(get=get_thread, create=create, update=AsyncMock())
     )
-    post = AsyncMock(return_value=("1700000000.111111", None))
+    post = AsyncMock(return_value="1700000000.111111")
     dispatch = AsyncMock(return_value={"run_id": "run-123"})
     monkeypatch.setattr("agent.run_config.get_config", lambda: config)
     monkeypatch.setattr(slack_breakout_tool, "langgraph_client", lambda: client)
@@ -430,12 +431,12 @@ async def test_slack_start_new_thread_returns_detail_failure_without_dispatch(
 ) -> None:
     captured: dict[str, Any] = {"dispatched": False, "detail_posts": 0, "sleeps": []}
 
-    async def fake_post_top_level(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
-        return "1700000000.111111", None
+    async def fake_post_top_level(*args: Any, **kwargs: Any) -> str:
+        return "1700000000.111111"
 
-    async def fake_post_thread_reply(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
+    async def fake_post_thread_reply(*args: Any, **kwargs: Any) -> str:
         captured["detail_posts"] += 1
-        return None, "rate_limited: 30"
+        raise SlackRequestError("rate_limited: 30")
 
     async def fake_sleep(delay: float) -> None:
         captured["sleeps"].append(delay)

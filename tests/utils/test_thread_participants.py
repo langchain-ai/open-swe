@@ -49,11 +49,10 @@ async def test_resolves_slack_participants_from_verified_source_context() -> Non
             return_value="teammate",
         ),
     ):
-        logins, unresolved, error = await participants.resolve_thread_participant_logins(
+        logins, unresolved = await participants.resolve_thread_participant_logins(
             {"configurable": {"thread_id": "thread-1", "source": "slack"}}
         )
 
-    assert error is None
     assert unresolved == 0
     assert logins == {"owner", "teammate"}
     fetch.assert_awaited_once_with("C123", "1700000000.000100")
@@ -70,11 +69,10 @@ async def test_resolves_linear_participants_from_metadata() -> None:
         patch.object(participants, "get_client", return_value=_Client(metadata)),
         patch.object(participants.User, "for_login", side_effect=_known_user),
     ):
-        logins, unresolved, error = await participants.resolve_thread_participant_logins(
+        logins, unresolved = await participants.resolve_thread_participant_logins(
             {"configurable": {"thread_id": "thread-1", "source": "linear"}}
         )
 
-    assert error is None
     assert unresolved == 0
     assert logins == {"owner"}
 
@@ -97,11 +95,10 @@ async def test_resolves_github_participants_from_issue_context() -> None:
             return_value={"owner", "teammate"},
         ) as fetch,
     ):
-        logins, unresolved, error = await participants.resolve_thread_participant_logins(
+        logins, unresolved = await participants.resolve_thread_participant_logins(
             {"configurable": {"thread_id": "thread-1", "source": "github"}}
         )
 
-    assert error is None
     assert unresolved == 0
     assert logins == {"owner", "teammate"}
     fetch.assert_awaited_once_with({"owner": "acme", "name": "widgets"}, 7, token="token")
@@ -126,13 +123,10 @@ async def test_source_fetch_failure_does_not_fall_back_to_metadata_owner() -> No
             return_value=[],
         ),
     ):
-        logins, unresolved, error = await participants.resolve_thread_participant_logins(
-            {"configurable": {"thread_id": "thread-1", "source": "slack"}}
-        )
-
-    assert logins is None
-    assert unresolved == 0
-    assert error == "Could not verify Slack thread participants"
+        with pytest.raises(ValueError, match="Could not verify Slack thread participants"):
+            await participants.resolve_thread_participant_logins(
+                {"configurable": {"thread_id": "thread-1", "source": "slack"}}
+            )
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ from agent.review_guide.walk import Walk, summary
 from agent.slack.blocks import block_payload, context, option_actions
 from agent.slack.client import post_slack_top_level_message_with_ts, update_slack_message
 from agent.slack.code_channels import set_summary_message
+from agent.slack.http import SlackRequestError
 from agent.slack.markdown import markdown_blocks
 from agent.utils.json_types import JsonObject
 
@@ -59,53 +60,58 @@ async def refresh_progress(
     text = "\n".join(lines)
     channel_id = session.slack_channel_id
     if session.summary_message_ts:
-        updated, error = await update_slack_message(channel_id, session.summary_message_ts, text)
-        if updated:
+        try:
+            await update_slack_message(channel_id, session.summary_message_ts, text)
             return
-        logger.warning(
-            "Could not update a review guide's progress message",
-            extra={"agent_thread_id": session.thread_id, "slack_error": error},
-        )
-    message_ts, error = await post_slack_top_level_message_with_ts(channel_id, text)
-    if not message_ts:
+        except SlackRequestError as exc:
+            logger.warning(
+                "Could not update a review guide's progress message",
+                extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
+            )
+    try:
+        message_ts = await post_slack_top_level_message_with_ts(channel_id, text)
+    except SlackRequestError as exc:
         logger.warning(
             "Could not post a review guide's progress message",
-            extra={"agent_thread_id": session.thread_id, "slack_error": error},
+            extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
         )
         return
     await session.save_summary_message(message_ts)
-    _, error = await set_summary_message(channel_id, message_ts)
-    if error:
+    try:
+        await set_summary_message(channel_id, message_ts)
+    except SlackRequestError as exc:
         logger.warning(
             "Could not set a review guide's summary message",
-            extra={"agent_thread_id": session.thread_id, "slack_error": error},
+            extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
         )
 
 
 async def post_with_buttons(session: ReviewGuideSession, text: str, buttons: list[str]) -> str:
     """Post a message the guide prepared earlier; its timestamp, or ``""`` when Slack refused."""
-    message_ts, error = await post_slack_top_level_message_with_ts(
-        session.slack_channel_id, text, blocks=_text_blocks(text, buttons=buttons)
-    )
-    if not message_ts:
+    try:
+        return await post_slack_top_level_message_with_ts(
+            session.slack_channel_id, text, blocks=_text_blocks(text, buttons=buttons)
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Could not post a prepared review guide chunk",
-            extra={"agent_thread_id": session.thread_id, "slack_error": error},
+            extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
         )
-    return message_ts or ""
+        return ""
 
 
 async def retire(channel_id: str, message_ts: str, text: str, note: str) -> None:
     """Take the buttons off a message the guide posted, saying why."""
     if not message_ts:
         return
-    updated, error = await update_slack_message(
-        channel_id, message_ts, text, blocks=_text_blocks(text, note=note)
-    )
-    if not updated:
+    try:
+        await update_slack_message(
+            channel_id, message_ts, text, blocks=_text_blocks(text, note=note)
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Could not take the buttons off a review guide message",
-            extra={"slack_channel": channel_id, "slack_error": error},
+            extra={"slack_channel": channel_id, "slack_error": str(exc)},
         )
 
 
@@ -118,20 +124,20 @@ async def pause(session: ReviewGuideSession, head_sha: str) -> None:
     blocks = _text_blocks(text, buttons=[CONTINUE])
     channel_id = session.slack_channel_id
     if session.paused_message_ts:
-        updated, error = await update_slack_message(
-            channel_id, session.paused_message_ts, text, blocks=blocks
-        )
-        if updated:
+        try:
+            await update_slack_message(channel_id, session.paused_message_ts, text, blocks=blocks)
             return
-        logger.warning(
-            "Could not update a review guide's pause note",
-            extra={"agent_thread_id": session.thread_id, "slack_error": error},
-        )
-    message_ts, error = await post_slack_top_level_message_with_ts(channel_id, text, blocks=blocks)
-    if not message_ts:
+        except SlackRequestError as exc:
+            logger.warning(
+                "Could not update a review guide's pause note",
+                extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
+            )
+    try:
+        message_ts = await post_slack_top_level_message_with_ts(channel_id, text, blocks=blocks)
+    except SlackRequestError as exc:
         logger.warning(
             "Could not post a review guide's pause note",
-            extra={"agent_thread_id": session.thread_id, "slack_error": error},
+            extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
         )
         return
     await session.save_pause(message_ts)

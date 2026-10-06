@@ -36,6 +36,7 @@ from agent.slack.code_channels import (
     set_context_bar,
     set_session_status,
 )
+from agent.slack.http import SlackRequestError
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -96,15 +97,16 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
     )
     client = langgraph_client()
     thread_id = await _fork(client, start.source_thread_id, login)
-    channel_id, error = await create_code_channel(
-        name=f"Review {start.repo}#{start.number}: {head.title}"[:200],
-        session_id=thread_id,
-        origin_channel_id=start.origin_channel_id,
-        origin_message_ts=start.origin_message_ts,
-        team_id=start.team_id,
-    )
-    if channel_id is None:
-        raise GuideStartError(error or "Slack could not create the code channel")
+    try:
+        channel_id = await create_code_channel(
+            name=f"Review {start.repo}#{start.number}: {head.title}"[:200],
+            session_id=thread_id,
+            origin_channel_id=start.origin_channel_id,
+            origin_message_ts=start.origin_message_ts,
+            team_id=start.team_id,
+        )
+    except SlackRequestError as exc:
+        raise GuideStartError(f"Slack could not create the code channel: {exc}") from exc
     location = SlackThreadRef(
         channel_id=channel_id,
         thread_ts=CODE_CHANNEL_SESSION_TS,
@@ -134,10 +136,13 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             mode=mode,
         )
     except Exception:
-        if not (await archive_code_channel(channel_id))[0]:
+        try:
+            await archive_code_channel(channel_id)
+        except SlackRequestError:
             logger.warning(
                 "Could not archive an unbound review guide channel",
                 extra={"slack_channel": channel_id},
+                exc_info=True,
             )
         raise
     _, invite_error = await invite_to_slack_channel(
@@ -148,14 +153,21 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             "Could not invite everyone to a review guide channel",
             extra={"slack_channel": channel_id, "slack_error": invite_error},
         )
-    await set_context_bar(
-        channel_id,
-        repo_context_bar_items(
-            {"owner": start.owner, "name": start.repo},
-            pr_url=pull_request.url,
-            dashboard_url=dashboard_thread_url(thread_id) or "",
-        ),
-    )
+    try:
+        await set_context_bar(
+            channel_id,
+            repo_context_bar_items(
+                {"owner": start.owner, "name": start.repo},
+                pr_url=pull_request.url,
+                dashboard_url=dashboard_thread_url(thread_id) or "",
+            ),
+        )
+    except SlackRequestError:
+        logger.warning(
+            "Could not set a review guide channel's context bar",
+            extra={"slack_channel": channel_id},
+            exc_info=True,
+        )
     session = await ReviewGuideSession.get(thread_id)
     if session is None:
         raise GuideStartError("the review session was not saved")

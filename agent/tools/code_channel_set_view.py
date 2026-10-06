@@ -10,6 +10,7 @@ from agent.slack.code_channels import (
     is_code_channel_session,
     set_view,
 )
+from agent.slack.http import SlackRequestError
 from agent.slack.tools.manage_code_channel import resolve_view_content
 from agent.utils.thread_ops import langgraph_client
 
@@ -37,23 +38,21 @@ async def code_channel_set_view(
     )
     if not active or not is_code_channel_session(str(active.get("thread_ts") or "")):
         return {"success": False, "error": "this conversation is not in a Slack code channel"}
-    content, content_error = await resolve_view_content(content, file_path)
-    if content_error:
-        return {"success": False, "error": content_error}
-    data, error = await set_view(
-        str(active.get("channel_id") or ""),
-        view_type,
-        view_key=view_key,
-        content=content,
-        blocks=blocks,
-        canvas_id=canvas_id,
-        access_level=access_level,
-        base_branch=base_branch,
-        head_branch=head_branch,
-        name=name,
-        csp=csp,
-        agent_content_hash=agent_content_hash,
-    )
-    if error:
-        return {"success": False, "error": error}
+    try:
+        data = await set_view(
+            str(active.get("channel_id") or ""),
+            view_type,
+            view_key=view_key,
+            content=await resolve_view_content(content, file_path),
+            blocks=blocks,
+            canvas_id=canvas_id,
+            access_level=access_level,
+            base_branch=base_branch,
+            head_branch=head_branch,
+            name=name,
+            csp=csp,
+            agent_content_hash=agent_content_hash,
+        )
+    except (ValueError, SlackRequestError) as exc:
+        return {"success": False, "error": str(exc)}
     return {"success": True, "slack_response": data}

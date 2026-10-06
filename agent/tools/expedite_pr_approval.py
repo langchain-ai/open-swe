@@ -36,6 +36,7 @@ from agent.slack.blocks import escape
 from agent.slack.cards import run_slack_location
 from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
+from agent.slack.http import SlackRequestError
 from agent.tools.manage_baby_sit import dispatch_run_config
 
 
@@ -76,9 +77,7 @@ async def _discard(approval: HumanReviewRequest) -> None:
             await session.delete(row)
 
 
-async def _post_root_message(
-    channel: SlackChannel, pr_ref: GitHubPrRef, title: str
-) -> tuple[str | None, str | None]:
+async def _post_root_message(channel: SlackChannel, pr_ref: GitHubPrRef, title: str) -> str:
     """Open a thread in ``channel`` for the card."""
     return await channel.post(
         prompt(
@@ -226,10 +225,11 @@ async def expedite_pr_approval(
         target = target or await SlackChannel.load(channel_id)
         if target is None:
             return _failure(f"Slack channel {channel_id} is unavailable")
-        thread_ts, error = await _post_root_message(target, pr_ref, payload.title)
-        if not thread_ts:
+        try:
+            thread_ts = await _post_root_message(target, pr_ref, payload.title)
+        except SlackRequestError as exc:
             return _failure(
-                f"Could not post in Slack channel {channel_id}: {error or 'unknown error'}. "
+                f"Could not post in Slack channel {channel_id}: {exc.code or 'unknown error'}. "
                 "For a private channel, invite the bot first."
             )
 
@@ -282,17 +282,17 @@ async def expedite_pr_approval(
             "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
         }
     try:
-        message_ts, error = await post_card(approval, title=payload.title, files=files)
+        message_ts = await post_card(approval, title=payload.title, files=files)
+    except SlackRequestError as exc:
+        await _discard(approval)
+        if displaced is not None:
+            await reopen(displaced)
+        return _failure(f"Could not post the approval card in Slack: {exc.code}")
     except BaseException:
         await _discard(approval)
         if displaced is not None:
             await reopen(displaced)
         raise
-    if not message_ts:
-        await _discard(approval)
-        if displaced is not None:
-            await reopen(displaced)
-        return _failure(f"Could not post the approval card in Slack: {error or 'unknown error'}")
     approval.slack_message_ts = message_ts
     approval = await approval.save()
     await broadcast_configured(approval)

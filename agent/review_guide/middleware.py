@@ -33,6 +33,7 @@ from agent.review_guide.sessions import ReviewGuideSession
 from agent.review_guide.walk import Walk
 from agent.sandboxes.lifecycle import get_cached_sandbox_backend
 from agent.slack.code_channels import repo_context_bar_items, set_context_bar, set_view
+from agent.slack.http import SlackRequestError
 from agent.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -85,27 +86,34 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 head_sha=head.head.sha,
             )
             await git.pin(backend, repo_dir, base_sha=head.base.sha, head_sha=head.head.sha)
-            _, view_error = await set_view(
-                session.slack_channel_id,
-                "diff",
-                content=await git.pr_diff(backend, repo_dir, zero=False),
-                base_branch=head.base.ref,
-                head_branch=head.head.ref,
-            )
-            if view_error:
+            try:
+                await set_view(
+                    session.slack_channel_id,
+                    "diff",
+                    content=await git.pr_diff(backend, repo_dir, zero=False),
+                    base_branch=head.base.ref,
+                    head_branch=head.head.ref,
+                )
+            except SlackRequestError as exc:
                 logger.warning(
                     "Could not attach the pull request diff to a review walkthrough channel",
-                    extra={"agent_thread_id": self._thread_id, "slack_error": view_error},
+                    extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
                 )
         # Refreshed every run so channels opened before a link was added still get it.
-        await set_context_bar(
-            session.slack_channel_id,
-            repo_context_bar_items(
-                {"owner": pr.owner, "name": pr.repo},
-                pr_url=pr.url,
-                dashboard_url=dashboard_thread_url(self._thread_id) or "",
-            ),
-        )
+        try:
+            await set_context_bar(
+                session.slack_channel_id,
+                repo_context_bar_items(
+                    {"owner": pr.owner, "name": pr.repo},
+                    pr_url=pr.url,
+                    dashboard_url=dashboard_thread_url(self._thread_id) or "",
+                ),
+            )
+        except SlackRequestError as exc:
+            logger.warning(
+                "Could not set a review walkthrough channel's context bar",
+                extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
+            )
         await resume(session)
         changes = parse(await git.pr_diff(backend, repo_dir))
         walk = session.walk

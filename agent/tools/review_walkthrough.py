@@ -24,6 +24,7 @@ from agent.review_guide.walk import (
 )
 from agent.run_config import RunConfig
 from agent.slack.code_channels import archive_code_channel, set_session_status_result
+from agent.slack.http import SlackRequestError
 from agent.slack.tools.reply import slack_reply
 from agent.tools.approve_pull_request import approve_pull_request
 from agent.tools.mark_pull_request_ready import mark_pull_request_ready
@@ -295,16 +296,14 @@ async def end_walkthrough(message: str = "", archive: bool = False) -> dict[str,
     await state.save("finished" if finished else "ended")
     if archive:
         await state.ctx.session.set_closed(True)
-        _, status_error = await set_session_status_result(state.channel_id, "closed")
-        archived, archive_error = await archive_code_channel(state.channel_id)
-        warnings += [
-            f"could not {what}: {error}"
-            for what, error in (
-                ("close the session", status_error),
-                ("archive the channel", None if archived else archive_error),
-            )
-            if error
-        ]
+        for what, close in (
+            ("close the session", set_session_status_result(state.channel_id, "closed")),
+            ("archive the channel", archive_code_channel(state.channel_id)),
+        ):
+            try:
+                await close
+            except SlackRequestError as exc:
+                warnings.append(f"could not {what}: {exc}")
     return {
         "success": True,
         "finished": finished,

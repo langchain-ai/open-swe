@@ -26,6 +26,7 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
 )
 from agent.slack.dm import note_for_concierge, open_dm
+from agent.slack.http import SlackRequestError
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url
 
@@ -126,19 +127,21 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
         "Approve, always allow, or deny."
     )
     dm_channel_id = await open_dm(slack_user_id)
-    message_ts, error = None, "dm_not_opened"
-    if dm_channel_id:
-        message_ts, error = await post_slack_top_level_message_with_ts(
+    if not dm_channel_id:
+        logger.error("Could not open act-as DM", extra={"login": request.login})
+        return False
+    try:
+        await post_slack_top_level_message_with_ts(
             dm_channel_id,
             message,
             blocks=block_payload(
                 [*card_blocks(message, request, thread_id), *await origin_footer(thread_id)]
             ),
         )
-    if not dm_channel_id or not message_ts:
+    except SlackRequestError as exc:
         logger.error(
             "Could not DM the act-as card",
-            extra={"login": request.login, "thread_id": thread_id, "error": error},
+            extra={"login": request.login, "thread_id": thread_id, "error": exc.code},
         )
         return False
     await note_for_concierge(

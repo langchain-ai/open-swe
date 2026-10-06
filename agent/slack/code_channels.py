@@ -11,7 +11,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from agent.slack.channels import SlackChannel
 from agent.slack.client import SLACK_BOT_TOKEN
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 
 logger = logging.getLogger(__name__)
 
@@ -69,22 +69,24 @@ async def is_code_channel(channel_id: str) -> bool:
     return isinstance(record, dict) and record.get("record_type") == "agent_channel"
 
 
-async def _call(method: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+async def _call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not SLACK_BOT_TOKEN:
-        return None, "missing_slack_bot_token"
+        raise SlackRequestError("missing_slack_bot_token")
     try:
         async with SlackClient.bot() as client:
             response = await client.api_call(method, json=payload)
         if not isinstance(response.data, dict):
-            return None, "invalid_response"
-        return response.data, None
+            raise SlackRequestError("invalid_response")
+        return response.data
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
         logger.warning(
             "Slack code channel request failed",
             extra={"slack_method": method, "slack_error": error},
         )
-        return None, "rate_limited" if error.startswith("rate_limited") else error
+        raise SlackRequestError(
+            "rate_limited" if error.startswith("rate_limited") else error
+        ) from exc
 
 
 def _content_error(content: str) -> str | None:
@@ -127,12 +129,12 @@ async def create_code_channel(
     origin_message_ts: str,
     team_id: str = "",
     is_private: bool = False,
-) -> tuple[str | None, str | None]:
+) -> str:
     """Create a code channel for a task and return its channel id."""
     if not 1 <= len(name.strip()) <= 200:
-        return None, "invalid_name"
+        raise SlackRequestError("invalid_name")
     if not session_id or len(session_id) > 64:
-        return None, "invalid_session_id"
+        raise SlackRequestError("invalid_session_id")
     payload: dict[str, Any] = {
         "name": name.strip(),
         "session_id": session_id,
@@ -142,40 +144,39 @@ async def create_code_channel(
     if team_id:
         payload["team_id"] = team_id
     payload["is_private"] = is_private
-    data, error = await _call("agents.conversations.create", payload)
-    if error or data is None:
-        return None, error
+    data = await _call("agents.conversations.create", payload)
     channel = data.get("channel")
     channel_id = channel.get("id") if isinstance(channel, dict) else data.get("channel_id")
     if isinstance(channel_id, str) and channel_id:
-        return channel_id, None
-    return None, "missing_channel_id"
+        return channel_id
+    raise SlackRequestError("missing_channel_id")
 
 
-async def set_session_status_result(
-    channel_id: str, status: SessionStatus
-) -> tuple[dict[str, Any] | None, str | None]:
+async def set_session_status_result(channel_id: str, status: SessionStatus) -> dict[str, Any]:
     if status not in {"processing", "active", "suspended", "closed"}:
-        return None, "invalid_status"
+        raise SlackRequestError("invalid_status")
     return await _call("agents.sessions.setStatus", {"channel_id": channel_id, "status": status})
 
 
 async def set_session_status(channel_id: str, status: SessionStatus) -> bool:
     """Set a code channel's lifecycle status."""
-    _, error = await set_session_status_result(channel_id, status)
-    return error is None
+    try:
+        await set_session_status_result(channel_id, status)
+    except SlackRequestError:
+        logger.warning("Could not set code channel status", exc_info=True)
+        return False
+    return True
 
 
-async def rename_session(channel_id: str, title: str) -> tuple[bool, str | None]:
+async def rename_session(channel_id: str, title: str) -> None:
     """Rename a code channel session."""
     clean_title = title.strip()
     if not 1 <= len(clean_title) <= 200:
-        return False, "invalid_title"
-    _, error = await _call(
+        raise SlackRequestError("invalid_title")
+    await _call(
         "agents.sessions.rename",
         {"channel_id": channel_id, "title": clean_title},
     )
-    return error is None, error
 
 
 async def set_properties(
@@ -183,64 +184,59 @@ async def set_properties(
     *,
     code_channel: dict[str, Any] | None = None,
     agent_resource: dict[str, Any] | None = None,
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> dict[str, Any]:
     if code_channel is None and agent_resource is None:
-        return None, "no_properties_provided"
+        raise SlackRequestError("no_properties_provided")
     payload: dict[str, Any] = {"channel_id": channel_id}
     if code_channel is not None:
         items = code_channel.get("context_bar_items")
         if items is not None:
             if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
-                return None, "invalid_context_bar_items"
+                raise SlackRequestError("invalid_context_bar_items")
             if error := _context_items_error(items):
-                return None, error
+                raise SlackRequestError(error)
         summary = code_channel.get("summary_message")
         if summary is not None and (
             not isinstance(summary, dict)
             or not isinstance(summary.get("message_ts"), str)
             or not summary["message_ts"]
         ):
-            return None, "invalid_summary_message"
+            raise SlackRequestError("invalid_summary_message")
         payload["code_channel"] = code_channel
     if agent_resource is not None:
         if not agent_resource:
-            return None, "invalid_agent_resource"
+            raise SlackRequestError("invalid_agent_resource")
         limits = {"url": 2048, "resource_type": 64, "title": 255, "provider": 64}
         if any(
             key not in limits or not isinstance(value, str) or len(value) > limits[key]
             for key, value in agent_resource.items()
         ):
-            return None, "invalid_agent_resource"
+            raise SlackRequestError("invalid_agent_resource")
         payload["agent_resource"] = agent_resource
     return await _call("agents.conversations.setProperties", payload)
 
 
-async def set_context_bar(channel_id: str, items: list[dict[str, Any]]) -> tuple[bool, str | None]:
+async def set_context_bar(channel_id: str, items: list[dict[str, Any]]) -> None:
     """Replace the agent-supplied items at the top of a code channel."""
-    _, error = await set_properties(channel_id, code_channel={"context_bar_items": items})
-    return error is None, error
+    await set_properties(channel_id, code_channel={"context_bar_items": items})
 
 
 async def set_summary_message(
     channel_id: str, message_ts: str, *, thread_ts: str = ""
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> dict[str, Any]:
     summary: dict[str, str] = {"message_ts": message_ts}
     if thread_ts:
         summary["thread_ts"] = thread_ts
     return await set_properties(channel_id, code_channel={"summary_message": summary})
 
 
-async def set_agent_resource(
-    channel_id: str, resource: dict[str, Any]
-) -> tuple[dict[str, Any] | None, str | None]:
+async def set_agent_resource(channel_id: str, resource: dict[str, Any]) -> dict[str, Any]:
     return await set_properties(channel_id, agent_resource=resource)
 
 
-async def set_commands(
-    channel_id: str, commands: list[dict[str, Any]]
-) -> tuple[dict[str, Any] | None, str | None]:
+async def set_commands(channel_id: str, commands: list[dict[str, Any]]) -> dict[str, Any]:
     if len(commands) > 10:
-        return None, "too_many_commands"
+        raise SlackRequestError("too_many_commands")
     names: set[str] = set()
     for command in commands:
         name = command.get("name")
@@ -256,9 +252,9 @@ async def set_commands(
             or (hint is not None and (not isinstance(hint, str) or len(hint) > 50))
             or (should_escape is not None and not isinstance(should_escape, bool))
         ):
-            return None, "invalid_commands"
+            raise SlackRequestError("invalid_commands")
         if name in names:
-            return None, "duplicate_command"
+            raise SlackRequestError("duplicate_command")
         names.add(name)
     return await _call(
         "agents.conversations.setCommands",
@@ -353,29 +349,29 @@ async def set_view(
     name: str = "",
     csp: dict[str, list[str]] | None = None,
     agent_content_hash: str = "",
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> dict[str, Any]:
     if view_type not in {"html", "diff", "block_kit", "canvas"}:
-        return None, "invalid_view_type"
+        raise SlackRequestError("invalid_view_type")
     # A diff view may go unkeyed; every other view needs a key.
     if (view_type != "diff" or view_key) and not 1 <= len(view_key) <= 256:
-        return None, "invalid_view_key"
+        raise SlackRequestError("invalid_view_key")
     if name and len(name) > 256:
-        return None, "invalid_name"
+        raise SlackRequestError("invalid_name")
 
     payload: dict[str, Any] = {"channel_id": channel_id, "type": view_type}
     if view_type in {"html", "diff"}:
         if error := _content_error(content):
-            return None, error
+            raise SlackRequestError(error)
         payload["content"] = content
     elif view_type == "block_kit":
         if not blocks or not all(isinstance(block, dict) for block in blocks):
-            return None, "invalid_blocks"
+            raise SlackRequestError("invalid_blocks")
         payload["blocks"] = blocks
     else:
         if not canvas_id:
-            return None, "canvas_id_required"
+            raise SlackRequestError("canvas_id_required")
         if access_level not in {"read", "write", "comment"}:
-            return None, "invalid_access_level"
+            raise SlackRequestError("invalid_access_level")
         payload.update({"canvas_id": canvas_id, "access_level": access_level})
 
     if view_key:
@@ -386,7 +382,7 @@ async def set_view(
         payload["agent_content_hash"] = agent_content_hash
     if view_type == "diff":
         if len(base_branch) > 255 or len(head_branch) > 255:
-            return None, "invalid_branch_name"
+            raise SlackRequestError("invalid_branch_name")
         if base_branch:
             payload["base_branch"] = base_branch
         if head_branch:
@@ -399,28 +395,24 @@ async def set_view(
             or not all(isinstance(domain, str) for domain in domains)
             for key, domains in csp.items()
         ):
-            return None, "invalid_csp_domain"
+            raise SlackRequestError("invalid_csp_domain")
         payload["csp"] = csp
     return await _call("agents.conversations.setView", payload)
 
 
 async def list_views(
     channel_id: str,
-) -> tuple[list[dict[str, Any]] | None, str | None]:
-    data, error = await _call("agents.conversations.listViews", {"channel_id": channel_id})
-    if error or data is None:
-        return None, error
+) -> list[dict[str, Any]]:
+    data = await _call("agents.conversations.listViews", {"channel_id": channel_id})
     views = data.get("views")
     if not isinstance(views, list) or not all(isinstance(view, dict) for view in views):
-        return None, "invalid_views_response"
-    return views, None
+        raise SlackRequestError("invalid_views_response")
+    return views
 
 
-async def remove_view(
-    channel_id: str, *, view_key: str = "", view_id: str = ""
-) -> tuple[dict[str, Any] | None, str | None]:
+async def remove_view(channel_id: str, *, view_key: str = "", view_id: str = "") -> dict[str, Any]:
     if bool(view_key) == bool(view_id):
-        return None, "invalid_arguments"
+        raise SlackRequestError("invalid_arguments")
     payload = {"channel_id": channel_id}
     payload["view_key" if view_key else "view_id"] = view_key or view_id
     return await _call("agents.conversations.removeView", payload)
@@ -428,9 +420,9 @@ async def remove_view(
 
 async def get_canvas(
     channel_id: str, canvas_id: str, *, include_resolved: bool = False
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> dict[str, Any]:
     if not canvas_id:
-        return None, "canvas_id_required"
+        raise SlackRequestError("canvas_id_required")
     return await _call(
         "agents.conversations.getCanvas",
         {
@@ -442,28 +434,23 @@ async def get_canvas(
     )
 
 
-async def set_canvas_content(
-    channel_id: str, canvas_id: str, content: str
-) -> tuple[dict[str, Any] | None, str | None]:
+async def set_canvas_content(channel_id: str, canvas_id: str, content: str) -> dict[str, Any]:
     if not canvas_id:
-        return None, "canvas_id_required"
+        raise SlackRequestError("canvas_id_required")
     if error := _content_error(content):
-        return None, error
+        raise SlackRequestError(error)
     return await _call(
         "agents.conversations.setCanvasContent",
         {"channel_id": channel_id, "canvas_id": canvas_id, "content": content},
     )
 
 
-async def archive_code_channel(
-    channel_id: str, *, summary_message_ts: str = ""
-) -> tuple[bool, str | None]:
+async def archive_code_channel(channel_id: str, *, summary_message_ts: str = "") -> None:
     """Archive a code channel, recording the agent's closing summary."""
     payload: dict[str, Any] = {"channel_id": channel_id}
     if summary_message_ts:
         payload["summary_message_ts"] = summary_message_ts
-    _, error = await _call("agents.conversations.archive", payload)
-    return error is None, error
+    await _call("agents.conversations.archive", payload)
 
 
 def repo_context_bar_items(

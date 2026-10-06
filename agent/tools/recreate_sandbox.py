@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from typing import NotRequired, TypedDict
 
 from agent.run_config import RunConfig
-from agent.sandboxes.lifecycle import SandboxSource
+from agent.sandboxes.lifecycle import SandboxRecreationStopError, SandboxSource
 from agent.tools.access import Policy, access
 
 logger = logging.getLogger(__name__)
@@ -44,19 +44,28 @@ async def recreate_sandbox(
     try:
         from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
 
-        old_sandbox_id, new_sandbox_id, stop_error = await recreate_sandbox_for_thread(
+        old_sandbox_id, new_sandbox_id = await recreate_sandbox_for_thread(
             thread_id,
             workspace_slug=workspace or thread_workspace,
             source=source,
         )
+    except SandboxRecreationStopError as exc:
+        logger.warning("Sandbox recreated but old sandbox did not stop", exc_info=True)
+        return {
+            "success": True,
+            "old_sandbox_id": exc.old_sandbox_id,
+            "new_sandbox_id": exc.new_sandbox_id,
+            "old_sandbox_stopped": False,
+            "old_sandbox_stop_error": str(exc),
+        }
     except Exception as exc:
-        logger.exception("Failed to recreate sandbox for thread %s", thread_id)
+        logger.exception("Failed to recreate sandbox", extra={"thread_id": thread_id})
         return {"success": False, "error": str(exc)}
 
     return {
         "success": True,
         "old_sandbox_id": old_sandbox_id,
         "new_sandbox_id": new_sandbox_id,
-        "old_sandbox_stopped": stop_error is None,
-        "old_sandbox_stop_error": stop_error,
+        "old_sandbox_stopped": True,
+        "old_sandbox_stop_error": None,
     }

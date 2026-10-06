@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent.slack.http import SlackRequestError
+
 manage_tool = import_module("agent.slack.tools.manage_code_channel")
 
 
@@ -19,18 +21,15 @@ async def test_sandbox_content_reader_enforces_source_and_size(
         AsyncMock(return_value=(backend, "/workspace/plan.md", "/workspace")),
     )
 
-    content, error = await manage_tool.resolve_view_content("", "plan.md")
-    conflict_content, conflict_error = await manage_tool.resolve_view_content("inline", "plan.md")
-
-    assert (content, error) == ("# Plan", None)
-    assert conflict_content == ""
-    assert conflict_error == "Pass content or file_path, not both"
+    assert await manage_tool.resolve_view_content("", "plan.md") == "# Plan"
+    with pytest.raises(ValueError, match="Pass content or file_path, not both"):
+        await manage_tool.resolve_view_content("inline", "plan.md")
 
     backend.adownload_files.return_value = [
         SimpleNamespace(content=b"x" * (manage_tool.VIEW_CONTENT_MAX_BYTES + 1))
     ]
-    _, size_error = await manage_tool.resolve_view_content("", "large.html")
-    assert size_error == "file_path exceeds Slack's 1 MB view limit"
+    with pytest.raises(ValueError, match="file_path exceeds Slack's 1 MB view limit"):
+        await manage_tool.resolve_view_content("", "large.html")
 
 
 async def test_promotion_initializes_status_context_and_runtime_commands(
@@ -44,17 +43,15 @@ async def test_promotion_initializes_status_context_and_runtime_commands(
     }
     client = SimpleNamespace(threads=SimpleNamespace(update=AsyncMock()))
 
-    monkeypatch.setattr(
-        manage_tool, "create_code_channel", AsyncMock(return_value=("C-code", None))
-    )
+    monkeypatch.setattr(manage_tool, "create_code_channel", AsyncMock(return_value="C-code"))
     monkeypatch.setattr(manage_tool, "rebind_slack_thread", AsyncMock())
-    status = AsyncMock(return_value=({"ok": True}, None))
-    context = AsyncMock(return_value=(True, None))
-    commands = AsyncMock(return_value=({"ok": True}, None))
+    status = AsyncMock(return_value={"ok": True})
+    context = AsyncMock(return_value=None)
+    commands = AsyncMock(return_value={"ok": True})
     monkeypatch.setattr(manage_tool, "set_session_status_result", status)
     monkeypatch.setattr(manage_tool, "set_context_bar", context)
     monkeypatch.setattr(manage_tool, "set_commands", commands)
-    monkeypatch.setattr(manage_tool, "invite_to_slack_channel", AsyncMock(return_value=([], "")))
+    monkeypatch.setattr(manage_tool, "invite_to_slack_channel", AsyncMock(return_value=[]))
 
     result = await manage_tool._create(
         client,
@@ -81,13 +78,13 @@ def promotion(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "triggering_user_id": "U1",
     }
 
-    invite = AsyncMock(return_value=(["U1", "U2"], ""))
+    invite = AsyncMock(return_value=["U1", "U2"])
     stubs: dict[str, Any] = {
-        "create_code_channel": AsyncMock(return_value=("C-code", None)),
+        "create_code_channel": AsyncMock(return_value="C-code"),
         "rebind_slack_thread": AsyncMock(),
-        "set_session_status_result": AsyncMock(return_value=({"ok": True}, None)),
-        "set_context_bar": AsyncMock(return_value=(True, None)),
-        "set_commands": AsyncMock(return_value=({"ok": True}, None)),
+        "set_session_status_result": AsyncMock(return_value={"ok": True}),
+        "set_context_bar": AsyncMock(return_value=None),
+        "set_commands": AsyncMock(return_value={"ok": True}),
         "invite_to_slack_channel": invite,
     }
     for name, mock in stubs.items():
@@ -114,7 +111,9 @@ async def _promote(invite: list[str]) -> dict[str, Any]:
 async def test_one_stale_id_does_not_cost_the_others_their_invite(
     promotion: dict[str, Any],
 ) -> None:
-    promotion["invite_to_slack_channel"].return_value = (["U1"], "U2 (user_not_found)")
+    promotion["invite_to_slack_channel"].side_effect = SlackRequestError(
+        "U2 (user_not_found)", invited=["U1"]
+    )
 
     result = await _promote(["U1", "U2"])
 
