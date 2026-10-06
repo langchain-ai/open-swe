@@ -27,7 +27,7 @@ from agent.sandboxes.tool_access import (
     sandbox_host_thread_id,
 )
 from agent.slack.channels import SlackChannel
-from agent.slack.client import bind_slack_thread_id, invite_to_slack_channel, slack_user_ids
+from agent.slack.client import bind_slack_thread_id, invite_to_slack_channel
 from agent.slack.code_channels import (
     CODE_CHANNEL_SESSION_TS,
     archive_code_channel,
@@ -145,13 +145,12 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
                 exc_info=True,
             )
         raise
-    _, invite_error = await invite_to_slack_channel(
-        channel_id, slack_user_ids([start.requester_slack_id, *start.invite])
-    )
-    if invite_error:
+    try:
+        await invite_to_slack_channel(channel_id, [start.requester_slack_id, *start.invite])
+    except SlackRequestError as exc:
         logger.warning(
             "Could not invite everyone to a review guide channel",
-            extra={"slack_channel": channel_id, "slack_error": invite_error},
+            extra={"slack_channel": channel_id, "slack_error": str(exc)},
         )
     try:
         await set_context_bar(
