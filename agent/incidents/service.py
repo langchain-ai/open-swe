@@ -23,12 +23,15 @@ from agent.input_messages import PersonIdentity
 from agent.slack.channels import SlackChannel
 from agent.slack.http import SlackClient
 from agent.store import TypedStore, now_iso
+from agent.ui_invalidations import Topic
 from agent.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
-POLICIES = TypedStore(["incidents", "policies"], IncidentPolicy)
-INCIDENTS = TypedStore(["incidents", "incidents"], Incident)
-REPORTS = TypedStore(["incidents", "reports"], IncidentReportRecord)
+POLICIES = TypedStore(
+    ["incidents", "policies"], IncidentPolicy, invalidates=Topic.INCIDENT_SETTINGS
+)
+INCIDENTS = TypedStore(["incidents", "incidents"], Incident, invalidates=Topic.INCIDENTS)
+REPORTS = TypedStore(["incidents", "reports"], IncidentReportRecord, invalidates=Topic.INCIDENTS)
 COMMANDS = TypedStore(["incidents", "commands"], CommandReceipt)
 ACTIVE_STATUSES = frozenset({"watching", "needs_attention"})
 _VIEWS = {"active": ACTIVE_STATUSES, "inactive": frozenset({"paused", "completed"})}
@@ -159,6 +162,15 @@ async def readable(
             )
         return False
     return channel_allowed(info, policy, for_read=True)
+
+
+async def visible(id: str, *, include_setup: bool) -> bool:
+    """Whether ``get_incident`` would show this incident."""
+    record = await INCIDENTS.get(id)
+    policy = await get_policy()
+    if not record or record.workspace_id != policy.workspace_id:
+        return False
+    return (include_setup and record.reason == "setup_failed") or await readable(record, policy)
 
 
 async def _auth_test() -> tuple[dict[str, Any], list[str] | None]:

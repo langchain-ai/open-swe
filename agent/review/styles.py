@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agent.store import TypedStore, now_iso
+from agent.ui_invalidations import Topic
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ def effective_approval_mode(record: ReviewStyle | None) -> ApprovalMode:
 
 class ReviewStyleStore(TypedStore[ReviewStyle]):
     def __init__(self) -> None:
-        super().__init__(REVIEW_STYLES_NAMESPACE, ReviewStyle)
+        super().__init__(REVIEW_STYLES_NAMESPACE, ReviewStyle, invalidates=Topic.REVIEW_STYLES)
 
     async def list_all(self) -> list[ReviewStyle]:
         records = await self.search_all()

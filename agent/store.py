@@ -22,6 +22,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, ValidationError
 
+from agent.ui_invalidations import Topic
+
 logger = logging.getLogger(__name__)
 
 Namespace = Sequence[str]
@@ -181,11 +183,16 @@ class TypedStore[RecordT: BaseModel]:
     ``get`` raises — the caller asked for that one record — while the search
     methods skip it and log, so one unreadable record cannot take a whole
     listing down with it.
+
+    Every write invalidates ``invalidates`` and the written key under it.
     """
 
-    def __init__(self, namespace: Namespace, model: type[RecordT]) -> None:
+    def __init__(
+        self, namespace: Namespace, model: type[RecordT], *, invalidates: Topic | None = None
+    ) -> None:
         self.namespace = list(namespace)
         self.model = model
+        self.invalidates = invalidates
 
     async def get(self, key: str) -> RecordT | None:
         value = await get_value(self.namespace, key)
@@ -193,10 +200,14 @@ class TypedStore[RecordT: BaseModel]:
 
     async def put(self, key: str, record: RecordT) -> RecordT:
         await put_value(self.namespace, key, record.model_dump(mode="json"))
+        if self.invalidates:
+            await self.invalidates.invalidate(key=key)
         return record
 
     async def delete(self, key: str) -> None:
         await delete_value(self.namespace, key)
+        if self.invalidates:
+            await self.invalidates.invalidate(key=key)
 
     async def search(
         self,

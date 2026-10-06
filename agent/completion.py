@@ -28,6 +28,7 @@ from agent.invocation import resolve_invocation_id, with_invocation_id
 from agent.linear.notifications import post_linear_notification
 from agent.review.findings import REVIEWER_THREAD_KIND
 from agent.review.publish import settle_review_check_run
+from agent.review.style_jobs import settle_review_style_run
 from agent.session_cost import schedule_session_cost_refresh
 from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
@@ -473,6 +474,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
     payload_metadata = payload.get("metadata")
+    if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
+        await settle_review_style_run(payload_metadata)
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
     if status == "success" and not (

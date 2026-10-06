@@ -8,8 +8,9 @@ from agent.incidents import service
 from agent.incidents.document_models import IncidentHistory
 from agent.incidents.models import Incident, IncidentReport
 from agent.store import TypedStore, get_value, now_iso, put_value
+from agent.ui_invalidations import Topic
 
-HISTORY = TypedStore(["incidents", "history"], IncidentHistory)
+HISTORY = TypedStore(["incidents", "history"], IncidentHistory, invalidates=Topic.INCIDENTS)
 SUMMARIES = ["incidents", "summaries"]
 
 
@@ -110,6 +111,7 @@ async def update_from_report(record: Incident, report: IncidentReport) -> None:
     markdown = _linked_markdown(markdown, [item.model_dump() for item in report.evidence])
     await preserve_metadata(record)
     await put_value(SUMMARIES, record.id, {"markdown": markdown})
+    await Topic.INCIDENTS.invalidate(key=record.id)
 
 
 async def search_history(
