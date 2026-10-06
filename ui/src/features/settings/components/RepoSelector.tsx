@@ -72,6 +72,7 @@ export function RepoSelector({
             <button
               type="button"
               disabled={disabled}
+              title={selectedRepo ?? undefined}
               className={cn(
                 "flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
                 triggerClassName
@@ -153,6 +154,7 @@ export function RepoSelector({
                   <button
                     key={repo.full_name}
                     type="button"
+                    title={repo.full_name}
                     onClick={() => {
                       onRepoChange(repo.full_name)
                       setOpen(false)
