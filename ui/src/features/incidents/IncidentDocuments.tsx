@@ -1,7 +1,14 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
-import { Copy } from "lucide-react"
+
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+
+import { Copy, Info } from "@/components/glyphs"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { ErrorState, isReadUnavailable } from "./shared"
@@ -22,9 +29,10 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
   })
   if (documents.isPending)
     return (
-      <p role="status" className="text-body text-ink-subtle">
+      <Inline role="status" gap="sm" className="text-body text-ink-subtle">
+        <Spinner size="sm" />
         Loading incident summary…
-      </p>
+      </Inline>
     )
   if (
     documents.error &&
@@ -41,45 +49,52 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
     try {
       await navigator.clipboard.writeText(markdown)
       setCopyNotice("Incident copied as Markdown.")
-    } catch {
+    } catch (error) {
+      console.warn("Could not copy incident", error)
       setCopyNotice(
         "Unable to copy. Select the incident text to copy it manually."
       )
     }
   }
   return (
-    <section className="space-y-4 rounded-control border border-line bg-panel p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-body font-medium">Postmortem summary</h2>
+    <PageSection
+      title="Postmortem summary"
+      contained
+      inset="padded"
+      actions={
         <Button
           size="compact"
           variant="outline"
           disabled={!markdown.trim()}
           onClick={() => void copy()}
         >
-          <Copy className="size-3.5" />
+          <Icon icon={Copy} size="sm" />
           Copy incident
         </Button>
-      </div>
+      }
+    >
       {documents.error && (
-        <p role="alert" className="text-body text-attention">
-          {documents.error.message}
-        </p>
+        <StateNotice
+          tone="INFO"
+          icon={Info}
+          title="Showing the last loaded summary"
+          description={documents.error.message}
+        />
       )}
       {markdown ? (
-        <div className="mx-auto max-w-3xl py-5 sm:px-4">
+        <Box className="mx-auto w-full max-w-reading py-4">
           <Markdown content={markdown} />
-        </div>
+        </Box>
       ) : (
-        <p className="text-body text-ink-subtle">
+        <Box render={<p />} className="text-body text-ink-subtle">
           The agent will add a summary after investigating.
-        </p>
+        </Box>
       )}
       {copyNotice && (
-        <p role="status" className="text-label">
+        <Box render={<p />} role="status" className="text-label text-ink">
           {copyNotice}
-        </p>
+        </Box>
       )}
-    </section>
+    </PageSection>
   )
 }

@@ -1,32 +1,39 @@
 import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
-import {
-  ArrowSquareOutIcon,
-  CircleNotchIcon,
-  RobotIcon,
-} from "@phosphor-icons/react"
-import { IoLogoSlack } from "react-icons/io5"
 
-import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
-import type { AllowedSlackBotEntry } from "@/lib/api"
-import { Avatar, AvatarFallback, AvatarImage } from "@langchain/gtm-platform-design-system/ui/avatar"
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { PageMasthead } from "@langchain/gtm-platform-design-system/patterns/page-masthead"
+import { RecordHop } from "@langchain/gtm-platform-design-system/patterns/record-header"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button, buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+
+import {
+  AlertTriangle,
+  Bot,
+  ChevronRight,
+  ExternalLink,
+} from "@/components/glyphs"
+import type { AgentThread } from "@/features/agents/lib/types"
+import type { AllowedSlackBotEntry } from "@/lib/api"
 import { useThreadsPage } from "@/features/agents/lib/queries"
+import { RunStatusBadge } from "@/features/automations/components/AutomationRuns"
 import { AllowedSlackBotsSection } from "@/features/bots/components/AllowedSlackBotsSection"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { cn, formatRelativeTime } from "@/lib/utils"
+import { formatRelativeTime } from "@/lib/utils"
 
 const THREAD_LIMIT = 50
 
-const STATUS_LABELS: Record<AgentStatus, string> = {
-  running: "Running",
-  finished: "Finished",
-  interrupted: "Interrupted",
-  error: "Error",
-  idle: "Idle",
-}
+const PANEL_LIST_CLASS = "overflow-hidden"
+const ROW_CLASS =
+  "flex min-h-row-record w-full min-w-0 items-center gap-3 px-3 py-2 text-left outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
 
 export function BotThreadsList({
   bot,
@@ -50,105 +57,123 @@ export function BotThreadsList({
   const isAdmin = useSession().data?.is_admin === true
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        {bot && (
-          <Button
-            variant="ghost"
-            className="mb-3 h-auto p-0"
-            onClick={() => onBotChange(undefined)}
-          >
-            ← Bots
-          </Button>
-        )}
-        <h1 className="text-title font-medium text-ink">
-          {bot ? `${botsByKey.get(bot)?.name ?? "Bot"} threads` : "Bots"}
-        </h1>
-        <p className="mt-1 text-meta text-ink-subtle">
-          Threads started by Slack bots on the allowlist. They are read-only
-          here: reply in the Slack thread to steer one.
-          {!isAdmin && " Workspace admins manage which bots are allowed."}
-        </p>
+    <ScrollArea overflow="vertical" className="h-full min-h-0 min-w-0 flex-1">
+      <Stack
+        gap="xl"
+        className="mx-auto w-full max-w-work px-6 py-6 max-md:pt-16"
+      >
+        <Stack gap="sm">
+          {bot && (
+            <Inline>
+              <RecordHop label="Bots" onClick={() => onBotChange(undefined)} />
+            </Inline>
+          )}
+          <PageMasthead
+            title={
+              bot ? `${botsByKey.get(bot)?.name ?? "Bot"} threads` : "Bots"
+            }
+            description={`Threads started by Slack bots on the allowlist. They are read-only here: reply in the Slack thread to steer one.${isAdmin ? "" : " Workspace admins manage which bots are allowed."}`}
+          />
+        </Stack>
 
         {!bot &&
           (isAdmin ? (
-            <div className="mt-4 rounded-control border border-line bg-panel">
-              <AllowedSlackBotsSection onBotChange={onBotChange} />
-            </div>
+            <AllowedSlackBotsSection onBotChange={onBotChange} />
+          ) : directory.isPending ? (
+            <RowsSkeleton label="Loading enabled bots" />
+          ) : directory.isError ? (
+            <StateNotice
+              tone="RISK"
+              icon={AlertTriangle}
+              title="Enabled bots could not be loaded."
+              description={directory.error.message}
+              action={
+                <Button
+                  variant="outline"
+                  size="compact"
+                  onClick={() => void directory.refetch()}
+                >
+                  Retry
+                </Button>
+              }
+            />
+          ) : bots.length === 0 ? (
+            <EmptyState icon={Bot} title="No Slack bots are enabled." />
           ) : (
-            <div className="mt-4 divide-y rounded-control border border-line bg-panel">
-              {directory.isPending ? (
-                <p className="p-4 text-meta text-ink-subtle">
-                  Loading enabled bots…
-                </p>
-              ) : directory.isError ? (
-                <div className="p-4">
-                  <p className="text-label text-risk">
-                    Enabled bots could not be loaded.
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="compact"
-                    className="mt-3"
-                    onClick={() => void directory.refetch()}
-                  >
-                    Retry
-                  </Button>
-                </div>
-              ) : bots.length === 0 ? (
-                <p className="p-4 text-meta text-ink-subtle">
-                  No Slack bots are enabled.
-                </p>
-              ) : (
-                bots.map((entry) => (
+            <Stack
+              render={<ul aria-label="Enabled bots" />}
+              gap="none"
+              bg="panel"
+              border="line"
+              radius="panel"
+              className={PANEL_LIST_CLASS}
+            >
+              {bots.map((entry) => (
+                <Box
+                  key={entry.key}
+                  render={<li />}
+                  className="border-b border-line last:border-b-0"
+                >
                   <button
-                    key={entry.key}
                     type="button"
                     onClick={() => onBotChange(entry.key)}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-hover focus-visible:outline-2 focus-visible:outline-primary"
+                    className={ROW_CLASS}
                   >
                     <BotAvatar entry={entry} />
-                    <span className="min-w-0 flex-1 truncate text-body font-medium">
+                    <Box className="min-w-0 flex-1 truncate text-label font-medium text-ink">
                       {entry.name}
-                    </span>
-                    <span className="text-label text-positive">Enabled</span>
-                    <span aria-hidden="true">→</span>
+                    </Box>
+                    <Badge tone="positive" dot>
+                      Enabled
+                    </Badge>
+                    <Icon
+                      icon={ChevronRight}
+                      size="sm"
+                      className="text-ink-subtle"
+                    />
                   </button>
-                ))
-              )}
-            </div>
+                </Box>
+              ))}
+            </Stack>
           ))}
 
-        {bot && (
-          <div className="mt-6">
-            {threadsQuery.isLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-16 w-full rounded-control" />
-                <Skeleton className="h-16 w-full rounded-control" />
-              </div>
-            ) : threadsQuery.isError ? (
-              <div className="flex flex-col items-center rounded-control border border-risk/30 bg-risk-bg px-6 py-12 text-center">
-                <p className="text-label text-risk">
-                  Bot threads could not be loaded.
-                </p>
+        {bot &&
+          (threadsQuery.isLoading ? (
+            <RowsSkeleton label="Loading bot threads" />
+          ) : threadsQuery.isError ? (
+            <StateNotice
+              tone="RISK"
+              icon={AlertTriangle}
+              title="Bot threads could not be loaded."
+              description="The bot's threads in Slack are unaffected."
+              action={
                 <Button
                   type="button"
                   size="compact"
                   variant="outline"
-                  className="mt-3"
                   onClick={() => void threadsQuery.refetch()}
                   disabled={threadsQuery.isFetching}
                 >
                   {threadsQuery.isFetching ? "Retrying…" : "Retry"}
                 </Button>
-              </div>
-            ) : threads.length === 0 ? (
-              <div className="rounded-control border border-dashed border-line px-6 py-12 text-center text-meta text-ink-subtle">
-                No bot threads yet. They appear here once an allowed bot
-                mentions Open SWE in Slack.
-              </div>
-            ) : (
-              <div className="space-y-2">
+              }
+            />
+          ) : threads.length === 0 ? (
+            <EmptyState
+              icon={Bot}
+              title="No bot threads yet"
+              description="They appear here once an allowed bot mentions Open SWE in Slack."
+            />
+          ) : (
+            <Stack gap="md">
+              <Stack
+                render={<ul aria-label="Bot threads" />}
+                gap="none"
+                bg="panel"
+                border="line"
+                radius="panel"
+                className={PANEL_LIST_CLASS}
+              >
                 {threads.map((thread) => (
                   <BotThreadRow
                     key={thread.id}
@@ -160,28 +185,30 @@ export function BotThreadsList({
                     }
                   />
                 ))}
-                {threadsQuery.data?.hasMore && (
-                  <p className="pt-4 text-center text-meta text-ink-subtle">
-                    Showing the {THREAD_LIMIT} most recent threads.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+              </Stack>
+              {threadsQuery.data?.hasMore && (
+                <Box
+                  render={<p />}
+                  className="text-center text-meta text-ink-subtle"
+                >
+                  Showing the {THREAD_LIMIT} most recent threads.
+                </Box>
+              )}
+            </Stack>
+          ))}
+      </Stack>
+    </ScrollArea>
   )
 }
 
 function BotAvatar({ entry }: { entry: AllowedSlackBotEntry }) {
   return (
-    <Avatar className="size-4">
-      {entry.image_url && <AvatarImage src={entry.image_url} alt="" />}
-      <AvatarFallback>
-        <RobotIcon className="size-3" />
-      </AvatarFallback>
-    </Avatar>
+    <Avatar
+      name={entry.name}
+      src={entry.image_url || undefined}
+      size="chat"
+      aria-hidden
+    />
   )
 }
 
@@ -194,57 +221,90 @@ function BotThreadRow({
 }) {
   const slackUrl = thread.sourceAppUrl ?? thread.sourceUrl
   return (
-    <div className="flex items-center gap-3 rounded-control border border-line bg-panel px-4 py-3 transition-colors hover:border-ink-subtle/70">
+    <Inline
+      render={<li />}
+      gap="sm"
+      className="border-b border-line pr-3 last:border-b-0 hover:bg-hover"
+    >
       <Link
         to="/agents/$threadId"
         params={{ threadId: thread.id }}
-        className="flex min-w-0 flex-1 items-center gap-3"
+        className={ROW_CLASS}
       >
-        {thread.status === "running" ? (
-          <CircleNotchIcon className="size-4 shrink-0 animate-spin text-primary" />
-        ) : (
-          <span
-            className={cn(
-              "size-2.5 shrink-0 rounded-full",
-              thread.status === "error" || thread.status === "interrupted"
-                ? "bg-risk"
-                : thread.status === "finished"
-                  ? "bg-positive"
-                  : "bg-line"
-            )}
-          />
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-body font-medium text-ink">
+        <Stack gap="none" className="min-w-0 flex-1">
+          <Box
+            render={<span />}
+            className="truncate text-label font-medium text-ink"
+          >
             {thread.title}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ink-subtle/70">
-            <span>{STATUS_LABELS[thread.status]}</span>
+          </Box>
+          <Inline
+            render={<span />}
+            gap="md"
+            wrap
+            className="text-meta text-ink-subtle"
+          >
             {thread.triggeringBot && (
-              <span className="flex items-center gap-1">
-                {entry && <BotAvatar entry={entry} />}
+              <Inline render={<span />} gap="xs">
+                <Icon icon={Bot} size="sm" />
                 {entry?.name ?? thread.triggeringBot.name}
-              </span>
+              </Inline>
             )}
             {thread.repoFullName && <span>{thread.repoFullName}</span>}
-            <span>{formatRelativeTime(thread.updatedAt)}</span>
-          </div>
-        </div>
+          </Inline>
+        </Stack>
+        <Inline render={<span />} justify="end" className="w-27.5 shrink-0">
+          <RunStatusBadge status={thread.status} />
+        </Inline>
+        <Box
+          render={<span />}
+          className="w-20 shrink-0 text-right text-meta text-ink-subtle tabular-nums"
+        >
+          {formatRelativeTime(thread.updatedAt)}
+        </Box>
       </Link>
       {slackUrl ? (
         <a
           href={slackUrl}
           target="_blank"
-          rel="noreferrer"
-          className="flex shrink-0 items-center gap-1 rounded-badge px-2 py-1 text-meta text-ink-subtle hover:bg-hover hover:text-ink"
+          rel="noopener noreferrer"
           aria-label="Open the Slack thread"
+          className={buttonVariants({ variant: "ghost", size: "compact" })}
         >
-          <IoLogoSlack className="size-3.5" />
+          <ProviderLogo provider="slack" className="size-3.5" />
           Slack
         </a>
       ) : (
-        <ArrowSquareOutIcon className="size-4 shrink-0 text-ink-subtle/70" />
+        <Icon icon={ExternalLink} size="sm" className="text-ink-subtle" />
       )}
-    </div>
+    </Inline>
+  )
+}
+
+function RowsSkeleton({ label }: { label: string }) {
+  return (
+    <Stack
+      gap="none"
+      bg="panel"
+      border="line"
+      radius="panel"
+      aria-busy
+      aria-label={label}
+      className={PANEL_LIST_CLASS}
+    >
+      {[0, 1].map((row) => (
+        <Inline
+          key={row}
+          gap="md"
+          className="min-h-row-record border-b border-line px-3 py-2 last:border-b-0"
+        >
+          <Stack gap="xs" className="min-w-0 flex-1">
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-3 w-32" />
+          </Stack>
+          <Skeleton className="h-5 w-16 rounded-badge" />
+        </Inline>
+      ))}
+    </Stack>
   )
 }

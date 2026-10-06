@@ -1,12 +1,22 @@
 import { Link } from "@tanstack/react-router"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
-import { ArrowRight, History, Search } from "lucide-react"
 
-import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { PageMasthead } from "@langchain/gtm-platform-design-system/patterns/page-masthead"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@langchain/gtm-platform-design-system/ui/toggle-group"
+
+import { Activity, AlertTriangle, ArchiveBox, Hash } from "@/components/glyphs"
 import { invalidationTopic } from "@/lib/invalidations/topics"
-import { cn } from "@/lib/utils"
 import { incidentsApi } from "./api"
 import { citationPreview } from "./citations"
 import { workspaceApi } from "./workspace-api"
@@ -15,11 +25,40 @@ import {
   ErrorState,
   formatTime,
   humanize,
-  IncidentsMark,
   incidentViews,
   LoadingState,
   StatusBadge,
 } from "./shared"
+
+const ROW_CLASS =
+  "flex w-full items-start gap-4 px-3 py-3 text-left outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+
+function emptyTitle(view: IncidentView, filtered: boolean) {
+  if (filtered) return "No matching incidents"
+  switch (view) {
+    case "active":
+      return "Waiting for matching channel events"
+    case "all":
+      return "No incidents yet"
+    case "history":
+      return "No incident history yet"
+    case "inactive":
+      return "No inactive incidents"
+  }
+}
+
+function viewSummary(view: IncidentView) {
+  switch (view) {
+    case "inactive":
+      return "Paused or completed agent activity"
+    case "history":
+      return "Retained summaries and postmortems"
+    case "active":
+      return "Active investigations, including those needing attention"
+    case "all":
+      return "All current investigations"
+  }
+}
 
 export function IncidentList({
   view,
@@ -61,170 +100,180 @@ export function IncidentList({
   const items = incidents.data?.pages.flatMap((page) => page.items) ?? []
   const filtered = Boolean(search.trim())
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-10 sm:py-10">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-page font-semibold tracking-tightish">
-          {view === "history" ? "Incident history" : "Incidents"}
-        </h1>
-        <Button
-          variant="ghost"
-          size="compact"
-          onClick={() => onViewChange(view === "history" ? "all" : "history")}
-        >
-          <History className="size-3.5" />
-          {view === "history" ? "Current incidents" : "Incident history"}
-        </Button>
-      </div>
-      <p className="mt-2 mb-6 text-body text-ink-subtle">
-        Investigations, findings, and the context to act.
-      </p>
-      <div className="mb-5 flex flex-wrap items-center gap-4">
-        {view !== "history" && (
-          <div
-            role="group"
-            className="flex gap-1 rounded-compact border border-line p-1"
-            aria-label="Agent activity filters"
-          >
-            {incidentViews.map(({ value, label }) => (
-              <button
-                type="button"
-                key={value}
-                onClick={() => onViewChange(value)}
-                aria-pressed={view === value}
-                className={cn(
-                  "min-h-8 rounded-badge px-3 py-1.5 text-label transition-colors",
-                  view === value
-                    ? "bg-hover font-medium text-ink"
-                    : "text-ink-subtle hover:bg-hover/60"
-                )}
+    <ScrollArea overflow="vertical" className="h-full min-h-0 min-w-0 flex-1">
+      <Stack
+        gap="xl"
+        className="mx-auto w-full max-w-work px-6 py-6 max-md:pt-16"
+      >
+        <PageMasthead
+          title={view === "history" ? "Incident history" : "Incidents"}
+          description="Investigations, findings, and the context to act."
+        />
+        <Stack gap="sm">
+          <Inline gap="md" wrap>
+            {view !== "history" && (
+              <ToggleGroup
+                aria-label="Agent activity filters"
+                value={[view]}
+                onValueChange={(value) => {
+                  const next = value[0]
+                  if (next) onViewChange(next)
+                }}
               >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="relative min-w-0 flex-1 basis-56">
-          <Search className="absolute top-2.5 left-3 size-3.5 text-ink-subtle" />
-          <Input
-            type="search"
-            aria-label="Search incidents"
-            placeholder={
-              view === "history"
-                ? "Search incident history…"
-                : "Search incident titles or channels…"
-            }
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="h-9 bg-transparent pl-9"
-          />
-        </div>
-      </div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-meta text-ink-subtle">
-        <span>
-          {view === "inactive"
-            ? "Paused or completed agent activity"
-            : view === "history"
-              ? "Retained summaries and postmortems"
-              : view === "active"
-                ? "Active investigations, including those needing attention"
-                : "All current investigations"}
-        </span>
-        <span aria-live="polite">
-          {incidents.data
-            ? `${items.length} ${items.length === 1 ? "incident" : "incidents"}${incidents.hasNextPage ? " loaded" : ""}`
-            : ""}
-        </span>
-      </div>
-      <div className="border-t border-line">
+                {incidentViews.map(({ value, label }) => (
+                  <ToggleGroupItem key={value} value={value}>
+                    {label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            )}
+            <Box className="min-w-0 flex-1 basis-56">
+              <SearchInput
+                size="control"
+                label="Search incidents"
+                placeholder={
+                  view === "history"
+                    ? "Search incident history…"
+                    : "Search incident titles or channels…"
+                }
+                value={search}
+                onValueChange={setSearch}
+              />
+            </Box>
+            <Button
+              variant="ghost"
+              onClick={() =>
+                onViewChange(view === "history" ? "all" : "history")
+              }
+            >
+              <Icon icon={ArchiveBox} size="sm" />
+              {view === "history" ? "Current incidents" : "Incident history"}
+            </Button>
+          </Inline>
+          <Inline
+            gap="sm"
+            justify="between"
+            wrap
+            className="text-meta text-ink-subtle"
+          >
+            <span>{viewSummary(view)}</span>
+            <span aria-live="polite">
+              {incidents.data
+                ? `${items.length} ${items.length === 1 ? "incident" : "incidents"}${incidents.hasNextPage ? " loaded" : ""}`
+                : ""}
+            </span>
+          </Inline>
+        </Stack>
+
         {incidents.isPending ? (
           <LoadingState />
         ) : incidents.error ? (
-          <div className="p-4">
-            <ErrorState
-              error={incidents.error}
-              retry={() => void incidents.refetch()}
-            />
-          </div>
+          <ErrorState
+            error={incidents.error}
+            retry={() => void incidents.refetch()}
+          />
         ) : items.length === 0 ? (
-          <div className="flex min-h-96 flex-col items-center justify-center px-6 py-14 text-center">
-            <IncidentsMark className="mb-6 size-14 rounded-panel" />
-            <h2 className="text-title font-medium">
-              {filtered
-                ? "No matching incidents"
+          <EmptyState
+            icon={Activity}
+            title={emptyTitle(view, filtered)}
+            description={
+              filtered
+                ? "No incidents match your search."
                 : view === "active"
-                  ? "Waiting for matching channel events"
-                  : view === "all"
-                    ? "No incidents yet"
-                    : view === "history"
-                      ? "No incident history yet"
-                      : "No inactive incidents"}
-            </h2>
-            {(filtered || view === "active") && (
-              <p className="mt-3 max-w-sm text-body leading-relaxed text-ink-subtle">
-                {filtered
-                  ? "No incidents match your search."
-                  : "New public channels matching the prefix appear here once Incidents is enabled."}
-              </p>
-            )}
-          </div>
+                  ? "New public channels matching the prefix appear here once Incidents is enabled."
+                  : undefined
+            }
+            className="min-h-96"
+          />
         ) : (
-          <div className="divide-y divide-line">
-            {items.map((item) => (
-              <Link
-                key={item.id}
-                to="/incidents/$incidentId"
-                params={{ incidentId: item.id }}
-                className="group flex flex-wrap items-start gap-4 px-2 py-5 transition-colors hover:bg-hover/40"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-body font-medium">
-                      {item.title || item.channel_name}
-                    </h2>
-                    {item.is_archived && (
-                      <span className="text-meta text-ink-subtle">
-                        Channel archived
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-2 line-clamp-2 text-body leading-relaxed text-ink-subtle">
-                    {item.latest_finding
-                      ? citationPreview(item.latest_finding)
-                      : "Gathering incident context. Findings will appear here."}
-                  </p>
-                  <p className="mt-3 text-meta text-ink-subtle">
-                    #{item.channel_name}
-                  </p>
-                  {item.reason && (
-                    <p className="mt-2 text-label text-attention">
-                      {humanize(item.reason)}
-                    </p>
-                  )}
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-3 text-meta text-ink-subtle">
-                  <StatusBadge status={item.status} />
-                  <time>{formatTime(item.updated_at)}</time>
-                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
-        {incidents.hasNextPage && !incidents.error && (
-          <div className="border-t border-line p-4 text-center">
-            <Button
-              variant="outline"
-              size="compact"
-              disabled={incidents.isFetchingNextPage}
-              onClick={() => void incidents.fetchNextPage()}
+          <Stack gap="md">
+            <Stack
+              render={<ul aria-label="Incidents" />}
+              gap="none"
+              bg="panel"
+              border="line"
+              radius="panel"
+              className="overflow-hidden"
             >
-              {incidents.isFetchingNextPage
-                ? "Loading…"
-                : "Load more incidents"}
-            </Button>
-          </div>
+              {items.map((item) => (
+                <Box
+                  key={item.id}
+                  render={<li />}
+                  className="border-b border-line last:border-b-0"
+                >
+                  <Link
+                    to="/incidents/$incidentId"
+                    params={{ incidentId: item.id }}
+                    className={ROW_CLASS}
+                  >
+                    <Stack gap="xs" className="min-w-0 flex-1">
+                      <Inline gap="sm" wrap>
+                        <Box
+                          render={<span />}
+                          className="text-label font-medium text-ink"
+                        >
+                          {item.title || item.channel_name}
+                        </Box>
+                        {item.is_archived && (
+                          <Badge tier="plain">Channel archived</Badge>
+                        )}
+                      </Inline>
+                      <Box
+                        render={<span />}
+                        className="line-clamp-2 text-label text-ink-subtle"
+                      >
+                        {item.latest_finding
+                          ? citationPreview(item.latest_finding)
+                          : "Gathering incident context. Findings will appear here."}
+                      </Box>
+                      <Inline
+                        render={<span />}
+                        gap="md"
+                        wrap
+                        className="text-meta text-ink-subtle"
+                      >
+                        <Inline render={<span />} gap="xs">
+                          <Icon icon={Hash} size="sm" />
+                          {item.channel_name}
+                        </Inline>
+                        {item.reason && (
+                          <Inline render={<span />} gap="xs" ink="attention">
+                            <Icon icon={AlertTriangle} size="sm" />
+                            {humanize(item.reason)}
+                          </Inline>
+                        )}
+                      </Inline>
+                    </Stack>
+                    <Stack gap="xs" align="end" className="shrink-0">
+                      <StatusBadge status={item.status} />
+                      <Box
+                        render={<time />}
+                        className="text-meta text-ink-subtle tabular-nums"
+                      >
+                        {formatTime(item.updated_at)}
+                      </Box>
+                    </Stack>
+                  </Link>
+                </Box>
+              ))}
+            </Stack>
+            {incidents.hasNextPage && (
+              <Inline justify="center">
+                <Button
+                  variant="outline"
+                  size="compact"
+                  disabled={incidents.isFetchingNextPage}
+                  onClick={() => void incidents.fetchNextPage()}
+                >
+                  {incidents.isFetchingNextPage
+                    ? "Loading…"
+                    : "Load more incidents"}
+                </Button>
+              </Inline>
+            )}
+          </Stack>
         )}
-      </div>
-    </div>
+      </Stack>
+    </ScrollArea>
   )
 }

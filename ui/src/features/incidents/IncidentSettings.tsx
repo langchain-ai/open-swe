@@ -1,118 +1,42 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  Check,
-  CircleAlert,
-  LoaderCircle,
-  Radio,
-  RefreshCw,
-} from "lucide-react"
 import { useState } from "react"
-import type { ReactNode } from "react"
 
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
 import {
-  SettingsPanel,
-  SettingsRow,
-  SettingsSection,
-} from "@/components/AppShell"
+  SettingRow,
+  SettingSection,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
-import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
+
+import { AlertTriangle, Check, Info, RefreshCw } from "@/components/glyphs"
 import { SlackChannelMultiCombobox } from "@/components/SlackChannelCombobox"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { incidentsApi } from "./api"
 import type { IncidentPolicy, IncidentSettingsPayload } from "./api"
 import { ErrorState, formatTime, LoadingState } from "./shared"
 
-function Field({
-  name,
-  label,
-  description,
-  value,
-  multiline,
-  placeholder,
-}: {
-  name: string
-  label: string
-  description?: string
-  value: string
-  multiline?: boolean
-  placeholder?: string
-}) {
-  const describedBy = description ? `policy-${name}-description` : undefined
+function SaveFailure({ title, reason }: { title: string; reason: string }) {
   return (
-    <div className="space-y-2">
-      <label
-        id={`policy-${name}-label`}
-        htmlFor={`policy-${name}`}
-        className="block text-label font-medium"
-      >
-        {label}
-      </label>
-      {multiline ? (
-        <Textarea
-          id={`policy-${name}`}
-          name={name}
-          aria-describedby={describedBy}
-          defaultValue={value}
-          placeholder={placeholder}
-          className="min-h-20 bg-canvas"
-        />
-      ) : (
-        <Input
-          id={`policy-${name}`}
-          name={name}
-          aria-describedby={describedBy}
-          defaultValue={value}
-          placeholder={placeholder}
-          required={name === "channel_prefix"}
-          maxLength={name === "channel_prefix" ? 60 : undefined}
-          pattern={name === "channel_prefix" ? "[a-z0-9_-]+" : undefined}
-          className="h-9 bg-canvas"
-        />
-      )}
-      {description && (
-        <p
-          id={`policy-${name}-description`}
-          className="text-meta leading-relaxed text-ink-subtle"
-        >
-          {description}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function Toggle({
-  name,
-  label,
-  checked,
-}: {
-  name: string
-  label: string
-  checked: boolean
-}) {
-  return (
-    <Switch
-      id={`policy-${name}`}
-      name={name}
-      aria-label={label}
-      defaultChecked={checked}
+    <StateNotice
+      tone="RISK"
+      icon={AlertTriangle}
+      title={title}
+      description={reason}
     />
   )
 }
 
-function Notice({ children, error }: { children: ReactNode; error?: boolean }) {
-  return (
-    <div
-      role={error ? "alert" : "status"}
-      className={`rounded-compact border p-3 text-body ${error ? "border-risk/20 bg-risk-bg text-risk" : "border-info/20 bg-info/5 text-info"}`}
-    >
-      {children}
-    </div>
-  )
-}
-
+/*
+ * The policy is one versioned document (`expected_version`), so it keeps an
+ * explicit Save: per-row save-on-change would race its own version bumps.
+ */
 function PolicyForm({
   settings,
   onReload,
@@ -159,136 +83,146 @@ function PolicyForm({
     save.mutate(policy)
   }
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <SettingsSection
+    <Stack render={<form onSubmit={onSubmit} />} gap="2xl">
+      <SlackConnectionStatus settings={settings} />
+      <SettingSection
         title="Incidents"
         description="Investigate matching Slack channels and maintain incident summaries with Open SWE."
       >
-        <SlackConnectionStatus settings={settings} />
-        <SettingsRow
+        <SettingRow
           label="Enable Incidents"
-          htmlFor="policy-enabled"
-          control={
-            <Toggle
+          control={({ id }) => (
+            <Switch
+              id={id}
               name="enabled"
-              label="Enable Incidents"
-              checked={initial.enabled}
+              aria-label="Enable Incidents"
+              defaultChecked={initial.enabled}
             />
-          }
+          )}
         />
-        <SettingsPanel>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field
+        <SettingRow
+          label="Channel prefix"
+          description="New public channels with this prefix are investigated."
+          control={({ id }) => (
+            <Input
+              id={id}
               name="channel_prefix"
-              label="Channel prefix"
-              value={initial.channel_prefix}
+              defaultValue={initial.channel_prefix}
               placeholder="inc-"
+              required
+              maxLength={60}
+              pattern="[a-z0-9_-]+"
             />
-            <div className="space-y-2">
-              <span className="block text-label font-medium">
-                Excluded channels
-              </span>
-              <SlackChannelMultiCombobox
-                value={excludedChannelIds}
-                onValueChange={setExcludedChannelIds}
-                aria-label="Excluded channels"
-                className="min-h-9 bg-canvas"
-              />
-            </div>
-          </div>
-        </SettingsPanel>
-        <details>
-          <summary className="cursor-pointer px-4 py-3 text-label font-medium">
-            Model and analysis limits
-          </summary>
-          <SettingsPanel>
-            <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
-              {[
-                {
-                  name: "max_model_calls",
-                  label: "Model calls per turn",
-                  value: initial.max_model_calls,
-                  min: 1,
-                  max: 20,
-                },
-              ].map(({ name, label, value, min, max }) => (
-                <label
-                  key={name}
-                  htmlFor={`policy-${name}`}
-                  className="space-y-2"
-                >
-                  <span className="block text-label font-medium">{label}</span>
-                  <Input
-                    type="number"
-                    min={min}
-                    max={max}
-                    step={1}
-                    required
-                    id={`policy-${name}`}
-                    name={name}
-                    defaultValue={value}
-                    className="h-9 bg-canvas"
-                  />
-                </label>
-              ))}
-              <Field
-                name="model"
-                label="Model"
-                value={initial.model ?? ""}
-                placeholder="Server default"
-              />
-            </div>
-          </SettingsPanel>
-        </details>
-      </SettingsSection>
-      {validation && <Notice error>{validation}</Notice>}
-      {save.error && <Notice error>{save.error.message}</Notice>}
+          )}
+        />
+        <SettingRow
+          label="Excluded channels"
+          description="Matching channels Open SWE leaves alone."
+          control={() => (
+            <SlackChannelMultiCombobox
+              value={excludedChannelIds}
+              onValueChange={setExcludedChannelIds}
+              aria-label="Excluded channels"
+              className="w-full"
+            />
+          )}
+        />
+      </SettingSection>
+      <SettingSection
+        title="Model and analysis limits"
+      >
+        <SettingRow
+          label="Model calls per turn"
+          control={({ id }) => (
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              step={1}
+              required
+              id={id}
+              name="max_model_calls"
+              defaultValue={initial.max_model_calls}
+            />
+          )}
+        />
+        <SettingRow
+          label="Model"
+          control={({ id }) => (
+            <Input
+              id={id}
+              name="model"
+              defaultValue={initial.model ?? ""}
+              placeholder="Server default"
+            />
+          )}
+        />
+      </SettingSection>
+      {validation && (
+        <SaveFailure title="Settings were not saved" reason={validation} />
+      )}
+      {save.error && (
+        <SaveFailure
+          title="Settings were not saved"
+          reason={save.error.message}
+        />
+      )}
       {operation?.status === "failed" && (
-        <Notice error>
-          {operation.error || "The settings operation failed."}
-        </Notice>
+        <SaveFailure
+          title="The last settings change failed"
+          reason={operation.error || "The settings operation failed."}
+        />
       )}
       {save.isSuccess && (
-        <Notice>
-          {submittedOperation?.status === "applied"
-            ? "Settings applied."
-            : "Settings update requested. The policy becomes effective after server validation."}
-        </Notice>
+        <Alert
+          tone={submittedOperation?.status === "applied" ? "positive" : "info"}
+          icon={submittedOperation?.status === "applied" ? Check : Info}
+          role="status"
+        >
+          <AlertDescription>
+            {submittedOperation?.status === "applied"
+              ? "Settings applied."
+              : "Settings update requested. The policy becomes effective after server validation."}
+          </AlertDescription>
+        </Alert>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-5">
-        <p className="max-w-md text-meta leading-relaxed text-ink-subtle">
+      <Inline
+        gap="lg"
+        justify="between"
+        wrap
+        className="border-t border-line pt-6"
+      >
+        <Box render={<p />} className="max-w-md text-meta text-ink-subtle">
           Policy version {initial.version}. Existing matching channels are not
           enrolled unless a new matching rename event is received.
-        </p>
-        <div className="flex gap-2">
+        </Box>
+        <Inline gap="sm">
           <Button
             type="button"
             variant="outline"
-            size="compact"
             onClick={onReload}
             disabled={save.isPending}
           >
-            <RefreshCw className="size-3.5" />
+            <Icon icon={RefreshCw} size="sm" />
             Reload settings
           </Button>
           <Button
             type="submit"
-            size="compact"
             disabled={
               save.isPending ||
               (save.isSuccess && submittedOperation?.status !== "failed")
             }
           >
             {save.isPending ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
+              <Spinner size="sm" />
             ) : (
-              <Check className="size-3.5" />
+              <Icon icon={Check} size="sm" />
             )}
             Save settings
           </Button>
-        </div>
-      </div>
-    </form>
+        </Inline>
+      </Inline>
+    </Stack>
   )
 }
 
@@ -305,50 +239,60 @@ function SlackConnectionStatus({
       : connection.required_scopes_present === false
         ? "Required Slack scopes are missing."
         : null)
+  const facts = [
+    {
+      label: "Workspace",
+      value:
+        connection.workspace_id || policy.workspace_id || "Not configured",
+      mono: true,
+    },
+    {
+      label: "Slack app",
+      value: connection.slack_app_id || policy.slack_app_id || "Not configured",
+      mono: true,
+    },
+    {
+      label: "Last verified",
+      value: formatTime(connection.verified_at),
+      mono: false,
+    },
+  ]
   return (
-    <div className="px-4 py-4">
-      <div className="flex items-start gap-3">
-        {connectionError ? (
-          <CircleAlert className="mt-0.5 size-5 text-attention" />
-        ) : (
-          <Radio className="mt-0.5 size-5 text-info" />
+    <PageSection
+      title="Slack connection"
+      description={
+        connectionError ? undefined : "Slack connection configured."
+      }
+    >
+      <Stack gap="lg">
+        {connectionError && (
+          <StateNotice
+            tone="ATTENTION"
+            icon={AlertTriangle}
+            title="Slack connection needs attention"
+            description={connectionError}
+          />
         )}
-        <div className="min-w-0 flex-1">
-          <h2 className="text-body font-medium">
-            {connectionError
-              ? "Slack connection needs attention"
-              : "Slack connection configured"}
-          </h2>
-          {connectionError && (
-            <p className="mt-1 text-meta leading-relaxed text-ink-subtle">
-              {connectionError}
-            </p>
-          )}
-          <dl className="mt-4 grid grid-cols-1 gap-3 text-label sm:grid-cols-3">
-            <div>
-              <dt className="text-ink-subtle">Workspace</dt>
-              <dd className="mt-1 font-mono">
-                {connection.workspace_id ||
-                  policy.workspace_id ||
-                  "Not configured"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-ink-subtle">Slack app</dt>
-              <dd className="mt-1 font-mono">
-                {connection.slack_app_id ||
-                  policy.slack_app_id ||
-                  "Not configured"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-ink-subtle">Last verified</dt>
-              <dd className="mt-1">{formatTime(connection.verified_at)}</dd>
-            </div>
-          </dl>
-        </div>
-      </div>
-    </div>
+        <Box
+          render={<dl />}
+          className="grid grid-cols-1 gap-3 text-label sm:grid-cols-3"
+        >
+          {facts.map((fact) => (
+            <Stack key={fact.label} gap="xs">
+              <Box render={<dt />} className="text-meta text-ink-subtle">
+                {fact.label}
+              </Box>
+              <Box
+                render={<dd />}
+                className={fact.mono ? "font-mono text-ink" : "text-ink"}
+              >
+                {fact.value}
+              </Box>
+            </Stack>
+          ))}
+        </Box>
+      </Stack>
+    </PageSection>
   )
 }
 
@@ -363,24 +307,20 @@ export function IncidentSettings() {
   if (settings.isPending) return <LoadingState />
   if (settings.error)
     return (
-      <div className="p-6">
-        <ErrorState
-          error={settings.error}
-          retry={() => void settings.refetch()}
-        />
-      </div>
+      <ErrorState
+        error={settings.error}
+        retry={() => void settings.refetch()}
+      />
     )
   return (
-    <div>
-      <PolicyForm
-        key={formVersion}
-        settings={settings.data}
-        onReload={() => {
-          void settings.refetch().then((result) => {
-            if (result.isSuccess) setFormVersion((version) => version + 1)
-          })
-        }}
-      />
-    </div>
+    <PolicyForm
+      key={formVersion}
+      settings={settings.data}
+      onReload={() => {
+        void settings.refetch().then((result) => {
+          if (result.isSuccess) setFormVersion((version) => version + 1)
+        })
+      }}
+    />
   )
 }

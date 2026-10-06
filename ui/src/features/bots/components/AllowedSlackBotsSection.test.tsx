@@ -68,10 +68,10 @@ describe("Allowed Slack bots", () => {
     renderSection(onBotChange)
     await screen.findByText("No Slack bots are allowed.")
     expect(
-      screen.queryByRole("textbox", { name: "Search Slack bots" })
+      screen.queryByRole("searchbox", { name: "Search Slack bots" })
     ).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
-    const search = await screen.findByRole("textbox", {
+    const search = await screen.findByRole("searchbox", {
       name: "Search Slack bots",
     })
     fireEvent.change(search, { target: { value: "Release" } })
@@ -84,7 +84,7 @@ describe("Allowed Slack bots", () => {
     expect(onBotChange).toHaveBeenCalledWith("T123:B123")
     onBotChange.mockClear()
     expect(
-      screen.queryByRole("textbox", { name: "Search Slack bots" })
+      screen.queryByRole("searchbox", { name: "Search Slack bots" })
     ).toBeNull()
     expect(requests.find(({ init }) => init.method === "POST")?.init.body).toBe(
       JSON.stringify({ bot_id: "U123" })

@@ -1,16 +1,44 @@
 import { useState } from "react"
+import type { ReactNode } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
-import {
-  CheckIcon,
-  ClockIcon,
-  GithubLogoIcon,
-  KanbanIcon,
-  PencilSimpleIcon,
-  PlusIcon,
-  SlackLogoIcon,
-  TrashIcon,
-} from "@phosphor-icons/react"
 
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
+import {
+  FormField,
+  FormSection,
+  FormStack,
+} from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import {
+  RecordHeader,
+  RecordInlineEdit,
+} from "@langchain/gtm-platform-design-system/patterns/record-header"
+import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button, buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { IconWell } from "@langchain/gtm-platform-design-system/ui/icon-well"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { HELP_CLASS, LABEL_CLASS } from "@langchain/gtm-platform-design-system/ui/label"
+import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@langchain/gtm-platform-design-system/ui/toggle-group"
+
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Clock,
+  GitHub,
+  Lock,
+  Pencil,
+  Plus,
+  Trash2,
+} from "@/components/glyphs"
 import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
@@ -28,8 +56,6 @@ import { AutomationRuns } from "@/features/automations/components/AutomationRuns
 import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import { describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
@@ -53,7 +79,6 @@ import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedC
 import { useRepos } from "@/lib/profile"
 import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
 
 function eventItems<E extends string>(
   events: Record<E, string>
@@ -77,13 +102,6 @@ const SENDER_ITEMS: Array<{ value: SlackTriggerSenders; label: string }> = [
   { value: "people", label: "People" },
   { value: "bots", label: "Bots" },
 ]
-
-/** ``list`` with ``item`` toggled, kept in ``order``. */
-function toggled<T>(list: Array<T>, item: T, order: Array<T>): Array<T> {
-  return order.filter((value) =>
-    value === item ? !list.includes(value) : list.includes(value)
-  )
-}
 
 interface AutomationEditorProps {
   mode: "create" | "edit"
@@ -124,7 +142,8 @@ export function AutomationEditor({
     draftsFor(schedule, template?.schedule)
   )
   const [drafts, setDrafts] = useState<Array<TriggerDraft>>(initialDrafts)
-  const [name, setName] = useState(schedule?.name ?? template?.name ?? "")
+  const savedName = schedule?.name ?? template?.name ?? ""
+  const [name, setName] = useState(savedName)
   const [prompt, setPrompt] = useState(
     schedule?.prompt ?? template?.prompt ?? ""
   )
@@ -160,7 +179,7 @@ export function AutomationEditor({
     selectionOverride !== undefined ? selectionOverride : initialSelection
   const isDirty =
     canManage &&
-    (name !== (schedule?.name ?? template?.name ?? "") ||
+    (name !== savedName ||
       prompt !== (schedule?.prompt ?? template?.prompt ?? "") ||
       JSON.stringify(toTriggers(drafts)) !==
         JSON.stringify(toTriggers(initialDrafts)) ||
@@ -210,40 +229,6 @@ export function AutomationEditor({
         : draft
     )
   }
-  const toggleEvent = (key: string, event: string) =>
-    updateDraft(key, (draft) => {
-      switch (draft.kind) {
-        case "github":
-          return {
-            ...draft,
-            events: toggled(
-              draft.events,
-              event as GitHubTriggerEvent,
-              GITHUB_EVENT_ITEMS.map((item) => item.value)
-            ),
-          }
-        case "slack":
-          return {
-            ...draft,
-            events: toggled(
-              draft.events,
-              event as SlackTriggerEvent,
-              SLACK_EVENT_ITEMS.map((item) => item.value)
-            ),
-          }
-        case "linear":
-          return {
-            ...draft,
-            events: toggled(
-              draft.events,
-              event as LinearTriggerEvent,
-              LINEAR_EVENT_ITEMS.map((item) => item.value)
-            ),
-          }
-        default:
-          return draft
-      }
-    })
 
   const handleSave = () => {
     if (!canSave || workspace === null) return
@@ -297,501 +282,636 @@ export function AutomationEditor({
     )
   }
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!schedule) return
-    if (!window.confirm(`Delete "${schedule.name}"?`)) return
-    deleteSchedule.mutate(schedule.id, {
-      onSuccess: () => {
-        allowNavigation()
-        navigate({ to: "/agents/automations" })
-      },
-    })
+    await deleteSchedule.mutateAsync(schedule.id)
+    allowNavigation()
+    void navigate({ to: "/agents/automations" })
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <header className="flex items-center justify-between gap-3 px-6 py-4 max-md:pt-14">
-        <div className="flex min-w-0 items-center gap-1.5 text-meta text-ink-subtle/70">
-          <Link
-            to="/agents/automations"
-            className="shrink-0 transition-colors hover:text-ink"
-          >
-            Automations
-          </Link>
-          <span className="shrink-0">/</span>
-          <span className="truncate text-ink">
-            {name.trim() || "New automation"}
-          </span>
-        </div>
-        {canManage && (
-          <div className="flex shrink-0 items-center gap-2">
-            {mode === "edit" && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={handleDelete}
-                disabled={deleteSchedule.isPending}
-                aria-label="Delete automation"
-                className="text-ink-subtle/70 hover:text-risk"
-              >
-                <TrashIcon className="size-4" />
-              </Button>
-            )}
-            <Button onClick={handleSave} disabled={!canSave || isSaving}>
-              {isSaving
-                ? "Saving…"
-                : mode === "create"
-                  ? "Create"
-                  : "Save changes"}
-            </Button>
-          </div>
-        )}
-      </header>
+    <ScrollArea overflow="vertical" className="h-full min-h-0 min-w-0 flex-1">
+      <Stack
+        gap="xl"
+        className="mx-auto w-full max-w-reading px-6 py-6 max-md:pt-16"
+      >
+        <Stack gap="sm">
+          <Inline>
+            <Link
+              to="/agents/automations"
+              className={buttonVariants({ variant: "ghost", size: "compact" })}
+            >
+              <Icon icon={ArrowLeft} size="sm" />
+              Automations
+            </Link>
+          </Inline>
+          <RecordHeader
+            title={
+              canManage ? (
+                <RecordInlineEdit
+                  kind="TITLE"
+                  label="Automation name"
+                  placeholder="Untitled automation"
+                  value={name}
+                  onChange={setName}
+                  onCommit={() => {}}
+                  onCancel={() => setName(savedName)}
+                />
+              ) : (
+                <Box
+                  render={<h1 />}
+                  className="truncate text-title font-semibold text-ink"
+                >
+                  {name.trim() || "Untitled automation"}
+                </Box>
+              )
+            }
+            status={
+              mode === "edit" ? (
+                <Badge tone={enabled ? "positive" : "neutral"} dot>
+                  {enabled ? "Active" : "Paused"}
+                </Badge>
+              ) : undefined
+            }
+            actions={
+              canManage ? (
+                <>
+                  {mode === "edit" && schedule && (
+                    <ConfirmableAction
+                      title={`Delete "${schedule.name}"?`}
+                      description="It stops running, and this cannot be undone."
+                      confirmLabel="Delete automation"
+                      confirmIcon={Trash2}
+                      onConfirm={handleDelete}
+                      trigger={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Delete automation"
+                          disabled={deleteSchedule.isPending}
+                        >
+                          <Icon icon={Trash2} size="sm" />
+                        </Button>
+                      }
+                    />
+                  )}
+                  <Button onClick={handleSave} disabled={!canSave || isSaving}>
+                    {isSaving
+                      ? "Saving…"
+                      : mode === "create"
+                        ? "Create"
+                        : "Save changes"}
+                  </Button>
+                </>
+              ) : undefined
+            }
+          />
+        </Stack>
 
-      <div className="mx-auto w-full max-w-3xl px-6 pt-2 pb-16">
         {!canManage && (
-          <p className="mb-4 rounded-compact border border-line bg-panel px-3 py-2 text-meta text-ink-subtle">
-            This workspace automation is read-only. Ask a workspace admin to
-            change it.
-          </p>
+          <Alert tone="neutral" icon={Lock}>
+            <AlertDescription>
+              This workspace automation is read-only. Ask a workspace admin to
+              change it.
+            </AlertDescription>
+          </Alert>
         )}
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          disabled={!canManage}
-          placeholder="Untitled automation"
-          className="w-full bg-transparent text-title font-medium text-ink outline-none placeholder:text-ink-subtle/70"
-        />
 
-        <div className="mt-3 flex items-center gap-3 text-label">
-          <div className="flex items-center gap-2">
-            <Switch
+        <FormStack>
+          <FormSection title="Details">
+            <FormField
+              label="Workspace"
+              help="Every run starts a sandbox from this workspace."
+              error={
+                savedWorkspaceMissing
+                  ? `Workspace ${schedule?.workspace} no longer exists, so runs are refused. Pick another workspace and save.`
+                  : undefined
+              }
+              control={
+                <WorkspaceSelector
+                  workspaces={workspaces}
+                  selectedSlug={workspace}
+                  onChange={(slug) => setWorkspaceOverride(slug)}
+                  disabled={!canManage}
+                  placeholder="Choose workspace"
+                  showWithOneWorkspace
+                />
+              }
+            />
+            <CheckboxField
+              label="Active"
+              description="Paused automations keep their setup but do not run."
               checked={enabled}
               onCheckedChange={setEnabled}
               disabled={!canManage}
             />
-            <span className="text-ink-subtle">
-              {enabled ? "Active" : "Paused"}
-            </span>
-          </div>
-          <span className="text-line">|</span>
-          <WorkspaceSelector
-            workspaces={workspaces}
-            selectedSlug={workspace}
-            onChange={(slug) => setWorkspaceOverride(slug)}
-            disabled={!canManage}
-            placeholder="Choose workspace"
-            showWithOneWorkspace
-          />
-        </div>
-        {savedWorkspaceMissing && (
-          <p role="alert" className="mt-2 text-label text-risk">
-            Workspace {schedule?.workspace} no longer exists, so runs are
-            refused. Pick another workspace and save.
-          </p>
-        )}
+          </FormSection>
 
-        <SectionLabel>Triggers</SectionLabel>
-        <div className="flex flex-col gap-2">
-          {drafts.map((draft) => {
-            const problem = draftProblem(draft)
-            const hint = (fallback: string) => (
-              <p
-                className={cn(
-                  "mt-2 text-label",
-                  problem ? "text-risk" : "text-ink-subtle/70"
-                )}
-              >
-                {problem ?? fallback}
-              </p>
-            )
-            const set = (change: Partial<TriggerDraft>) =>
-              updateDraft(
-                draft.key,
-                (current) => ({ ...current, ...change }) as TriggerDraft
-              )
-            if (draft.kind === "schedule") {
-              return (
-                <TriggerCard
-                  key={draft.key}
-                  icon={<ClockIcon className="size-4" />}
-                  removeLabel="Remove schedule"
-                  onRemove={() => removeDraft(draft.key)}
-                  canManage={canManage}
-                  actions={
-                    canManage && (
-                      <TriggerMenu
-                        onSchedule={(cron) => pickSchedule(draft.key, cron)}
-                        aria-label="Change schedule"
-                        className={CARD_ACTION}
-                      >
-                        <PencilSimpleIcon className="size-3.5" />
-                      </TriggerMenu>
-                    )
+          <FormSection
+            title="Triggers"
+            description="Run on a schedule, or when GitHub, Slack, or Linear events arrive."
+          >
+            {drafts.map((draft) => (
+              <TriggerEditor
+                key={draft.key}
+                draft={draft}
+                canManage={canManage}
+                repos={reposQuery.data?.repositories}
+                onChange={(change) => updateDraft(draft.key, change)}
+                onRemove={() => removeDraft(draft.key)}
+                onPickSchedule={(cron) => pickSchedule(draft.key, cron)}
+              />
+            ))}
+            {canManage && (
+              <Inline>
+                <TriggerMenu
+                  onSchedule={(cron) => pickSchedule(null, cron)}
+                  onGitHub={() =>
+                    setDrafts((current) => [...current, githubDraft()])
+                  }
+                  onSlack={() =>
+                    setDrafts((current) => [...current, slackDraft()])
+                  }
+                  onLinear={() =>
+                    setDrafts((current) => [...current, linearDraft()])
                   }
                 >
-                  {draft.custom ? (
-                    <input
-                      value={draft.cron}
-                      onChange={(e) => set({ cron: e.target.value })}
-                      disabled={!canManage}
-                      placeholder="0 9 * * 1-5"
-                      aria-label="Cron schedule"
-                      className="w-full bg-transparent font-mono text-body text-ink outline-none placeholder:text-ink-subtle/70"
-                    />
-                  ) : (
-                    <p className="text-body text-ink">
-                      {describeCron(draft.cron)}{" "}
-                      <span className="font-mono text-meta text-ink-subtle/70">
-                        {draft.cron}
-                      </span>
-                    </p>
-                  )}
-                  {problem && (
-                    <p className="mt-1 text-label text-risk">{problem}</p>
-                  )}
-                </TriggerCard>
-              )
-            }
-            if (draft.kind === "github") {
-              return (
-                <TriggerCard
-                  key={draft.key}
-                  icon={<GithubLogoIcon className="size-4" />}
-                  removeLabel="Remove GitHub trigger"
-                  onRemove={() => removeDraft(draft.key)}
-                  canManage={canManage}
-                >
-                  <div className="text-body text-ink">
-                    <RepoSelector
-                      repos={reposQuery.data?.repositories}
-                      selectedRepo={draft.repo}
-                      onRepoChange={(repo) => set({ repo })}
-                      placeholder="Choose repository"
-                      triggerClassName="text-ink-subtle"
-                      disabled={!canManage}
-                    />
-                  </div>
-                  <EventChips
-                    items={GITHUB_EVENT_ITEMS}
-                    selected={draft.events}
-                    onToggle={(event) => toggleEvent(draft.key, event)}
-                    disabled={!canManage}
-                  />
-                  {hint(
-                    draft.events.includes("pull_request.closed")
-                      ? "PR closed also fires when a pull request is merged."
-                      : "Event details reach the run as untrusted context."
-                  )}
-                </TriggerCard>
-              )
-            }
-            if (draft.kind === "slack") {
-              return (
-                <TriggerCard
-                  key={draft.key}
-                  icon={<SlackLogoIcon className="size-4" />}
-                  removeLabel="Remove Slack trigger"
-                  onRemove={() => removeDraft(draft.key)}
-                  canManage={canManage}
-                >
-                  <SlackChannelCombobox
-                    value={draft.channel}
-                    onValueChange={(channel) => set({ channel })}
-                    disabled={!canManage}
-                    placeholder="Choose a channel to watch"
-                    aria-label="Slack channel to watch"
-                    className="w-full"
-                  />
-                  <EventChips
-                    items={SLACK_EVENT_ITEMS}
-                    selected={draft.events}
-                    onToggle={(event) => toggleEvent(draft.key, event)}
-                    disabled={!canManage}
-                  />
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-meta text-ink-subtle">
-                    <span>From</span>
-                    <div className="flex overflow-hidden rounded-badge border border-line">
-                      {SENDER_ITEMS.map((item) => (
-                        <button
-                          key={item.value}
-                          type="button"
-                          aria-pressed={draft.senders === item.value}
-                          onClick={() => set({ senders: item.value })}
-                          disabled={!canManage}
-                          className={cn(
-                            "px-2 py-1 transition-colors disabled:pointer-events-none",
-                            draft.senders === item.value
-                              ? "bg-primary/20 text-ink"
-                              : "hover:text-ink"
-                          )}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_9rem]">
-                    <FilterInput
-                      label="Text matches"
-                      value={draft.match}
-                      onChange={(match) => set({ match })}
-                      placeholder="Regular expression, e.g. FIRING|SEV-?1"
-                      disabled={!canManage}
-                    />
-                    <FilterInput
-                      label="Max runs per hour"
-                      value={draft.maxRunsPerHour}
-                      onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
-                      placeholder="No limit"
-                      inputMode="numeric"
-                      disabled={!canManage}
-                    />
-                  </div>
-                  {hint(
-                    "Top-level messages only. Open SWE must be in the channel; messages reach the run as untrusted context."
-                  )}
-                </TriggerCard>
-              )
-            }
-            return (
-              <TriggerCard
-                key={draft.key}
-                icon={<KanbanIcon className="size-4" />}
-                removeLabel="Remove Linear trigger"
-                onRemove={() => removeDraft(draft.key)}
-                canManage={canManage}
-              >
-                <FilterInput
-                  label="Team key"
-                  value={draft.team}
-                  onChange={(team) => set({ team: team.toUpperCase() })}
-                  placeholder="ENG"
-                  disabled={!canManage}
-                />
-                <EventChips
-                  items={LINEAR_EVENT_ITEMS}
-                  selected={draft.events}
-                  onToggle={(event) => toggleEvent(draft.key, event)}
-                  disabled={!canManage}
-                />
-                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_9rem]">
-                  <FilterInput
-                    label="Labels"
-                    value={draft.labels}
-                    onChange={(labels) => set({ labels })}
-                    placeholder="Any; comma-separated"
-                    disabled={!canManage}
-                  />
-                  <FilterInput
-                    label="Project"
-                    value={draft.project}
-                    onChange={(project) => set({ project })}
-                    placeholder="Any"
-                    disabled={!canManage}
-                  />
-                  <FilterInput
-                    label="Max runs per hour"
-                    value={draft.maxRunsPerHour}
-                    onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
-                    placeholder="No limit"
-                    inputMode="numeric"
-                    disabled={!canManage}
-                  />
-                </div>
-                {hint(
-                  draft.events.includes("issue.labeled")
-                    ? "Label added fires when the issue gains one of these labels, or any label when none are listed."
-                    : "Issue details reach the run as untrusted context."
-                )}
-              </TriggerCard>
-            )
-          })}
-          {canManage && (
-            <TriggerMenu
-              onSchedule={(cron) => pickSchedule(null, cron)}
-              onGitHub={() =>
-                setDrafts((current) => [...current, githubDraft()])
-              }
-              onSlack={() => setDrafts((current) => [...current, slackDraft()])}
-              onLinear={() =>
-                setDrafts((current) => [...current, linearDraft()])
-              }
-              className="flex items-center gap-1.5 self-start rounded-compact border border-dashed border-line px-3 py-2 text-meta text-ink-subtle transition-colors hover:border-ink/30 hover:text-ink"
-            >
-              <PlusIcon className="size-3.5" />
-              Add trigger
-            </TriggerMenu>
-          )}
-          {!canManage && drafts.length === 0 && (
-            <p className="text-meta text-ink-subtle/70">No triggers.</p>
-          )}
-        </div>
+                  <Icon icon={Plus} size="sm" />
+                  Add trigger
+                </TriggerMenu>
+              </Inline>
+            )}
+            {!canManage && drafts.length === 0 && (
+              <Box render={<p />} className={HELP_CLASS}>
+                No triggers.
+              </Box>
+            )}
+          </FormSection>
 
-        <SectionLabel>Agent Instructions</SectionLabel>
-        <div className="rounded-control border border-line bg-panel p-3">
-          <SlackChannelTextarea
-            bare
-            value={prompt}
-            onValueChange={setPrompt}
-            disabled={!canManage}
-            placeholder="What should Open SWE do each time this runs?"
-            rows={5}
-            className="w-full resize-none bg-transparent text-body leading-relaxed text-ink outline-none placeholder:text-ink-subtle/70"
-          />
-          <div className="mt-2 flex items-center">
-            <ModelPicker
-              models={models}
-              selection={activeSelection}
-              onSelectionChange={setSelectionOverride}
-              disabled={!canManage}
+          <FormSection title="Agent instructions">
+            <FormField
+              label="Instructions"
+              control={
+                <SlackChannelTextarea
+                  value={prompt}
+                  onValueChange={setPrompt}
+                  disabled={!canManage}
+                  placeholder="What should Open SWE do each time this runs?"
+                  rows={5}
+                  className="resize-none"
+                />
+              }
             />
-          </div>
-          {session.data?.is_admin === true && (
-            <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-line/60 pt-3">
-              <input
-                type="checkbox"
+            <FormField
+              label="Model"
+              control={
+                <ModelPicker
+                  models={models}
+                  selection={activeSelection}
+                  onSelectionChange={setSelectionOverride}
+                  disabled={!canManage}
+                />
+              }
+            />
+            {session.data?.is_admin === true && (
+              <CheckboxField
+                label="Run as admin thread"
+                description="Allow this automation to use workspace admin capabilities."
                 checked={adminThread}
-                onChange={(event) => setAdminThread(event.target.checked)}
+                onCheckedChange={setAdminThread}
                 disabled={!canManage}
-                className="mt-0.5 size-4 accent-risk"
               />
-              <span>
-                <span className="block text-label font-medium text-ink">
-                  Run as admin thread
-                </span>
-                <span className="mt-0.5 block text-meta text-ink-subtle/70">
-                  Allow this automation to use workspace admin capabilities.
-                </span>
-              </span>
-            </label>
-          )}
-        </div>
+            )}
+          </FormSection>
+        </FormStack>
 
         {mode === "edit" && schedule && (
-          <>
-            <SectionLabel>Recent runs</SectionLabel>
+          <PageSection title="Recent runs">
             <AutomationRuns automationId={schedule.id} limit={10} />
-          </>
+          </PageSection>
         )}
-      </div>
-    </div>
+      </Stack>
+    </ScrollArea>
   )
 }
 
-const CARD_ACTION =
-  "rounded-tick p-1 text-ink-subtle/70 hover:bg-hover hover:text-ink"
-
-function EventChips<E extends string>({
-  items,
-  selected,
-  onToggle,
-  disabled,
-}: {
-  items: Array<{ value: E; label: string }>
-  selected: Array<E>
-  onToggle: (event: E) => void
-  disabled: boolean
-}) {
-  return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {items.map((item) => {
-        const on = selected.includes(item.value)
-        return (
-          <button
-            key={item.value}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onToggle(item.value)}
-            disabled={disabled}
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-label transition-colors disabled:pointer-events-none",
-              on
-                ? "border-primary/60 bg-primary/20 text-ink"
-                : "border-line text-ink-subtle hover:border-ink/30 hover:text-ink"
-            )}
-          >
-            {on && <CheckIcon className="size-3 text-primary" />}
-            {item.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-function FilterInput({
+function CheckboxField({
   label,
-  value,
-  onChange,
-  placeholder,
+  description,
+  checked,
+  onCheckedChange,
   disabled,
-  inputMode,
 }: {
   label: string
-  value: string
-  onChange: (value: string) => void
-  placeholder: string
+  description: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
   disabled: boolean
-  inputMode?: "numeric"
 }) {
   return (
-    <label className="flex flex-col gap-1 text-meta text-ink-subtle">
-      {label}
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        inputMode={inputMode}
+    <Inline
+      render={<label />}
+      gap="sm"
+      align="start"
+      className={disabled ? undefined : "cursor-pointer"}
+    >
+      <Checkbox
+        checked={checked}
+        onCheckedChange={onCheckedChange}
         disabled={disabled}
-        className="rounded-badge border border-line bg-transparent px-2 py-1 text-body text-ink outline-none placeholder:text-ink-subtle/60 focus:border-ink/30"
+        className="mt-0.5"
       />
-    </label>
+      <Stack gap="xs" className="min-w-0">
+        <Box render={<span />} className={LABEL_CLASS}>
+          {label}
+        </Box>
+        <Box render={<span />} className={HELP_CLASS}>
+          {description}
+        </Box>
+      </Stack>
+    </Inline>
+  )
+}
+
+function TriggerEditor({
+  draft,
+  canManage,
+  repos,
+  onChange,
+  onRemove,
+  onPickSchedule,
+}: {
+  draft: TriggerDraft
+  canManage: boolean
+  repos: Parameters<typeof RepoSelector>[0]["repos"]
+  onChange: (change: (draft: TriggerDraft) => TriggerDraft) => void
+  onRemove: () => void
+  onPickSchedule: (cron: string | null) => void
+}) {
+  const problem = draftProblem(draft)
+  const set = (change: Partial<TriggerDraft>) =>
+    onChange((current) => ({ ...current, ...change }) as TriggerDraft)
+
+  if (draft.kind === "schedule") {
+    return (
+      <TriggerCard
+        mark={<Icon icon={Clock} size="sm" />}
+        title="Schedule"
+        removeLabel="Remove schedule"
+        onRemove={onRemove}
+        canManage={canManage}
+        actions={
+          canManage && (
+            <TriggerMenu
+              onSchedule={onPickSchedule}
+              aria-label="Change schedule"
+              variant="ghost"
+              size="icon-sm"
+            >
+              <Icon icon={Pencil} size="sm" />
+            </TriggerMenu>
+          )
+        }
+      >
+        {draft.custom ? (
+          <FormField
+            label="Cron schedule"
+            help="Five fields, in UTC."
+            error={problem ?? undefined}
+            control={
+              <Input
+                value={draft.cron}
+                onChange={(e) => set({ cron: e.target.value })}
+                disabled={!canManage}
+                placeholder="0 9 * * 1-5"
+                className="font-mono"
+              />
+            }
+          />
+        ) : (
+          <Inline gap="sm" wrap className="text-body text-ink">
+            {describeCron(draft.cron)}
+            <Box render={<span />} className="font-mono text-meta text-ink-subtle">
+              {draft.cron}
+            </Box>
+          </Inline>
+        )}
+        {!draft.custom && problem && <TriggerHint problem={problem} />}
+      </TriggerCard>
+    )
+  }
+
+  if (draft.kind === "github") {
+    return (
+      <TriggerCard
+        mark={<Icon icon={GitHub} size="sm" />}
+        title={AUTOMATION_EVENT_PROVIDERS.github.label}
+        removeLabel="Remove GitHub trigger"
+        onRemove={onRemove}
+        canManage={canManage}
+      >
+        <FormField
+          label="Repository"
+          control={
+            <RepoSelector
+              repos={repos}
+              selectedRepo={draft.repo}
+              onRepoChange={(repo) => set({ repo })}
+              placeholder="Choose repository"
+              disabled={!canManage}
+            />
+          }
+        />
+        <EventToggles
+          label="GitHub events"
+          items={GITHUB_EVENT_ITEMS}
+          selected={draft.events}
+          onChange={(events) => set({ events })}
+          disabled={!canManage}
+        />
+        <TriggerHint problem={problem}>
+          {draft.events.includes("pull_request.closed")
+            ? "PR closed also fires when a pull request is merged."
+            : "Event details reach the run as untrusted context."}
+        </TriggerHint>
+      </TriggerCard>
+    )
+  }
+
+  if (draft.kind === "slack") {
+    return (
+      <TriggerCard
+        mark={<ProviderLogo provider="slack" className="size-3.5" />}
+        title={AUTOMATION_EVENT_PROVIDERS.slack.label}
+        removeLabel="Remove Slack trigger"
+        onRemove={onRemove}
+        canManage={canManage}
+      >
+        <FormField
+          label="Channel"
+          control={
+            <SlackChannelCombobox
+              value={draft.channel}
+              onValueChange={(channel) => set({ channel })}
+              disabled={!canManage}
+              placeholder="Choose a channel to watch"
+              aria-label="Slack channel to watch"
+              className="w-full"
+            />
+          }
+        />
+        <EventToggles
+          label="Slack events"
+          items={SLACK_EVENT_ITEMS}
+          selected={draft.events}
+          onChange={(events) => set({ events })}
+          disabled={!canManage}
+        />
+        <FormField
+          label="From"
+          control={
+            <ToggleGroup
+              aria-label="Senders"
+              value={[draft.senders]}
+              onValueChange={(value) => {
+                const next = value[0]
+                if (next) set({ senders: next })
+              }}
+              disabled={!canManage}
+            >
+              {SENDER_ITEMS.map((item) => (
+                <ToggleGroupItem key={item.value} value={item.value}>
+                  {item.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          }
+        />
+        <Box className="grid gap-4 sm:grid-cols-3">
+          <Box className="sm:col-span-2">
+            <FormField
+              label="Text matches"
+              control={
+                <Input
+                  value={draft.match}
+                  onChange={(e) => set({ match: e.target.value })}
+                  placeholder="Regular expression, e.g. FIRING|SEV-?1"
+                  disabled={!canManage}
+                />
+              }
+            />
+          </Box>
+          <RunsPerHourField
+            value={draft.maxRunsPerHour}
+            onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
+            disabled={!canManage}
+          />
+        </Box>
+        <TriggerHint problem={problem}>
+          Top-level messages only. Open SWE must be in the channel; messages
+          reach the run as untrusted context.
+        </TriggerHint>
+      </TriggerCard>
+    )
+  }
+
+  return (
+    <TriggerCard
+      mark={<ProviderLogo provider="linear" className="size-3.5" />}
+      title={AUTOMATION_EVENT_PROVIDERS.linear.label}
+      removeLabel="Remove Linear trigger"
+      onRemove={onRemove}
+      canManage={canManage}
+    >
+      <FormField
+        label="Team key"
+        control={
+          <Input
+            value={draft.team}
+            onChange={(e) => set({ team: e.target.value.toUpperCase() })}
+            placeholder="ENG"
+            disabled={!canManage}
+          />
+        }
+      />
+      <EventToggles
+        label="Linear events"
+        items={LINEAR_EVENT_ITEMS}
+        selected={draft.events}
+        onChange={(events) => set({ events })}
+        disabled={!canManage}
+      />
+      <Box className="grid gap-4 sm:grid-cols-3">
+        <FormField
+          label="Labels"
+          control={
+            <Input
+              value={draft.labels}
+              onChange={(e) => set({ labels: e.target.value })}
+              placeholder="Any; comma-separated"
+              disabled={!canManage}
+            />
+          }
+        />
+        <FormField
+          label="Project"
+          control={
+            <Input
+              value={draft.project}
+              onChange={(e) => set({ project: e.target.value })}
+              placeholder="Any"
+              disabled={!canManage}
+            />
+          }
+        />
+        <RunsPerHourField
+          value={draft.maxRunsPerHour}
+          onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
+          disabled={!canManage}
+        />
+      </Box>
+      <TriggerHint problem={problem}>
+        {draft.events.includes("issue.labeled")
+          ? "Label added fires when the issue gains one of these labels, or any label when none are listed."
+          : "Issue details reach the run as untrusted context."}
+      </TriggerHint>
+    </TriggerCard>
+  )
+}
+
+function RunsPerHourField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string
+  onChange: (value: string) => void
+  disabled: boolean
+}) {
+  return (
+    <FormField
+      label="Max runs per hour"
+      control={
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="No limit"
+          inputMode="numeric"
+          disabled={disabled}
+        />
+      }
+    />
+  )
+}
+
+function EventToggles<E extends string>({
+  label,
+  items,
+  selected,
+  onChange,
+  disabled,
+}: {
+  label: string
+  items: Array<{ value: E; label: string }>
+  selected: Array<E>
+  onChange: (events: Array<E>) => void
+  disabled: boolean
+}) {
+  return (
+    <FormField
+      label="Events"
+      control={
+        <ToggleGroup<E>
+          multiple
+          aria-label={label}
+          value={selected}
+          onValueChange={(next) =>
+            onChange(
+              items
+                .map((item) => item.value)
+                .filter((value) => next.includes(value))
+            )
+          }
+          disabled={disabled}
+          className="flex-wrap"
+        >
+          {items.map((item) => (
+            <ToggleGroupItem<E> key={item.value} value={item.value}>
+              {item.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      }
+    />
+  )
+}
+
+function TriggerHint({
+  problem,
+  children,
+}: {
+  problem: string | null
+  children?: ReactNode
+}) {
+  if (problem) {
+    return (
+      <Inline gap="sm" align="start" ink="risk" className="text-label">
+        <Icon icon={AlertTriangle} size="sm" className="mt-0.5" />
+        <Box render={<span />}>{problem}</Box>
+      </Inline>
+    )
+  }
+  if (!children) return null
+  return (
+    <Box render={<p />} className={HELP_CLASS}>
+      {children}
+    </Box>
   )
 }
 
 function TriggerCard({
-  icon,
+  mark,
+  title,
   children,
   actions,
   removeLabel,
   onRemove,
   canManage,
 }: {
-  icon: React.ReactNode
-  children: React.ReactNode
-  actions?: React.ReactNode
+  mark: ReactNode
+  title: string
+  children: ReactNode
+  actions?: ReactNode
   removeLabel: string
   onRemove: () => void
   canManage: boolean
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-control border border-line bg-panel px-3 py-2.5">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-compact bg-muted text-ink-subtle">
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1 py-0.5">{children}</div>
-      {canManage && (
-        <div className="flex shrink-0 items-center gap-0.5">
-          {actions}
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={removeLabel}
-            className={CARD_ACTION}
-          >
-            <TrashIcon className="size-3.5" />
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="mt-8 mb-2 text-meta font-medium text-ink-subtle">
+    <Stack gap="md" bg="panel" border="line" radius="panel" padding="lg">
+      <Inline gap="sm" justify="between" className="min-h-control-sm">
+        <Inline gap="sm" className="min-w-0">
+          <IconWell>{mark}</IconWell>
+          <Box render={<span />} className={LABEL_CLASS}>
+            {title}
+          </Box>
+        </Inline>
+        {canManage && (
+          <Inline gap="xs" className="shrink-0">
+            {actions}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={onRemove}
+              aria-label={removeLabel}
+            >
+              <Icon icon={Trash2} size="sm" />
+            </Button>
+          </Inline>
+        )}
+      </Inline>
       {children}
-    </h2>
+    </Stack>
   )
 }

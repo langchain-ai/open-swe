@@ -1,6 +1,13 @@
-import { ArrowUpRight, CircleAlert, LoaderCircle, Radar } from "lucide-react"
 import type { ReactNode } from "react"
+
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+
+import { AlertTriangle, ArrowUpRight } from "@/components/glyphs"
 import { cn } from "@/lib/utils"
 import { ApiError } from "@/lib/api"
 import type { IncidentReport, IncidentView, Timestamp } from "./api"
@@ -32,46 +39,34 @@ export function formatTime(value: Timestamp | null) {
   })
 }
 
+const STATUS_TONE: Record<string, "info" | "attention" | "neutral"> = {
+  pending: "info",
+  watching: "info",
+  investigating: "info",
+  needs_attention: "attention",
+  paused: "neutral",
+  completed: "neutral",
+}
+
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-meta font-medium",
-        {
-          "border-info/20 bg-info/5 text-info": [
-            "pending",
-            "watching",
-            "investigating",
-          ].includes(status),
-          "border-attention/20 bg-attention-bg text-attention":
-            status === "needs_attention",
-          "border-line bg-muted text-ink-subtle": [
-            "paused",
-            "completed",
-          ].includes(status),
-        }
-      )}
-    >
-      <span
-        className={cn(
-          "size-1.5 rounded-full bg-current",
-          status === "investigating" && "animate-pulse"
-        )}
-      />
+    <Badge tone={STATUS_TONE[status] ?? "neutral"} dot>
       {humanize(status)}
-    </span>
+    </Badge>
   )
 }
 
 export function LoadingState() {
   return (
-    <div
+    <Inline
       role="status"
-      className="flex items-center justify-center gap-2 py-24 text-body text-ink-subtle"
+      gap="sm"
+      justify="center"
+      className="w-full py-24 text-body text-ink-subtle"
     >
-      <LoaderCircle className="size-4 animate-spin" />
+      <Spinner size="sm" />
       Loading incidents…
-    </div>
+    </Inline>
   )
 }
 
@@ -83,19 +78,17 @@ export function ErrorState({
   retry: () => void
 }) {
   return (
-    <div
-      role="alert"
-      className="rounded-control border border-risk/20 bg-risk-bg p-5"
-    >
-      <div className="flex items-center gap-2 text-body font-medium">
-        <CircleAlert className="size-4 text-risk" />
-        Unable to load Incidents
-      </div>
-      <p className="mt-2 text-body text-ink-subtle">{error.message}</p>
-      <Button variant="outline" size="compact" className="mt-4" onClick={retry}>
-        Try again
-      </Button>
-    </div>
+    <StateNotice
+      tone="RISK"
+      icon={AlertTriangle}
+      title="Incidents could not be loaded"
+      description={error.message}
+      action={
+        <Button variant="outline" size="compact" onClick={retry}>
+          Try again
+        </Button>
+      }
+    />
   )
 }
 
@@ -103,10 +96,12 @@ export function ExternalLink({
   href,
   children,
   className,
+  showIcon = true,
 }: {
   href: string | null | undefined
   children: ReactNode
   className?: string
+  showIcon?: boolean
 }) {
   if (!href || !/^https?:\/\//i.test(href))
     return <span className={className}>{children}</span>
@@ -121,7 +116,7 @@ export function ExternalLink({
       )}
     >
       {children}
-      <ArrowUpRight className="size-3.5 shrink-0" />
+      {showIcon && <Icon icon={ArrowUpRight} size="sm" />}
     </a>
   )
 }
@@ -143,7 +138,8 @@ export function CitedText({
             <ExternalLink
               key={source.id}
               href={source.url}
-              className="mx-0.5 text-meta font-medium text-info [&_svg]:hidden"
+              showIcon={false}
+              className="mx-0.5 text-meta font-medium text-info"
             >
               <span
                 aria-label={`Evidence ${evidenceIndex + 1}: ${source.source}`}
@@ -155,9 +151,9 @@ export function CitedText({
         })}
       </sup>
     ) : part.startsWith("[") && !citationPreview(part) ? (
-      <span key={index} className="text-meta text-ink-subtle">
+      <Box key={index} render={<span />} className="text-meta text-ink-subtle">
         [source unavailable]
-      </span>
+      </Box>
     ) : (
       part
     )
@@ -174,19 +170,6 @@ export function sourceLabel(summary: string, channelName: string) {
 export function slackMessageTime(url: string | null | undefined) {
   const timestamp = url?.match(/\/archives\/[^/]+\/p(\d{10})(\d{6})(?:[?#]|$)/)
   return timestamp ? Number(timestamp[1]) : null
-}
-
-export function IncidentsMark({ className }: { className?: string }) {
-  return (
-    <div
-      className={cn(
-        "flex size-9 items-center justify-center rounded-control border border-info/20 bg-info/5 text-info",
-        className
-      )}
-    >
-      <Radar className="size-5" />
-    </div>
-  )
 }
 
 export function isReadUnavailable(error: Error) {
