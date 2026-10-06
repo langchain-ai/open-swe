@@ -2,7 +2,9 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse
 
+from agent import background_tasks
 from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
@@ -44,7 +46,7 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
     async def read_metadata(thread_id: str) -> dict[str, object]:
         return metadata[thread_id]
 
-    async def update(*, thread_id: str, metadata: dict[str, object]) -> None:
+    async def update(thread_id: str, *, metadata: dict[str, object]) -> None:
         shared_metadata[thread_id].update(metadata)
 
     shared_metadata = metadata
@@ -109,6 +111,42 @@ async def test_worker_refreshes_binding_during_concurrent_host_reconnect(
     assert shared_sandbox["worker"]["sandbox_id"] == "sb-replacement"
     assert worker.id == host.id == "sb-replacement"
     assert worker is not host
+
+
+async def test_worker_reattach_recovers_a_missed_background_completion(
+    shared_sandbox: dict[str, dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared_sandbox["worker"]["running_background_tasks"] = ["cmd-worker"]
+    task: dict[str, object] = {
+        "task_id": "cmd-worker",
+        "owner_thread_id": "worker",
+        "status": "completed",
+        "notification": "pending",
+    }
+
+    async def get(thread_id: str) -> dict[str, object]:
+        return {"metadata": dict(shared_sandbox[thread_id])}
+
+    client = AsyncMock()
+    client.threads.get.side_effect = get
+    client.threads.update.side_effect = lifecycle.client.threads.update
+    backend = MagicMock(id="sb-old")
+    backend.aexecute = AsyncMock(return_value=ExecuteResponse(output="", exit_code=0))
+    dispatch = AsyncMock()
+    monkeypatch.setattr(lifecycle, "create_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
+    monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
+    monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[task]))
+    monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
+
+    await lifecycle.ensure_sandbox_for_thread("worker")
+    await asyncio.gather(*lifecycle._BACKGROUND)
+
+    assert shared_sandbox["worker"]["running_background_tasks"] == []
+    assert task["notification"] == "done"
+    assert [call.args[0] for call in dispatch.await_args_list] == ["worker"]
+    assert "cmd-worker" in dispatch.await_args.args[1]
 
 
 async def test_worker_does_not_replace_a_deleted_host_sandbox(

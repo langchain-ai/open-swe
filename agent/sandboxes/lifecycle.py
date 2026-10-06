@@ -416,7 +416,15 @@ async def _attach_task_worker_sandbox(
             SANDBOX_PROXY_CONFIG_METADATA_KEY: current_host.get(SANDBOX_PROXY_CONFIG_METADATA_KEY),
         },
     )
-    return set_sandbox_backend(thread_id, unwrap_sandbox_backend(backend))
+    from agent.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
+
+    published = set_sandbox_backend(thread_id, unwrap_sandbox_backend(backend))
+    if metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
+        from agent.background_tasks import reconcile_background_tasks
+
+        # Attaching the host only reconciles commands owned by the coordinator.
+        _fire_and_forget(reconcile_background_tasks(thread_id), "background task reconcile")
+    return published
 
 
 async def ensure_sandbox_for_thread(
