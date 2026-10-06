@@ -189,6 +189,7 @@ async def test_merged_card_names_only_actual_approvers(states: dict[str, str] | 
     rendered = str(payload)
     for message in (text, rendered):
         assert "merged" in message
+        assert "by @ada" in message
         if states:
             assert "approved by <@U_grace>, @hopper" in message
         else:
@@ -231,11 +232,14 @@ async def test_approved_card_collapses_without_closing_the_request(
     request.requested_by = None
     with (
         patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)),
-        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
         text, blocks = await _render_standard(request, None, "token")
     assert ("Review request: approved" in text) is collapsed
     assert (len(blocks) == 1) is collapsed
+    assert "<@U_ada>" in str(block_payload(blocks))
+    if collapsed:
+        assert "by <@U_ada>" in text
     assert request.state == "open"
 
 
