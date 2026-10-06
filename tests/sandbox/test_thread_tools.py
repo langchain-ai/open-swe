@@ -152,6 +152,71 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert rule["headers"][0]["value"] == first_token
 
 
+async def test_private_owner_langsmith_token_reaches_only_the_proxy_callback(
+    capability_settings: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.sandboxes import langsmith_auth
+    from agent.sandboxes.providers import langsmith
+
+    metadata: dict[str, object] = {
+        "sandbox_id": "sandbox-a",
+        "visibility": "private",
+        "owner_login": "alice",
+    }
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": metadata})
+    monkeypatch.setattr(tool_access, "get_client", lambda: client)
+    monkeypatch.setattr(langsmith_auth, "get_client", lambda: client)
+    monkeypatch.setattr(langsmith_auth, "langsmith_oauth_configured", lambda: True)
+    monkeypatch.setattr(langsmith_auth, "load_credential", AsyncMock(return_value=object()))
+    access_token = AsyncMock(return_value="alice-langsmith-token")
+    monkeypatch.setattr(langsmith_auth, "langsmith_access_token", access_token)
+    monkeypatch.setenv("LANGSMITH_API_KEY", "test-sandbox-api-key")
+    patch_proxy = AsyncMock()
+    monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
+
+    await langsmith.configure_sandbox_proxy("sandbox-a", "gh-token", thread_id="thread-a")
+    proxy_config = patch_proxy.call_args.args[2]["proxy_config"]
+    assert "alice-langsmith-token" not in str(proxy_config)
+    [callback] = proxy_config["callbacks"]
+    assert callback["match_hosts"] == ["api.smith.langchain.com"]
+    assert (
+        callback["url"] == "https://agent.example.test/dashboard/api/sandbox-langsmith/credentials"
+    )
+    callback_token = callback["request_headers"][0]["value"]
+    tools_rule = next(r for r in proxy_config["rules"] if r["name"] == tool_access.TOOLS_RULE)
+    assert (
+        tools_rule["env_vars"]["LANGSMITH_API_KEY"] == langsmith_auth.LANGSMITH_API_KEY_PLACEHOLDER
+    )
+
+    app = FastAPI()
+    app.include_router(langsmith_auth.router)
+    body = {"host": "api.smith.langchain.com", "port": 443}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://test"
+    ) as http:
+        tools_token = tools_rule["headers"][0]["value"]
+        for token in (tools_token, None):
+            headers = {langsmith_auth.LANGSMITH_CALLBACK_HEADER: token} if token else {}
+            response = await http.post(callback["url"], json=body, headers=headers)
+            assert response.status_code == 401
+        headers = {langsmith_auth.LANGSMITH_CALLBACK_HEADER: callback_token}
+        resolved = await http.post(callback["url"], json=body, headers=headers)
+        assert resolved.json() == {
+            "headers": {"Authorization": "Bearer alice-langsmith-token", "X-Api-Key": ""}
+        }
+        access_token.assert_awaited_once_with("alice")
+        metadata["visibility"] = "public"
+        shared = await http.post(callback["url"], json=body, headers=headers)
+        assert shared.json() == {"headers": {}}
+
+    await langsmith.configure_sandbox_proxy(
+        "sandbox-a", "gh-token", thread_id="thread-a", base_proxy_config=proxy_config
+    )
+    assert patch_proxy.call_args.args[2]["proxy_config"]["callbacks"] == []
+
+
 async def test_restores_idle_context_ignoring_legacy_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

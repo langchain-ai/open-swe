@@ -418,12 +418,40 @@ async def configure_sandbox_proxy(
         for rule in preserved_rules
         if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
     ]
-    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
+    from agent.sandboxes.langsmith_auth import langsmith_callback_url, langsmith_proxy_auth
+
+    langsmith_auth = None
+    if thread_id:
+        try:
+            langsmith_auth = await langsmith_proxy_auth(thread_id, sandbox_name)
+        except Exception:
+            # Optional: a failed lookup must not make the sandbox unreachable.
+            logger.warning(
+                "Skipping LangSmith proxy callback", extra={"thread_id": thread_id}, exc_info=True
+            )
+    tools_rule = (
+        await tool_proxy_rule(
+            thread_id, sandbox_name, extra_env=langsmith_auth.env_vars if langsmith_auth else None
+        )
+        if thread_id
+        else None
+    )
     proxy_config["rules"] = [
         *_github_proxy_rules(github_token),
         *([tools_rule] if tools_rule else []),
         *preserved_rules,
     ]
+    callback_url = langsmith_callback_url()
+    custom_callbacks = proxy_config.get("callbacks")
+    callbacks = [
+        callback
+        for callback in (custom_callbacks if isinstance(custom_callbacks, list) else [])
+        if not isinstance(callback, dict) or callback.get("url") != callback_url
+    ]
+    if langsmith_auth:
+        callbacks.insert(0, langsmith_auth.callback)
+    if callbacks or "callbacks" in proxy_config:
+        proxy_config["callbacks"] = callbacks
     payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:

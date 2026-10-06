@@ -1,6 +1,7 @@
 """Sandbox capabilities for the associated thread's tools."""
 
 import shlex
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode, urlsplit
 
@@ -59,17 +60,21 @@ def tools_endpoint_configured() -> bool:
     return bool(ENV.DASHBOARD_JWT_SECRET.optional() and tools_base_url())
 
 
-async def issue_tool_access(thread_id: str, sandbox_id: str) -> tuple[str, str] | None:
+async def issue_tool_access(
+    thread_id: str, sandbox_id: str, *, audience: str = TOOLS_AUDIENCE
+) -> tuple[str, str] | None:
     secret = ENV.DASHBOARD_JWT_SECRET.optional()
     url = tools_base_url()
     if not secret or not url:
         return None
     access = ToolAccess(thread_id=await sandbox_host_thread_id(thread_id), sandbox_id=sandbox_id)
-    token = jwt.encode({"aud": TOOLS_AUDIENCE, **access.model_dump()}, secret, algorithm="HS256")
+    token = jwt.encode({"aud": audience, **access.model_dump()}, secret, algorithm="HS256")
     return url, token
 
 
-async def authenticate_tool_access(token: str | None) -> ToolAccess:
+async def authenticate_tool_access(
+    token: str | None, *, audience: str = TOOLS_AUDIENCE
+) -> ToolAccess:
     secret = ENV.DASHBOARD_JWT_SECRET.optional()
     if not token or len(token) > 4096 or not secret:
         raise HTTPException(401, "Invalid sandbox capability")
@@ -78,7 +83,7 @@ async def authenticate_tool_access(token: str | None) -> ToolAccess:
             token,
             secret,
             algorithms=["HS256"],
-            audience=TOOLS_AUDIENCE,
+            audience=audience,
             options={"require": ["aud", "thread_id", "sandbox_id"]},
         )
         access = ToolAccess.model_validate(claims)
@@ -95,7 +100,9 @@ async def authenticate_tool_access(token: str | None) -> ToolAccess:
     return access
 
 
-async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] | None:
+async def tool_proxy_rule(
+    thread_id: str, sandbox_id: str, *, extra_env: Mapping[str, str] | None = None
+) -> dict[str, object] | None:
     access = await issue_tool_access(thread_id, sandbox_id)
     if access is None:
         return None
@@ -103,7 +110,7 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
     host = await get_client().threads.get(await sandbox_host_thread_id(thread_id))
     workspace = (host.get("metadata") or {}).get("workspace")
     settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")
-    env_vars = {TOOLS_URL_ENV: url}
+    env_vars = {TOOLS_URL_ENV: url, **(extra_env or {})}
     if settings.sandbox_openai_enabled:
         env_vars.update(
             OPENAI_BASE_URL=url.removesuffix(TOOLS_PATH) + OPENAI_PATH,
