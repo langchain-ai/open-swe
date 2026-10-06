@@ -1,3 +1,6 @@
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
@@ -23,6 +26,44 @@ from agent.slack.blocks import block_payload
 from agent.users import User, UserIdentity
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("decision", [None, "picked", "review"])
+async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -> None:
+    from agent.human_review.people import Outcome, Participant
+    from agent.human_review.standard import _add_reviewer
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    if decision is not None:
+        request.participants.append(
+            HumanReviewParticipant(
+                user_id=User().id, decision="picked" if decision == "picked" else "review"
+            )
+        )
+    lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        async with lock:
+            yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("agent.human_review.standard.refresh_card", AsyncMock()),
+    ):
+        results = await asyncio.gather(
+            *(
+                _add_reviewer(request, Participant(User(), login), picked=True)
+                for login in ("grace", "linus")
+            )
+        )
+    assert len(request.participants) == 1
+    assert sum(not isinstance(result, Outcome) for result in results) == (
+        1 if decision is None else 0
+    )
 
 
 @pytest.mark.parametrize("status", [200, 503])

@@ -443,6 +443,10 @@ async def _add_reviewer(
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
             return Outcome("This review request closed before you signed up.")
+        if picked and (row.reviewers or row.picks):
+            return Outcome(
+                "This pull request already has a reviewer or pending pick. Stop assigning reviewers."
+            )
         existing = row.participant(reviewer.user.id)
         if existing is not None and (picked or existing.decision not in ("picked", "expired")):
             return Outcome(f"@{reviewer.github_login} is already reviewing this.")
