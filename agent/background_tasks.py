@@ -3,12 +3,13 @@
 Two triggers, chosen per launch by the triggering person's
 ``experimental_background_callbacks`` flag: the runner calling back through the
 sandbox tools channel when its command exits, or a per-thread cron polling every
-minute. Either one reconciles every task's state from the sandbox, and claims
+minute. Either one reconciles the owner's tasks from the sandbox, and claims
 keep a completion from being delivered twice.
 """
 
 import logging
 import shlex
+from collections.abc import Mapping
 from typing import Any, Literal, NamedTuple
 
 from langgraph_sdk import get_client
@@ -18,6 +19,7 @@ from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
 from agent.prompts import prompt
 from agent.sandboxes.connect import connect_sandbox
+from agent.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
 from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
 from agent.tools.background_execute import TASK_ROOT, control_script, encoded, execute
@@ -185,13 +187,33 @@ class _Reconciled(NamedTuple):
     result: dict[str, Any]
     backend: Any | None
     tracked: bool
+    owns_legacy_tasks: bool = True
+
+
+def _belongs_to_thread(
+    task: Mapping[str, object], thread_id: str, *, owns_legacy_tasks: bool
+) -> bool:
+    owner = task.get("owner_thread_id")
+    # Commands created before ownership tracking belong to the sandbox's host.
+    return owner == thread_id or (owner is None and owns_legacy_tasks)
 
 
 async def reconcile_background_tasks(thread_id: str) -> dict[str, Any]:
     return (await _reconcile(thread_id)).result
 
 
-async def _reconcile(thread_id: str) -> _Reconciled:
+async def reconcile_background_task_callback(task_id: str, access: ToolAccess) -> dict[str, object]:
+    backend = await connect_sandbox(access.sandbox_id, thread_id=access.thread_id)
+    for task in await _list_tasks(backend):
+        if task.get("task_id") == task_id:
+            owner = task.get("owner_thread_id", access.thread_id)
+            if not isinstance(owner, str) or not owner:
+                raise PermissionError("Background task has invalid ownership")
+            return (await _reconcile(owner, access=access)).result
+    raise LookupError("No such background task")
+
+
+async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Reconciled:
     client = _client()
     try:
         thread = await client.threads.get(thread_id)
@@ -200,6 +222,15 @@ async def _reconcile(thread_id: str) -> _Reconciled:
         return _Reconciled({"status": "missing_thread"}, None, tracked=True)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    owns_legacy_tasks = not metadata.get(SANDBOX_HOST_THREAD_KEY)
+    if access is not None and (
+        metadata.get("sandbox_id") != access.sandbox_id
+        or (
+            thread_id != access.thread_id
+            and metadata.get(SANDBOX_HOST_THREAD_KEY) != access.thread_id
+        )
+    ):
+        raise PermissionError("Background task owner does not belong to this sandbox")
     tracked = metadata.get(RUNNING_BACKGROUND_TASKS_KEY)
     tracked_ids = (
         [task_id for task_id in tracked if isinstance(task_id, str)]
@@ -213,7 +244,11 @@ async def _reconcile(thread_id: str) -> _Reconciled:
         await sync_slack_background_status(client, thread_id, metadata=metadata)
         return _Reconciled({"status": "missing_sandbox"}, None, tracked=True)
     backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
-    tasks = await _list_tasks(backend)
+    tasks = [
+        task
+        for task in await _list_tasks(backend)
+        if _belongs_to_thread(task, thread_id, owns_legacy_tasks=owns_legacy_tasks)
+    ]
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
     running_ids = [task_id for task in running if isinstance((task_id := task.get("task_id")), str)]
@@ -285,7 +320,7 @@ async def _reconcile(thread_id: str) -> _Reconciled:
         "delivered": delivered,
         "pending": pending,
     }
-    return _Reconciled(result, backend, tracked_successfully)
+    return _Reconciled(result, backend, tracked_successfully, owns_legacy_tasks)
 
 
 HeartbeatOutcome = Literal["running", "finished", "unknown"]
@@ -320,6 +355,9 @@ async def monitor_background_tasks(thread_id: str) -> dict[str, Any]:
                         task.get("status") in TERMINAL_STATES and task.get("notification") != "done"
                     )
                     for task in fresh
+                    if _belongs_to_thread(
+                        task, thread_id, owns_legacy_tasks=reconciled.owns_legacy_tasks
+                    )
                 ):
                     await _delete_crons(thread_id)
             finally:

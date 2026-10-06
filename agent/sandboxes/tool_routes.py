@@ -75,9 +75,14 @@ TaskId = Annotated[str, Path(pattern=r"^[A-Za-z0-9-]{1,128}$")]
 
 @router.post("/background-tasks/{task_id}/complete", status_code=204)
 async def background_task_complete(task_id: TaskId, access: Access) -> None:
-    from agent.background_tasks import reconcile_background_tasks
+    from agent.background_tasks import reconcile_background_task_callback
 
-    result = await reconcile_background_tasks(access.thread_id)
+    try:
+        result = await reconcile_background_task_callback(task_id, access)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
     if result.get("pending"):
         # The runner retries on 5xx, which is what redelivers a failed dispatch.
         raise HTTPException(503, "Background task completion is not delivered yet")
