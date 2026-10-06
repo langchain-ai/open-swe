@@ -276,6 +276,55 @@ describe("AutomationEditor", () => {
     ])
   })
 
+  it("preserves and edits a workflow conclusion filter", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Nightly",
+          prompt: "Investigate failures",
+          schedule: null,
+          triggers: [
+            {
+              id: "trigger_1",
+              kind: "github",
+              repo: "acme/oss",
+              events: ["workflow_run.completed", "issues.opened"],
+              conclusion: "failure",
+            },
+          ],
+          scope: "workspace",
+          workspace: "default",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />
+    )
+    const filter = screen.getByLabelText(/Workflow conclusion/)
+    expect((filter as HTMLSelectElement).value).toBe("failure")
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([
+      {
+        kind: "github",
+        repo: "acme/oss",
+        events: ["workflow_run.completed", "issues.opened"],
+        conclusion: "failure",
+      },
+    ])
+    fireEvent.change(filter, { target: { value: "" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(mocks.updateMutate.mock.calls[1]?.[0].body.triggers).toEqual([
+      {
+        kind: "github",
+        repo: "acme/oss",
+        events: ["workflow_run.completed", "issues.opened"],
+      },
+    ])
+  })
+
   it("saves a Linear trigger with its team and filters", () => {
     signInAsAdmin()
     render(<AutomationEditor mode="create" template={TEMPLATE} />)

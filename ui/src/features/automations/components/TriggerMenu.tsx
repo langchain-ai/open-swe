@@ -102,7 +102,9 @@ export function TriggerMenu({
                 onClick={() => choose(onGitHub)}
                 className={ITEM}
               >
-                <span className="flex-1">Issue and pull request events</span>
+                <span className="flex-1">
+                  Issue, pull request and workflow events
+                </span>
                 <CaretRightIcon className="size-3.5 opacity-50" />
               </button>
             </>

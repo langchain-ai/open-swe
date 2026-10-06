@@ -546,6 +546,70 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
     assert "Merged: yes" in merge_prompt
 
 
+async def test_workflow_completion_filters_conclusion_and_deduplicates(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    on_failure = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Investigate nightly failures",
+            triggers=[
+                GitHubTrigger(
+                    repo="langchain-ai/open-swe",
+                    events=["workflow_run.completed", "issues.opened"],
+                    conclusion="failure",
+                )
+            ],
+        ),
+    )
+    on_any = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Summarize workflow",
+            triggers=[
+                GitHubTrigger(repo="langchain-ai/open-swe", events=["workflow_run.completed"])
+            ],
+        ),
+    )
+    payload = {
+        "action": "completed",
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe", "private": True},
+        "workflow_run": {
+            "name": "Nightly",
+            "conclusion": "success",
+            "id": 42,
+            "html_url": "https://github.com/langchain-ai/open-swe/actions/runs/42",
+            "head_branch": "main",
+            "head_sha": "abc",
+            "run_attempt": 2,
+        },
+    }
+    assert [
+        r["schedule_id"]
+        for r in await schedules.launch_github_automations("workflow_run", payload, "success")
+    ] == [on_any["id"]]
+    payload["workflow_run"]["conclusion"] = "failure"
+    assert {
+        r["schedule_id"]
+        for r in await schedules.launch_github_automations("workflow_run", payload, "failure")
+    } == {on_failure["id"], on_any["id"]}
+    assert await schedules.launch_github_automations("workflow_run", payload, "failure") == []
+    payload["action"] = "in_progress"
+    assert await schedules.launch_github_automations("workflow_run", payload, "pending") == []
+    assert [
+        r["schedule_id"]
+        for r in await schedules.launch_github_automations(
+            "issues", {"action": "opened", "repository": payload["repository"]}, "issue"
+        )
+    ] == [on_failure["id"]]
+    run_prompt = fake_client.runs.created[1]["input"]["messages"][-1]["content"]
+    assert "Conclusion: failure" in run_prompt
+    assert "https://github.com/langchain-ai/open-swe/actions/runs/42" in run_prompt
+    assert "Branch: main  SHA: abc" in run_prompt
+
+
 async def test_launch_github_issue_automations_isolates_claim_failures(
     fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

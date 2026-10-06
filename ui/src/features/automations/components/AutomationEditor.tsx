@@ -15,6 +15,7 @@ import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
   GitHubTriggerEvent,
+  WorkflowConclusion,
   LinearTriggerEvent,
   SlackTriggerEvent,
   SlackTriggerSenders,
@@ -66,6 +67,17 @@ function eventItems<E extends string>(
 const GITHUB_EVENT_ITEMS = eventItems<GitHubTriggerEvent>(
   AUTOMATION_EVENT_PROVIDERS.github.events
 )
+const WORKFLOW_CONCLUSIONS: Array<WorkflowConclusion> = [
+  "failure",
+  "success",
+  "cancelled",
+  "timed_out",
+  "action_required",
+  "neutral",
+  "skipped",
+  "stale",
+  "startup_failure",
+]
 const SLACK_EVENT_ITEMS = eventItems<SlackTriggerEvent>(
   AUTOMATION_EVENT_PROVIDERS.slack.events
 )
@@ -478,6 +490,33 @@ export function AutomationEditor({
                     onToggle={(event) => toggleEvent(draft.key, event)}
                     disabled={!canManage}
                   />
+                  {draft.events.includes("workflow_run.completed") && (
+                    <label className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
+                      Workflow conclusion
+                      <select
+                        value={draft.conclusion ?? ""}
+                        onChange={(event) =>
+                          set({
+                            conclusion:
+                              WORKFLOW_CONCLUSIONS.find(
+                                (value) => value === event.target.value
+                              ) ?? null,
+                          })
+                        }
+                        disabled={!canManage}
+                        className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+                      >
+                        <option value="">Any conclusion</option>
+                        {WORKFLOW_CONCLUSIONS.map((value) => (
+                          <option key={value} value={value}>
+                            {value.replaceAll("_", " ")}
+                          </option>
+                        ))}
+                      </select>
+                      Only workflow completions are filtered; issue and PR
+                      events are unaffected.
+                    </label>
+                  )}
                   {hint(
                     draft.events.includes("pull_request.closed")
                       ? "PR closed also fires when a pull request is merged."
