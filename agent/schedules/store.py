@@ -727,14 +727,13 @@ async def update_agent_schedule(
             use_workspace_credentials=use_workspace_credentials,
         )
 
-    await _refuse_public_events_for_admin(
-        triggers,
-        admin_thread=(
-            body.admin_thread
-            if body.admin_thread is not None
-            else existing.get("admin_thread") is True
-        ),
-    )
+    was_admin = existing.get("admin_thread") is True
+    admin_thread = body.admin_thread if body.admin_thread is not None else was_admin
+    # Only an edit that could newly put admin runs on a repository's events is
+    # checked; pausing or renaming must keep working if GitHub can't be read,
+    # and launches skip repositories that went public since.
+    if triggers is not current_triggers or (admin_thread and not was_admin):
+        await _refuse_public_events_for_admin(triggers, admin_thread=admin_thread)
 
     enabled = bool(columns.get("enabled", existing.get("enabled")))
     rebuild_triggers = triggers is not current_triggers or enabled != bool(existing.get("enabled"))

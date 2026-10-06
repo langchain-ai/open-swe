@@ -682,7 +682,14 @@ async def test_admin_automations_refuse_events_from_public_repositories(
             "issue": {"number": 1},
         }
 
-    # The repository went public after the automation was saved.
+    # The repository went public after the automation was saved: launches skip
+    # it, and it can still be paused without GitHub saying it's private.
+    visibility["langchain-ai/private"] = False
+    paused = await schedules.update_agent_schedule(
+        created["id"], "alice", ScheduleUpdateBody(enabled=False)
+    )
+    assert paused["enabled"] is False
+    await schedules.update_agent_schedule(created["id"], "alice", ScheduleUpdateBody(enabled=True))
     assert await schedules.launch_github_automations("issues", opened(private=False), "d-1") == []
     started = await schedules.launch_github_automations("issues", opened(private=True), "d-2")
     assert [result["schedule_id"] for result in started] == [created["id"]]
