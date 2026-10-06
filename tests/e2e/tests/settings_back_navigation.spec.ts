@@ -46,6 +46,7 @@ test("task coordination opt-in persists and can be disabled", async ({
     default_agent_reasoning_effort: string;
   };
   const update = {
+    ...profile,
     default_model: profile.default_model ?? options.default_agent_model,
     reasoning_effort:
       profile.reasoning_effort ?? options.default_agent_reasoning_effort,

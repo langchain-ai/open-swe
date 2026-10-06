@@ -113,7 +113,9 @@ async def test_task_tools_require_the_thread_owners_opt_in(saved_thread_scope, e
 
 
 @pytest.mark.parametrize("role", ["coordinator", "worker"])
-async def test_existing_task_keeps_controls_after_opt_out(saved_thread_scope, role):
+async def test_existing_task_keeps_controls_after_opt_out(
+    saved_thread_scope, role: Literal["coordinator", "worker"]
+):
     from agent.tasks.store import CoordinatedTask, TaskContext, TaskMembership
     from agent.users import User, UserPreferences
 
