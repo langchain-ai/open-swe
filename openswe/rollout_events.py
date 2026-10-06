@@ -8,9 +8,10 @@ import hashlib
 import json
 import logging
 import re
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import JsonValue
 
 from openswe.config import ENV
 from openswe.database import configured
@@ -142,7 +143,10 @@ async def rollout_webhook(request: Request) -> RolloutAccepted:
     if parsed is None:
         raise HTTPException(status_code=400, detail="Invalid rollout event")
     target, commits = parsed
-    stored_payload = {"target": target, "commits": commits}
+    stored_payload: dict[str, JsonValue] = {
+        "target": target,
+        "commits": cast(list[JsonValue], commits),
+    }
     stored = await EventLog.record(
         request,
         _stored_body(target, commits),
