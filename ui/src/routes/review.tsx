@@ -1,13 +1,25 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
-import { CaretRightIcon } from "@phosphor-icons/react"
 import { useMemo } from "react"
-import { IoLogoGithub } from "react-icons/io5"
-import { SettingsPage, SettingsSection } from "@/components/AppShell"
+
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { IconWell } from "@langchain/gtm-platform-design-system/ui/icon-well"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+
+import { SettingsPage } from "@/components/AppShell"
+import { AlertTriangle, ChevronRight, GitHub } from "@/components/glyphs"
 import { api } from "@/lib/api"
-import { useRepos } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
+import { useRepos } from "@/lib/profile"
 
 export const Route = createFileRoute("/review")({
   component: ReviewPage,
@@ -53,54 +65,90 @@ function RepositoriesSection() {
   }, [repos.data?.repositories])
 
   const loading = repos.isLoading || autoReview.isLoading
+  const failed = !loading && grouped.length === 0 && repos.isError
 
   return (
-    <SettingsSection
+    <PageSection
       title="Repositories"
       description="All installed repositories support on-demand reviews. Click into an installation to configure automatic reviews."
+      contained
     >
-      <div className="divide-y divide-line">
-        {loading && (
-          <div className="p-4">
-            <Skeleton className="h-16 w-full" />
-          </div>
-        )}
-        {!loading && grouped.length === 0 && (
-          <p className="px-4 py-3 text-meta text-ink-subtle">
-            No GitHub App installations found. Install the Open SWE GitHub App
-            on an account or org to manage repos here.
-          </p>
-        )}
-        {grouped.map(([owner, list]) => {
-          const autoReviewCount = list.filter((r) =>
-            autoReviewSet.has(r.full_name)
-          ).length
-          return (
-            <Link
-              key={owner}
-              to="/review/repositories/$owner"
-              params={{ owner }}
-              className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/40"
-            >
-              <div className="flex items-center gap-3">
-                <IoLogoGithub className="size-5 shrink-0 text-ink-subtle" />
-                <div className="flex flex-col gap-0.5">
-                  <div className="flex items-center gap-2 text-label">
-                    <span className="font-medium text-ink">{owner}</span>
-                  </div>
-                  <span className="text-meta text-ink-subtle">GitHub</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-meta text-ink-subtle">
-                <span>
-                  {autoReviewCount}/{list.length} Run Automatically
-                </span>
-                <CaretRightIcon className="size-3.5" />
-              </div>
-            </Link>
-          )
-        })}
-      </div>
-    </SettingsSection>
+      {loading ? (
+        <Stack className="divide-y divide-line">
+          {[0, 1, 2].map((index) => (
+            <Inline key={index} gap="md" className="h-row-convo px-4">
+              <Skeleton className="size-6 rounded-badge" />
+              <Skeleton className="h-3 w-40" />
+              <Skeleton className="ml-auto h-3 w-28" />
+            </Inline>
+          ))}
+        </Stack>
+      ) : failed ? (
+        <Box padding="md">
+          <StateNotice
+            tone="RISK"
+            icon={AlertTriangle}
+            title="Could not load your installations"
+            description="Nothing changed on your repositories. Try loading them again."
+            action={
+              <Button
+                size="compact"
+                variant="outline"
+                onClick={() => void repos.refetch()}
+              >
+                Try again
+              </Button>
+            }
+          />
+        </Box>
+      ) : grouped.length === 0 ? (
+        <EmptyState
+          icon={GitHub}
+          title="No GitHub App installations found"
+          description="Install the Open SWE GitHub App on an account or org to manage repos here."
+        />
+      ) : (
+        <Stack render={<ul />} className="divide-y divide-line">
+          {grouped.map(([owner, list]) => {
+            const autoReviewCount = list.filter((r) =>
+              autoReviewSet.has(r.full_name)
+            ).length
+            return (
+              <li key={owner}>
+                <Inline
+                  render={
+                    <Link to="/review/repositories/$owner" params={{ owner }} />
+                  }
+                  gap="md"
+                  justify="between"
+                  className="h-row-convo px-4 hover:bg-hover"
+                >
+                  <Inline gap="md" className="min-w-0">
+                    <IconWell>
+                      <Icon icon={GitHub} size="sm" />
+                    </IconWell>
+                    <Stack gap="none" className="min-w-0">
+                      <span className="truncate text-label font-medium text-ink">
+                        {owner}
+                      </span>
+                      <span className="text-meta text-ink-subtle">GitHub</span>
+                    </Stack>
+                  </Inline>
+                  <Inline
+                    gap="sm"
+                    className="shrink-0 text-meta text-ink-subtle"
+                  >
+                    <span className="tabular-nums">
+                      {autoReviewCount}/{list.length} Run Automatically
+                    </span>
+                    <Icon icon={ChevronRight} size="sm" />
+                  </Inline>
+                </Inline>
+              </li>
+            )
+          })}
+        </Stack>
+      )}
+    </PageSection>
   )
 }

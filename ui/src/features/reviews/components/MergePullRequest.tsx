@@ -1,6 +1,19 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
+import { Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+
+import { ChevronDown, GitMerge } from "@/components/glyphs"
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 import { actionLabel, githubActions } from "../lib/githubActions"
@@ -10,12 +23,10 @@ import {
   readPreferredMergeMethod,
   writePreferredMergeMethod,
 } from "../lib/mergeMethod"
-import { control } from "../lib/styles"
+import { pullRequestKey } from "../lib/status"
 import { usePullRequestAction } from "../lib/usePullRequestAction"
-import { PullRequestActionButton } from "./PullRequestActionButton"
 
-function asMergeMethod(value: string): MergeMethod | "" | null {
-  if (value === "") return ""
+function asMergeMethod(value: unknown): MergeMethod | null {
   return mergeMethods.find((method) => method === value) ?? null
 }
 
@@ -62,30 +73,56 @@ export function MergePullRequest({
     },
   })
   return (
-    <PullRequestActionButton
-      label={actionLabel(githubActions.merge.labels, merge)}
-      disabled={!method || !pr.headSha || merge.isPending || merge.isSuccess}
-      onClick={() => merge.mutate()}
-    >
-      <select
-        className={control}
-        aria-label={`Merge method for PR #${pr.number}`}
-        value={method}
-        disabled={allowed.isPending || merge.isPending}
-        onChange={(event) => {
-          const chosen = asMergeMethod(event.target.value)
-          if (chosen !== null) setChoice(chosen)
+    <Inline gap="sm" wrap>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<Button size="compact" variant="outline" />}
+          aria-label={`Merge method for PR #${pr.number}`}
+          disabled={allowed.isPending || merge.isPending}
+        >
+          {method ? mergeMethodLabels[method] : "Merge method"}
+          <Icon icon={ChevronDown} size="sm" className="text-ink-subtle" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuRadioGroup
+            value={method}
+            onValueChange={(value: unknown) => {
+              const chosen = asMergeMethod(value)
+              if (chosen !== null) setChoice(chosen)
+            }}
+          >
+            {options.map((option) => (
+              <DropdownMenuRadioItem key={option} value={option} closeOnClick>
+                {mergeMethodLabels[option]}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* A merge cannot be taken back, so the button opens the decision; once
+          confirmed it still runs in the background like every other action. */}
+      <ConfirmableAction
+        tone="PRIMARY"
+        confirmIcon={GitMerge}
+        title={`Merge ${pullRequestKey(pr)}?`}
+        description={`GitHub merges it into the base branch${method ? ` as a ${mergeMethodLabels[method].toLowerCase()}` : ""}. A merge cannot be undone from here.`}
+        confirmLabel="Merge pull request"
+        onConfirm={async () => {
+          merge.mutate()
         }}
-      >
-        <option value="" disabled>
-          Merge method
-        </option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {mergeMethodLabels[option]}
-          </option>
-        ))}
-      </select>
-    </PullRequestActionButton>
+        trigger={
+          <Button
+            size="compact"
+            variant="outline"
+            disabled={
+              !method || !pr.headSha || merge.isPending || merge.isSuccess
+            }
+            aria-live="polite"
+          >
+            {actionLabel(githubActions.merge.labels, merge)}
+          </Button>
+        }
+      />
+    </Inline>
   )
 }

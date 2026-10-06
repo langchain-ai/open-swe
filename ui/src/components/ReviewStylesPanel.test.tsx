@@ -76,7 +76,7 @@ afterEach(() => {
 })
 
 const repoChip = (repo: string) =>
-  screen.queryByRole("button", { name: new RegExp(`^${repo}`) })
+  screen.queryByRole("option", { name: new RegExp(`^${repo}`) })
 
 const chipStatus = (repo: string) =>
   repoChip(repo)?.textContent?.slice(repo.length)
@@ -88,7 +88,7 @@ async function renderAndSelect(repo: string) {
     </QueryClientProvider>
   )
   fireEvent.click(
-    await screen.findByRole("button", { name: new RegExp(`^${repo}`) })
+    await screen.findByRole("option", { name: new RegExp(`^${repo}`) })
   )
   await screen.findByDisplayValue(`${repo} prompt`)
 }
@@ -141,12 +141,14 @@ it("caches an analysis under the repo it started for after the selection moves",
 })
 
 it("removes a repo from the list immediately and restores it when deletion fails", async () => {
-  vi.spyOn(window, "confirm").mockReturnValue(true)
   const request = deferred<void>()
   vi.spyOn(api, "deleteReviewStyle").mockReturnValue(request.promise)
   await renderAndSelect("acme/api")
 
   fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Remove repository" })
+  )
   await waitFor(() => expect(repoChip("acme/api")).toBeNull())
 
   const failure = new Error("cannot delete")

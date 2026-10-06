@@ -1,9 +1,8 @@
-import { cn } from "@/lib/utils"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
 
 export function HumanInputText({ summary }: { summary: string }) {
-  return (
-    <p className="text-body whitespace-pre-wrap text-ink">{summary}</p>
-  )
+  return <p className="text-body whitespace-pre-wrap text-ink">{summary}</p>
 }
 
 /**
@@ -19,14 +18,10 @@ export function HumanInputCard({
 }) {
   if (!summary) return null
   return (
-    <section
-      aria-label="Human input"
-      className={cn("rounded-compact border border-line bg-panel p-4", className)}
-    >
-      <h3 className="mb-2.5 text-label font-medium text-ink">
-        Human input
-      </h3>
-      <HumanInputText summary={summary} />
-    </section>
+    <Box className={className}>
+      <PageSection title="Human input" contained inset="padded">
+        <HumanInputText summary={summary} />
+      </PageSection>
+    </Box>
   )
 }

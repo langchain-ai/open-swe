@@ -1,7 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ChatCircleIcon, MagnifyingGlassIcon } from "@phosphor-icons/react"
 
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/gtm-platform-design-system/ui/popover"
+import {
+  SCROLL_HOST_CLASS,
+  ScrollAreaBody,
+} from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+
+import { AlertTriangle, MessageSquare, Search } from "@/components/glyphs"
 import type { PrReviewComment } from "@/lib/api"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -27,7 +49,6 @@ export function ReviewCommentsMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
-  const wrapperRef = useRef<HTMLDivElement | null>(null)
 
   const comments = useQuery({
     queryKey: ["reviewComments", owner, repo, number],
@@ -48,98 +69,90 @@ export function ReviewCommentsMenu({
     )
   }, [otherComments, query])
 
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: PointerEvent) => {
-      if (
-        event.target instanceof Node &&
-        !wrapperRef.current?.contains(event.target)
-      ) {
-        setOpen(false)
-      }
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    window.addEventListener("pointerdown", onPointerDown)
-    window.addEventListener("keydown", onKeyDown)
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown)
-      window.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open])
-
   const count = otherComments.length
 
   return (
-    <div ref={wrapperRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={<Button size="compact" variant="outline" />}
         aria-label="PR comments"
-        aria-expanded={open}
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-badge border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink",
-          open && "text-ink"
-        )}
       >
-        <ChatCircleIcon className="size-3.5" />
-        <span>Comments</span>
+        <Icon icon={MessageSquare} size="sm" className="text-ink-subtle" />
+        Comments
         {count > 0 && (
-          <span className="rounded-tick bg-muted px-1 text-meta font-medium text-ink">
+          <Badge tier="chip" className="text-ink">
             {count}
-          </span>
+          </Badge>
         )}
-      </button>
-      {open && (
-        <div className="absolute top-full right-0 z-50 mt-1 w-96 overflow-hidden rounded-badge border border-line bg-panel text-ink shadow-popup">
-          <div className="flex items-center gap-1.5 border-b border-line px-2 py-1.5">
-            <MagnifyingGlassIcon className="size-3.5 shrink-0 text-ink-subtle" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search comments"
-              className="w-full bg-transparent text-meta outline-none placeholder:text-ink-subtle"
-            />
-          </div>
-          <div className="max-h-96 overflow-y-auto">
-            {comments.isLoading ? (
-              <p className="px-3 py-4 text-center text-meta text-ink-subtle">
-                Loading…
-              </p>
-            ) : comments.isError ? (
-              <p className="px-3 py-4 text-center text-label text-risk">
-                Failed to load comments
-              </p>
-            ) : filtered.length === 0 ? (
-              <p className="px-3 py-4 text-center text-meta text-ink-subtle">
-                {otherComments.length === 0
-                  ? "No comments yet"
-                  : "No matching comments"}
-              </p>
-            ) : (
-              <ul className="divide-y divide-line">
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        inset="flush"
+        aria-label="PR comments"
+        className="w-96 max-w-(--available-width)"
+      >
+        <Box padding="sm" className="border-b border-line">
+          <SearchInput
+            label="Search comments"
+            placeholder="Search comments"
+            value={query}
+            onValueChange={setQuery}
+            autoFocus
+          />
+        </Box>
+        {comments.isLoading ? (
+          <Stack gap="sm" padding="md">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </Stack>
+        ) : comments.isError ? (
+          <Inline
+            role="alert"
+            gap="sm"
+            justify="center"
+            padding="lg"
+            className="text-label text-risk"
+          >
+            <Icon icon={AlertTriangle} size="sm" />
+            Failed to load comments
+          </Inline>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={otherComments.length === 0 ? MessageSquare : Search}
+            title={
+              otherComments.length === 0
+                ? "No comments yet"
+                : "No matching comments"
+            }
+          />
+        ) : (
+          <Box className={cn(SCROLL_HOST_CLASS, "max-h-96")}>
+            <ScrollAreaBody overflow="vertical">
+              <Stack render={<ul />} className="divide-y divide-line">
                 {filtered.map((comment) => (
                   <li key={comment.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelect(comment)
-                        setOpen(false)
-                      }}
-                      className="flex w-full gap-2 px-3 py-2 text-left hover:bg-muted/50"
-                    >
-                      {comment.author_avatar_url ? (
-                        <img
-                          src={comment.author_avatar_url}
-                          alt=""
-                          className="mt-0.5 size-4 shrink-0 rounded-full"
+                    <Inline
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelect(comment)
+                            setOpen(false)
+                          }}
                         />
-                      ) : (
-                        <span className="mt-0.5 size-4 shrink-0 rounded-full bg-muted" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 text-meta">
+                      }
+                      gap="sm"
+                      align="start"
+                      className="w-full px-3 py-2 text-left hover:bg-hover"
+                    >
+                      <Avatar
+                        name={comment.author}
+                        src={comment.author_avatar_url ?? undefined}
+                        size="chat"
+                        className="mt-0.5"
+                      />
+                      <Stack gap="xs" className="min-w-0 flex-1">
+                        <Inline gap="sm" className="min-w-0 text-meta">
                           <span className="font-medium text-ink">
                             {comment.author}
                           </span>
@@ -149,19 +162,19 @@ export function ReviewCommentsMenu({
                               {comment.line !== null ? `:${comment.line}` : ""}
                             </span>
                           )}
-                        </div>
-                        <p className="mt-0.5 line-clamp-2 text-meta text-ink-subtle">
+                        </Inline>
+                        <p className="line-clamp-2 text-meta text-ink-subtle">
                           {comment.body}
                         </p>
-                      </div>
-                    </button>
+                      </Stack>
+                    </Inline>
                   </li>
                 ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+              </Stack>
+            </ScrollAreaBody>
+          </Box>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }

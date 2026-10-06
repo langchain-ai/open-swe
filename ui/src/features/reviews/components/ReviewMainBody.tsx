@@ -16,36 +16,7 @@ import {
   useRef,
   useState,
 } from "react"
-import {
-  ArrowClockwiseIcon,
-  ArrowSquareOutIcon,
-  BugBeetleIcon,
-  CaretDownIcon,
-  ChatCircleIcon,
-  CheckCircleIcon,
-  CheckIcon,
-  CircleIcon,
-  CircleNotchIcon,
-  CodeIcon,
-  CopyIcon,
-  FlagIcon,
-  InfoIcon,
-  LinkIcon,
-  ListBulletsIcon,
-  ListChecksIcon,
-  ListNumbersIcon,
-  PencilSimpleIcon,
-  QuotesIcon,
-  RowsIcon,
-  SquareSplitHorizontalIcon,
-  TextBIcon,
-  TextHIcon,
-  TextItalicIcon,
-  XCircleIcon,
-  XIcon,
-} from "@phosphor-icons/react"
 import { Link } from "@tanstack/react-router"
-import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 import {
   FileDiff,
@@ -54,7 +25,6 @@ import {
   WorkerPoolContextProvider,
   useVirtualizer,
 } from "@pierre/diffs/react"
-import type { Icon } from "@phosphor-icons/react"
 import type {
   FileDiff as CoreFileDiff,
   DiffLineAnnotation,
@@ -123,10 +93,70 @@ import {
   useDiffOptions,
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Sheet, SheetContent } from "@langchain/gtm-platform-design-system/ui/sheet"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { ReviewBand } from "@langchain/gtm-platform-design-system/patterns/review-band"
+import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { IconWell } from "@langchain/gtm-platform-design-system/ui/icon-well"
+import {
+  Sheet,
+  SheetContent,
+} from "@langchain/gtm-platform-design-system/ui/sheet"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Shortcut } from "@langchain/gtm-platform-design-system/ui/shortcut"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@langchain/gtm-platform-design-system/ui/toggle-group"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@langchain/gtm-platform-design-system/ui/tooltip"
+import {
+  AlertTriangle,
+  Bold,
+  Bug,
+  Check,
+  CheckCircle,
+  ChevronDown,
+  Circle,
+  Code,
+  Copy,
+  ExternalLink,
+  FileText,
+  Flag,
+  GitHub,
+  Heading,
+  Info,
+  Italic,
+  Link as LinkGlyph,
+  List,
+  ListChecks,
+  ListOrdered,
+  MessageSquare,
+  Pencil,
+  Quote,
+  RefreshCw,
+  Rows,
+  Columns,
+  X,
+  XCircle,
+  type Glyph,
+} from "@/components/glyphs"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
@@ -372,16 +402,16 @@ function sumStats(files: Array<ResolvedGroupFile>) {
 }
 
 const GROUP_STYLES = {
-  bug: { label: "Bug", className: "text-risk", Icon: BugBeetleIcon },
+  bug: { label: "Bug", className: "text-risk", glyph: Bug },
   investigate: {
     label: "Investigate",
     className: "text-attention",
-    Icon: FlagIcon,
+    glyph: Flag,
   },
   informational: {
     label: "Informational",
     className: "text-ink-subtle",
-    Icon: InfoIcon,
+    glyph: Info,
   },
 } as const
 
@@ -1361,22 +1391,24 @@ function ReviewBodyInner({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="relative flex min-h-0 min-w-0 flex-1">
           {!embedded && (
-            <div className="hidden w-72 shrink-0 flex-col border-r border-line bg-sidebar lg:flex">
+            <Stack
+              bg="sidebar"
+              className="hidden w-72 shrink-0 border-r border-line lg:flex"
+            >
               <ReviewSidebarPanel data={sidebarData} />
-            </div>
+            </Stack>
           )}
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {embedded && (
-              <div className="flex h-9 shrink-0 items-center justify-end border-b border-line px-3">
-                <button
-                  type="button"
-                  onClick={onExpand}
-                  className="inline-flex items-center gap-1.5 rounded-badge border border-line px-2 py-1 text-meta text-ink-subtle transition-colors hover:text-ink"
-                >
-                  <ArrowSquareOutIcon className="size-3" />
+              <Inline
+                justify="end"
+                className="h-row-data shrink-0 border-b border-line px-3"
+              >
+                <Button size="compact" variant="outline" onClick={onExpand}>
+                  <Icon icon={ExternalLink} size="sm" />
                   Open full review
-                </button>
-              </div>
+                </Button>
+              </Inline>
             )}
             <WorkerPoolContextProvider
               poolOptions={DIFF_WORKER_POOL_OPTIONS}
@@ -1407,16 +1439,17 @@ function ReviewBodyInner({
                     additions: detail.pr.additions,
                     deletions: detail.pr.deletions,
                   }}
-                />
-                {!embedded &&
-                  (detail.pr.state === "open" ||
-                    detail.pr.state === "draft") && (
-                    <ReviewPageActions
-                      owner={detail.owner}
-                      repo={detail.repo}
-                      number={detail.number}
-                    />
-                  )}
+                >
+                  {!embedded &&
+                    (detail.pr.state === "open" ||
+                      detail.pr.state === "draft") && (
+                      <ReviewPageActions
+                        owner={detail.owner}
+                        repo={detail.repo}
+                        number={detail.number}
+                      />
+                    )}
+                </PrHeader>
                 {!detail.walkthrough && detail.pr.changed_files > 0 && (
                   <WalkthroughCallout detail={detail} />
                 )}
@@ -1429,11 +1462,12 @@ function ReviewBodyInner({
                     headSha={detail.pr.head_sha}
                   />
                 )}
-                <div
-                  className={cn(
-                    "mt-4 rounded-compact border border-line p-4",
-                    embedded ? "bg-panel" : "bg-panel"
-                  )}
+                <Box
+                  bg="panel"
+                  border="line"
+                  radius="panel"
+                  padding="lg"
+                  className="mt-4"
                 >
                   {detail.pr.body ? (
                     <Markdown
@@ -1445,7 +1479,7 @@ function ReviewBodyInner({
                       This PR has no description.
                     </p>
                   )}
-                </div>
+                </Box>
                 <HumanInputCard
                   summary={detail.walkthrough?.human_input ?? ""}
                   className="mt-4"
@@ -1460,9 +1494,14 @@ function ReviewBodyInner({
                 )}
 
                 <div className="mt-6">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <h2 className="text-body font-medium">Changes</h2>
-                    <div className="flex items-center gap-3">
+                  <Inline gap="md" justify="between" className="mb-3">
+                    <Box
+                      render={<h2 />}
+                      className="text-title font-medium text-ink"
+                    >
+                      Changes
+                    </Box>
+                    <Inline gap="md">
                       {detail.walkthrough && (
                         <ScoutThreadLink
                           threadId={detail.walkthrough_scout_thread_id}
@@ -1476,16 +1515,16 @@ function ReviewBodyInner({
                         </span>
                       )}
                       {diffFiles && diffFiles.length > 0 && (
-                        <div className="flex items-center gap-1">
-                          <DiffWrapToggle className="size-5" />
+                        <Inline gap="xs">
+                          <DiffWrapToggle className="size-6" />
                           <DiffStyleToggle
                             value={diffStyle}
                             onChange={setDiffStyle}
                           />
-                        </div>
+                        </Inline>
                       )}
-                    </div>
-                  </div>
+                    </Inline>
+                  </Inline>
                   {diffFiles && diffFiles.length < detail.pr.changed_files && (
                     <p className="mb-2 text-meta text-ink-subtle">
                       Showing {diffFiles.length} of {detail.pr.changed_files}{" "}
@@ -1501,11 +1540,9 @@ function ReviewBodyInner({
                     </p>
                   )}
                   {!diffFiles ? (
-                    <Skeleton className="h-64 w-full" />
+                    <Skeleton className="h-64 w-full rounded-panel" />
                   ) : diffFiles.length === 0 ? (
-                    <p className="text-meta text-ink-subtle">
-                      No diff available.
-                    </p>
+                    <EmptyState icon={FileText} title="No diff available." />
                   ) : view === "ai" && groupedView ? (
                     <div className="space-y-6">
                       {groupedView.map((group) => (
@@ -1548,11 +1585,11 @@ function ReviewBodyInner({
                   className="fixed right-4 bottom-4 z-30 shadow-popup"
                   onClick={() => setSidePanelOpen(true)}
                 >
-                  <ChatCircleIcon />
+                  <Icon icon={MessageSquare} size="md" />
                   Info &amp; chat
                 </Button>
               )}
-              <SheetContent side="right" keepMounted>
+              <SheetContent side="right" className="p-0">
                 {sidePanel("sheet")}
               </SheetContent>
             </Sheet>
@@ -1565,28 +1602,21 @@ function ReviewBodyInner({
 function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   const { recent } = progress
   return (
-    <div className="mt-2 text-meta text-ink-subtle">
+    <Stack gap="xs" className="text-meta text-ink-subtle">
       <p>
         {progress.steps} step{progress.steps === 1 ? "" : "s"} committed
       </p>
       {recent.length > 0 && (
-        <ol className="mt-1 space-y-0.5 font-mono text-meta">
+        <Stack render={<ol />} gap="none" className="font-mono text-meta">
           {recent.map((action, index) => {
             const current = progress.running && index === recent.length - 1
             return (
               <li
                 key={index}
-                className={cn(
-                  "flex min-w-0 gap-2",
-                  current && "text-ink"
-                )}
+                className={cn("flex min-w-0 gap-2", current && "text-ink")}
               >
-                <span className="shrink-0">
-                  {current ? (
-                    <CircleNotchIcon className="inline size-3 animate-spin" />
-                  ) : (
-                    "·"
-                  )}
+                <span className="flex w-3.5 shrink-0 justify-center">
+                  {current ? <Spinner size="sm" /> : "·"}
                 </span>
                 <span className="shrink-0">{action.tool}</span>
                 {action.target && (
@@ -1595,9 +1625,9 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
               </li>
             )
           })}
-        </ol>
+        </Stack>
       )}
-    </div>
+    </Stack>
   )
 }
 
@@ -1673,42 +1703,59 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
     detail.walkthrough_scout_thread_id,
   ])
   return (
-    <div className="mt-4 flex items-center gap-4 rounded-compact border border-primary/40 bg-primary/5 p-4">
-      <ListNumbersIcon className="size-6 shrink-0 text-primary" />
-      <div className="min-w-0 flex-1">
-        <p className="text-body font-medium">
-          {running ? "Building the walkthrough…" : "Read this PR step by step"}
-        </p>
-        <p className="mt-0.5 text-meta text-ink-subtle">
-          {running
-            ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
-            : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
-        </p>
-        {running && detail.walkthrough_progress && (
-          <ScoutProgressPreview progress={detail.walkthrough_progress} />
-        )}
-        {failureSummary && (
-          <p className="mt-1.5 text-label break-words text-risk">
-            Last attempt failed: {failureSummary}
-          </p>
-        )}
-        {(running || failure) && (
-          <ScoutThreadLink
-            threadId={detail.walkthrough_scout_thread_id}
-            className="mt-1.5"
-          />
-        )}
-      </div>
-      <Button size="control" onClick={() => scout.mutate(detail)} disabled={running}>
-        {running ? (
-          <CircleNotchIcon className="animate-spin" />
-        ) : (
-          <ListNumbersIcon />
-        )}
-        {running ? "Building…" : "Build walkthrough"}
-      </Button>
-    </div>
+    <ReviewBand
+      className="mt-4"
+      mark={
+        <IconWell>
+          <Icon icon={ListOrdered} size="sm" />
+        </IconWell>
+      }
+      title={
+        running ? "Building the walkthrough…" : "Read this PR step by step"
+      }
+      description={
+        running
+          ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
+          : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."
+      }
+      meta={
+        running || failureSummary ? (
+          <Stack gap="sm">
+            {running && detail.walkthrough_progress && (
+              <ScoutProgressPreview progress={detail.walkthrough_progress} />
+            )}
+            {failureSummary && (
+              <Inline
+                gap="xs"
+                align="start"
+                className="text-label break-words text-risk"
+              >
+                <Icon icon={AlertTriangle} size="sm" className="mt-0.5" />
+                <span>Last attempt failed: {failureSummary}</span>
+              </Inline>
+            )}
+            {(running || failure) && (
+              <ScoutThreadLink threadId={detail.walkthrough_scout_thread_id} />
+            )}
+          </Stack>
+        ) : undefined
+      }
+      actions={
+        <Button onClick={() => scout.mutate(detail)} disabled={running}>
+          {running ? (
+            <Spinner size="md" />
+          ) : (
+            <Icon icon={ListOrdered} size="md" />
+          )}
+          {running ? "Building…" : "Build walkthrough"}
+        </Button>
+      }
+    />
   )
+}
+
+function isDiffStyle(value: unknown): value is DiffStyle {
+  return value === "unified" || value === "split"
 }
 
 function DiffStyleToggle({
@@ -1719,50 +1766,32 @@ function DiffStyleToggle({
   onChange: (value: DiffStyle) => void
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-badge border border-line p-0.5">
-      <DiffStyleButton
-        active={value === "unified"}
-        label="Unified view"
-        onClick={() => onChange("unified")}
-      >
-        <RowsIcon className="size-3.5" />
-      </DiffStyleButton>
-      <DiffStyleButton
-        active={value === "split"}
-        label="Split view"
-        onClick={() => onChange("split")}
-      >
-        <SquareSplitHorizontalIcon className="size-3.5" />
-      </DiffStyleButton>
-    </div>
-  )
-}
-
-function DiffStyleButton({
-  active,
-  label,
-  onClick,
-  children,
-}: {
-  active: boolean
-  label: string
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
-      className={cn(
-        "flex size-5 items-center justify-center rounded-tick text-ink-subtle transition-colors",
-        active ? "bg-muted text-ink" : "hover:text-ink"
-      )}
+    <ToggleGroup
+      aria-label="Diff layout"
+      value={[value]}
+      onValueChange={(next: unknown[]) => {
+        const chosen = next[0]
+        if (isDiffStyle(chosen)) onChange(chosen)
+      }}
+      className="min-h-0"
     >
-      {children}
-    </button>
+      <ToggleGroupItem
+        value="unified"
+        aria-label="Unified view"
+        title="Unified view"
+        className="size-6 px-0"
+      >
+        <Icon icon={Rows} size="sm" />
+      </ToggleGroupItem>
+      <ToggleGroupItem
+        value="split"
+        aria-label="Split view"
+        title="Split view"
+        className="size-6 px-0"
+      >
+        <Icon icon={Columns} size="sm" />
+      </ToggleGroupItem>
+    </ToggleGroup>
   )
 }
 
@@ -1793,24 +1822,38 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
   )
   return (
     <>
-      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-line bg-canvas">
-        <span className="flex size-5 shrink-0 items-center justify-center rounded-tick bg-hover text-meta font-medium text-ink-subtle">
+      <Inline
+        gap="sm"
+        bg="canvas"
+        className="sticky top-0 z-5 h-row-data border-b border-line"
+      >
+        <Box
+          render={<span />}
+          radius="badge"
+          bg="muted"
+          className="flex size-6 shrink-0 items-center justify-center font-mono text-meta font-medium text-ink-subtle"
+        >
           {group.index}
-        </span>
-        <h3 className="min-w-0 flex-1 truncate text-body font-medium">{title}</h3>
-        <span className="flex shrink-0 items-center gap-1.5 font-mono text-meta">
+        </Box>
+        <Box
+          render={<h3 />}
+          className="min-w-0 flex-1 truncate text-title font-medium text-ink"
+        >
+          {title}
+        </Box>
+        <Inline gap="sm" className="shrink-0 font-mono text-meta tabular-nums">
           {group.additions > 0 && (
             <span className="text-positive">+{group.additions}</span>
           )}
           {group.deletions > 0 && (
-            <span className="text-risk">-{group.deletions}</span>
+            <span className="text-risk">−{group.deletions}</span>
           )}
-        </span>
-      </div>
+        </Inline>
+      </Inline>
       {summary && (
-        <div className="text-meta text-ink-subtle">
+        <Box className="text-body text-ink-subtle">
           <Markdown content={summary} />
-        </div>
+        </Box>
       )}
     </>
   )
@@ -2090,57 +2133,68 @@ const FileDiffCard = memo(function FileDiffCard({
       ref={sectionRef}
       className="scroll-mt-4 overflow-clip rounded-compact border border-line"
     >
-      <div
+      <Inline
+        gap="sm"
+        bg="hover"
         className={cn(
-          // accent is translucent; the background underlay keeps code from showing through.
-          "sticky z-[5] flex items-center gap-2 bg-[linear-gradient(var(--gtm-hover),var(--gtm-hover)),linear-gradient(var(--gtm-canvas),var(--gtm-canvas))] px-3 py-2 text-label",
-          belowStepHeader ? "top-9" : "top-0"
+          "sticky z-5 min-h-row-data border-b border-line px-3 py-1.5 text-label",
+          belowStepHeader ? "top-10" : "top-0"
         )}
       >
-        <button
-          type="button"
-          onClick={() => onToggleExpanded(file.path)}
-          className="inline-flex items-center gap-2 text-left"
+        <Inline
+          render={
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => onToggleExpanded(file.path)}
+            />
+          }
+          gap="sm"
+          className="min-w-0 text-left"
         >
-          <CaretDownIcon
+          <Icon
+            icon={ChevronDown}
+            size="sm"
             className={cn(
-              "size-3 transition-transform",
+              "text-ink-subtle transition-transform duration-fast ease-out-quint motion-reduce:transition-none",
               !expanded && "-rotate-90"
             )}
           />
-          <span className="font-mono font-medium">{file.path}</span>
-        </button>
-        <span className="flex items-center gap-1.5 font-mono text-meta">
-          <span className="text-positive">+{additions}</span>
-          <span className="text-risk">-{deletions}</span>
-        </span>
-        {findings.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-meta text-attention">
-            <FlagIcon className="size-3" />
-            {findings.length}
+          <span className="truncate font-mono font-medium text-ink">
+            {file.path}
           </span>
+        </Inline>
+        <Inline gap="sm" className="shrink-0 font-mono text-meta tabular-nums">
+          <span className="text-positive">+{additions}</span>
+          <span className="text-risk">−{deletions}</span>
+        </Inline>
+        {findings.length > 0 && (
+          <Badge tier="quiet" tone="attention">
+            <Icon icon={Flag} size="sm" />
+            {findings.length}
+          </Badge>
         )}
-        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-meta text-ink-subtle">
+        <Inline
+          render={<label />}
+          gap="sm"
+          className="ml-auto shrink-0 cursor-pointer text-meta text-ink-subtle"
+        >
           Mark as viewed
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={viewed}
-            onClick={() => onToggleViewed(file.path)}
-            className={cn(
-              "flex size-4 items-center justify-center rounded-tick border border-line",
-              viewed && "bg-ink text-canvas"
-            )}
-          >
-            {viewed && <CheckIcon className="size-3" />}
-          </button>
-        </label>
-      </div>
+          <Checkbox
+            checked={viewed}
+            onCheckedChange={() => onToggleViewed(file.path)}
+          />
+        </Inline>
+      </Inline>
       {expanded &&
         (file.unrenderable || file.patch === null ? (
-          <div className="bg-panel p-4 text-center text-meta text-ink-subtle/70">
+          <Box
+            bg="panel"
+            padding="lg"
+            className="text-center text-meta text-ink-subtle"
+          >
             Binary or large file — diff not shown.
-          </div>
+          </Box>
         ) : (
           <div
             {...lineSelection.wrapperProps}
@@ -2177,17 +2231,17 @@ const FileDiffCard = memo(function FileDiffCard({
         initialFocus={false}
         className="rounded-badge p-0"
       >
-        <button
+        <Button
           type="button"
+          size="compact"
+          variant="ghost"
           data-add-to-chat
           onClick={addSelectionToChat}
-          className="inline-flex items-center gap-1.5 px-2 py-1 font-sans text-meta font-medium"
+          className="font-sans"
         >
           Add to Chat
-          <kbd className="rounded-tick border border-line px-1 text-meta text-ink-subtle">
-            ⌘L
-          </kbd>
-        </button>
+          <Shortcut keys={["mod", "L"]} />
+        </Button>
       </DiffSelectionPopover>
     </div>
   )
@@ -2282,23 +2336,23 @@ function applyMarkdownAction(
 interface ToolbarItem {
   action: MarkdownAction
   label: string
-  Icon: Icon
+  glyph: Glyph
 }
 
 // Grouped to match GitHub's comment toolbar (format group, then list group).
 const MARKDOWN_TOOLBAR: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
   [
-    { action: "heading", label: "Heading", Icon: TextHIcon },
-    { action: "bold", label: "Bold", Icon: TextBIcon },
-    { action: "italic", label: "Italic", Icon: TextItalicIcon },
-    { action: "quote", label: "Quote", Icon: QuotesIcon },
-    { action: "code", label: "Code", Icon: CodeIcon },
-    { action: "link", label: "Link", Icon: LinkIcon },
+    { action: "heading", label: "Heading", glyph: Heading },
+    { action: "bold", label: "Bold", glyph: Bold },
+    { action: "italic", label: "Italic", glyph: Italic },
+    { action: "quote", label: "Quote", glyph: Quote },
+    { action: "code", label: "Code", glyph: Code },
+    { action: "link", label: "Link", glyph: LinkGlyph },
   ],
   [
-    { action: "ul", label: "Bulleted list", Icon: ListBulletsIcon },
-    { action: "ol", label: "Numbered list", Icon: ListNumbersIcon },
-    { action: "task", label: "Task list", Icon: ListChecksIcon },
+    { action: "ul", label: "Bulleted list", glyph: List },
+    { action: "ol", label: "Numbered list", glyph: ListOrdered },
+    { action: "task", label: "Task list", glyph: ListChecks },
   ],
 ]
 
@@ -2351,19 +2405,20 @@ function CommentComposer({
       textarea.setSelectionRange(next.start, next.end)
     })
   }
-  const tabClass = (active: boolean) =>
-    cn(
-      "rounded-tick px-2 py-0.5 text-meta",
-      active
-        ? "bg-hover font-medium text-ink"
-        : "text-ink-subtle hover:text-ink"
-    )
   return (
-    <div className="px-2 py-1 font-sans">
-      <div className="overflow-hidden rounded-badge border border-line bg-panel">
-        <div className="flex items-center gap-1.5 border-b border-line px-2 py-1 text-meta">
-          <ChatCircleIcon className="size-3 text-ink-subtle" />
-          <span className="font-medium">
+    <Box className="px-2 py-1 font-sans">
+      <Stack
+        bg="panel"
+        border="line"
+        radius="compact"
+        className="overflow-hidden"
+      >
+        <Inline
+          gap="sm"
+          className="border-b border-line py-1 pr-1 pl-3 text-meta"
+        >
+          <Icon icon={MessageSquare} size="sm" className="text-ink-subtle" />
+          <span className="font-medium text-ink">
             Add a comment on line {commentRangeLabel(range)}
           </span>
           <Button
@@ -2374,116 +2429,126 @@ function CommentComposer({
             className="ml-auto"
             onClick={onClose}
           >
-            <XIcon />
+            <Icon icon={X} size="sm" />
           </Button>
-        </div>
-        {
-          <>
-            <div className="flex items-center gap-1 border-b border-line px-1.5 py-1">
-              <button
-                type="button"
-                onClick={() => setMode("write")}
-                aria-selected={mode === "write"}
-                className={tabClass(mode === "write")}
-              >
-                Write
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("preview")}
-                aria-selected={mode === "preview"}
-                className={tabClass(mode === "preview")}
-              >
-                Preview
-              </button>
-              {mode === "write" && (
-                <div className="ml-auto flex items-center gap-0.5">
-                  {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
-                    <Fragment key={group[0]?.action ?? groupIndex}>
-                      {groupIndex > 0 && (
-                        <span className="mx-0.5 h-4 w-px bg-line" />
-                      )}
-                      {group.map(({ action, label, Icon }) => (
-                        <Button
-                          key={action}
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={label}
-                          title={label}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => applyAction(action)}
-                        >
-                          <Icon className="size-4" />
-                        </Button>
-                      ))}
-                    </Fragment>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="p-2">
-              {mode === "write" ? (
-                <Textarea
-                  ref={textareaRef}
-                  value={value}
-                  onChange={(event) => setValue(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      (event.metaKey || event.ctrlKey) &&
-                      event.key === "Enter"
-                    ) {
-                      event.preventDefault()
-                      submit()
-                    } else if (event.key === "Escape") {
-                      event.preventDefault()
-                      onClose()
-                    }
-                  }}
-                  placeholder="Leave a comment…"
-                  rows={3}
-                  className="resize-y text-label"
-                />
-              ) : (
-                <div className="min-h-16 rounded-badge border border-line-strong bg-line-strong/20 px-2 py-2 text-label">
-                  {value.trim() ? (
-                    <Markdown content={value} />
-                  ) : (
-                    <span className="text-ink-subtle">
-                      Nothing to preview
-                    </span>
+        </Inline>
+        <Inline gap="xs" className="border-b border-line px-1.5 py-1">
+          <ToggleGroup
+            aria-label="Comment mode"
+            value={[mode]}
+            onValueChange={(next: unknown[]) => {
+              if (next[0] === "write" || next[0] === "preview") setMode(next[0])
+            }}
+            className="min-h-0"
+          >
+            <ToggleGroupItem value="write" className="h-6">
+              Write
+            </ToggleGroupItem>
+            <ToggleGroupItem value="preview" className="h-6">
+              Preview
+            </ToggleGroupItem>
+          </ToggleGroup>
+          {mode === "write" && (
+            <Inline gap="none" className="ml-auto">
+              {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
+                <Fragment key={group[0]?.action ?? groupIndex}>
+                  {groupIndex > 0 && (
+                    <Box aria-hidden="true" className="mx-1 h-4 w-px bg-line" />
                   )}
-                </div>
+                  {group.map(({ action, label, glyph }) => (
+                    <Tooltip key={action}>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={label}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => applyAction(action)}
+                          />
+                        }
+                      >
+                        <Icon icon={glyph} size="md" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{label}</TooltipContent>
+                    </Tooltip>
+                  ))}
+                </Fragment>
+              ))}
+            </Inline>
+          )}
+        </Inline>
+        <Stack gap="sm" padding="sm">
+          {mode === "write" ? (
+            <Textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault()
+                  submit()
+                } else if (event.key === "Escape") {
+                  event.preventDefault()
+                  onClose()
+                }
+              }}
+              placeholder="Leave a comment…"
+              rows={3}
+              className="resize-y"
+            />
+          ) : (
+            <Box
+              bg="muted"
+              border="line"
+              radius="compact"
+              className="min-h-16 px-3 py-2 text-label"
+            >
+              {value.trim() ? (
+                <Markdown content={value} />
+              ) : (
+                <span className="text-ink-subtle">Nothing to preview</span>
               )}
-              {mutation.isError && (
-                <p className="mt-1.5 text-meta text-risk">
-                  {mutation.error instanceof Error
-                    ? mutation.error.message
-                    : "Failed to add the comment"}
-                </p>
-              )}
-              <div className="mt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="rounded-tick border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={submit}
-                  disabled={!value.trim() || mutation.isPending}
-                  className="rounded-tick bg-ink px-2 py-1 text-meta font-medium text-canvas disabled:opacity-50"
-                >
-                  {mutation.isPending ? "Adding…" : "Add review comment"}
-                </button>
-              </div>
-            </div>
-          </>
-        }
-      </div>
-    </div>
+            </Box>
+          )}
+          {mutation.isError && (
+            <Inline
+              role="alert"
+              gap="xs"
+              align="start"
+              className="text-meta text-risk"
+            >
+              <Icon icon={AlertTriangle} size="sm" />
+              <span>
+                {mutation.error instanceof Error
+                  ? mutation.error.message
+                  : "Failed to add the comment"}
+              </span>
+            </Inline>
+          )}
+          <Inline gap="sm" justify="end">
+            <Button
+              type="button"
+              size="compact"
+              variant="ghost"
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="compact"
+              onClick={submit}
+              disabled={!value.trim()}
+              loading={mutation.isPending}
+            >
+              Add review comment
+            </Button>
+          </Inline>
+        </Stack>
+      </Stack>
+    </Box>
   )
 }
 
@@ -2570,25 +2635,30 @@ function InlineComment({
       ref={(node) => registerAnnotation(`comment:${comment.id}`, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-badge border border-line bg-panel">
-        <div className="flex items-center gap-1.5 border-b border-line px-2 py-1 text-meta">
-          {comment.author_avatar_url ? (
-            <img
-              src={comment.author_avatar_url}
-              alt=""
-              className="size-4 shrink-0 rounded-full"
-            />
-          ) : (
-            <span className="size-4 shrink-0 rounded-full bg-muted" />
-          )}
-          <span className="font-medium">{comment.author}</span>
+      <Stack
+        bg="panel"
+        border="line"
+        radius="compact"
+        className="overflow-hidden"
+      >
+        <Inline
+          gap="sm"
+          className="border-b border-line py-1 pr-1 pl-3 text-meta"
+        >
+          <Avatar
+            name={comment.author}
+            src={comment.author_avatar_url ?? undefined}
+            size="chat"
+            className="size-5"
+          />
+          <span className="font-medium text-ink">{comment.author}</span>
           {comment.line !== null && (
             <span className="font-mono text-ink-subtle">
               {sideLabel}
               {comment.line}
             </span>
           )}
-          <div className="ml-auto flex items-center gap-0.5">
+          <Inline gap="none" className="ml-auto">
             {editable && !editing && (
               <Button
                 type="button"
@@ -2597,7 +2667,7 @@ function InlineComment({
                 aria-label="Edit comment"
                 onClick={() => setEditing(true)}
               >
-                <PencilSimpleIcon />
+                <Icon icon={Pencil} size="sm" />
               </Button>
             )}
             <a
@@ -2606,9 +2676,12 @@ function InlineComment({
               rel="noreferrer"
               aria-label="View on GitHub"
               title="View on GitHub"
-              className="inline-flex size-5 items-center justify-center rounded-tick text-ink-subtle hover:text-ink"
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                "text-ink-subtle hover:text-ink"
+              )}
             >
-              <IoLogoGithub className="size-3" />
+              <Icon icon={GitHub} size="sm" />
             </a>
             <Button
               type="button"
@@ -2617,12 +2690,12 @@ function InlineComment({
               aria-label="Close comment"
               onClick={onClose}
             >
-              <XIcon />
+              <Icon icon={X} size="sm" />
             </Button>
-          </div>
-        </div>
+          </Inline>
+        </Inline>
         {editing ? (
-          <div className="p-2">
+          <Stack gap="sm" padding="sm">
             <Textarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -2636,35 +2709,35 @@ function InlineComment({
                 }
               }}
               rows={3}
-              className="resize-y text-label"
+              className="resize-y"
               autoFocus
             />
-            <div className="mt-2 flex items-center justify-end gap-2">
-              <button
+            <Inline gap="sm" justify="end">
+              <Button
                 type="button"
+                size="compact"
+                variant="ghost"
                 onClick={cancel}
-                className="rounded-tick border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                size="compact"
                 onClick={submit}
-                disabled={
-                  !draft.trim() || draft.trim() === body || mutation.isPending
-                }
-                className="rounded-tick bg-ink px-2 py-1 text-meta font-medium text-canvas disabled:opacity-50"
+                disabled={!draft.trim() || draft.trim() === body}
+                loading={mutation.isPending}
               >
-                {mutation.isPending ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </div>
+                Save
+              </Button>
+            </Inline>
+          </Stack>
         ) : (
-          <div className="px-3 py-2.5 text-meta text-ink-subtle">
+          <Box className="px-3 py-2.5 text-label text-ink">
             <Markdown content={body} />
-          </div>
+          </Box>
         )}
-      </div>
+      </Stack>
     </div>
   )
 }
@@ -2678,21 +2751,30 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
     useExpandedFinding()
   const expanded = expandedId === finding.id
   const style = GROUP_STYLES[finding.group]
-  const Icon = style.Icon
   return (
     <div
       ref={(node) => registerAnnotation(finding.id, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-badge border border-line bg-panel">
-        <button
-          type="button"
-          onClick={() => toggle(finding)}
-          aria-expanded={expanded}
-          aria-label={`${expanded ? "Collapse" : "Expand"} finding: ${finding.title}`}
-          className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-meta"
+      <Stack
+        bg="panel"
+        border="line"
+        radius="compact"
+        className="overflow-hidden"
+      >
+        <Inline
+          render={
+            <button
+              type="button"
+              onClick={() => toggle(finding)}
+              aria-expanded={expanded}
+              aria-label={`${expanded ? "Collapse" : "Expand"} finding: ${finding.title}`}
+            />
+          }
+          gap="sm"
+          className="min-h-control-sm w-full px-3 py-1 text-left text-label hover:bg-hover"
         >
-          <Icon className={cn("size-3 shrink-0", style.className)} />
+          <Icon icon={style.glyph} size="sm" className={style.className} />
           <span className={cn("font-medium", style.className)}>
             {style.label}
           </span>
@@ -2701,15 +2783,17 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
           </span>
           {finding.outdated && <Badgeish>Outdated</Badgeish>}
           {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
-          <CaretDownIcon
+          <Icon
+            icon={ChevronDown}
+            size="sm"
             className={cn(
-              "size-3 shrink-0 text-ink-subtle transition-transform",
+              "text-ink-subtle transition-transform duration-fast ease-out-quint motion-reduce:transition-none",
               !expanded && "-rotate-90"
             )}
           />
-        </button>
+        </Inline>
         {expanded && <FindingDetails finding={finding} reviewUrl={reviewUrl} />}
-      </div>
+      </Stack>
     </div>
   )
 }
@@ -2739,45 +2823,41 @@ function FindingDetails({
   }
 
   return (
-    <div className="border-t border-line px-3 py-2.5 font-sans">
-      <div className="text-meta text-ink-subtle">
+    <Stack gap="sm" className="border-t border-line px-3 py-2.5 font-sans">
+      <Box className="text-label text-ink-muted">
         <Markdown content={finding.description} />
-      </div>
+      </Box>
       {finding.resolution_note && (
-        <p className="mt-2 text-meta text-ink-subtle">
+        <p className="text-meta text-ink-subtle">
           Resolution: {finding.resolution_note}
         </p>
       )}
-      <div className="mt-2.5 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={copy}
-          className="inline-flex items-center gap-1.5 rounded-tick border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink"
-        >
-          <CopyIcon className="size-3" />
+      <Inline gap="sm">
+        <Button size="compact" variant="outline" onClick={copy}>
+          <Icon icon={copied ? Check : Copy} size="sm" />
           {copied ? "Copied" : "Copy"}
-        </button>
+        </Button>
         {githubUrl && (
           <a
             href={githubUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-tick border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink"
+            className={buttonVariants({ variant: "outline", size: "compact" })}
           >
-            <IoLogoGithub className="size-3" />
+            <Icon icon={GitHub} size="sm" />
             View on GitHub
           </a>
         )}
-      </div>
-    </div>
+      </Inline>
+    </Stack>
   )
 }
 
 function Badgeish({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-tick border border-line px-1.5 py-0.5 text-meta text-ink-subtle capitalize">
+    <Badge tier="notable" tone="neutral" className="capitalize">
       {children}
-    </span>
+    </Badge>
   )
 }
 
@@ -2861,9 +2941,9 @@ function ReviewPanelResizeHandle({
       onPointerCancel={onPointerUp}
       className={cn(
         "absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize touch-none select-none",
-        "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
-        "hover:after:bg-line",
-        dragging && "after:bg-line"
+        "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors after:duration-fast",
+        "hover:after:bg-line-strong",
+        dragging && "after:bg-line-strong"
       )}
     />
   )
@@ -2946,28 +3026,18 @@ function SidePanel({
           layout === "inline" && "border-l border-line"
         )}
       >
-        <div className="flex items-center gap-1 border-b border-line px-3 py-2">
-          {(
-            [
-              ["info", "Info"],
-              ["chat", "Chat"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onTabChange(id)}
-              className={cn(
-                "rounded-badge px-2.5 py-1 text-label transition-colors",
-                tab === id
-                  ? "bg-muted font-medium text-ink"
-                  : "text-ink-subtle hover:bg-muted/50"
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Inline className="h-toolbar shrink-0 border-b border-line px-3">
+          <ToggleGroup
+            aria-label="Side panel"
+            value={[tab]}
+            onValueChange={(next: unknown[]) => {
+              if (next[0] === "info" || next[0] === "chat") onTabChange(next[0])
+            }}
+          >
+            <ToggleGroupItem value="info">Info</ToggleGroupItem>
+            <ToggleGroupItem value="chat">Chat</ToggleGroupItem>
+          </ToggleGroup>
+        </Inline>
 
         {tab === "chat" ? (
           <ReviewChat
@@ -2978,45 +3048,75 @@ function SidePanel({
           />
         ) : (
           <div className="divide-y divide-line">
-            <section className="px-3 py-3">
-              <div className="flex items-center justify-between text-label">
-                <span className="font-medium">
-                  {detail.status === "running"
-                    ? "PR analysis in progress"
-                    : detail.status === "error"
-                      ? "PR analysis failed"
-                      : detail.status === "none"
-                        ? "Not analyzed yet"
-                        : "PR analysis complete"}
-                </span>
-                <button
-                  type="button"
+            <Stack render={<section />} gap="sm" className="px-3 py-3">
+              <Inline gap="sm" justify="between" className="text-label">
+                <Inline gap="sm">
+                  <Badge
+                    tier="quiet"
+                    dot={detail.status === "running"}
+                    tone={
+                      detail.status === "running"
+                        ? "attention"
+                        : detail.status === "error"
+                          ? "risk"
+                          : detail.status === "none"
+                            ? "neutral"
+                            : "positive"
+                    }
+                  >
+                    {detail.status === "running"
+                      ? "In progress"
+                      : detail.status === "error"
+                        ? "Failed"
+                        : detail.status === "none"
+                          ? "Not analyzed"
+                          : "Complete"}
+                  </Badge>
+                  <span className="font-medium text-ink">
+                    {detail.status === "running"
+                      ? "PR analysis in progress"
+                      : detail.status === "error"
+                        ? "PR analysis failed"
+                        : detail.status === "none"
+                          ? "Not analyzed yet"
+                          : "PR analysis complete"}
+                  </span>
+                </Inline>
+                <Button
+                  size="compact"
+                  variant="outline"
                   onClick={() => reReview.mutate(detail)}
                   disabled={reReview.isPending || detail.status === "running"}
-                  className="inline-flex items-center gap-1 rounded-tick border border-line px-1.5 py-0.5 text-meta text-ink-subtle hover:text-ink disabled:opacity-50"
                 >
-                  <ArrowClockwiseIcon className="size-3" />
+                  <Icon icon={RefreshCw} size="sm" />
                   {detail.status === "none" ? "Review" : "Re-review"}
-                </button>
-              </div>
-              <div className="mt-2 space-y-1 text-meta text-ink-subtle">
+                </Button>
+              </Inline>
+              <Stack gap="xs" className="text-meta text-ink-subtle">
                 <div>
                   {detail.status === "none"
                     ? "Head commit"
                     : "Reviewing commit"}{" "}
-                  {detail.head_sha.slice(0, 7) || "—"}
+                  <span className="font-mono">
+                    {detail.head_sha.slice(0, 7) || "—"}
+                  </span>
                 </div>
                 {detail.watch && <div>Watching for new pushes</div>}
                 {detail.status === "error" && detail.review_error && (
-                  <div className="break-words text-risk">
-                    {detail.review_error}
-                  </div>
+                  <Inline
+                    gap="xs"
+                    align="start"
+                    className="break-words text-risk"
+                  >
+                    <Icon icon={AlertTriangle} size="sm" className="mt-0.5" />
+                    <span>{detail.review_error}</span>
+                  </Inline>
                 )}
-              </div>
-            </section>
+              </Stack>
+            </Stack>
 
             <FindingSection
-              icon={BugBeetleIcon}
+              icon={Bug}
               label={`${openBugs.length} Bug${openBugs.length === 1 ? "" : "s"}`}
               emptyLabel={
                 detail.status === "none"
@@ -3031,7 +3131,7 @@ function SidePanel({
             />
 
             <FindingSection
-              icon={FlagIcon}
+              icon={Flag}
               label={`${openFlags.length} Flag${openFlags.length === 1 ? "" : "s"}`}
               emptyLabel={
                 detail.status === "none"
@@ -3045,13 +3145,13 @@ function SidePanel({
               onFindingClick={onFindingClick}
               action={
                 detail.findings.length > 0 ? (
-                  <button
-                    type="button"
+                  <Button
+                    size="compact"
+                    variant="ghost"
                     onClick={onMarkAllRead}
-                    className="rounded-tick border border-line px-1.5 py-0.5 text-meta text-ink-subtle hover:text-ink"
                   >
                     Mark all as read
-                  </button>
+                  </Button>
                 ) : null
               }
             />
@@ -3062,23 +3162,20 @@ function SidePanel({
               people={detail.pr.requested_reviewers}
             />
             <PeopleSection title="Assignees" people={detail.pr.assignees} />
-            <section className="px-3 py-3">
-              <h3 className="mb-2 text-label font-medium">Labels</h3>
+            <Stack render={<section />} gap="sm" className="px-3 py-3">
+              <SidePanelHeading>Labels</SidePanelHeading>
               {detail.pr.labels.length === 0 ? (
                 <p className="text-meta text-ink-subtle">None</p>
               ) : (
-                <div className="flex flex-wrap gap-1">
+                <Inline gap="xs" wrap>
                   {detail.pr.labels.map((label) => (
-                    <span
-                      key={label.name}
-                      className="rounded-full border border-line px-2 py-0.5 text-meta"
-                    >
+                    <Badge key={label.name} tier="notable" tone="neutral">
                       {label.name}
-                    </span>
+                    </Badge>
                   ))}
-                </div>
+                </Inline>
               )}
-            </section>
+            </Stack>
           </div>
         )}
       </aside>
@@ -3086,8 +3183,16 @@ function SidePanel({
   )
 }
 
+function SidePanelHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <Box render={<h3 />} className="text-label font-medium text-ink">
+      {children}
+    </Box>
+  )
+}
+
 function FindingSection({
-  icon: HeaderIcon,
+  icon,
   label,
   emptyLabel,
   findings,
@@ -3097,7 +3202,7 @@ function FindingSection({
   onFindingClick,
   action,
 }: {
-  icon: (typeof GROUP_STYLES)["bug"]["Icon"]
+  icon: Glyph
   label: string
   emptyLabel: string
   findings: Array<ReviewFinding>
@@ -3109,42 +3214,54 @@ function FindingSection({
 }) {
   const [collapsed, setCollapsed] = useState(false)
   return (
-    <section className="px-3 py-3">
-      <div className="mb-2 flex items-center justify-between text-label">
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="inline-flex items-center gap-1.5 font-medium"
+    <Stack render={<section />} gap="sm" className="px-3 py-3">
+      <Inline
+        gap="sm"
+        justify="between"
+        className="min-h-control-sm text-label"
+      >
+        <Inline
+          render={
+            <button
+              type="button"
+              aria-expanded={!collapsed}
+              onClick={() => setCollapsed((v) => !v)}
+            />
+          }
+          gap="sm"
+          className="font-medium text-ink"
         >
-          <HeaderIcon className="size-3.5" />
+          <Icon icon={icon} size="sm" />
           {label}
-          <CaretDownIcon
+          <Icon
+            icon={ChevronDown}
+            size="sm"
             className={cn(
-              "size-3 text-ink-subtle transition-transform",
+              "text-ink-subtle transition-transform duration-fast ease-out-quint motion-reduce:transition-none",
               collapsed && "-rotate-90"
             )}
           />
-        </button>
+        </Inline>
         {action}
-      </div>
+      </Inline>
       {!collapsed &&
         (findings.length === 0 ? (
           <p className="text-meta text-ink-subtle">{emptyLabel}</p>
         ) : (
-          <div className="space-y-0.5">
+          <Stack gap="xs">
             {findings.map((finding) => {
               const style = GROUP_STYLES[finding.group]
-              const Icon = style.Icon
               const isRead = read.has(finding.id)
               const muted = finding.status !== "open" || isRead
               const anchored = isAnchored(finding)
               const expanded = expandedId === finding.id && !anchored
               return (
-                <div
+                <Box
                   key={finding.id}
+                  radius="compact"
                   className={cn(
-                    "rounded-badge border border-transparent transition-colors hover:border-line hover:bg-muted/40",
-                    expanded && "border-line bg-muted/40",
+                    "border border-transparent hover:border-line hover:bg-hover",
+                    expanded && "border-line bg-muted",
                     muted && !expanded && "opacity-50"
                   )}
                 >
@@ -3154,18 +3271,21 @@ function FindingSection({
                     aria-expanded={anchored ? undefined : expanded}
                     className="block w-full px-2 py-1.5 text-left"
                   >
-                    <span className="flex items-start gap-1.5 text-label">
+                    <Inline gap="sm" align="start" className="text-label">
                       <Icon
-                        className={cn(
-                          "mt-0.5 size-3.5 shrink-0",
-                          style.className
-                        )}
+                        icon={style.glyph}
+                        size="sm"
+                        className={cn("mt-0.5", style.className)}
                       />
-                      <span className="min-w-0 flex-1">
+                      <Stack gap="none" className="min-w-0 flex-1">
                         <span className="line-clamp-1 font-medium text-ink">
                           {finding.title || finding.description}
                         </span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-meta text-ink-subtle">
+                        <Inline
+                          gap="sm"
+                          wrap
+                          className="text-meta text-ink-subtle"
+                        >
                           <span className={style.className}>{style.label}</span>
                           <span className="truncate font-mono">
                             {findingAnchorLabel(finding)}
@@ -3177,79 +3297,108 @@ function FindingSection({
                           {isRead && finding.status === "open" && (
                             <span>• Read</span>
                           )}
-                        </span>
-                      </span>
+                        </Inline>
+                      </Stack>
                       {!anchored && (
-                        <CaretDownIcon
+                        <Icon
+                          icon={ChevronDown}
+                          size="sm"
                           className={cn(
-                            "mt-0.5 size-3 shrink-0 text-ink-subtle transition-transform",
+                            "mt-0.5 text-ink-subtle transition-transform duration-fast ease-out-quint motion-reduce:transition-none",
                             !expanded && "-rotate-90"
                           )}
                         />
                       )}
-                    </span>
+                    </Inline>
                   </button>
                   {expanded && (
                     <FindingDetails finding={finding} reviewUrl={reviewUrl} />
                   )}
-                </div>
+                </Box>
               )
             })}
-          </div>
+          </Stack>
         ))}
-    </section>
+    </Stack>
   )
+}
+
+const CHECK_STATE: Record<
+  "running" | "passed" | "skipped" | "failed",
+  { glyph: Glyph; className: string }
+> = {
+  running: { glyph: Circle, className: "animate-pulse text-attention" },
+  passed: { glyph: CheckCircle, className: "text-positive" },
+  skipped: { glyph: Circle, className: "text-ink-subtle" },
+  failed: { glyph: XCircle, className: "text-risk" },
+}
+
+function checkState(check: ReviewCheckRun): keyof typeof CHECK_STATE {
+  if (check.status !== "completed") return "running"
+  if (check.conclusion === "success" || check.conclusion === "neutral")
+    return "passed"
+  if (check.conclusion === "skipped") return "skipped"
+  return "failed"
 }
 
 function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
+  const failed = checks.filter((check) => checkState(check) === "failed")
+  const running = checks.filter((check) => checkState(check) === "running")
   return (
-    <section className="px-3 py-3">
-      <h3 className="mb-2 text-label font-medium">Checks</h3>
+    <Stack render={<section />} gap="sm" className="px-3 py-3">
+      <Inline gap="sm">
+        <SidePanelHeading>Checks</SidePanelHeading>
+        {failed.length > 0 && (
+          <Badge tier="quiet" tone="risk">
+            {failed.length} failing
+          </Badge>
+        )}
+        {running.length > 0 && (
+          <Badge tier="quiet" tone="attention" dot>
+            {running.length} running
+          </Badge>
+        )}
+      </Inline>
       {checks.length === 0 ? (
         <p className="text-meta text-ink-subtle">No checks reported.</p>
       ) : (
-        <div className="max-h-56 space-y-1 overflow-y-auto">
-          {checks.map((check, index) =>
-            check.url ? (
-              <a
-                key={`${check.name}-${index}`}
-                href={check.url}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-1.5 text-meta text-ink-subtle hover:text-ink"
-              >
-                <CheckStatusIcon check={check} />
+        <Stack gap="xs" className="max-h-56 overflow-y-auto">
+          {checks.map((check, index) => {
+            const state = CHECK_STATE[checkState(check)]
+            const row = (
+              <>
+                <Icon
+                  icon={state.glyph}
+                  size="sm"
+                  className={cn(state.className, "motion-reduce:animate-none")}
+                />
                 <span className="truncate">{check.name}</span>
-              </a>
-            ) : (
-              <span
-                key={`${check.name}-${index}`}
-                className="flex items-center gap-1.5 text-meta text-ink-subtle"
-              >
-                <CheckStatusIcon check={check} />
-                <span className="truncate">{check.name}</span>
-              </span>
+              </>
             )
-          )}
-        </div>
+            return check.url ? (
+              <Inline
+                key={`${check.name}-${index}`}
+                render={<a href={check.url} target="_blank" rel="noreferrer" />}
+                gap="sm"
+                className="text-meta text-ink-subtle hover:text-ink"
+              >
+                {row}
+              </Inline>
+            ) : (
+              <Inline
+                key={`${check.name}-${index}`}
+                render={<span />}
+                gap="sm"
+                className="text-meta text-ink-subtle"
+              >
+                {row}
+              </Inline>
+            )
+          })}
+        </Stack>
       )}
-    </section>
+    </Stack>
   )
-}
-
-function CheckStatusIcon({ check }: { check: ReviewCheckRun }) {
-  if (check.status !== "completed") {
-    return (
-      <CircleIcon className="size-3.5 shrink-0 animate-pulse text-attention" />
-    )
-  }
-  if (check.conclusion === "success" || check.conclusion === "neutral") {
-    return <CheckCircleIcon className="size-3.5 shrink-0 text-positive" />
-  }
-  if (check.conclusion === "skipped") {
-    return <CircleIcon className="size-3.5 shrink-0 text-ink-subtle" />
-  }
-  return <XCircleIcon className="size-3.5 shrink-0 text-risk" />
 }
 
 function PeopleSection({
@@ -3260,31 +3409,25 @@ function PeopleSection({
   people: Array<ReviewUserRef>
 }) {
   return (
-    <section className="px-3 py-3">
-      <h3 className="mb-2 text-label font-medium">{title}</h3>
+    <Stack render={<section />} gap="sm" className="px-3 py-3">
+      <SidePanelHeading>{title}</SidePanelHeading>
       {people.length === 0 ? (
         <p className="text-meta text-ink-subtle">None</p>
       ) : (
-        <div className="space-y-1">
+        <Stack gap="xs">
           {people.map((person) => (
-            <div
-              key={person.login}
-              className="flex items-center gap-2 text-meta"
-            >
-              {person.avatar_url ? (
-                <img
-                  src={person.avatar_url}
-                  alt=""
-                  className="size-4 rounded-full"
-                />
-              ) : (
-                <span className="size-4 rounded-full bg-muted" />
-              )}
+            <Inline key={person.login} gap="sm" className="text-meta text-ink">
+              <Avatar
+                name={person.login}
+                src={person.avatar_url ?? undefined}
+                size="chat"
+                className="size-5"
+              />
               {person.login}
-            </div>
+            </Inline>
           ))}
-        </div>
+        </Stack>
       )}
-    </section>
+    </Stack>
   )
 }

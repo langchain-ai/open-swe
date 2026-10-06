@@ -55,20 +55,17 @@ export function statusDetail(pr: OpenPullRequest): string | null {
   return null
 }
 
-export const statusTones: Record<string, string> = {
-  Conflicted: "border-risk/30 bg-risk-bg text-risk",
-  Failing: "border-risk/30 bg-risk-bg text-risk",
-  "Changes Requested":
-    "border-risk/30 bg-risk-bg text-risk",
-  Approved:
-    "border-positive/30 bg-positive-bg text-positive",
-  Pending:
-    "border-attention/30 bg-attention-bg text-attention",
-  "Review required":
-    "border-attention/30 bg-attention-bg text-attention",
-  "Status unavailable":
-    "border-attention/30 bg-attention-bg text-attention",
-  Reviewable: "border-info/30 bg-info-bg text-info",
+export type StatusTone = "positive" | "attention" | "risk" | "info" | "neutral"
+
+export const statusTones: Record<string, StatusTone> = {
+  Conflicted: "risk",
+  Failing: "risk",
+  "Changes Requested": "risk",
+  Approved: "positive",
+  Pending: "attention",
+  "Review required": "attention",
+  "Status unavailable": "attention",
+  Reviewable: "info",
 }
 
 export function isConflicted(pr: OpenPullRequest) {

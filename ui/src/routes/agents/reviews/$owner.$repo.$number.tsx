@@ -1,13 +1,23 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+
+import { AlertTriangle, ArrowLeft, GitPullRequest } from "@/components/glyphs"
+import { useRailCollapsed } from "@/components/rail/useRailCollapsed"
 import type { PrReviewComment } from "@/lib/api"
+import { navLink } from "@/features/reviews/PullRequestLinks"
 import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewCommentsMenu"
 import { ReviewMainBody } from "@/features/reviews/components/ReviewMainBody"
 import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
-import { useSidebarControls } from "@/components/sidebar-layout"
 import {
   markReviewViewed,
   reviewChatQuery,
@@ -18,7 +28,6 @@ import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/agents/reviews/$owner/$repo/$number")({
   component: ReviewDetailPage,
@@ -37,10 +46,7 @@ function ReviewDetailPage() {
   const { owner, repo, number } = Route.useParams()
   const prNumber = Number(number)
   const session = useSession()
-  const sidebar = useSidebarControls()
-  const sidebarCollapsed = sidebar?.collapsed ?? false
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const rail = useRailCollapsed()
   // A comment picked from the dropdown, shown inline in the diff (not GitHub).
   const [activeComment, setActiveComment] = useState<PrReviewComment | null>(
     null
@@ -56,16 +62,16 @@ function ReviewDetailPage() {
 
   // Collapse the global nav by default while viewing a review (roomy diff),
   // restoring the prior preference on leave. Runs once for the page's lifetime.
-  const sidebarRef = useRef(sidebar)
+  const railRef = useRef(rail)
   const openedFromSidebar = useRef(
     reviewOpenedFromSidebar({ owner, repo, number: prNumber })
   )
   useEffect(() => {
-    sidebarRef.current = sidebar
-  }, [sidebar])
+    railRef.current = rail
+  }, [rail])
   useEffect(() => {
-    const controls = sidebarRef.current
-    if (!controls || controls.collapsed || openedFromSidebar.current) return
+    const controls = railRef.current
+    if (controls.collapsed || openedFromSidebar.current) return
     controls.setCollapsed(true)
     return () => controls.setCollapsed(false)
   }, [])
@@ -119,43 +125,40 @@ function ReviewDetailPage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
+      <Box render={<main />} padding="xl" className="flex-1">
+        <Skeleton className="h-64 w-full rounded-panel" />
+      </Box>
     )
   }
   if (!session.data) return <RequireLogin />
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas text-ink">
-      <header
+    <Stack className="min-w-0 flex-1 overflow-hidden bg-canvas text-ink">
+      <Inline
+        render={<header />}
         data-desktop-drag-region=""
-        className={cn(
-          "flex h-12 shrink-0 items-center gap-3 border-b border-line pr-4 text-label",
-          // Clear room for the fixed collapse toggle when the sidebar is hidden.
-          sidebarCollapsed ? (isDesktop ? "pl-32" : "pl-14") : "pl-4"
-        )}
+        gap="sm"
+        className="h-toolbar shrink-0 border-b border-line px-4 text-label"
       >
-        <Link
-          to="/agents/reviews"
-          className="inline-flex items-center gap-1.5 text-ink-subtle hover:text-ink"
-        >
-          <ArrowLeftIcon className="size-3.5" />
+        <Link to="/agents/reviews" className={navLink}>
+          <Icon icon={ArrowLeft} size="sm" />
           Reviews
         </Link>
-        <span className="text-ink-subtle">/</span>
-        <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
-          <GitPullRequestIcon className="size-3.5 shrink-0 text-ink-subtle" />
-          <span className="truncate font-medium">
+        <span aria-hidden="true" className="text-ink-subtle">
+          /
+        </span>
+        <Inline gap="sm" className="min-w-0 flex-1">
+          <Icon icon={GitPullRequest} size="sm" className="text-ink-subtle" />
+          <span className="min-w-0 truncate font-medium">
             {owner}/{repo}
-            <span className="ml-1.5 font-normal text-ink-subtle">
+            <span className="ml-1.5 font-mono font-normal text-ink-subtle">
               #{number}
             </span>
             {detail.data ? ` ${detail.data.pr.title}` : ""}
           </span>
-        </span>
+        </Inline>
         {Number.isFinite(prNumber) && (
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Inline gap="sm" className="shrink-0">
             <ReviewCommentsMenu
               owner={owner}
               repo={repo}
@@ -163,19 +166,33 @@ function ReviewDetailPage() {
               onSelect={setActiveComment}
             />
             <SubmitReviewPopover owner={owner} repo={repo} number={prNumber} />
-          </div>
+          </Inline>
         )}
-      </header>
+      </Inline>
 
       {detail.error ? (
-        <div className="p-6 text-label text-risk">
-          {detail.error.message}
-        </div>
+        <Box padding="xl" className="mx-auto w-full max-w-reading">
+          <StateNotice
+            tone="RISK"
+            icon={AlertTriangle}
+            title="Could not load this review"
+            description={detail.error.message}
+            action={
+              <Button
+                size="compact"
+                variant="outline"
+                onClick={() => void detail.refetch()}
+              >
+                Try again
+              </Button>
+            }
+          />
+        </Box>
       ) : !detail.data ? (
-        <div className="space-y-3 p-6">
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-96 w-full" />
-        </div>
+        <Stack gap="md" padding="xl">
+          <Skeleton className="h-24 w-full rounded-panel" />
+          <Skeleton className="h-96 w-full rounded-panel" />
+        </Stack>
       ) : (
         <ReviewMainBody
           key={detail.data.head_sha}
@@ -186,6 +203,6 @@ function ReviewDetailPage() {
           onCloseOpenComment={closeActiveComment}
         />
       )}
-    </div>
+    </Stack>
   )
 }

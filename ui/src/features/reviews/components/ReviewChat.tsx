@@ -10,14 +10,25 @@ import {
 } from "react"
 import { StreamProvider, useStreamContext } from "@langchain/react"
 import { useQuery } from "@tanstack/react-query"
-import {
-  ArrowUpIcon,
-  CodeIcon,
-  SparkleIcon,
-  XIcon,
-} from "@phosphor-icons/react"
 import type { BaseMessage } from "@langchain/core/messages"
 
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+
+import {
+  AlertTriangle,
+  ArrowUp,
+  Code,
+  MessageSquare,
+  Sparkles,
+  X,
+} from "@/components/glyphs"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import {
   parseExcerpts,
@@ -125,8 +136,15 @@ function AttachmentPill({
   onRemove?: () => void
 }) {
   return (
-    <span className="inline-flex max-w-[200px] items-center gap-1 rounded-badge border border-line bg-muted/60 py-0.5 pr-1 pl-1.5 text-meta text-ink">
-      <CodeIcon className="size-3 shrink-0 text-ink-subtle" />
+    <Inline
+      render={<span />}
+      gap="xs"
+      bg="muted"
+      border="line"
+      radius="badge"
+      className="h-6 max-w-50 pr-0.5 pl-1.5 text-meta text-ink"
+    >
+      <Icon icon={Code} size="sm" className="text-ink-subtle" />
       <span className="truncate font-mono">{label}</span>
       {onRemove && (
         <Button
@@ -134,12 +152,13 @@ function AttachmentPill({
           variant="ghost"
           size="icon-sm"
           aria-label="Remove attachment"
+          className="size-5 rounded-tick"
           onClick={onRemove}
         >
-          <XIcon />
+          <Icon icon={X} size="sm" />
         </Button>
       )}
-    </span>
+    </Inline>
   )
 }
 
@@ -188,43 +207,44 @@ function EmptyState({
     ? SUGGESTED_PROMPTS
     : SUGGESTED_PROMPTS.filter((prompt) => prompt !== FINDINGS_PROMPT)
   return (
-    <div className="flex flex-1 flex-col gap-4 p-4">
-      <p className="text-label text-ink">
+    <Stack gap="lg" padding="lg" className="flex-1">
+      <p className="text-body text-ink">
         {reviewed
           ? "I've reviewed this PR. Ask me about the diff, the findings, or the surrounding code — I have read-only access to the repository."
           : "This PR hasn't been reviewed yet. Ask me about the diff or the surrounding code — I have read-only access to the repository."}
       </p>
-      <div className="flex flex-col gap-1.5">
+      <Stack gap="xs">
         <span className="text-meta font-medium text-ink-subtle">
           Suggested prompts
         </span>
         {prompts.map((prompt) => (
-          <button
+          <Inline
             key={prompt}
-            type="button"
-            onClick={() => onPick(prompt)}
-            className="flex items-center gap-2 rounded-badge px-2 py-1.5 text-left text-label text-ink hover:bg-muted/60"
+            render={<button type="button" onClick={() => onPick(prompt)} />}
+            gap="sm"
+            radius="badge"
+            className="min-h-control px-2 py-1.5 text-left text-label text-ink hover:bg-hover"
           >
-            <SparkleIcon className="size-4 shrink-0 text-ink-subtle" />
+            <Icon icon={Sparkles} size="md" className="text-ink-subtle" />
             {prompt}
-          </button>
+          </Inline>
         ))}
-      </div>
-    </div>
+      </Stack>
+    </Stack>
   )
 }
 
 function LoadingState() {
   return (
-    <div className="flex flex-1 flex-col gap-4 p-4">
-      <div className="flex justify-end">
+    <Stack gap="lg" padding="lg" className="flex-1">
+      <Inline justify="end">
         <Skeleton className="h-12 w-2/5 rounded-compact" />
-      </div>
-      <div className="flex flex-col gap-2">
+      </Inline>
+      <Stack gap="sm">
         <Skeleton className="h-4 w-4/5" />
         <Skeleton className="h-4 w-3/5" />
-      </div>
-    </div>
+      </Stack>
+    </Stack>
   )
 }
 
@@ -385,7 +405,7 @@ function ChatBody({
   }, [showMessages])
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <Stack className="flex-1 overflow-hidden">
       {showLoading ? (
         <LoadingState />
       ) : showEmpty ? (
@@ -428,11 +448,9 @@ function ChatBody({
             const isUser = messageType(message) === "human"
             if (!isUser) {
               return (
-                <div key={message.id ?? index} className="flex justify-start">
-                  <div className="w-full text-label text-ink">
-                    <Markdown content={content} />
-                  </div>
-                </div>
+                <Box key={message.id ?? index} className="w-full text-ink">
+                  <Markdown content={content} />
+                </Box>
               )
             }
             const parsed = parseExcerpts(content)
@@ -449,55 +467,67 @@ function ChatBody({
                     : undefined
                 }
               >
-                <div
-                  className={`flex max-w-[85%] flex-col gap-1.5 ${
-                    isSystem ? "items-start" : "items-end"
-                  }`}
+                <Stack
+                  gap="xs"
+                  align={isSystem ? "start" : "end"}
+                  className="max-w-4/5"
                 >
                   {parsed.excerpts.length > 0 && (
-                    <div className="flex flex-wrap justify-end gap-1">
+                    <Inline gap="xs" justify="end" wrap>
                       {parsed.excerpts.map((excerpt, i) => (
                         <AttachmentPill
                           key={i}
                           label={attachmentBasename(excerpt.location)}
                         />
                       ))}
-                    </div>
+                    </Inline>
                   )}
                   {parsed.text && (
-                    <span
-                      className={`rounded-compact px-3 py-2 text-label whitespace-pre-wrap text-ink ${
-                        isSystem
-                          ? "border border-line bg-muted/50"
-                          : "bg-muted"
-                      }`}
+                    <Box
+                      render={<span />}
+                      radius="compact"
+                      bg="muted"
+                      border={isSystem ? "line" : undefined}
+                      className="px-3 py-2 text-body whitespace-pre-wrap text-ink"
                     >
                       {parsed.text}
-                    </span>
+                    </Box>
                   )}
-                </div>
+                </Stack>
               </div>
             )
           })}
           {busy && (
-            <div className="flex justify-start">
-              <div className="px-3 py-2 text-meta text-ink-subtle">
-                Thinking…
-              </div>
-            </div>
+            <Inline
+              role="status"
+              gap="sm"
+              className="text-meta text-ink-subtle"
+            >
+              <Spinner size="sm" />
+              Thinking…
+            </Inline>
           )}
           {!busy && streamError && (
-            <p className="rounded-badge border border-risk/40 px-3 py-2 text-label break-words text-risk">
-              The chat run failed: {streamError}
-            </p>
+            <StateNotice
+              tone="RISK"
+              icon={AlertTriangle}
+              title="The chat run failed"
+              description={streamError}
+            />
           )}
         </div>
       )}
 
-      <div className="p-3">
-        <div className="flex flex-col gap-1.5 rounded-panel border border-line bg-canvas px-1.5 py-1.5 transition-colors focus-within:border-primary/60">
+      <Box padding="md">
+        <Stack
+          gap="xs"
+          bg="panel"
+          border="line"
+          radius="panel"
+          className="p-1.5 transition-colors duration-fast ease-out-quint focus-within:border-line-strong motion-reduce:transition-none"
+        >
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-0.5 pl-2">
+            <Inline gap="xs" wrap className="pt-0.5 pl-2">
               {attachments.map((attachment) => (
                 <AttachmentPill
                   key={attachment.id}
@@ -505,9 +535,9 @@ function ChatBody({
                   onRemove={() => removeAttachment(attachment.id)}
                 />
               ))}
-            </div>
+            </Inline>
           )}
-          <div className="flex items-end gap-2 pl-2">
+          <Inline gap="sm" align="end" className="pl-2">
             <Textarea
               ref={inputRef}
               value={value}
@@ -520,21 +550,22 @@ function ChatBody({
               }}
               placeholder="Ask anything about this PR…"
               rows={1}
-              className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 shadow-none focus-visible:border-transparent focus-visible:ring-0 "
+              className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 text-body shadow-none focus-visible:border-transparent focus-visible:ring-0"
             />
             <Button
               type="button"
+              size="icon"
               onClick={submitComposer}
               disabled={(!value.trim() && attachments.length === 0) || busy}
               aria-label="Send message"
               className="rounded-full"
             >
-              <ArrowUpIcon className="size-4" />
+              <Icon icon={ArrowUp} size="md" />
             </Button>
-          </div>
-        </div>
-      </div>
-    </div>
+          </Inline>
+        </Stack>
+      </Box>
+    </Stack>
   )
 }
 
@@ -559,7 +590,7 @@ function ChatPanel({
   )
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden">
+    <Stack className="h-full flex-1 overflow-hidden">
       <StreamProvider
         client={client}
         assistantId={assistantId}
@@ -573,7 +604,7 @@ function ChatPanel({
           reviewed={reviewed}
         />
       </StreamProvider>
-    </div>
+    </Stack>
   )
 }
 
@@ -593,18 +624,23 @@ export function ReviewChat({
 
   if (meta.isPending) {
     return (
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <Stack gap="md" padding="lg" className="flex-1">
         <Skeleton className="h-4 w-2/3" />
         <Skeleton className="h-4 w-1/2" />
-      </div>
+      </Stack>
     )
   }
 
   if (meta.isError || !meta.data.available) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6 text-center text-meta text-ink-subtle">
-        Chat is unavailable right now. Reload the page to try again.
-      </div>
+      <Box padding="lg">
+        <StateNotice
+          tone="INFO"
+          icon={MessageSquare}
+          title="Chat is unavailable right now"
+          description="Reload the page to try again."
+        />
+      </Box>
     )
   }
 

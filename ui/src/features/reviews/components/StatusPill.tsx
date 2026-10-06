@@ -1,15 +1,12 @@
-import { cn } from "@/lib/utils"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+
 import { statusTones } from "../lib/status"
 
 export function StatusPill({ status }: { status: string }) {
+  const tone = statusTones[status] ?? "neutral"
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-label font-medium",
-        statusTones[status] ?? "border-line bg-muted text-ink-subtle"
-      )}
-    >
+    <Badge tier="quiet" tone={tone} dot={status === "Pending"}>
       {status}
-    </span>
+    </Badge>
   )
 }

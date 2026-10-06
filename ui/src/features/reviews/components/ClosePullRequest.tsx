@@ -1,4 +1,5 @@
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+
 import type { OpenPullRequest } from "@/lib/api"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import { pullRequestKey } from "../lib/status"
@@ -21,24 +22,22 @@ export function ClosePullRequest({
     onDone: onClosed,
   })
   return (
-    <div>
-      <TextPopover
-        trigger={
-          <Button
-            size="compact"
-            variant="outline"
-            disabled={close.isPending || close.isSuccess}
-            aria-live="polite"
-          >
-            {actionLabel(githubActions.close.labels, close)}
-          </Button>
-        }
-        title={`Close ${pullRequestKey(pr)}?`}
-        description="GitHub closes it without merging. A reason is posted as a comment."
-        placeholder="Reason (optional)"
-        submitLabel="Close pull request"
-        onSubmit={(reason) => close.mutateAsync(reason)}
-      />
-    </div>
+    <TextPopover
+      trigger={
+        <Button
+          size="compact"
+          variant="ghost"
+          disabled={close.isPending || close.isSuccess}
+          aria-live="polite"
+        >
+          {actionLabel(githubActions.close.labels, close)}
+        </Button>
+      }
+      title={`Close ${pullRequestKey(pr)}?`}
+      description="GitHub closes it without merging. A reason is posted as a comment."
+      placeholder="Reason (optional)"
+      submitLabel="Close pull request"
+      onSubmit={(reason) => close.mutateAsync(reason)}
+    />
   )
 }

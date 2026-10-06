@@ -2,11 +2,25 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
-import { AppShell } from "@/components/AppShell"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import {
+  SettingRow,
+  SettingSection,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
+
+import { AppShell } from "@/components/AppShell"
+import { ChevronLeft, ChevronRight, GitHub, Search } from "@/components/glyphs"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
@@ -105,9 +119,9 @@ function RepositoriesOwnerPage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
+      <Box render={<main />} padding="xl">
+        <Skeleton className="h-64 w-full rounded-panel" />
+      </Box>
     )
   }
   if (!session.data) return <RequireLogin />
@@ -129,119 +143,132 @@ function RepositoriesOwnerPage() {
       }
       backTo={{ to: "/review", label: "Back to Code review" }}
     >
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-meta font-medium tracking-wide text-ink-subtle uppercase">
-            Repositories
-          </h2>
-          <span className="text-meta text-ink-subtle">
+      <SettingSection
+        title="Repositories"
+        actions={
+          <span className="text-meta text-ink-subtle tabular-nums">
             {autoReviewCount}/{ownerRepos.length} run automatically
           </span>
-        </div>
-        <Input
-          type="search"
-          value={search}
-          onChange={(event) =>
-            setSearchPosition({ owner, search: event.target.value })
-          }
-          placeholder="Search repositories…"
-          aria-label="Search repositories"
-        />
-        <div className="rounded-compact border border-line bg-panel">
-          {loading && (
-            <div className="p-4">
-              <Skeleton className="h-32 w-full" />
-            </div>
-          )}
-          {!loading && filteredRepos.length === 0 && (
-            <p className="px-4 py-3 text-meta text-ink-subtle">
-              {ownerRepos.length === 0
-                ? "No repositories found for this installation."
-                : "No repositories match your search."}
-            </p>
-          )}
-          <ul className="divide-y divide-line">
-            {pageRepos.map((r) => {
-              const runsAutomatically = autoReviewSet.has(r.full_name)
-              return (
-                <li
-                  key={r.full_name}
-                  className="flex items-center justify-between gap-4 px-4 py-3"
+        }
+        contained
+      >
+        <Box className="pb-2">
+          <SearchInput
+            size="control"
+            value={search}
+            onValueChange={(value) =>
+              setSearchPosition({ owner, search: value })
+            }
+            placeholder="Search repositories…"
+            label="Search repositories"
+          />
+        </Box>
+        {loading ? (
+          <Stack gap="md" className="px-5 py-3">
+            {[0, 1, 2, 3].map((index) => (
+              <Inline key={index} gap="md" justify="between">
+                <Skeleton className="h-3 w-48" />
+                <Skeleton className="h-5 w-9 rounded-full" />
+              </Inline>
+            ))}
+          </Stack>
+        ) : filteredRepos.length === 0 ? (
+          ownerRepos.length === 0 ? (
+            <EmptyState
+              icon={GitHub}
+              title="No repositories found for this installation."
+            />
+          ) : (
+            <EmptyState
+              icon={Search}
+              title="No repositories match your search."
+              action={
+                <Button
+                  size="compact"
+                  variant="outline"
+                  onClick={() => setSearchPosition({ owner, search: "" })}
                 >
-                  <div className="flex min-w-0 items-center gap-2 text-label">
-                    <span className="truncate">
-                      <span className="text-ink-subtle">{owner}/</span>
-                      <span className="font-medium text-ink">
-                        {r.full_name.slice(owner.length + 1)}
-                      </span>
-                    </span>
-                    {r.private && (
-                      <span className="text-meta text-ink-subtle">
-                        private
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-meta text-ink-subtle">
-                      Run automatically
-                    </span>
-                    <span
-                      title={
-                        !canEdit
-                          ? "Only team admins can modify automatic review settings"
-                          : undefined
+                  Clear search
+                </Button>
+              }
+            />
+          )
+        ) : (
+          pageRepos.map((r) => {
+            const runsAutomatically = autoReviewSet.has(r.full_name)
+            return (
+              <SettingRow
+                key={r.full_name}
+                density="compact"
+                label={r.full_name}
+                badge={
+                  r.private ? (
+                    <Badge tier="notable" tone="neutral">
+                      private
+                    </Badge>
+                  ) : undefined
+                }
+                control={() => (
+                  <span
+                    title={
+                      !canEdit
+                        ? "Only team admins can modify automatic review settings"
+                        : undefined
+                    }
+                    className={!canEdit ? "cursor-not-allowed" : undefined}
+                  >
+                    <Switch
+                      aria-label={`Run reviews automatically for ${r.full_name}`}
+                      checked={runsAutomatically}
+                      disabled={!canEdit || toggling.has(r.full_name)}
+                      onCheckedChange={(v) =>
+                        toggleAutoReview.mutate({
+                          full_name: r.full_name,
+                          on: v,
+                        })
                       }
-                      className={!canEdit ? "cursor-not-allowed" : undefined}
-                    >
-                      <Switch
-                        aria-label={`Run reviews automatically for ${r.full_name}`}
-                        checked={runsAutomatically}
-                        disabled={!canEdit || toggling.has(r.full_name)}
-                        onCheckedChange={(v) =>
-                          toggleAutoReview.mutate({
-                            full_name: r.full_name,
-                            on: v,
-                          })
-                        }
-                      />
-                    </span>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-          {filteredRepos.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between gap-4 border-t border-line px-4 py-2 text-label">
-              <span className="text-ink-subtle">
-                Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
+                    />
+                  </span>
+                )}
+              />
+            )
+          })
+        )}
+        {filteredRepos.length > PAGE_SIZE && (
+          <Inline
+            gap="lg"
+            justify="between"
+            className="mt-2 border-t border-line px-5 pt-3 text-label"
+          >
+            <span className="text-ink-subtle tabular-nums">
+              Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
+            </span>
+            <Inline gap="sm">
+              <Button
+                size="compact"
+                variant="outline"
+                disabled={safePage === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                <Icon icon={ChevronLeft} size="sm" />
+                Prev
+              </Button>
+              <span className="text-ink-subtle tabular-nums">
+                {safePage + 1} / {totalPages}
               </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="compact"
-                  variant="outline"
-                  disabled={safePage === 0}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                >
-                  Prev
-                </Button>
-                <span className="text-ink-subtle">
-                  {safePage + 1} / {totalPages}
-                </span>
-                <Button
-                  size="compact"
-                  variant="outline"
-                  disabled={safePage >= totalPages - 1}
-                  onClick={() =>
-                    setPage((p) => Math.min(totalPages - 1, p + 1))
-                  }
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
+              <Button
+                size="compact"
+                variant="outline"
+                disabled={safePage >= totalPages - 1}
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              >
+                Next
+                <Icon icon={ChevronRight} size="sm" />
+              </Button>
+            </Inline>
+          </Inline>
+        )}
+      </SettingSection>
     </AppShell>
   )
 }

@@ -3,7 +3,13 @@ import { useState } from "react"
 import type { PendingReviewComment } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
@@ -32,11 +38,23 @@ export function PendingReviewCommentCard({
     )
   }
   return (
-    <div className="px-2 py-1 font-sans" data-testid="pending-review-comment">
-      <div className="rounded-badge border border-line bg-panel px-3 py-2 text-label">
-        <div className="mb-1.5 flex items-center gap-2">
-          <Badge variant="outline">Pending</Badge>
-          <div className="ml-auto flex items-center gap-1">
+    <Box
+      padding="xs"
+      className="px-2 font-sans"
+      data-testid="pending-review-comment"
+    >
+      <Stack
+        gap="sm"
+        bg="panel"
+        border="line"
+        radius="compact"
+        className="px-3 py-2 text-label"
+      >
+        <Inline gap="sm">
+          <Badge tier="notable" tone="attention">
+            Pending
+          </Badge>
+          <Inline gap="xs" className="ml-auto">
             {!editing && (
               <Button
                 size="compact"
@@ -50,18 +68,23 @@ export function PendingReviewCommentCard({
                 Edit
               </Button>
             )}
-            <Button
-              size="compact"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => pending.remove.mutate(comment.id)}
-            >
-              Delete
-            </Button>
-          </div>
-        </div>
+            <ConfirmableAction
+              title="Delete this pending comment?"
+              description="It is removed from your pending review on GitHub and cannot be recovered."
+              confirmLabel="Delete comment"
+              onConfirm={() =>
+                pending.remove.mutateAsync(comment.id).then(() => undefined)
+              }
+              trigger={
+                <Button size="compact" variant="ghost" disabled={busy}>
+                  Delete
+                </Button>
+              }
+            />
+          </Inline>
+        </Inline>
         {editing ? (
-          <>
+          <Stack gap="sm">
             <Textarea
               aria-label="Pending comment body"
               value={body}
@@ -75,27 +98,32 @@ export function PendingReviewCommentCard({
                 }
               }}
               rows={3}
-              className="resize-y text-label"
+              className="resize-y"
               autoFocus
             />
-            <div className="mt-2 flex justify-end gap-2">
+            <Inline gap="sm" justify="end">
               <Button
                 size="compact"
-                variant="outline"
+                variant="ghost"
                 disabled={busy}
                 onClick={() => setEditing(false)}
               >
                 Cancel
               </Button>
-              <Button size="compact" disabled={busy || !body.trim()} onClick={save}>
-                {pending.update.isPending ? "Saving…" : "Save"}
+              <Button
+                size="compact"
+                disabled={busy || !body.trim()}
+                loading={pending.update.isPending}
+                onClick={save}
+              >
+                Save
               </Button>
-            </div>
-          </>
+            </Inline>
+          </Stack>
         ) : (
           <Markdown content={comment.body} />
         )}
-      </div>
-    </div>
+      </Stack>
+    </Box>
   )
 }

@@ -1,22 +1,31 @@
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef } from "react"
-import { ArrowSquareOutIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 
-import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { IconWell } from "@langchain/gtm-platform-design-system/ui/icon-well"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+
+import {
+  AlertTriangle,
+  ExternalLink,
+  GitHub,
+  GitPullRequest,
+} from "@/components/glyphs"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/$owner/$repo/pull/$number")({
   component: PullRequestReviewLinkPage,
@@ -65,9 +74,16 @@ function PullRequestReviewLinkPage() {
 
   if (session.isLoading) {
     return (
-      <main className="flex min-h-svh items-center justify-center p-6">
-        <Skeleton className="h-52 w-full max-w-lg" />
-      </main>
+      <Stack
+        render={<main />}
+        align="center"
+        justify="center"
+        bg="canvas"
+        padding="xl"
+        className="min-h-svh"
+      >
+        <Skeleton className="h-52 w-full max-w-lg rounded-panel" />
+      </Stack>
     )
   }
 
@@ -78,6 +94,7 @@ function PullRequestReviewLinkPage() {
       <ReviewLinkCard
         title="Invalid pull request link"
         description="Expected a GitHub-style pull request path like /owner/repo/pull/123."
+        failure="ATTENTION"
         owner={owner}
         repo={repo}
         number={number}
@@ -101,6 +118,7 @@ function PullRequestReviewLinkPage() {
       <ReviewLinkCard
         title="Could not start review"
         description={triggerReview.error.message}
+        failure="RISK"
         owner={owner}
         repo={repo}
         number={number}
@@ -144,6 +162,7 @@ function ReviewLinkCard({
   githubPrUrl,
   stableReviewPath,
   loading = false,
+  failure,
   onRetry,
 }: {
   title: string
@@ -154,60 +173,97 @@ function ReviewLinkCard({
   githubPrUrl: string
   stableReviewPath?: string
   loading?: boolean
+  /** Who clears it: a failed start is a wall, a bad link the reader fixes. */
+  failure?: "RISK" | "ATTENTION"
   onRetry?: () => void
 }) {
   return (
-    <main className="flex min-h-svh items-center justify-center bg-canvas p-6 text-ink">
-      <Card className="w-full max-w-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-page">
-            <GitPullRequestIcon className="size-5 text-ink-subtle" />
-            {title}
-          </CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-compact border border-line bg-muted/40 p-3 text-body">
-            <div className="font-medium">
-              {owner}/{repo} #{number}
-            </div>
-            <a
-              href={githubPrUrl}
-              className="mt-1 inline-flex items-center gap-1 text-ink-subtle hover:text-ink"
-            >
-              View on GitHub
-              <ArrowSquareOutIcon className="size-3.5" />
-            </a>
-          </div>
-          {loading && <Skeleton className="mt-4 h-2 w-full" />}
-        </CardContent>
-        <CardFooter className="flex flex-wrap gap-2">
-          {onRetry && (
-            <button
-              type="button"
-              className={buttonVariants()}
-              onClick={onRetry}
-            >
-              Try again
-            </button>
-          )}
+    <Stack
+      render={<main />}
+      align="center"
+      justify="center"
+      bg="canvas"
+      padding="xl"
+      className="min-h-svh text-ink"
+    >
+      <Stack
+        gap="lg"
+        bg="panel"
+        border="line"
+        radius="panel"
+        padding="xl"
+        className="w-full max-w-lg"
+      >
+        {failure ? (
+          <StateNotice
+            tone={failure}
+            icon={AlertTriangle}
+            title={title}
+            description={description}
+          />
+        ) : (
+          <Inline gap="md" align="start">
+            <IconWell>
+              {loading ? (
+                <Spinner size="sm" />
+              ) : (
+                <Icon icon={GitPullRequest} size="sm" />
+              )}
+            </IconWell>
+            <Stack gap="xs" className="min-w-0">
+              <Box
+                render={<h1 />}
+                className="text-title font-semibold text-ink"
+              >
+                {title}
+              </Box>
+              <p className="text-body text-ink-subtle">{description}</p>
+            </Stack>
+          </Inline>
+        )}
+        <Inline
+          gap="md"
+          justify="between"
+          bg="muted"
+          border="line"
+          radius="compact"
+          padding="md"
+          wrap
+        >
+          <Inline gap="sm" className="min-w-0 text-label">
+            <Icon icon={GitHub} size="sm" className="text-ink-subtle" />
+            <span className="truncate font-medium">
+              {owner}/{repo}
+            </span>
+            <span className="font-mono text-ink-subtle">#{number}</span>
+          </Inline>
+          <a
+            href={githubPrUrl}
+            className="inline-flex items-center gap-1 text-label text-ink-subtle hover:text-ink"
+          >
+            View on GitHub
+            <Icon icon={ExternalLink} size="sm" />
+          </a>
+        </Inline>
+        <Inline gap="sm" justify="end" wrap>
+          <a
+            href={githubPrUrl}
+            className={buttonVariants({ variant: "ghost" })}
+          >
+            Open GitHub PR
+          </a>
           {stableReviewPath && (
             <Link
               to="/agents/reviews/$owner/$repo/$number"
               params={{ owner, repo, number }}
-              className={cn(buttonVariants({ variant: "outline" }))}
+              className={buttonVariants({ variant: "outline" })}
             >
               Open stable review page
             </Link>
           )}
-          <a
-            href={githubPrUrl}
-            className={cn(buttonVariants({ variant: "ghost" }))}
-          >
-            Open GitHub PR
-          </a>
-        </CardFooter>
-      </Card>
-    </main>
+          {onRetry && <Button onClick={onRetry}>Try again</Button>}
+        </Inline>
+      </Stack>
+    </Stack>
   )
 }

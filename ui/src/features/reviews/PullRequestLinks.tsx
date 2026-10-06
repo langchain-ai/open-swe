@@ -1,36 +1,48 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
-import { IoLogoGithub } from "react-icons/io5"
 import { useState } from "react"
-import { ChevronDown } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@langchain/gtm-platform-design-system/ui/dialog"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@langchain/gtm-platform-design-system/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
-import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Bot,
+  ChevronDown,
+  GitHub,
+  MessageSquare,
+  MoreVertical,
+} from "@/components/glyphs"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
+/** A link drawn as a quiet compact control, for hops that leave the row. */
 export const navLink = cn(
   buttonVariants({ variant: "ghost", size: "compact" }),
-  "px-1.5 text-ink-subtle"
+  "px-2 text-ink-subtle hover:text-ink"
 )
 
-export function PullRequestLinks({
-  repo,
-  number,
-  title,
-  onReviewPage = false,
-}: {
-  repo: string
-  number: number
-  title: string
-  onReviewPage?: boolean
-}) {
-  const [owner, name] = repo.split("/")
+function usePullRequestAgent(repo: string, number: number, title: string) {
   const navigate = useNavigate()
   const [messageOpen, setMessageOpen] = useState(false)
   const [message, setMessage] = useState("")
@@ -66,95 +78,188 @@ export function PullRequestLinks({
       navigate({ to: "/agents/$threadId", params: { threadId: thread_id } }),
     retry: false,
   })
-  return (
-    <div className="text-label">
-      <span className="flex flex-wrap items-center gap-0.5">
-        <span className="inline-flex items-center">
-          <button
-            type="button"
-            className={navLink}
-            disabled={thread.isPending || thread.isSuccess}
-            aria-live="polite"
-            onClick={() => thread.mutate()}
-          >
-            {thread.isPending ? "Opening thread…" : "Agent"}
-          </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className={cn(navLink, "border-l border-line px-1")}
-              aria-label="Agent options"
-            >
-              <ChevronDown className="size-3" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => setMessageOpen(true)}>
-                Send a message…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </span>
-        <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
-          <DialogContent className="gap-4 p-5">
+  const messageDialog = (
+    <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
+      <DialogContent className="sm:max-w-md">
+        <form
+          className="contents"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (message.trim() && !send.isPending) send.mutate()
+          }}
+        >
+          <DialogHeader>
             <DialogTitle>Send a message to the agent</DialogTitle>
             <DialogDescription>
               {repo}#{number} · {title}
             </DialogDescription>
-            <form
-              className="flex flex-col gap-4"
-              onSubmit={(event) => {
-                event.preventDefault()
-                if (message.trim() && !send.isPending) send.mutate()
-              }}
+          </DialogHeader>
+          <Textarea
+            autoFocus
+            aria-label="Message"
+            placeholder="What should the agent do?"
+            value={message}
+            maxLength={10000}
+            disabled={send.isPending}
+            onChange={(event) => setMessage(event.target.value)}
+          />
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setMessageOpen(false)}
             >
-              <Textarea
-                autoFocus
-                aria-label="Message"
-                placeholder="What should the agent do?"
-                value={message}
-                maxLength={10000}
-                disabled={send.isPending}
-                onChange={(event) => setMessage(event.target.value)}
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={!message.trim()}
+              loading={send.isPending}
+            >
+              Send message
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+  return { thread, openMessage: () => setMessageOpen(true), messageDialog }
+}
+
+export function PullRequestLinks({
+  repo,
+  number,
+  title,
+  onReviewPage = false,
+}: {
+  repo: string
+  number: number
+  title: string
+  onReviewPage?: boolean
+}) {
+  const [owner, name] = repo.split("/")
+  const { thread, openMessage, messageDialog } = usePullRequestAgent(
+    repo,
+    number,
+    title
+  )
+  return (
+    <Inline gap="xs" wrap className="text-label">
+      <Inline>
+        <Button
+          size="compact"
+          variant="ghost"
+          className="rounded-r-none px-2 text-ink-subtle hover:text-ink"
+          disabled={thread.isPending || thread.isSuccess}
+          aria-live="polite"
+          onClick={() => thread.mutate()}
+        >
+          {thread.isPending ? "Opening thread…" : "Agent"}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="rounded-l-none text-ink-subtle hover:text-ink"
               />
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setMessageOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={!message.trim() || send.isPending}
-                >
-                  {send.isPending ? "Sending…" : "Send message"}
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
-        {!onReviewPage && (
-          <>
-            <Link
-              className={navLink}
-              to="/agents/reviews/$owner/$repo/$number"
-              params={{ owner: owner!, repo: name!, number: String(number) }}
-            >
-              Reviewer
-            </Link>
-            <a
-              className={navLink}
-              href={`https://github.com/${repo}/pull/${number}`}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="GitHub"
-              title="Open on GitHub"
-            >
-              <IoLogoGithub className="size-3.5" />
-            </a>
-          </>
-        )}
-      </span>
-    </div>
+            }
+            aria-label="Agent options"
+          >
+            <Icon icon={ChevronDown} size="sm" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={openMessage}>
+              Send a message…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </Inline>
+      {messageDialog}
+      {!onReviewPage && (
+        <>
+          <Link
+            className={navLink}
+            to="/agents/reviews/$owner/$repo/$number"
+            params={{ owner: owner!, repo: name!, number: String(number) }}
+          >
+            Reviewer
+          </Link>
+          <a
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon-sm" }),
+              "text-ink-subtle hover:text-ink"
+            )}
+            href={`https://github.com/${repo}/pull/${number}`}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="GitHub"
+            title="Open on GitHub"
+          >
+            <Icon icon={GitHub} size="sm" />
+          </a>
+        </>
+      )}
+    </Inline>
+  )
+}
+
+/** The same agent and GitHub hops as a queue row's one menu. */
+export function PullRequestRowMenu({
+  repo,
+  number,
+  title,
+}: {
+  repo: string
+  number: number
+  title: string
+}) {
+  const { thread, openMessage, messageDialog } = usePullRequestAgent(
+    repo,
+    number,
+    title
+  )
+  // The row owns Enter, Space and clicks; this menu and its dialog keep theirs.
+  const keepFromRow = (event: { stopPropagation: () => void }) =>
+    event.stopPropagation()
+  return (
+    <Box render={<span />} onKeyDown={keepFromRow} onClick={keepFromRow}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<Button size="icon-sm" variant="ghost" />}
+          aria-label={`Actions for ${repo}#${number}`}
+        >
+          <Icon icon={MoreVertical} size="sm" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            disabled={thread.isPending || thread.isSuccess}
+            onClick={() => thread.mutate()}
+          >
+            <Icon icon={Bot} size="sm" />
+            {thread.isPending ? "Opening thread…" : "Open agent thread"}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={openMessage}>
+            <Icon icon={MessageSquare} size="sm" />
+            Send a message…
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() =>
+              window.open(
+                `https://github.com/${repo}/pull/${number}`,
+                "_blank",
+                "noopener,noreferrer"
+              )
+            }
+          >
+            <Icon icon={GitHub} size="sm" />
+            Open on GitHub
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {messageDialog}
+    </Box>
   )
 }

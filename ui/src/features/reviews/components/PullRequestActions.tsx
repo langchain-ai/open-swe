@@ -1,3 +1,7 @@
+import { Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+
+import { AlertTriangle } from "@/components/glyphs"
 import type { OpenPullRequest } from "@/lib/api"
 import { PullRequestLinks } from "../PullRequestLinks"
 import {
@@ -45,17 +49,14 @@ export function PullRequestActions({
     return () => onSettled(undefined)
   }
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <Inline gap="lg" wrap>
       {outcome && (
         <span className="text-meta text-ink-subtle">
           {outcomeLabels[outcome]} · leaves the list on the next refresh
         </span>
       )}
       {/* Hidden rather than unmounted, so a rolled-back outcome keeps each control's state. */}
-      <div
-        hidden={Boolean(outcome)}
-        className="flex flex-wrap items-center gap-x-2 gap-y-2"
-      >
+      <Inline hidden={Boolean(outcome)} gap="sm" align="start" wrap>
         {isConflicted(pr) && (
           <PullRequestThreadAction
             pr={pr}
@@ -88,22 +89,25 @@ export function PullRequestActions({
           />
         )}
         {pr.missingChecks.length > 0 && (
-          <span className="text-label text-attention">
-            Merge blocked: {pr.missingChecks.join(", ")} never reported
-          </span>
+          <Inline gap="xs" className="h-control-sm text-label text-attention">
+            <Icon icon={AlertTriangle} size="sm" />
+            <span>
+              Merge blocked: {pr.missingChecks.join(", ")} never reported
+            </span>
+          </Inline>
         )}
         <ClosePullRequest
           pr={pr}
           apply={() => settle("closed")}
           onClosed={onSettledConfirmed}
         />
-      </div>
+      </Inline>
       <PullRequestLinks
         repo={pr.repo}
         number={pr.number}
         title={pr.title}
         onReviewPage={onReviewPage}
       />
-    </div>
+    </Inline>
   )
 }

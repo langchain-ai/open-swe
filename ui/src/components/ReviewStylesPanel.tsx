@@ -1,15 +1,42 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import {
+  QueueList,
+  QueueRow,
+} from "@langchain/gtm-platform-design-system/patterns/queue-row"
+import { RecordHeader } from "@langchain/gtm-platform-design-system/patterns/record-header"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@langchain/gtm-platform-design-system/ui/combobox"
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from "@langchain/gtm-platform-design-system/ui/combobox"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { Label } from "@langchain/gtm-platform-design-system/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@langchain/gtm-platform-design-system/ui/select"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+
+import { AlertTriangle, Brush, Key, Play, X } from "@/components/glyphs"
+import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -23,17 +50,20 @@ const APPROVAL_MODES: Array<{ value: ReviewApprovalMode; label: string }> = [
   { value: "approve", label: "Approve" },
 ]
 
-function statusVariant(status: ReviewStyle["status"]) {
-  switch (status) {
-    case "completed":
-      return "default" as const
-    case "running":
-      return "secondary" as const
-    case "failed":
-      return "destructive" as const
-    default:
-      return "outline" as const
-  }
+function StatusBadge({ status }: { status: ReviewStyle["status"] }) {
+  const tone =
+    status === "completed"
+      ? "positive"
+      : status === "running"
+        ? "attention"
+        : status === "failed"
+          ? "risk"
+          : "neutral"
+  return (
+    <Badge tier="quiet" tone={tone} dot={status === "running"}>
+      {status}
+    </Badge>
+  )
 }
 
 export function ReviewStylesPanel() {
@@ -184,7 +214,12 @@ export function ReviewStylesPanel() {
   })
 
   if (styles.isLoading) {
-    return <Skeleton className="h-40" />
+    return (
+      <Stack gap="md">
+        <Skeleton className="h-24 w-full rounded-panel" />
+        <Skeleton className="h-40 w-full rounded-panel" />
+      </Stack>
+    )
   }
 
   const configured = new Set((styles.data ?? []).map((s) => s.full_name))
@@ -212,23 +247,29 @@ export function ReviewStylesPanel() {
       .some(isGithubReauthError)
 
   return (
-    <div className="flex flex-col gap-6 p-4">
+    <Stack gap="xl">
       {githubReauth && (
-        <div className="rounded-badge border border-risk/40 bg-risk-bg px-3 py-2 text-label text-risk">
-          Your GitHub connection expired.{" "}
-          <a
-            href={loginUrl()}
-            className="font-medium underline underline-offset-2"
-          >
-            Sign in with GitHub again
-          </a>{" "}
-          to list installed repos and run style analysis.
-        </div>
+        <StateNotice
+          tone="ATTENTION"
+          icon={Key}
+          title="Your GitHub connection expired"
+          description="Sign in with GitHub again to list installed repos and run style analysis."
+          action={
+            <Button
+              size="compact"
+              variant="outline"
+              nativeButton={false}
+              render={<a href={loginUrl()} />}
+            >
+              Sign in with GitHub again
+            </Button>
+          }
+        />
       )}
-      <section className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="add-repo">Add repository</Label>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+      <PageSection title="Add repository" contained inset="padded">
+        <Stack gap="sm">
+          <Label htmlFor="add-repo">Repository</Label>
+          <Inline gap="sm" align="start" wrap>
             <Input
               id="add-repo"
               placeholder="owner/repo"
@@ -240,30 +281,29 @@ export function ReviewStylesPanel() {
                   handleAdd()
                 }
               }}
-              className="sm:flex-1"
+              className="min-w-48 flex-1"
             />
             <Button
-              size="compact"
-              className="shrink-0 sm:w-auto"
-              disabled={!canAdd || createStyle.isPending}
+              disabled={!canAdd}
+              loading={createStyle.isPending}
               onClick={handleAdd}
             >
               Add
             </Button>
-          </div>
+          </Inline>
           {suggestedRepos.length > 0 && (
-            <Combobox
-              items={suggestedRepos.map((r) => r.full_name)}
-              value={addRepo}
-              onValueChange={(v) => setAddRepo(typeof v === "string" ? v : "")}
-            >
-              <ComboboxInput
-                placeholder="Search installed repos…"
-                showClear
-                className="w-full"
-              />
-              <ComboboxContent className="min-w-[var(--anchor-width)]">
-                <ComboboxList className="max-h-48">
+            <Combobox value={addRepo} onValueChange={(v) => setAddRepo(v)}>
+              <ComboboxTrigger
+                placeholder="Or pick an installed repo…"
+                aria-label="Pick an installed repo"
+              >
+                {suggestedRepos.some((r) => r.full_name === addRepo)
+                  ? addRepo
+                  : null}
+              </ComboboxTrigger>
+              <ComboboxContent>
+                <ComboboxInput placeholder="Search installed repos…" />
+                <ComboboxList>
                   <ComboboxEmpty>No matches</ComboboxEmpty>
                   {suggestedRepos.map((r) => (
                     <ComboboxItem key={r.full_name} value={r.full_name}>
@@ -281,104 +321,123 @@ export function ReviewStylesPanel() {
               </ComboboxContent>
             </Combobox>
           )}
-        </div>
+        </Stack>
+      </PageSection>
 
-        <div className="space-y-2">
-          <p className="text-label font-medium text-ink">Repositories</p>
-          {(styles.data ?? []).length === 0 ? (
-            <p className="text-meta text-ink-subtle">
-              No repositories yet.
-            </p>
-          ) : (
-            <ul className="flex flex-wrap gap-2">
-              {(styles.data ?? []).map((s) => (
-                <li key={s.full_name}>
-                  <button
-                    type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-badge border px-2.5 py-1.5 text-left text-label transition-colors hover:bg-muted ${
-                      selected === s.full_name
-                        ? "border-primary bg-muted font-medium"
-                        : "border-line"
-                    }`}
-                    onClick={() => setSelected(s.full_name)}
-                  >
-                    <span className="truncate">{s.full_name}</span>
-                    <Badge
-                      variant={statusVariant(s.status)}
-                      className="shrink-0"
-                    >
-                      {s.status}
-                    </Badge>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
-
-      <div className="border-t border-line" />
-
-      <section className="space-y-3">
-        {!selected || !active ? (
-          <p className="text-meta text-ink-subtle">
-            Select a repository above to view or edit its review style prompt.
-          </p>
+      <PageSection title="Repositories" contained>
+        {(styles.data ?? []).length === 0 ? (
+          <EmptyState
+            icon={Brush}
+            title="No repositories yet."
+            description="Add a repository to learn its review style."
+          />
         ) : (
-          <>
-            <p className="text-body font-medium text-ink">
-              {active.full_name}
-            </p>
-            <div className="flex flex-wrap items-center gap-2 text-label">
-              <Badge variant={statusVariant(active.status)}>
-                {active.status}
-              </Badge>
-              {active.top_reviewers.length > 0 && (
-                <span className="text-ink-subtle">
-                  Reviewers: {active.top_reviewers.join(", ")}
-                </span>
-              )}
-              {active.prs_sampled > 0 && (
-                <span className="text-ink-subtle">
-                  {active.prs_sampled} PRs · {active.reviews_sampled} reviews
-                  sampled
-                </span>
-              )}
-            </div>
-            {active.analysis_summary && (
-              <p className="text-meta text-ink-subtle">
-                {active.analysis_summary}
-              </p>
-            )}
-            {active.error && (
-              <p className="text-label text-risk">{active.error}</p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="compact"
-                variant="outline"
-                disabled={active.status === "running" || analyze.isPending}
-                onClick={() => {
-                  void analyze
-                    .mutateAsync(active.full_name)
-                    .catch(() => undefined)
-                }}
-              >
-                {active.status === "running" ? "Analyzing…" : "Run analysis"}
-              </Button>
-              {active.status === "running" && (
+          <QueueList label="Repositories with review styles">
+            {(styles.data ?? []).map((s) => (
+              <QueueRow
+                key={s.full_name}
+                primary={s.full_name}
+                state={<StatusBadge status={s.status} />}
+                selected={selected === s.full_name}
+                onSelect={() => setSelected(s.full_name)}
+              />
+            ))}
+          </QueueList>
+        )}
+      </PageSection>
+
+      {!selected || !active ? (
+        <p className="text-meta text-ink-subtle">
+          Select a repository above to view or edit its review style prompt.
+        </p>
+      ) : (
+        <Stack render={<section aria-label={active.full_name} />} gap="lg">
+          <RecordHeader
+            title={active.full_name}
+            status={<StatusBadge status={active.status} />}
+            meta={
+              <Stack gap="xs" className="text-meta text-ink-subtle">
+                {(active.top_reviewers.length > 0 ||
+                  active.prs_sampled > 0) && (
+                  <Inline gap="md" wrap>
+                    {active.top_reviewers.length > 0 && (
+                      <span>Reviewers: {active.top_reviewers.join(", ")}</span>
+                    )}
+                    {active.prs_sampled > 0 && (
+                      <span className="tabular-nums">
+                        {active.prs_sampled} PRs · {active.reviews_sampled}{" "}
+                        reviews sampled
+                      </span>
+                    )}
+                  </Inline>
+                )}
+                {active.analysis_summary && <p>{active.analysis_summary}</p>}
+              </Stack>
+            }
+            actions={
+              <>
                 <Button
                   size="compact"
                   variant="outline"
-                  disabled={cancelAnalysis.isPending}
-                  onClick={() => cancelAnalysis.mutate(active.full_name)}
+                  disabled={active.status === "running" || analyze.isPending}
+                  onClick={() => {
+                    void analyze
+                      .mutateAsync(active.full_name)
+                      .catch(() => undefined)
+                  }}
                 >
-                  Cancel
+                  <Icon icon={Play} size="sm" />
+                  {active.status === "running" ? "Analyzing…" : "Run analysis"}
                 </Button>
-              )}
+                {active.status === "running" && (
+                  <Button
+                    size="compact"
+                    variant="ghost"
+                    disabled={cancelAnalysis.isPending}
+                    onClick={() => cancelAnalysis.mutate(active.full_name)}
+                  >
+                    Cancel
+                  </Button>
+                )}
+                <ConfirmableAction
+                  title={`Remove ${active.full_name}?`}
+                  description="Its review style prompt and approval mode are deleted. This cannot be undone."
+                  confirmLabel="Remove repository"
+                  onConfirm={async () => {
+                    removeStyle.mutate(active.full_name)
+                  }}
+                  trigger={
+                    <Button
+                      size="compact"
+                      variant="ghost"
+                      disabled={
+                        removeStyle.isPending ||
+                        (!!active.approval_mode && !session.data?.is_admin)
+                      }
+                    >
+                      <Icon icon={X} size="sm" />
+                      Remove
+                    </Button>
+                  }
+                />
+              </>
+            }
+          />
+          {active.error && (
+            <StateNotice
+              tone="RISK"
+              icon={AlertTriangle}
+              title="The last analysis failed"
+              description={active.error}
+            />
+          )}
+          <PageSection
+            title="Review style prompt"
+            actions={
               <Button
                 size="compact"
-                disabled={!draftPrompt.trim() || savePrompt.isPending}
+                disabled={!draftPrompt.trim()}
+                loading={savePrompt.isPending}
                 onClick={() =>
                   savePrompt.mutate({
                     full_name: active.full_name,
@@ -388,29 +447,11 @@ export function ReviewStylesPanel() {
               >
                 Save prompt
               </Button>
-              <Button
-                size="compact"
-                variant="destructive"
-                disabled={
-                  removeStyle.isPending ||
-                  (!!active.approval_mode && !session.data?.is_admin)
-                }
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      `Remove ${active.full_name} from review style prompts? This cannot be undone.`
-                    )
-                  ) {
-                    return
-                  }
-                  removeStyle.mutate(active.full_name)
-                }}
-              >
-                Remove
-              </Button>
-            </div>
+            }
+          >
             <Textarea
-              className="min-h-[320px] w-full font-mono text-label"
+              aria-label="Review style prompt"
+              className="min-h-80 w-full font-mono text-label"
               value={draftPrompt}
               onChange={(e) => setDraftPrompt(e.target.value)}
               placeholder={
@@ -420,6 +461,8 @@ export function ReviewStylesPanel() {
               }
               disabled={active.status === "running"}
             />
+          </PageSection>
+          <Stack gap="sm">
             <Label htmlFor="repo-approval-mode">Approval mode</Label>
             <p className="text-meta text-ink-subtle">
               Criteria come from <code>.open-swe/APPROVALS.md</code> in the
@@ -464,9 +507,9 @@ export function ReviewStylesPanel() {
                 )}
               </p>
             )}
-          </>
-        )}
-      </section>
-    </div>
+          </Stack>
+        </Stack>
+      )}
+    </Stack>
   )
 }

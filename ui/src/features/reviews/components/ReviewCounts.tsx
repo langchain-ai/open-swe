@@ -1,7 +1,8 @@
-import { BugBeetleIcon, FlagIcon } from "@phosphor-icons/react"
+import { Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 
+import { Bug, Flag } from "@/components/glyphs"
 import type { ReviewCounts as Counts } from "@/lib/api"
-import { cn } from "@/lib/utils"
 
 export function ReviewCounts({
   counts,
@@ -12,21 +13,26 @@ export function ReviewCounts({
 }) {
   return (
     <>
-      <span
-        className={cn(
-          "inline-flex items-center gap-1",
-          counts.bugs > 0 ? "text-risk" : "text-ink-subtle"
-        )}
+      <Inline
+        render={<span />}
+        gap="xs"
+        ink={counts.bugs > 0 ? "risk" : "ink-subtle"}
+        className="font-mono tabular-nums"
       >
-        <BugBeetleIcon aria-hidden="true" className="size-3.5" />
+        <Icon icon={Bug} size="sm" />
         {counts.bugs}
         {withLabels && " bugs"}
-      </span>
-      <span className="inline-flex items-center gap-1 text-ink-subtle">
-        <FlagIcon aria-hidden="true" className="size-3.5" />
+      </Inline>
+      <Inline
+        render={<span />}
+        gap="xs"
+        ink="ink-subtle"
+        className="font-mono tabular-nums"
+      >
+        <Icon icon={Flag} size="sm" />
         {counts.flags}
         {withLabels && " flags"}
-      </span>
+      </Inline>
     </>
   )
 }

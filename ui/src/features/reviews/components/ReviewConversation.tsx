@@ -1,21 +1,34 @@
-import {
-  ArrowSquareOutIcon,
-  ChatCircleIcon,
-  CheckCircleIcon,
-  EyeIcon,
-  ProhibitIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useState } from "react"
+import { useCallback, useId, useState } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 
-import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle,
+  ExternalLink,
+  Eye,
+  MessageSquare,
+  XCircle,
+  type Glyph,
+} from "@/components/glyphs"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import {
   getReviewConversation,
@@ -38,35 +51,36 @@ interface ReviewConversationProps {
 interface StateStyle {
   label: string
   verb: string
-  icon: ReactNode
-  className: string
+  icon: Glyph
+  tone: "positive" | "risk" | "neutral"
+  className?: string
 }
 
 const REVIEW_STATE_STYLES: Record<ConversationReviewState, StateStyle> = {
   APPROVED: {
     label: "Approved",
     verb: "approved these changes",
-    icon: <CheckCircleIcon weight="fill" />,
-    className:
-      "bg-positive-bg text-positive",
+    icon: CheckCircle,
+    tone: "positive",
   },
   CHANGES_REQUESTED: {
     label: "Changes requested",
     verb: "requested changes",
-    icon: <XCircleIcon weight="fill" />,
-    className: "bg-risk-bg text-risk",
+    icon: XCircle,
+    tone: "risk",
   },
   COMMENTED: {
     label: "Commented",
     verb: "reviewed",
-    icon: <EyeIcon />,
-    className: "bg-muted text-ink-subtle",
+    icon: Eye,
+    tone: "neutral",
   },
   DISMISSED: {
     label: "Dismissed",
     verb: "left a review that was dismissed",
-    icon: <ProhibitIcon />,
-    className: "bg-muted text-ink-subtle line-through",
+    icon: Ban,
+    tone: "neutral",
+    className: "line-through",
   },
 }
 
@@ -79,12 +93,13 @@ export function reviewConversationQueryKey(
 }
 
 function AuthorAvatar({ author }: { author: ConversationAuthor | null }) {
-  const login = author?.login ?? "ghost"
   return (
-    <Avatar size="sm" className="mt-0.5">
-      {author ? <AvatarImage src={author.avatar_url} alt={login} /> : null}
-      <AvatarFallback>{login.slice(0, 2).toUpperCase()}</AvatarFallback>
-    </Avatar>
+    <Avatar
+      name={author?.login ?? "ghost"}
+      src={author?.avatar_url}
+      size="chat"
+      className="mt-1.5"
+    />
   )
 }
 
@@ -121,28 +136,38 @@ function TimelineEntry({
   const hasBody = item.body.trim().length > 0
 
   return (
-    <li className="flex gap-3">
+    <Inline render={<li />} gap="md" align="start">
       <AuthorAvatar author={item.author} />
-      <div className="min-w-0 flex-1 overflow-hidden rounded-badge border border-line">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-muted/40 px-3 py-2 text-label">
+      <Stack
+        border="line"
+        radius="compact"
+        bg="panel"
+        className="min-w-0 flex-1 overflow-hidden"
+      >
+        <Inline
+          gap="sm"
+          wrap
+          bg="muted"
+          className="border-b border-line px-3 py-2 text-label"
+        >
           <span className="font-medium text-ink">{login}</span>
           <span className="text-ink-subtle">
             {style ? style.verb : "commented"}
           </span>
           <Timestamp value={item.created_at} href={item.html_url} />
-          <span className="ml-auto flex items-center gap-2">
+          <Inline gap="sm" className="ml-auto">
             {review && review.inline_comment_count > 0 ? (
-              <span className="flex items-center gap-1 text-ink-subtle">
-                <ChatCircleIcon />
+              <Inline gap="xs" className="text-meta text-ink-subtle">
+                <Icon icon={MessageSquare} size="sm" />
                 {review.inline_comment_count}{" "}
                 {review.inline_comment_count === 1
                   ? "inline comment"
                   : "inline comments"}
-              </span>
+              </Inline>
             ) : null}
             {style ? (
-              <Badge className={cn("gap-1", style.className)}>
-                {style.icon}
+              <Badge tier="quiet" tone={style.tone} className={style.className}>
+                <Icon icon={style.icon} size="sm" />
                 {style.label}
               </Badge>
             ) : null}
@@ -151,22 +176,25 @@ function TimelineEntry({
               target="_blank"
               rel="noreferrer"
               aria-label="Open on GitHub"
-              className="text-ink-subtle hover:text-ink"
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                "text-ink-subtle hover:text-ink"
+              )}
             >
-              <ArrowSquareOutIcon />
+              <Icon icon={ExternalLink} size="sm" />
             </a>
-          </span>
-        </div>
+          </Inline>
+        </Inline>
         {hasBody ? (
-          <div className="px-3 py-2 text-body">
+          <Box className="px-3 py-2 text-body">
             <Markdown
               content={item.body}
               transformImageUrl={transformImageUrl}
             />
-          </div>
+          </Box>
         ) : null}
-      </div>
-    </li>
+      </Stack>
+    </Inline>
   )
 }
 
@@ -207,12 +235,16 @@ function CommentBox({
   }
 
   return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(event) => {
-        event.preventDefault()
-        submit()
-      }}
+    <Stack
+      render={
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            submit()
+          }}
+        />
+      }
+      gap="sm"
     >
       <Textarea
         value={draft}
@@ -226,11 +258,17 @@ function CommentBox({
         className="min-h-24"
       />
       {mutation.isError ? (
-        <p role="alert" className="text-label text-risk">
-          {mutation.error.message}
-        </p>
+        <Inline
+          role="alert"
+          gap="xs"
+          align="start"
+          className="text-label text-risk"
+        >
+          <Icon icon={AlertTriangle} size="sm" className="mt-0.5" />
+          <span>{mutation.error.message}</span>
+        </Inline>
       ) : null}
-      <div className="flex items-center justify-end gap-2">
+      <Inline gap="sm" justify="end">
         <span className="text-meta text-ink-subtle">
           Cmd/Ctrl + Enter to comment
         </span>
@@ -243,11 +281,16 @@ function CommentBox({
         >
           Cancel
         </Button>
-        <Button type="submit" size="compact" disabled={!canSubmit}>
-          {mutation.isPending ? "Commenting…" : "Comment"}
+        <Button
+          type="submit"
+          size="compact"
+          disabled={!canSubmit}
+          loading={mutation.isPending}
+        >
+          Comment
         </Button>
-      </div>
-    </form>
+      </Inline>
+    </Stack>
   )
 }
 
@@ -267,30 +310,36 @@ export function ReviewConversation({
     [owner, repo, number]
   )
 
+  const headingId = useId()
+
   let timeline: ReactNode
   if (query.isPending) {
     timeline = (
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-20 w-full" />
-      </div>
+      <Stack gap="md">
+        <Skeleton className="h-20 w-full rounded-compact" />
+        <Skeleton className="h-20 w-full rounded-compact" />
+      </Stack>
     )
   } else if (query.isError) {
     timeline = (
-      <Alert variant="error">
-        <AlertDescription>{query.error.message}</AlertDescription>
-      </Alert>
+      <StateNotice
+        tone="RISK"
+        icon={AlertTriangle}
+        title="Could not load the conversation"
+        description={query.error.message}
+      />
     )
   } else if (query.data.items.length === 0) {
     timeline = (
-      <div className="flex flex-col items-center gap-2 rounded-badge border border-dashed border-line px-4 py-8 text-center text-body text-ink-subtle">
-        <ChatCircleIcon className="size-5" />
-        No comments or reviews yet.
-      </div>
+      <EmptyState
+        icon={MessageSquare}
+        title="No comments or reviews yet."
+        className="rounded-panel border border-dashed border-line"
+      />
     )
   } else {
     timeline = (
-      <ol className="flex flex-col gap-4">
+      <Stack render={<ol />} gap="lg">
         {query.data.items.map((item) => (
           <TimelineEntry
             key={`${item.kind}-${item.id}`}
@@ -298,17 +347,23 @@ export function ReviewConversation({
             transformImageUrl={transformImageUrl}
           />
         ))}
-      </ol>
+      </Stack>
     )
   }
 
   return (
-    <section
-      aria-label="Conversation"
-      className={cn("flex flex-col gap-3", className)}
+    <Stack
+      render={<section aria-labelledby={headingId} />}
+      gap="md"
+      className={className}
     >
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-body font-medium">Conversation</h2>
+      <Inline gap="sm" justify="between">
+        <Box
+          render={<h2 id={headingId} />}
+          className="text-title font-medium text-ink"
+        >
+          Conversation
+        </Box>
         {!composing && (
           <Button
             type="button"
@@ -316,11 +371,11 @@ export function ReviewConversation({
             variant="outline"
             onClick={() => setComposing(true)}
           >
-            <ChatCircleIcon />
+            <Icon icon={MessageSquare} size="sm" />
             Comment
           </Button>
         )}
-      </div>
+      </Inline>
       {composing && (
         <CommentBox
           owner={owner}
@@ -330,6 +385,6 @@ export function ReviewConversation({
         />
       )}
       {timeline}
-    </section>
+    </Stack>
   )
 }

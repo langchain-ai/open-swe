@@ -1,13 +1,66 @@
-import { GitPullRequestIcon } from "@phosphor-icons/react"
-import { IoLogoGithub } from "react-icons/io5"
+import type { ReactNode } from "react"
 
-import { cn } from "@/lib/utils"
+import { RecordHeader } from "@langchain/gtm-platform-design-system/patterns/record-header"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 
-const STATE_STYLES: Record<string, string> = {
-  open: "border-positive/40 text-positive",
-  draft: "border-line text-ink-subtle",
-  merged: "border-merged/40 text-merged",
-  closed: "border-risk/40 text-risk",
+import { GitHub, GitMerge, GitPullRequest } from "@/components/glyphs"
+
+type PrState = "open" | "draft" | "merged" | "closed"
+
+const STATE_TONE = {
+  open: "positive",
+  draft: "neutral",
+  closed: "risk",
+} as const
+
+function isPrState(state: string): state is PrState {
+  return (
+    state === "open" ||
+    state === "draft" ||
+    state === "merged" ||
+    state === "closed"
+  )
+}
+
+/** The PR's lifecycle as one Quiet badge; merged wears the app's merged pair. */
+export function PrStateBadge({ state }: { state: string }) {
+  const known: PrState = isPrState(state) ? state : "open"
+  if (known === "merged")
+    return (
+      <Badge
+        tier="quiet"
+        className="border-merged/20 bg-merged-bg text-merged capitalize"
+      >
+        <Icon icon={GitMerge} size="sm" />
+        {state}
+      </Badge>
+    )
+  return (
+    <Badge tier="quiet" tone={STATE_TONE[known]} className="capitalize">
+      <Icon icon={GitPullRequest} size="sm" />
+      {state}
+    </Badge>
+  )
+}
+
+function Ref({ name }: { name: string }) {
+  return (
+    <Box
+      render={<span />}
+      title={name}
+      radius="badge"
+      border="line"
+      className="max-w-60 truncate px-1.5 font-mono text-meta text-ink-muted"
+    >
+      {name}
+    </Box>
+  )
 }
 
 export interface PrHeaderProps {
@@ -23,11 +76,11 @@ export interface PrHeaderProps {
     additions: number
     deletions: number
   } | null
-  className?: string
-  titleClassName?: string
-  compact?: boolean
+  /** The PR's own verbs, under its facts. */
+  children?: ReactNode
 }
 
+/** PR identity in the work pane: title, lifecycle, and the quiet facts under it. */
 export function PrHeader({
   url,
   title,
@@ -37,89 +90,57 @@ export function PrHeader({
   number,
   author,
   stats,
-  className,
-  titleClassName,
-  compact = false,
+  children,
 }: PrHeaderProps) {
   return (
-    <div className={className}>
-      <div className="flex min-w-0 items-center gap-2">
-        <span
-          className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-meta capitalize",
-            STATE_STYLES[state] ?? STATE_STYLES.open
-          )}
-        >
-          <GitPullRequestIcon className="size-3" />
-          {state}
-        </span>
-        <h1
-          className={cn(
-            compact
-              ? "min-w-0 flex-1 truncate text-body font-medium"
-              : "min-w-0 text-title font-medium",
-            titleClassName
-          )}
-        >
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className={cn("hover:underline", compact && "block truncate")}
+    <RecordHeader
+      title={
+        <Inline gap="sm" className="min-w-0">
+          <PrStateBadge state={state} />
+          <Box
+            render={<h1 />}
+            className="min-w-0 text-title font-semibold break-words text-ink"
           >
-            <IoLogoGithub
-              aria-label="GitHub"
-              className="mr-1.5 inline size-4 align-[-2px] text-ink-subtle"
-            />
-            {title}
-            {number != null && (
-              <span className="text-ink-subtle"> #{number}</span>
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:underline"
+            >
+              <Icon
+                icon={GitHub}
+                size="md"
+                label="GitHub"
+                className="mr-1.5 inline align-middle text-ink-subtle"
+              />
+              {title}
+              {number != null && (
+                <span className="font-normal text-ink-subtle"> #{number}</span>
+              )}
+            </a>
+          </Box>
+        </Inline>
+      }
+      meta={
+        <Stack gap="md">
+          <Inline gap="sm" wrap className="text-meta text-ink-subtle">
+            {author && <span className="font-medium text-ink">{author}</span>}
+            <Ref name={baseRef} />
+            <span aria-hidden="true">←</span>
+            <Ref name={headRef} />
+            {stats && (
+              <Inline gap="sm" className="font-mono tabular-nums">
+                <span>
+                  {stats.changedFiles} file{stats.changedFiles === 1 ? "" : "s"}
+                </span>
+                <span className="text-positive">+{stats.additions}</span>
+                <span className="text-risk">−{stats.deletions}</span>
+              </Inline>
             )}
-          </a>
-        </h1>
-      </div>
-      <div
-        className={cn(
-          "flex items-center gap-2 text-meta text-ink-subtle",
-          compact ? "mt-1.5 min-w-0 overflow-hidden" : "mt-2 flex-wrap"
-        )}
-      >
-        {author && (
-          <span className="shrink-0 font-medium text-ink">{author}</span>
-        )}
-        {compact ? (
-          <>
-            <span className="min-w-0 truncate font-mono" title={headRef}>
-              {headRef}
-            </span>
-            <span className="shrink-0">→</span>
-            <span className="min-w-0 truncate font-mono" title={baseRef}>
-              {baseRef}
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="rounded-tick border border-line px-1.5 py-0.5 font-mono text-meta">
-              {baseRef}
-            </span>
-            <span>←</span>
-            <span className="rounded-tick border border-line px-1.5 py-0.5 font-mono text-meta">
-              {headRef}
-            </span>
-          </>
-        )}
-        {stats && (
-          <>
-            <span className="shrink-0">
-              {stats.changedFiles} file{stats.changedFiles === 1 ? "" : "s"}
-            </span>
-            <span className="shrink-0 text-positive">
-              +{stats.additions}
-            </span>
-            <span className="shrink-0 text-risk">-{stats.deletions}</span>
-          </>
-        )}
-      </div>
-    </div>
+          </Inline>
+          {children}
+        </Stack>
+      }
+    />
   )
 }

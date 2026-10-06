@@ -1,7 +1,16 @@
-import { useState, type ReactElement } from "react"
+import { useId, useState, type ReactElement } from "react"
 
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Popover, PopoverDescription, PopoverContent, PopoverTitle, PopoverTrigger } from "@langchain/gtm-platform-design-system/ui/popover"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/gtm-platform-design-system/ui/popover"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
 /**
@@ -25,6 +34,8 @@ export function TextPopover({
 }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
+  const titleId = useId()
+  const descriptionId = useId()
   const submit = () => {
     const submitted = text.trim()
     setOpen(false)
@@ -36,35 +47,56 @@ export function TextPopover({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={trigger} />
-      <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
-        <PopoverTitle className="text-label">{title}</PopoverTitle>
-        {description && (
-          <PopoverDescription className="mt-1">
-            {description}
-          </PopoverDescription>
-        )}
-        <Textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-              event.preventDefault()
-              submit()
-            }
-          }}
-          placeholder={placeholder}
-          rows={3}
-          className="mt-2 resize-y text-label"
-          autoFocus
-        />
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <Button size="compact" variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button size="compact" onClick={submit}>
-            {submitLabel}
-          </Button>
-        </div>
+      <PopoverContent
+        align="end"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        className="w-80 max-w-(--available-width)"
+      >
+        <Stack gap="md">
+          <Stack gap="xs">
+            <Box
+              render={<h2 id={titleId} />}
+              className="text-label font-medium text-ink"
+            >
+              {title}
+            </Box>
+            {description && (
+              <Box
+                render={<p id={descriptionId} />}
+                className="text-meta text-ink-subtle"
+              >
+                {description}
+              </Box>
+            )}
+          </Stack>
+          <Textarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault()
+                submit()
+              }
+            }}
+            placeholder={placeholder}
+            rows={3}
+            className="resize-y"
+            autoFocus
+          />
+          <Inline gap="sm" justify="end">
+            <Button
+              size="compact"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button size="compact" onClick={submit}>
+              {submitLabel}
+            </Button>
+          </Inline>
+        </Stack>
       </PopoverContent>
     </Popover>
   )

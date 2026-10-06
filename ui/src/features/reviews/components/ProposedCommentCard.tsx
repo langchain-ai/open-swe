@@ -6,15 +6,12 @@ import { getReviewConversation } from "@/features/reviews/lib/conversationApi"
 import { rangeLabel } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
 /** A line comment the chat drafted; the user adds it to their pending review or discards it. */
@@ -98,9 +95,17 @@ export function ProposedCommentCard({
   const { range } = draft.proposal
   const location = `${range.file}:${rangeLabel(range)}`
   return (
-    <Card size="sm" className="w-full shrink-0" data-testid="proposed-comment">
-      <CardHeader>
-        <CardTitle>
+    <Stack
+      gap="md"
+      bg="panel"
+      border="line"
+      radius="panel"
+      padding="md"
+      className="w-full shrink-0 text-label"
+      data-testid="proposed-comment"
+    >
+      <Stack gap="xs" className="min-w-0">
+        <Box render={<h3 />} className="font-medium text-ink">
           {submitted || outcome?.state === "posted"
             ? "Submitted with your review"
             : outcome?.state === "added"
@@ -108,57 +113,54 @@ export function ProposedCommentCard({
               : outcome?.state === "discarded"
                 ? "Comment discarded"
                 : "Draft review comment"}
-        </CardTitle>
-        <CardDescription>
+        </Box>
+        <Box className="min-w-0 text-meta text-ink-subtle">
           {onShow ? (
             <button
               type="button"
               onClick={onShow}
-              className="truncate font-mono underline-offset-2 hover:underline"
+              className="max-w-full truncate font-mono underline-offset-2 hover:text-ink hover:underline"
             >
               {location}
             </button>
           ) : (
             <span className="font-mono">{location}</span>
           )}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {outcome ? (
-          <p className="line-clamp-3 whitespace-pre-wrap text-ink-subtle">
-            {body}
-          </p>
-        ) : (
-          <Textarea
-            aria-label="Comment body"
-            value={body}
-            onChange={(event) => drafts.edit(id, { body: event.target.value })}
-            rows={4}
+        </Box>
+      </Stack>
+      {outcome ? (
+        <p className="line-clamp-3 whitespace-pre-wrap text-ink-subtle">
+          {body}
+        </p>
+      ) : (
+        <Textarea
+          aria-label="Comment body"
+          value={body}
+          onChange={(event) => drafts.edit(id, { body: event.target.value })}
+          rows={4}
+          disabled={post.isPending}
+        />
+      )}
+      {outcome ? null : (
+        <Inline gap="sm" justify="end">
+          <Button
+            size="compact"
+            variant="ghost"
             disabled={post.isPending}
-          />
-        )}
-      </CardContent>
-      <CardFooter className="justify-end gap-2">
-        {outcome ? null : (
-          <>
-            <Button
-              size="compact"
-              variant="ghost"
-              disabled={post.isPending}
-              onClick={() => drafts.settle(id, { state: "discarded" })}
-            >
-              Discard
-            </Button>
-            <Button
-              size="compact"
-              disabled={post.isPending || !body.trim()}
-              onClick={addToReview}
-            >
-              {post.isPending ? "Adding…" : "Add to review"}
-            </Button>
-          </>
-        )}
-      </CardFooter>
-    </Card>
+            onClick={() => drafts.settle(id, { state: "discarded" })}
+          >
+            Discard
+          </Button>
+          <Button
+            size="compact"
+            disabled={!body.trim()}
+            loading={post.isPending}
+            onClick={addToReview}
+          >
+            Add to review
+          </Button>
+        </Inline>
+      )}
+    </Stack>
   )
 }

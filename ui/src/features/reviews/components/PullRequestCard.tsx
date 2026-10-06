@@ -1,5 +1,11 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
 
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
@@ -20,8 +26,10 @@ const outcomeLabels: Record<PullRequestOutcome, string> = {
   closed: "Closed",
 }
 
+// A portaled menu, popover or dialog still bubbles its React events through
+// the card, so those count as the card's controls too.
 const interactive =
-  'a,button,input,select,textarea,[role="button"],[role="menu"]'
+  'a,button,input,select,textarea,[role="button"],[role="menu"],[role="dialog"],[role="alertdialog"]'
 
 export function PullRequestCard({
   pr,
@@ -49,52 +57,53 @@ export function PullRequestCard({
   onReady: () => void
 }) {
   if (compact) {
+    const detail = statusDetail(pr)
     return (
-      <button
-        type="button"
-        aria-current={selected ? "true" : undefined}
-        onClick={onSelect}
+      <Stack
+        render={
+          <button
+            type="button"
+            aria-current={selected ? "true" : undefined}
+            onClick={onSelect}
+          />
+        }
+        gap="xs"
+        radius="compact"
         className={cn(
-          "flex w-full gap-2.5 rounded-badge py-2 pr-2.5 pl-2 text-left transition-colors",
-          selected ? "bg-hover" : "hover:bg-hover",
+          "w-full px-3 py-2 text-left",
+          selected ? "bg-selected" : "hover:bg-hover",
           outcome && "opacity-60"
         )}
       >
-        <span
-          aria-hidden="true"
-          className={cn(
-            "mt-0.5 w-0.5 shrink-0 self-stretch rounded-full",
-            selected ? "bg-ink/60" : "bg-transparent"
-          )}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-1.5 text-meta text-ink-subtle">
-            <span className="min-w-0 truncate">{pr.repo}</span>
-            <span className="font-mono tabular-nums">#{pr.number}</span>
+        <Inline gap="sm" align="baseline" className="text-meta text-ink-subtle">
+          <span className="min-w-0 truncate">{pr.repo}</span>
+          <span className="font-mono tabular-nums">#{pr.number}</span>
+        </Inline>
+        <Box
+          render={<span />}
+          className="truncate text-label font-medium text-ink"
+        >
+          {pr.title}
+        </Box>
+        {outcome ? (
+          <span className="truncate text-meta text-ink-subtle">
+            {outcomeLabels[outcome]}
           </span>
-          <span className="mt-0.5 block truncate text-label font-medium text-ink">
-            {pr.title}
-          </span>
-          {outcome ? (
-            <span className="mt-0.5 block truncate text-meta text-ink-subtle">
-              {outcomeLabels[outcome]}
-            </span>
-          ) : (
-            <>
-              <span className="mt-1 flex flex-wrap gap-1">
-                {statusLabels(pr).map((status) => (
-                  <StatusPill key={status} status={status} />
-                ))}
+        ) : (
+          <>
+            <Inline gap="xs" wrap>
+              {statusLabels(pr).map((status) => (
+                <StatusPill key={status} status={status} />
+              ))}
+            </Inline>
+            {detail && (
+              <span className="truncate text-meta text-ink-subtle">
+                {detail}
               </span>
-              {statusDetail(pr) && (
-                <span className="mt-0.5 block truncate text-meta text-ink-subtle">
-                  {statusDetail(pr)}
-                </span>
-              )}
-            </>
-          )}
-        </span>
-      </button>
+            )}
+          </>
+        )}
+      </Stack>
     )
   }
 
@@ -109,74 +118,75 @@ export function PullRequestCard({
   }
 
   return (
-    <div
+    <Stack
       onClick={openFromCard}
+      gap="md"
+      bg={selected ? "selected" : "panel"}
+      border={selected ? "line-strong" : "line"}
+      radius="panel"
+      padding="lg"
       className={cn(
-        "cursor-pointer rounded-compact border bg-panel p-4 transition-colors",
-        selected
-          ? "border-ink/30"
-          : "border-line hover:border-ink/20",
+        "min-w-0 cursor-pointer hover:border-line-strong",
         outcome && "opacity-60"
       )}
     >
-      <div className="min-w-0 space-y-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-meta text-ink-subtle">
-            <span>
-              {pr.repo}{" "}
-              <span className="font-mono tabular-nums">#{pr.number}</span>
-            </span>
-            {statusLabels(pr).map((status) => (
-              <StatusPill key={status} status={status} />
-            ))}
-          </div>
-          <h3 className="mt-1 text-body font-medium break-words">
-            <button
-              type="button"
-              className="text-left hover:underline"
-              onClick={onSelect}
-            >
-              {pr.title}
-            </button>
-          </h3>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-meta text-ink-subtle">
-          <Diffstat pr={pr} />
-          {review}
+      <Stack gap="xs" className="min-w-0">
+        <Inline gap="sm" wrap className="text-meta text-ink-subtle">
           <span>
-            Updated{" "}
-            <time
-              dateTime={pr.updatedAt ?? undefined}
-              title={pr.updatedAt ?? undefined}
-            >
-              {dateLabel(pr.updatedAt)}
-            </time>
+            {pr.repo}{" "}
+            <span className="font-mono tabular-nums">#{pr.number}</span>
           </span>
-          <span>
-            Opened{" "}
-            <time
-              dateTime={pr.createdAt ?? undefined}
-              title={pr.createdAt ?? undefined}
-            >
-              {dateLabel(pr.createdAt)}
-            </time>
-          </span>
-          <UnresolvedConversations pr={pr} />
-          {!pr.statusAvailable && !pr.detailsLoading && (
-            <span className="text-attention">
-              Live PR status unavailable
-            </span>
-          )}
-        </div>
-        <PullRequestChecks pr={pr} />
-        <PullRequestActions
-          pr={pr}
-          login={login}
-          outcome={outcome}
-          onSettled={onSettled}
-          onReady={onReady}
-        />
-      </div>
-    </div>
+          {statusLabels(pr).map((status) => (
+            <StatusPill key={status} status={status} />
+          ))}
+        </Inline>
+        <Box
+          render={<h3 />}
+          className="text-body font-medium break-words text-ink"
+        >
+          <button
+            type="button"
+            className="text-left hover:underline"
+            onClick={onSelect}
+          >
+            {pr.title}
+          </button>
+        </Box>
+      </Stack>
+      <Inline gap="lg" align="start" wrap className="text-meta text-ink-subtle">
+        <Diffstat pr={pr} />
+        {review}
+        <span>
+          Updated{" "}
+          <time
+            dateTime={pr.updatedAt ?? undefined}
+            title={pr.updatedAt ?? undefined}
+          >
+            {dateLabel(pr.updatedAt)}
+          </time>
+        </span>
+        <span>
+          Opened{" "}
+          <time
+            dateTime={pr.createdAt ?? undefined}
+            title={pr.createdAt ?? undefined}
+          >
+            {dateLabel(pr.createdAt)}
+          </time>
+        </span>
+        <UnresolvedConversations pr={pr} />
+        {!pr.statusAvailable && !pr.detailsLoading && (
+          <span className="text-attention">Live PR status unavailable</span>
+        )}
+      </Inline>
+      <PullRequestChecks pr={pr} />
+      <PullRequestActions
+        pr={pr}
+        login={login}
+        outcome={outcome}
+        onSettled={onSettled}
+        onReady={onReady}
+      />
+    </Stack>
   )
 }

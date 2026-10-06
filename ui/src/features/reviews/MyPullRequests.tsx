@@ -1,9 +1,31 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { MultiSelect } from "@/components/MultiSelect"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Clock,
+  Filter,
+  GitPullRequest,
+  RefreshCw,
+  Search,
+} from "@/components/glyphs"
+import { MultiSelect } from "@/components/MultiSelect"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { expiresInBrowser } from "@/lib/query"
@@ -18,7 +40,6 @@ import { PullRequestReview } from "./components/PullRequestReview"
 import { pullRequestPreviewQuery, refreshPullRequest } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
-import { control } from "./lib/styles"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
 import { usePullRequestSearch } from "./lib/usePullRequestSearch"
@@ -217,19 +238,48 @@ export function MyPullRequests({
     )
   }
 
+  const refresh = () => {
+    setSettled({})
+    queryClient.removeQueries({
+      queryKey: ["my-pr-details", login],
+      predicate: (cached) => cached.state.data === null,
+    })
+    void query.refetch()
+    void queryClient.invalidateQueries({
+      queryKey: ["pull-request-search", login],
+    })
+    void queryClient.invalidateQueries({
+      queryKey: ["my-pr-details", login],
+    })
+    void queryClient.invalidateQueries({
+      queryKey: ["pr-thread-status", login],
+    })
+    void queryClient.invalidateQueries({
+      queryKey: ["my-pr-review-summaries", login],
+    })
+    // An open preview outlives a refresh, so its checks and
+    // comments would otherwise stay as they were when it opened.
+    void queryClient.invalidateQueries({
+      queryKey: ["pr-preview"],
+    })
+  }
+  const listLoading =
+    detailsLoading || query.isFetchingNextPage || descriptionSearch.isSearching
+
   return (
-    <div className="flex min-h-0 flex-1">
+    <Inline align="stretch" className="min-h-0 flex-1">
       {/* Both columns grow from a zero basis, so opening a preview animates the
           list across rather than resizing it in place. */}
-      <div
-        className="flex min-h-0 min-w-0 flex-col transition-[flex-grow] duration-300 ease-out"
+      <Stack
+        className="min-h-0 min-w-0 transition-[flex-grow] duration-300 ease-out-quint motion-reduce:transition-none"
         style={{ flexGrow: 1, flexBasis: 0 }}
       >
-        <section
-          className="mt-4 flex min-h-0 flex-1 flex-col gap-3"
-          aria-label="My open pull requests"
+        <Stack
+          render={<section aria-label="My open pull requests" />}
+          gap="md"
+          className="min-h-0 flex-1"
         >
-          <div className="flex flex-wrap items-center gap-2">
+          <Inline gap="sm" wrap>
             <MultiSelect
               label="Filter by repository"
               placeholder="All repositories"
@@ -247,13 +297,13 @@ export function MyPullRequests({
                 onFiltersChange({ repo: chosen.length ? chosen : undefined })
               }
             />
-            <input
-              className={cn(control, "min-w-40 flex-1")}
-              aria-label="Search pull requests"
+            <SearchInput
+              label="Search pull requests"
               placeholder="Search title, description, or PR number…"
+              className="min-w-40 flex-1"
               value={search}
-              onChange={(event) =>
-                onFiltersChange({ q: event.target.value || undefined }, true)
+              onValueChange={(value) =>
+                onFiltersChange({ q: value || undefined }, true)
               }
             />
             <MultiSelect
@@ -266,113 +316,134 @@ export function MyPullRequests({
               }
             />
             {!railed && (
-              <span className="flex items-center gap-1 text-meta text-ink-subtle">
-                Sort
+              <Inline gap="xs" className="text-meta text-ink-subtle">
+                <span className="pr-1">Sort</span>
                 {sortOptions.map(([label, key]) => (
-                  <button
+                  <Button
                     key={key}
-                    type="button"
+                    size="compact"
+                    variant={sort === key ? "outline" : "ghost"}
                     aria-pressed={sort === key}
                     onClick={() => toggleSort(key)}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-badge border px-2 py-1",
-                      sort === key
-                        ? "border-line bg-muted text-ink"
-                        : "border-transparent hover:text-ink"
-                    )}
+                    className={sort === key ? undefined : "text-ink-subtle"}
                   >
                     {label}
-                    <span aria-hidden="true">
-                      {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </button>
+                    <Icon
+                      icon={
+                        sort === key
+                          ? direction === "asc"
+                            ? ArrowUp
+                            : ArrowDown
+                          : ArrowUpDown
+                      }
+                      size="sm"
+                      className="text-ink-subtle"
+                    />
+                  </Button>
                 ))}
-              </span>
+              </Inline>
             )}
-            {!railed && (
-              <span
-                aria-live="polite"
-                className="text-meta whitespace-nowrap text-ink-subtle"
+            <Inline gap="sm" className="ml-auto">
+              {!railed && (
+                <span
+                  aria-live="polite"
+                  className="text-meta whitespace-nowrap text-ink-subtle"
+                >
+                  {refreshing
+                    ? "Refreshing from GitHub…"
+                    : latest
+                      ? `Refreshed ${dateLabel(latest.updatedAt)}`
+                      : "Live open pull requests from GitHub"}
+                </span>
+              )}
+              <Button
+                size="compact"
+                variant="outline"
+                disabled={query.isFetching}
+                onClick={refresh}
               >
-                {refreshing
-                  ? "Refreshing from GitHub…"
-                  : latest
-                    ? `Refreshed ${dateLabel(latest.updatedAt)}`
-                    : "Live open pull requests from GitHub"}
-              </span>
-            )}
-            <Button
-              size="compact"
-              variant="outline"
-              disabled={query.isFetching}
-              onClick={() => {
-                setSettled({})
-                queryClient.removeQueries({
-                  queryKey: ["my-pr-details", login],
-                  predicate: (cached) => cached.state.data === null,
-                })
-                void query.refetch()
-                void queryClient.invalidateQueries({
-                  queryKey: ["pull-request-search", login],
-                })
-                void queryClient.invalidateQueries({
-                  queryKey: ["my-pr-details", login],
-                })
-                void queryClient.invalidateQueries({
-                  queryKey: ["pr-thread-status", login],
-                })
-                void queryClient.invalidateQueries({
-                  queryKey: ["my-pr-review-summaries", login],
-                })
-                // An open preview outlives a refresh, so its checks and
-                // comments would otherwise stay as they were when it opened.
-                void queryClient.invalidateQueries({
-                  queryKey: ["pr-preview"],
-                })
-              }}
-            >
-              Refresh
-            </Button>
-          </div>
+                <Icon
+                  icon={RefreshCw}
+                  size="sm"
+                  className={cn(
+                    refreshing && "animate-spin motion-reduce:animate-none"
+                  )}
+                />
+                Refresh
+              </Button>
+            </Inline>
+          </Inline>
           {query.error && (
-            <p role="alert" className="text-body text-risk">
-              {latest &&
-                (query.isFetchNextPageError
-                  ? "Could not load more PRs; showing the pages loaded so far. "
-                  : "Refresh failed; showing the previous snapshot. ")}
-              {query.error.message}
-            </p>
+            <StateNotice
+              tone="RISK"
+              icon={AlertTriangle}
+              title={
+                !latest
+                  ? "Could not load your pull requests"
+                  : query.isFetchNextPageError
+                    ? "Could not load more PRs"
+                    : "Refresh failed"
+              }
+              description={
+                (latest
+                  ? query.isFetchNextPageError
+                    ? "Showing the pages loaded so far. "
+                    : "Showing the previous snapshot. "
+                  : "") + query.error.message
+              }
+            />
           )}
           {search.trim() && descriptionSearch.isError && (
-            <p role="alert" className="text-body text-risk">
-              Title and description search is unavailable; showing repository,
-              title, and PR number matches only.
-            </p>
+            <StateNotice
+              tone="INFO"
+              icon={Search}
+              title="Description search is unavailable"
+              description="Showing repository, title, and PR number matches only."
+            />
           )}
           {query.isLoading ? (
-            <Skeleton className="h-56 w-full" />
+            <Stack gap="md">
+              {[0, 1, 2].map((index) => (
+                <Skeleton key={index} className="h-40 w-full rounded-panel" />
+              ))}
+            </Stack>
           ) : incomplete ? (
-            <p
-              role="status"
-              className="rounded-compact border border-line bg-panel px-4 py-12 text-center text-label text-attention"
-            >
-              GitHub&rsquo;s pull request search timed out, and the partial
-              answer it returned would have hidden most of your PRs. Filter by
-              repository to narrow the search, or refresh to try again.
-            </p>
+            <StateNotice
+              tone="ATTENTION"
+              icon={Clock}
+              title="GitHub's pull request search timed out"
+              description="The partial answer it returned would have hidden most of your PRs. Filter by repository to narrow the search, or refresh to try again."
+            />
           ) : (
             latest && (
               <>
                 {visible.length === 0 ? (
-                  <p className="rounded-compact border border-line bg-panel px-4 py-12 text-center text-meta text-ink-subtle">
-                    {detailsLoading ||
-                    query.isFetchingNextPage ||
-                    descriptionSearch.isSearching
-                      ? "Loading matching PRs…"
-                      : all.length
-                        ? "No PRs match these filters."
-                        : "No open PRs found."}
-                  </p>
+                  listLoading ? (
+                    <Inline
+                      role="status"
+                      gap="sm"
+                      justify="center"
+                      bg="panel"
+                      border="line"
+                      radius="panel"
+                      className="py-12 text-meta text-ink-subtle"
+                    >
+                      <Spinner size="sm" />
+                      Loading matching PRs…
+                    </Inline>
+                  ) : all.length ? (
+                    <EmptyState
+                      icon={Filter}
+                      title="No PRs match these filters."
+                      description="Clear a filter or the search to see the rest."
+                    />
+                  ) : (
+                    <EmptyState
+                      icon={GitPullRequest}
+                      title="No open PRs found."
+                      description="Pull requests you open on GitHub appear here."
+                    />
+                  )
                 ) : (
                   <PullRequestList
                     rows={visible}
@@ -388,33 +459,40 @@ export function MyPullRequests({
                     {card}
                   </PullRequestList>
                 )}
-                <div className="flex items-center gap-3 text-meta text-ink-subtle">
-                  <span>
+                <Inline gap="md" className="text-meta text-ink-subtle">
+                  <span className="tabular-nums">
                     {visible.length} of {filtered.length}
                     {query.hasNextPage ? "+" : ""} PRs
                     {!railed &&
                       " · Added/deleted lines include tests and docs. PRs with checks still running are Pending."}
                   </span>
                   {query.isFetchingNextPage ? (
-                    <span role="status">Loading more PRs from GitHub…</span>
+                    <Inline role="status" gap="xs">
+                      <Spinner size="sm" />
+                      Loading more PRs from GitHub…
+                    </Inline>
                   ) : (
                     detailsLoading && (
-                      <span role="status">Loading PR details…</span>
+                      <Inline role="status" gap="xs">
+                        <Spinner size="sm" />
+                        Loading PR details…
+                      </Inline>
                     )
                   )}
-                </div>
+                </Inline>
               </>
             )
           )}
-        </section>
-      </div>
+        </Stack>
+      </Stack>
 
-      <div
-        className="flex min-h-0 min-w-0 overflow-hidden transition-[flex-grow] duration-300 ease-out"
+      <Inline
+        align="stretch"
+        className="min-h-0 min-w-0 overflow-hidden transition-[flex-grow] duration-300 ease-out-quint motion-reduce:transition-none"
         style={{ flexGrow: selectedRow ? 2.2 : 0, flexBasis: 0 }}
       >
         {selectedRow && (
-          <div className="flex min-h-0 w-full min-w-[420px] pt-4 pl-5">
+          <Box className="flex min-h-0 w-full min-w-105 pl-5">
             <PullRequestDetail
               key={selected}
               pr={selectedRow}
@@ -434,9 +512,9 @@ export function MyPullRequests({
                 refreshPullRequest(queryClient, login, selectedRow)
               }
             />
-          </div>
+          </Box>
         )}
-      </div>
-    </div>
+      </Inline>
+    </Inline>
   )
 }

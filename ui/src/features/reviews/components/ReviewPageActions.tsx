@@ -36,16 +36,14 @@ export function ReviewPageActions({
   }
   if (!session.data || !pr.data) return null
   return (
-    <div className="mt-3">
-      <PullRequestActions
-        pr={pr.data}
-        login={session.data.login}
-        outcome={outcome}
-        onSettled={setOutcome}
-        onSettledConfirmed={refreshPage}
-        onReady={refreshPage}
-        onReviewPage
-      />
-    </div>
+    <PullRequestActions
+      pr={pr.data}
+      login={session.data.login}
+      outcome={outcome}
+      onSettled={setOutcome}
+      onSettledConfirmed={refreshPage}
+      onReady={refreshPage}
+      onReviewPage
+    />
   )
 }

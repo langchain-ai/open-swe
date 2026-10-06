@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CaretRightIcon, XIcon } from "@phosphor-icons/react"
 import { PatchDiff } from "@pierre/diffs/react"
 import {
   useCallback,
@@ -9,7 +8,6 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { IoLogoGithub } from "react-icons/io5"
 import type {
   DiffLineAnnotation,
   FileDiffLoadedFiles,
@@ -22,8 +20,16 @@ import type {
   ReviewCommentCreate,
   ReviewDiffFile,
 } from "@/lib/api"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { AlertTriangle, ChevronRight, GitHub, X } from "@/components/glyphs"
 import {
   fileContentsCacheKey,
   useDiffOptions,
@@ -232,7 +238,7 @@ export function PullRequestFiles({
     )
 
   return (
-    <ul className="space-y-0.5" onPointerEnter={want} onFocus={want}>
+    <Stack render={<ul />} gap="none" onPointerEnter={want} onFocus={want}>
       {files.map((file) => {
         const open = expanded.includes(file.path)
         return (
@@ -243,15 +249,32 @@ export function PullRequestFiles({
               onToggle={() => toggle(file.path)}
             />
             {open && (
-              <div className="mt-1 mb-2 overflow-hidden rounded-badge border border-line">
+              <Box
+                border="line"
+                radius="compact"
+                className="mt-1 mb-2 overflow-hidden"
+              >
                 {diff.isPending ? (
-                  <p className="p-3 text-meta text-ink-subtle">
-                    Loading diff…
-                  </p>
+                  <Stack
+                    role="status"
+                    gap="sm"
+                    padding="md"
+                    aria-label="Loading diff…"
+                  >
+                    <Skeleton className="h-3 w-2/3" />
+                    <Skeleton className="h-3 w-1/2" />
+                    <Skeleton className="h-3 w-3/5" />
+                  </Stack>
                 ) : diff.error ? (
-                  <p role="alert" className="p-3 text-label text-risk">
-                    {diff.error.message}
-                  </p>
+                  <Inline
+                    role="alert"
+                    gap="xs"
+                    padding="md"
+                    className="text-label text-risk"
+                  >
+                    <Icon icon={AlertTriangle} size="sm" />
+                    <span>{diff.error.message}</span>
+                  </Inline>
                 ) : (
                   <FileDiff
                     pr={pr}
@@ -260,12 +283,12 @@ export function PullRequestFiles({
                     comments={comments}
                   />
                 )}
-              </div>
+              </Box>
             )}
           </li>
         )
       })}
-    </ul>
+    </Stack>
   )
 }
 
@@ -280,16 +303,17 @@ function FileRow({
 }) {
   const cut = file.path.lastIndexOf("/")
   return (
-    <button
-      type="button"
-      aria-expanded={open}
-      onClick={onToggle}
-      className="flex w-full items-baseline gap-2.5 rounded-tick px-1 py-1 text-left font-mono text-label hover:bg-hover"
+    <Inline
+      render={<button type="button" aria-expanded={open} onClick={onToggle} />}
+      gap="sm"
+      radius="badge"
+      className="h-7 w-full px-1 text-left font-mono text-label hover:bg-hover"
     >
-      <CaretRightIcon
-        aria-hidden="true"
+      <Icon
+        icon={ChevronRight}
+        size="sm"
         className={cn(
-          "size-3 shrink-0 self-center text-ink-subtle transition-transform",
+          "text-ink-subtle transition-transform duration-fast ease-out-quint motion-reduce:transition-none",
           open && "rotate-90"
         )}
       />
@@ -312,7 +336,7 @@ function FileRow({
       <span className="w-12 shrink-0 text-risk tabular-nums">
         −{file.deletions}
       </span>
-    </button>
+    </Inline>
   )
 }
 
@@ -406,10 +430,10 @@ function FileDiff({
         return (
           <CommentCard
             label={
-              <span className="inline-flex items-center gap-1">
-                <IoLogoGithub className="size-3" />
+              <Inline render={<span />} gap="xs">
+                <Icon icon={GitHub} size="sm" />
                 Commented on GitHub
-              </span>
+              </Inline>
             }
             href={meta.comment.url}
             range={meta.comment.range}
@@ -442,15 +466,15 @@ function FileDiff({
   )
   if (!file || file.unrenderable || !file.patch) {
     return (
-      <p className="p-3 text-center text-meta text-ink-subtle">
+      <Box padding="md" className="text-center text-meta text-ink-subtle">
         {file
           ? "Binary or large file — diff not shown."
           : "This file is not in the loaded diff."}
-      </p>
+      </Box>
     )
   }
   return (
-    <div className="overflow-x-auto bg-panel font-mono text-meta leading-5">
+    <Box bg="panel" className="overflow-x-auto font-mono text-meta leading-5">
       <PatchDiff<FileAnnotation>
         patch={file.patch}
         // Pierre's worker pool highlights partial diffs out of step with the
@@ -461,7 +485,7 @@ function FileDiff({
         selectedLines={fileDraft?.range ?? null}
         renderAnnotation={renderAnnotation}
       />
-    </div>
+    </Box>
   )
 }
 
@@ -481,10 +505,18 @@ function Composer({
   }, [])
   const empty = !body.trim()
   return (
-    <div className="px-2 py-1 font-sans">
-      <div className="overflow-hidden rounded-badge border border-line bg-panel">
-        <div className="flex items-center border-b border-line px-2 py-1 text-meta">
-          <span className="font-medium">
+    <Box className="px-2 py-1 font-sans">
+      <Stack
+        bg="panel"
+        border="line"
+        radius="compact"
+        className="overflow-hidden"
+      >
+        <Inline
+          gap="sm"
+          className="border-b border-line py-1 pr-1 pl-3 text-meta"
+        >
+          <span className="font-medium text-ink">
             Comment on line {commentRangeLabel(draft.range)}
           </span>
           <Button
@@ -495,10 +527,10 @@ function Composer({
             className="ml-auto"
             onClick={onClose}
           >
-            <XIcon />
+            <Icon icon={X} size="sm" />
           </Button>
-        </div>
-        <div className="p-2">
+        </Inline>
+        <Stack gap="sm" padding="sm">
           <Textarea
             ref={textareaRef}
             value={body}
@@ -514,16 +546,16 @@ function Composer({
             }}
             placeholder="Leave a comment…"
             rows={3}
-            className="resize-y text-label"
+            className="resize-y"
           />
-          <div className="mt-2 flex items-center justify-end gap-2">
+          <Inline gap="sm" justify="end">
             <Button
               size="compact"
               variant="outline"
               disabled={empty}
               onClick={() => onSend("github", body)}
             >
-              <IoLogoGithub className="size-3.5" />
+              <Icon icon={GitHub} size="sm" />
               Comment on GitHub
             </Button>
             <Button
@@ -533,10 +565,10 @@ function Composer({
             >
               Add to agent batch
             </Button>
-          </div>
-        </div>
-      </div>
-    </div>
+          </Inline>
+        </Stack>
+      </Stack>
+    </Box>
   )
 }
 
@@ -554,9 +586,15 @@ function CommentCard({
   onRemove?: () => void
 }) {
   return (
-    <div className="px-2 py-1 font-sans">
-      <div className="rounded-badge border border-line bg-panel px-2.5 py-2 text-label">
-        <div className="mb-1 flex items-center gap-1.5 text-meta text-ink-subtle">
+    <Box className="px-2 py-1 font-sans">
+      <Stack
+        gap="xs"
+        bg="panel"
+        border="line"
+        radius="compact"
+        className="px-3 py-2 text-label"
+      >
+        <Inline gap="xs" className="text-meta text-ink-subtle">
           {href ? (
             <a
               href={href}
@@ -580,12 +618,12 @@ function CommentCard({
               className="ml-auto"
               onClick={onRemove}
             >
-              <XIcon />
+              <Icon icon={X} size="sm" />
             </Button>
           )}
-        </div>
+        </Inline>
         <p className="whitespace-pre-wrap text-ink">{body}</p>
-      </div>
-    </div>
+      </Stack>
+    </Box>
   )
 }

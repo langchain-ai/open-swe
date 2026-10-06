@@ -6,7 +6,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
@@ -23,11 +22,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** The switch in the settings row carrying ``label``; rows have no label link. */
+/** The switch in the settings row carrying ``label``; the row label names it. */
 function rowSwitch(label: string): HTMLElement {
-  const row = screen.getByText(label).closest("div")
-  if (!row) throw new Error(`no settings row for ${label}`)
-  return within(row).getByRole("switch")
+  return screen.getByRole("switch", { name: label })
 }
 
 const SETTINGS: WorkspaceSettings = {

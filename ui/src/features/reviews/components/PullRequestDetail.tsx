@@ -1,8 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { XIcon } from "@phosphor-icons/react"
-import { useCallback, useRef, useState, type ReactNode } from "react"
-import { IoLogoGithub } from "react-icons/io5"
+import { useCallback, useId, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
+
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { RecordHeader } from "@langchain/gtm-platform-design-system/patterns/record-header"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+
+import {
+  AlertTriangle,
+  CheckCircle,
+  ChevronRight,
+  File,
+  GitHub,
+  Loader2,
+  MinusCircle,
+  X,
+  XCircle,
+  type Glyph,
+} from "@/components/glyphs"
 
 import type {
   OpenPullRequest,
@@ -35,13 +57,14 @@ import {
 
 const skippedConclusions = new Set(["neutral", "skipped"])
 
-function checkTone(check: PreviewCheck): string {
-  const rank = checkRank(check)
-  if (rank === 1) return "text-attention"
-  if (rank === 2) return "text-positive"
-  if (rank === 3) return "text-ink-subtle"
-  return "text-risk"
-}
+type CheckTone = "risk" | "attention" | "positive" | "neutral"
+
+const checkTones: readonly CheckTone[] = [
+  "risk",
+  "attention",
+  "positive",
+  "neutral",
+]
 
 function checkRank(check: PreviewCheck): number {
   if (check.status !== "completed") return 1
@@ -50,7 +73,19 @@ function checkRank(check: PreviewCheck): number {
   return 0
 }
 
-const checkMarks = ["✕", "•", "✓", "–"] as const
+const checkMarks: readonly Glyph[] = [
+  XCircle,
+  Loader2,
+  CheckCircle,
+  MinusCircle,
+]
+
+const toneInk: Record<CheckTone, string> = {
+  risk: "text-risk",
+  attention: "text-attention",
+  positive: "text-positive",
+  neutral: "text-ink-subtle",
+}
 
 function Section({
   heading,
@@ -63,28 +98,41 @@ function Section({
   action?: ReactNode
   children: ReactNode
 }) {
+  const headingId = useId()
   return (
-    <section className="border-t border-line px-5 py-4 first:border-t-0">
-      <div className="mb-2.5 flex items-baseline gap-2">
-        <h3 className="text-label font-medium text-ink">{heading}</h3>
-        {count && (
-          <span className="text-meta text-ink-subtle tabular-nums">
-            {count}
-          </span>
-        )}
-        {action && <div className="ml-auto">{action}</div>}
-      </div>
+    <Stack
+      render={<section aria-labelledby={headingId} />}
+      gap="sm"
+      className="border-t border-line px-5 py-4 first:border-t-0"
+    >
+      <Inline gap="sm" className="min-h-control-sm">
+        <Box
+          render={<h3 id={headingId} />}
+          className="text-label font-medium text-ink"
+        >
+          {heading}
+        </Box>
+        {count && <Badge tier="chip">{count}</Badge>}
+        {action && <Box className="ml-auto">{action}</Box>}
+      </Inline>
       {children}
-    </section>
+    </Stack>
   )
 }
 
 function CheckRow({ check }: { check: PreviewCheck }) {
+  const rank = checkRank(check)
+  const tone = checkTones[rank]!
   return (
-    <li className="flex items-baseline gap-2.5 py-0.5 text-label">
-      <span className={cn("shrink-0 tabular-nums", checkTone(check))}>
-        {checkMarks[checkRank(check)]}
-      </span>
+    <Inline render={<li />} gap="sm" className="min-h-6 text-label">
+      <Icon
+        icon={checkMarks[rank]!}
+        size="sm"
+        className={cn(
+          toneInk[tone],
+          rank === 1 && "animate-spin motion-reduce:animate-none"
+        )}
+      />
       <span className="min-w-0 flex-1 truncate text-ink">
         {check.url ? (
           <a
@@ -99,12 +147,12 @@ function CheckRow({ check }: { check: PreviewCheck }) {
           check.name
         )}
       </span>
-      <span className={cn("shrink-0", checkTone(check))}>
+      <Badge tier="plain" tone={tone}>
         {check.status !== "completed"
           ? check.status
           : (check.conclusion ?? "done")}
-      </span>
-    </li>
+      </Badge>
+    </Inline>
   )
 }
 
@@ -122,9 +170,10 @@ const checkGroups = [
 function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
   if (checks === null) {
     return (
-      <p className="text-label text-attention">
-        GitHub did not return the checks for this commit.
-      </p>
+      <Inline gap="xs" className="text-label text-attention">
+        <Icon icon={AlertTriangle} size="sm" />
+        <span>GitHub did not return the checks for this commit.</span>
+      </Inline>
     )
   }
   if (checks.length === 0) {
@@ -133,39 +182,41 @@ function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
   const sorted = [...checks].sort((a, b) => checkRank(a) - checkRank(b))
   if (sorted.length <= groupChecksAbove) {
     return (
-      <ul className="space-y-0.5">
+      <Stack render={<ul />} gap="none">
         {sorted.map((check) => (
           <CheckRow key={`${check.name}:${check.url ?? ""}`} check={check} />
         ))}
-      </ul>
+      </Stack>
     )
   }
   return (
-    <div className="space-y-1.5">
+    <Stack gap="xs">
       {checkGroups.map(([label, rank]) => {
         const group = sorted.filter((check) => checkRank(check) === rank)
         if (!group.length) return null
         return (
-          <details key={label} open={rank === 0} className="group">
-            <summary className="cursor-pointer list-none text-meta text-ink-subtle hover:text-ink">
-              <span aria-hidden="true" className="inline-block w-3">
-                {"›"}
-              </span>
+          <details key={label} open={rank === 0} className="group/checks">
+            <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-meta text-ink-subtle hover:text-ink [&::-webkit-details-marker]:hidden">
+              <Icon
+                icon={ChevronRight}
+                size="sm"
+                className="transition-transform duration-fast ease-out-quint group-open/checks:rotate-90 motion-reduce:transition-none"
+              />
               {label}
-              <span className="ml-1.5 tabular-nums">{group.length}</span>
+              <Badge tier="chip">{group.length}</Badge>
             </summary>
-            <ul className="mt-1 space-y-0.5 pl-3">
+            <Stack render={<ul />} gap="none" className="mt-1 pl-5">
               {group.map((check) => (
                 <CheckRow
                   key={`${check.name}:${check.url ?? ""}`}
                   check={check}
                 />
               ))}
-            </ul>
+            </Stack>
           </details>
         )
       })}
-    </div>
+    </Stack>
   )
 }
 
@@ -240,7 +291,7 @@ function AddToAgentBatch({
         onClick={() => remove(key, entry.item.id)}
       >
         Queued for agent
-        <XIcon className="size-3" />
+        <Icon icon={X} size="sm" />
       </Button>
     )
   return (
@@ -273,7 +324,7 @@ function AgentBatchBar({ target }: { target: PullRequestRef }) {
   const submit = useSubmitAgentBatch(target)
   if (!queued.length) return null
   return (
-    <div className="flex items-center gap-2 border-t border-line bg-panel px-5 py-3">
+    <Inline gap="sm" bg="muted" className="border-t border-line px-5 py-3">
       <span className="text-label text-ink">
         {queued.length} comment{queued.length === 1 ? "" : "s"} queued for the
         agent
@@ -292,7 +343,7 @@ function AgentBatchBar({ target }: { target: PullRequestRef }) {
       >
         Send to agent
       </Button>
-    </div>
+    </Inline>
   )
 }
 
@@ -313,8 +364,8 @@ function Conversation({
   }, [])
 
   return (
-    <li className="border-l-2 border-attention/40 pl-3">
-      <div className="flex items-center gap-2 text-meta text-ink-subtle">
+    <Stack render={<li />} gap="xs" className="py-3 first:pt-0 last:pb-0">
+      <Inline gap="sm" className="text-meta text-ink-subtle">
         <span className="font-medium text-ink">
           {thread.author ?? "Someone"}
         </span>
@@ -322,7 +373,7 @@ function Conversation({
           {thread.path}
           {thread.line !== null && `:${thread.line}`}
         </span>
-        <div className="ml-auto flex shrink-0 items-center gap-2 text-ink">
+        <Inline gap="xs" className="ml-auto shrink-0 text-ink">
           {thread.url && (
             <AddToAgentBatch target={target} commentUrl={thread.url} />
           )}
@@ -342,17 +393,21 @@ function Conversation({
               target="_blank"
               rel="noreferrer"
             >
-              <IoLogoGithub className="size-3.5" />
+              <Icon icon={GitHub} size="sm" />
               Reply
             </a>
           )}
-        </div>
-      </div>
+        </Inline>
+      </Inline>
       {open ? (
-        <div className="mt-1 max-w-[72ch]">
+        <Box className="max-w-reading">
           <Markdown content={thread.body} />
           {thread.replies.length > 0 && (
-            <ul className="mt-2 space-y-2 border-t border-line pt-2">
+            <Stack
+              render={<ul />}
+              gap="sm"
+              className="mt-2 border-t border-line pt-2"
+            >
               {thread.replies.map((reply, index) => (
                 <li key={reply.url ?? index}>
                   <span className="text-label font-medium text-ink">
@@ -361,13 +416,13 @@ function Conversation({
                   <Markdown content={reply.body} />
                 </li>
               ))}
-            </ul>
+            </Stack>
           )}
-        </div>
+        </Box>
       ) : (
         <p
           ref={measure}
-          className="mt-1 line-clamp-3 text-label whitespace-pre-wrap text-ink"
+          className="line-clamp-3 text-label whitespace-pre-wrap text-ink"
         >
           {thread.body}
         </p>
@@ -376,7 +431,7 @@ function Conversation({
         <button
           type="button"
           onClick={() => setOpen(!open)}
-          className="mt-1 text-meta text-ink-subtle hover:text-ink hover:underline"
+          className="w-fit text-meta text-ink-subtle hover:text-ink hover:underline"
         >
           {open
             ? "Show less"
@@ -385,7 +440,7 @@ function Conversation({
               : "Show more"}
         </button>
       )}
-    </li>
+    </Stack>
   )
 }
 
@@ -400,10 +455,13 @@ function Conversations({
 }) {
   if (preview.unresolved === null) {
     return (
-      <p className="text-label text-attention">
-        GitHub did not return the review threads, so unresolved comments cannot
-        be counted here. Open the PR to check.
-      </p>
+      <Inline gap="xs" align="start" className="text-label text-attention">
+        <Icon icon={AlertTriangle} size="sm" className="mt-0.5" />
+        <span>
+          GitHub did not return the review threads, so unresolved comments
+          cannot be counted here. Open the PR to check.
+        </span>
+      </Inline>
     )
   }
   if (preview.unresolved.length === 0) {
@@ -414,7 +472,7 @@ function Conversations({
     )
   }
   return (
-    <ul className="space-y-2.5">
+    <Stack render={<ul />} gap="none" className="divide-y divide-line">
       {preview.unresolved.map((thread, index) => (
         <Conversation
           key={
@@ -427,7 +485,7 @@ function Conversations({
           resolve={resolve}
         />
       ))}
-    </ul>
+    </Stack>
   )
 }
 
@@ -471,47 +529,64 @@ export function PullRequestDetail({
     data?.checks?.filter((check) => checkRank(check) === 1).length ?? 0
 
   return (
-    <aside
-      aria-label={`Pull request ${pr.repo} #${pr.number}`}
-      className="flex min-h-0 w-full flex-col overflow-hidden rounded-compact border border-line bg-panel"
+    <Stack
+      render={<aside aria-label={`Pull request ${pr.repo} #${pr.number}`} />}
+      bg="panel"
+      border="line"
+      radius="panel"
+      className="min-h-0 w-full overflow-hidden"
     >
-      <header className="flex items-start gap-3 border-b border-line px-5 py-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2 text-meta text-ink-subtle">
-            <span className="truncate">{pr.repo}</span>
-            <span className="font-mono tabular-nums">#{pr.number}</span>
-            {data && (
-              <span className="tabular-nums">
-                <span className="text-positive">
-                  +{data.additions}
-                </span>{" "}
-                <span className="text-risk">−{data.deletions}</span>
-              </span>
-            )}
-          </div>
-          <h2 className="mt-1 text-body font-medium break-words text-ink">
-            {data?.title ?? pr.title}
-          </h2>
-          {data && (
-            <p className="mt-1 text-meta text-ink-subtle">
-              {data.author ?? "Someone"} wants to merge {data.commits}{" "}
-              {data.commits === 1 ? "commit" : "commits"} into{" "}
-              <span className="font-mono">{data.base_ref}</span> from{" "}
-              <span className="font-mono">{data.head_ref}</span>
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          aria-label="Close pull request preview"
-          onClick={onClose}
-          className="-mt-1 -mr-1.5 rounded-badge p-1.5 text-ink-subtle transition-colors hover:bg-hover hover:text-ink"
-        >
-          <XIcon className="size-4" />
-        </button>
-      </header>
+      <Box className="px-5 pt-3">
+        <RecordHeader
+          title={
+            <Box
+              render={<h2 />}
+              className="text-title font-semibold break-words text-ink"
+            >
+              {data?.title ?? pr.title}
+            </Box>
+          }
+          actions={
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Close pull request preview"
+              onClick={onClose}
+            >
+              <Icon icon={X} size="md" />
+            </Button>
+          }
+          meta={
+            <Stack gap="xs" className="text-meta text-ink-subtle">
+              <Inline gap="sm" align="baseline">
+                <span className="truncate">{pr.repo}</span>
+                <span className="font-mono tabular-nums">#{pr.number}</span>
+                {data && (
+                  <Inline gap="xs" className="font-mono tabular-nums">
+                    <span className="text-positive">+{data.additions}</span>
+                    <span className="text-risk">−{data.deletions}</span>
+                  </Inline>
+                )}
+              </Inline>
+              {data && (
+                <p>
+                  {data.author ?? "Someone"} wants to merge {data.commits}{" "}
+                  {data.commits === 1 ? "commit" : "commits"} into{" "}
+                  <span className="font-mono text-ink-muted">
+                    {data.base_ref}
+                  </span>{" "}
+                  from{" "}
+                  <span className="font-mono text-ink-muted">
+                    {data.head_ref}
+                  </span>
+                </p>
+              )}
+            </Stack>
+          }
+        />
+      </Box>
 
-      <div className="border-b border-line px-5 py-3">
+      <Box className="border-b border-line px-5 py-3">
         <PullRequestActions
           pr={pr}
           login={login}
@@ -519,28 +594,33 @@ export function PullRequestDetail({
           onSettled={onSettled}
           onReady={onReady}
         />
-      </div>
+      </Box>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
         {preview.isPending && (
-          <div className="space-y-3 p-5">
+          <Stack gap="md" padding="lg" className="px-5">
             <Skeleton className="h-4 w-1/3" />
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-4 w-1/2" />
-          </div>
+          </Stack>
         )}
         {preview.error && (
-          <p role="alert" className="px-5 py-4 text-label text-risk">
-            {preview.error.message}
-          </p>
+          <Box className="px-5 py-4">
+            <StateNotice
+              tone="RISK"
+              icon={AlertTriangle}
+              title="Could not load this pull request"
+              description={preview.error.message}
+            />
+          </Box>
         )}
         {data && (
           <>
             <Section heading="Description">
               {data.body ? (
-                <div className="max-w-[72ch]">
+                <Box className="max-w-reading">
                   <Markdown content={data.body} />
-                </div>
+                </Box>
               ) : (
                 <p className="text-meta text-ink-subtle">
                   This PR has no description.
@@ -585,9 +665,7 @@ export function PullRequestDetail({
               }
             >
               {data.files.length === 0 ? (
-                <p className="text-meta text-ink-subtle">
-                  No files changed.
-                </p>
+                <EmptyState icon={File} title="No files changed." />
               ) : (
                 <PullRequestFiles
                   pr={pr}
@@ -619,6 +697,6 @@ export function PullRequestDetail({
         )}
       </div>
       <AgentBatchBar target={pr} />
-    </aside>
+    </Stack>
   )
 }

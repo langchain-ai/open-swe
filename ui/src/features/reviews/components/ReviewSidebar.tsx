@@ -4,8 +4,19 @@ import {
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import { ListBulletsIcon, TreeViewIcon } from "@phosphor-icons/react"
 import type { ReactNode } from "react"
+
+import { ListSidebarTitle } from "@langchain/gtm-platform-design-system/patterns/split-view"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from "@langchain/gtm-platform-design-system/ui/tabs"
+
+import { GitPullRequest, List, TreeStructure } from "@/components/glyphs"
 
 import type {
   FileTreeDirectoryHandle,
@@ -51,6 +62,9 @@ export interface ReviewSidebarData {
   onSelectOverview: () => void
 }
 
+const ROW_CLASS =
+  "flex w-full cursor-pointer items-start gap-2 rounded-badge px-2 py-1.5 text-left text-label outline-none focus-visible:ring-2 focus-visible:ring-primary"
+
 function OverviewRow({
   active,
   onSelect,
@@ -59,20 +73,26 @@ function OverviewRow({
   onSelect: () => void
 }) {
   return (
-    <button
-      type="button"
-      aria-current={active ? "true" : undefined}
-      onClick={onSelect}
-      className={cn(
-        "flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left text-label leading-5 transition-colors",
-        active
-          ? "border-primary bg-hover font-medium text-ink"
-          : "border-transparent text-ink-subtle hover:bg-hover"
-      )}
-    >
-      Overview
-    </button>
+    <Box className="px-2">
+      <button
+        type="button"
+        aria-current={active ? "true" : undefined}
+        onClick={onSelect}
+        className={cn(
+          ROW_CLASS,
+          active
+            ? "bg-selected font-medium text-ink"
+            : "text-ink-subtle hover:bg-hover hover:text-ink"
+        )}
+      >
+        Overview
+      </button>
+    </Box>
   )
+}
+
+function isSidebarView(value: unknown): value is ReviewSidebarView {
+  return value === "ai" || value === "files"
 }
 
 export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
@@ -80,12 +100,10 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
   const showAi = data.view === "ai" && hasGroups
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col pb-2">
-      <div className="px-4 py-1">
-        <span className="text-meta font-medium tracking-wide text-ink-subtle/70 uppercase">
-          {data.title}
-        </span>
-      </div>
+    <Stack gap="xs" className="min-h-0 flex-1 pt-2 pb-2">
+      <ListSidebarTitle icon={GitPullRequest} className="px-4">
+        {data.title}
+      </ListSidebarTitle>
       {hasGroups && (
         <ReviewViewTabs
           view={data.view}
@@ -105,9 +123,11 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
           onSelectGroup={data.onSelectGroup}
         />
       ) : !data.files ? (
-        <div className="px-4 pt-1">
-          <Skeleton className="h-40 w-full" />
-        </div>
+        <Stack gap="sm" className="px-4 pt-1">
+          {[0, 1, 2, 3].map((index) => (
+            <Skeleton key={index} className="h-4 w-full" />
+          ))}
+        </Stack>
       ) : (
         <ReviewFileTreeExplorer
           files={data.files}
@@ -115,7 +135,7 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
           onSelect={data.onSelect}
         />
       )}
-    </div>
+    </Stack>
   )
 }
 
@@ -131,65 +151,42 @@ function ReviewViewTabs({
   fileCount: number | null
 }) {
   return (
-    <div
-      role="tablist"
-      aria-label="Sidebar view"
-      className="mx-3 mb-1 flex border-b border-line"
+    <Tabs
+      value={view}
+      onValueChange={(value: unknown) => {
+        if (isSidebarView(value)) onChange(value)
+      }}
+      className="px-3"
     >
-      <ReviewViewTab
-        active={view === "ai"}
-        label="Walkthrough"
-        count={stepCount}
-        onClick={() => onChange("ai")}
-      >
-        <ListBulletsIcon className="size-3.5" />
-      </ReviewViewTab>
-      <ReviewViewTab
-        active={view === "files"}
-        label="Files"
-        count={fileCount}
-        onClick={() => onChange("files")}
-      >
-        <TreeViewIcon className="size-3.5" />
-      </ReviewViewTab>
-    </div>
+      <TabsList variant="line" aria-label="Sidebar view" className="w-full">
+        <ReviewViewTab value="ai" label="Walkthrough" count={stepCount}>
+          <Icon icon={List} size="sm" />
+        </ReviewViewTab>
+        <ReviewViewTab value="files" label="Files" count={fileCount}>
+          <Icon icon={TreeStructure} size="sm" />
+        </ReviewViewTab>
+      </TabsList>
+    </Tabs>
   )
 }
 
 function ReviewViewTab({
-  active,
+  value,
   label,
   count,
-  onClick,
   children,
 }: {
-  active: boolean
+  value: ReviewSidebarView
   label: string
   count: number | null
-  onClick: () => void
   children: ReactNode
 }) {
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-label transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none",
-        active
-          ? "border-primary font-medium text-ink"
-          : "border-transparent text-ink-subtle hover:text-ink"
-      )}
-    >
+    <TabsTrigger value={value}>
       {children}
       {label}
-      {count !== null && (
-        <span className="text-meta text-ink-subtle/70 tabular-nums">
-          {count}
-        </span>
-      )}
-    </button>
+      {count !== null && <Badge tier="chip">{count}</Badge>}
+    </TabsTrigger>
   )
 }
 
@@ -203,7 +200,7 @@ function ReviewGroupList({
   onSelectGroup: (index: number) => void
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto py-1">
+    <Stack gap="none" className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
       {groups.map((group) => (
         <ReviewGroupRow
           key={group.index}
@@ -212,7 +209,7 @@ function ReviewGroupList({
           onSelectGroup={onSelectGroup}
         />
       ))}
-    </div>
+    </Stack>
   )
 }
 
@@ -225,7 +222,7 @@ export function renderInlineCode(text: string): Array<ReactNode> {
       return (
         <code
           key={i}
-          className="rounded-tick bg-hover px-1 py-0.5 font-mono text-[0.9em] text-primary"
+          className="rounded-tick bg-muted px-1 py-0.5 font-mono text-meta text-ink"
         >
           {part.slice(1, -1)}
         </code>
@@ -270,20 +267,15 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       aria-current={active ? "true" : undefined}
       onClick={selectGroup}
       onKeyDown={onKeyDown}
-      className={cn(
-        "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
-        active
-          ? "border-primary bg-hover"
-          : "border-transparent hover:bg-hover"
-      )}
+      className={cn(ROW_CLASS, active ? "bg-selected" : "hover:bg-hover")}
     >
-      <span className="mt-px shrink-0 text-meta font-medium text-ink-subtle/70 tabular-nums">
+      <span className="mt-px shrink-0 font-mono text-meta text-ink-subtle tabular-nums">
         {group.index}.
       </span>
       <span
         className={cn(
-          "min-w-0 text-label leading-5",
-          active ? "font-medium text-ink" : "text-ink-subtle"
+          "min-w-0 text-label",
+          active ? "font-medium text-ink" : "text-ink-muted"
         )}
       >
         {title}
@@ -345,7 +337,7 @@ function ReviewFileTreeExplorer({
   }, [model, selected])
 
   return (
-    <div className="min-h-0 flex-1">
+    <Box className="min-h-0 flex-1">
       <FileTree
         model={model}
         style={
@@ -358,6 +350,6 @@ function ReviewFileTreeExplorer({
           } as React.CSSProperties
         }
       />
-    </div>
+    </Box>
   )
 }
