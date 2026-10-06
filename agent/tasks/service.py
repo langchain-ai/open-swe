@@ -20,6 +20,7 @@ from agent.prompts import prompt
 from agent.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, SANDBOX_PROXY_CONFIG_METADATA_KEY
 from agent.source_context import SourceContext
 from agent.tasks import presentation, store
+from agent.tasks.flags import require_task_coordination
 from agent.tasks.presentation import TaskEventMetadata
 from agent.threads.access import resolve_run_email
 from agent.threads.creation import create_thread
@@ -328,6 +329,7 @@ async def spawn_worker(
     context = await store.load_context(actor.thread_id)
     if context is not None:
         context = await authorized_context(actor, coordinator=True)
+    await require_task_coordination(metadata)
     if metadata.get(SANDBOX_HOST_THREAD_KEY):
         raise PermissionError("Sandbox guests must ask their coordinator for additional workers")
     if not metadata.get("sandbox_id"):
@@ -463,6 +465,7 @@ async def control_worker(
     if action == "retry":
         if delegation.cancelled:
             raise ValueError("Only an uncancelled worker launch can be retried")
+        await require_task_coordination(await authorized_metadata(actor))
         async with postgres.session() as session:
             await session.execute(
                 update(EventMatch)

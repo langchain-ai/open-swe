@@ -1,22 +1,64 @@
+import logging
 from collections.abc import Awaitable, Callable
+from typing import Self
 
+import langgraph_sdk
+from langchain.agents.middleware import AgentState
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
-from langgraph.config import get_config
+from langgraph.runtime import Runtime
 
+from agent.github.proxy import maybe_refresh_proxy_token
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import prompt
-from agent.tasks.store import load_context
+from agent.tasks.flags import task_coordination_enabled, task_owner_login
+from agent.tasks.store import TaskContext, load_context
+from agent.utils.json_types import thread_metadata
+
+logger = logging.getLogger(__name__)
 
 
 class TaskCoordinationMiddleware(OpenSWEMiddleware):
+    def __init__(
+        self, thread_id: str, owner_login: str, enabled: bool, context: TaskContext | None
+    ) -> None:
+        self.thread_id = thread_id
+        self.owner_login = owner_login
+        self.enabled = enabled
+        self.context = context
+
+    @classmethod
+    async def for_thread(cls, thread_id: str) -> Self | None:
+        metadata = thread_metadata(await langgraph_sdk.get_client().threads.get(thread_id))
+        owner_login = task_owner_login(metadata)
+        enabled = await task_coordination_enabled(owner_login)
+        context = await load_context(thread_id)
+        return cls(thread_id, owner_login, enabled, context) if enabled or context else None
+
+    @property
+    def is_worker(self) -> bool:
+        return self.context is not None and self.context.membership.role == "worker"
+
+    async def abefore_model(self, state: AgentState, runtime: Runtime) -> None:
+        if self.context is not None and self.is_worker:
+            try:
+                await maybe_refresh_proxy_token(self.context.task.coordinator_thread_id)
+            except Exception:
+                logger.warning(
+                    "Failed to refresh the task's GitHub proxy",
+                    exc_info=True,
+                    extra={"thread_id": self.thread_id},
+                )
+
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        thread_id = get_config().get("configurable", {}).get("thread_id")
-        context = await load_context(thread_id) if isinstance(thread_id, str) else None
+        # A thread becomes a coordinator only after its first spawn in this run.
+        if self.context is None:
+            self.context = await load_context(self.thread_id)
+        context = self.context
         if context is None:
             return await handler(request)
         instructions = prompt(
@@ -26,6 +68,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
             coordinator_thread_id=context.task.coordinator_thread_id,
             role=context.membership.role,
             delegated=context.task.delegated,
+            delegation_enabled=await task_coordination_enabled(self.owner_login),
         )
         blocks = list(request.system_message.content_blocks) if request.system_message else []
         blocks.append({"type": "text", "text": instructions})

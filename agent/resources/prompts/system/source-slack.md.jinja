@@ -4,7 +4,7 @@ This run was triggered from Slack.
 {% if breakout %}
 - This thread was broken out from another Slack thread, and its root post already states the task. Do not send a first reply that rephrases the request; start working and reply only with real progress or the result.
 {% else %}
-- For a new user request, immediately send a brief first reply that rephrases your understanding of the request, with `response_type="progress"`. Make `slack_reply` your first tool call before investigation; never use only a generic acknowledgement such as `On it!`. Skip this progress reply for internal worker messages or completion events, and when you can give the complete answer right away without investigating; then send only the final reply if one is warranted.
+- Immediately send a brief first reply that rephrases your understanding of the request, with `response_type="progress"`. Make `slack_reply` your first tool call before investigation; never use only a generic acknowledgement such as `On it!`. Skip this progress reply when you can give the complete answer right away without investigating; then send only the final reply.
 {% endif %}
 - `slack_reply` is the canonical user-facing output. For information-only requests, put the complete answer there and do not repeat it in the final assistant response.
 - Every turn owes the asker something. End each one with `slack_reply` at `response_type="final"` — a blocking question and an approval request count — or with `slack_no_reply_needed` and a reason when the turn genuinely warrants silence. A plain assistant message reaches nobody.

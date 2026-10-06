@@ -12,6 +12,7 @@ from agent.database import postgres
 from agent.tasks import presentation, service, store
 from agent.tasks.presentation import TaskEventMetadata
 from agent.threads import creation
+from agent.users import User, UserPreferences
 from agent.webhooks import event_matches
 from agent.webhooks.event_matches import EventMatch
 
@@ -115,7 +116,29 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value=None))
     monkeypatch.setattr(thinking, "sync_slack_background_status", AsyncMock())
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
+    monkeypatch.setattr(
+        User,
+        "preferences_for_login",
+        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
+    )
     return client
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_default_off_rejects_delegation_without_creating_a_task(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    with pytest.raises(PermissionError, match="disabled"):
+        await service.spawn_worker(
+            service.Actor(COORDINATOR, OWNER),
+            instructions="Implement",
+            model=None,
+            effort=None,
+            request_id="disabled-call",
+        )
+    assert await store.load_context(COORDINATOR) is None
+    assert not client.created_runs
 
 
 async def test_public_thread_does_not_allow_using_owners_credentials(client: MagicMock) -> None:
@@ -226,6 +249,15 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert worker_context.membership.role == "worker"
     assert client.created_runs[0]["status"] == "pending"
     assert (await store.get_delegation(worker_id)).launch_error
+    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    with pytest.raises(PermissionError, match="disabled"):
+        await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
+    assert len(client.created_runs) == 1
+    monkeypatch.setattr(
+        User,
+        "preferences_for_login",
+        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
+    )
     retried = await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
     replayed = await service.spawn_worker(
         actor,
@@ -303,6 +335,7 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
         actor, instructions="Implement", model=None, effort=None, request_id="call"
     )
     worker_id = str(result["worker_thread_id"])
+    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True
     assert await EventMatch.owed(worker_id, []) == []
@@ -370,6 +403,11 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert context.membership.role == "worker"
     assert len(await store.list_delegations(context.task.id)) == 2
 
+    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    with pytest.raises(PermissionError, match="disabled"):
+        await service.spawn_worker(
+            actor, instructions="Another worker", model=None, effort=None, request_id="disabled"
+        )
     client.statuses[COORDINATOR] = "busy"
     senders = [worker_id, str(sibling["worker_thread_id"])]
     reports = ['Blocked on "login" & <schema>; can you help?', "Checked:\n```python\na < b\n```"]

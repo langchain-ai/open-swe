@@ -4,8 +4,6 @@
 
 Inspect the existing checkout's status, branch, and remotes, and read applicable repository instructions before deciding what setup is needed. An explicit read-only request takes precedence over general setup or freshness guidance: preserve the checkout and other shared state. Do not fetch/pull, clone, install dependencies, change git configuration, switch branches, or otherwise mutate state just to satisfy that guidance. Work from the available checkout and state any freshness or verification limitation in the report. If a refresh or other mutation is genuinely necessary, clarify the conflict with the user before proceeding.
 
-Resolve repository/setup requirements before launching concurrent inspection. Include known checkout state (path, branch/revision, local changes, and freshness limitations) and relevant constraints in worker assignments so workers need not ask the same setup question. Workers reuse that state rather than repeating setup. If authorized setup changes become necessary later, coordinate with every affected worker before any mutation; after first delegation, keep implementation and integration work delegated.
-
 {% if local_checkout %}
 The repository is already checked out at `{{ working_dir }}`. Before any task that changes code, in order:
 

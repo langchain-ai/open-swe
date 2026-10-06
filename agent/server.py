@@ -1429,6 +1429,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
     local_run = is_desktop_run(cfg)
+    task_coordination = (
+        None if local_run else await TaskCoordinationMiddleware.for_thread(thread_id)
+    )
     reset_model_selection = (
         cfg.source == "dashboard" and cfg.model_selection == "auto" and cfg.model_selection_changed
     )
@@ -1740,10 +1743,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         search_pull_requests,
         get_thread,
         manage_thread,
-        spawn_worker,
-        task_status,
-        message_task_thread,
-        control_worker,
+        *(
+            [spawn_worker]
+            if task_coordination and task_coordination.enabled and not task_coordination.is_worker
+            else []
+        ),
+        *([task_status, message_task_thread, control_worker] if task_coordination else []),
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         expedite_pr_approval,
@@ -2115,8 +2120,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ),
                     *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                     WorkflowPushGuardMiddleware(),
-                    TaskCoordinationMiddleware(),
-                    refresh_github_proxy_before_model,
+                    *([task_coordination] if task_coordination else []),
+                    *(
+                        []
+                        if task_coordination and task_coordination.is_worker
+                        else [refresh_github_proxy_before_model]
+                    ),
                     *(
                         []
                         if stop_summary_mode

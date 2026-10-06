@@ -94,6 +94,46 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
     assert filesystem._offload_binary_content
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_task_tools_require_the_thread_owners_opt_in(saved_thread_scope, enabled: bool):
+    from agent.users import User, UserPreferences
+
+    saved_thread_scope.update(owner_type="user", owner_login="owner")
+
+    async def preferences(login: str) -> UserPreferences:
+        return UserPreferences(experimental_task_coordination=enabled if login == "owner" else True)
+
+    with patch.object(User, "preferences_for_login", side_effect=preferences):
+        captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    names = {_registered_tool_name(tool) for tool in tools}
+    assert ("spawn_worker" in names) is enabled
+    assert ("control_worker" in names) is enabled
+
+
+@pytest.mark.parametrize("role", ["coordinator", "worker"])
+async def test_existing_task_keeps_controls_after_opt_out(saved_thread_scope, role):
+    from agent.tasks.store import CoordinatedTask, TaskContext, TaskMembership
+    from agent.users import User, UserPreferences
+
+    saved_thread_scope.update(owner_type="user", owner_login="owner")
+    task = CoordinatedTask(
+        coordinator_thread_id="coordinator", title="Existing task", workspace="default"
+    )
+    context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
+    with (
+        patch.object(User, "preferences_for_login", return_value=UserPreferences()),
+        patch("agent.middleware.task_coordination.load_context", return_value=context),
+    ):
+        captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    names = {_registered_tool_name(tool) for tool in tools}
+    assert "spawn_worker" not in names
+    assert {"control_worker", "message_task_thread", "task_status"} <= names
+
+
 @pytest.mark.asyncio
 async def test_unknown_scope_omits_workspace_and_personal_mcps():
     with (
