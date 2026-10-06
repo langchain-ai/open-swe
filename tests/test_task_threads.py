@@ -180,6 +180,27 @@ async def test_task_owner_still_needs_admin_permission(client: MagicMock) -> Non
     assert error.value.status_code == 403
 
 
+@pytest.mark.parametrize("selection", ["explicit", "auto"])
+async def test_task_wakeup_preserves_current_model_selection(
+    client: MagicMock, selection: str
+) -> None:
+    client.metadata[COORDINATOR].update(
+        model="anthropic:claude-opus-5-5",
+        effort="high",
+        model_selection=selection,
+    )
+
+    config = await service.recipient_config(COORDINATOR)
+
+    assert config["model_selection"] == selection
+    if selection == "explicit":
+        assert config["agent_model_id"] == "anthropic:claude-opus-5-5"
+        assert config["agent_effort"] == "high"
+    else:
+        assert "agent_model_id" not in config
+        assert "agent_effort" not in config
+
+
 async def test_desktop_worker_cannot_be_shared(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:

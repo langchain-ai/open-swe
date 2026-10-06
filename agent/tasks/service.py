@@ -10,7 +10,7 @@ from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import delete, text, update
 
 from agent.dashboard.oauth import enforce_github_login_gate
-from agent.dashboard.options import available_requested_models
+from agent.dashboard.options import available_requested_models, normalize_model_choice
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.database import postgres
@@ -137,10 +137,14 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
         config["repo"] = {"owner": owner, "name": name}
     elif isinstance(metadata.get("repo"), dict):
         config["repo"] = metadata["repo"]
-    if isinstance(metadata.get("resolved_model"), str):
-        config["agent_model_id"] = metadata["resolved_model"]
-        config["agent_effort"] = metadata.get("resolved_effort")
-        config["model_selection"] = metadata.get("model_selection", "explicit")
+    selection = metadata.get("model_selection")
+    if selection in ("auto", "explicit"):
+        config["model_selection"] = selection
+    if selection == "explicit":
+        model, effort = normalize_model_choice(metadata.get("model"), metadata.get("effort"))
+        if model and effort:
+            config["agent_model_id"] = model
+            config["agent_effort"] = effort
     return config
 
 
