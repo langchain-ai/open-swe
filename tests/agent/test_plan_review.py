@@ -4,16 +4,15 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.tools.errors import ToolError
 from tests.conftest import FakeStore
 
 
 async def test_save_plan_rejects_html_outside_plans_dir() -> None:
     from agent.tools.save_plan import save_plan
 
-    with pytest.raises(ToolError) as raised:
-        await save_plan("/workspace/plan.html")
-    assert "/workspace/plans" in str(raised.value)
+    result = await save_plan("/workspace/plan.html")
+    assert result["success"] is False
+    assert "/workspace/plans" in result["error"]
 
 
 async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(

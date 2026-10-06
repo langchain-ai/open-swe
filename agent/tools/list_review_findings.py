@@ -11,7 +11,6 @@ from typing import Any
 from agent.review.findings import ReviewerThreadMissingError
 from agent.review.findings import list_findings as list_findings_async
 from agent.run_config import RunConfig
-from agent.tools.errors import ToolError
 
 _COMPACT_FIELDS = (
     "id",
@@ -37,22 +36,18 @@ def _compact(finding: Mapping[str, Any]) -> dict[str, Any]:
 async def list_review_findings(status_filter: str | None = None) -> dict[str, Any]:
     """Implement the `list_review_findings` tool."""
     if status_filter is not None and status_filter not in {"open", "resolved", "dismissed"}:
-        raise ToolError(
-            f"Invalid status_filter: {status_filter}", details={"findings": [], "count": 0}
-        )
+        return {"findings": [], "count": 0, "error": f"Invalid status_filter: {status_filter}"}
 
     reviewer_thread_id = RunConfig.from_runtime().reviewer_thread_id
     if not reviewer_thread_id:
-        raise ToolError("reviewer thread unavailable", details={"findings": [], "count": 0})
+        return {"findings": [], "count": 0, "error": "reviewer thread unavailable"}
 
     try:
         findings = await list_findings_async(reviewer_thread_id)
     except ReviewerThreadMissingError:
         return {"findings": [], "count": 0, "note": "No review has run on this pull request yet."}
     except Exception as exc:  # noqa: BLE001
-        raise ToolError(
-            f"could not load findings: {exc!s}", details={"findings": [], "count": 0}
-        ) from exc
+        return {"findings": [], "count": 0, "error": f"could not load findings: {exc!s}"}
 
     if status_filter is not None:
         findings = [f for f in findings if f.get("status") == status_filter]

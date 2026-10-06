@@ -2,7 +2,6 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
-from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_review_url
 
 
@@ -31,7 +30,10 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
     """Implement the `request_pr_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if not pr_ref:
-        raise ToolError("Expected a GitHub PR URL like https://github.com/OWNER/REPO/pull/NUMBER")
+        return {
+            "success": False,
+            "error": "Expected a GitHub PR URL like https://github.com/OWNER/REPO/pull/NUMBER",
+        }
 
     configurable = get_config().get("configurable", {})
     source = configurable.get("source") or "agent"
@@ -51,6 +53,8 @@ async def request_pr_review(pr_url: str) -> dict[str, object]:
         slack_channel_id=slack_thread.get("channel_id", ""),
         slack_thread_ts=slack_thread.get("thread_ts", ""),
     )
-    if review_url := dashboard_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number):
+    if result.get("success") and (
+        review_url := dashboard_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    ):
         result["review_url"] = review_url
     return result

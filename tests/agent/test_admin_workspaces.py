@@ -10,7 +10,6 @@ from langgraph.graph.state import RunnableConfig
 from agent import server
 from agent.sandboxes import lifecycle
 from agent.tools import workspaces as env_tools
-from agent.tools.errors import ToolError
 from agent.users import User
 from agent.utils.authorship import CollaboratorIdentity
 from agent.workspaces.store import Workspace
@@ -84,10 +83,9 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = _config(admin_thread=True, github_login="someone-else")
     with patch("agent.run_config.get_config", return_value=config):
-        with pytest.raises(ToolError):
-            await env_tools.list_workspaces()
-        with pytest.raises(ToolError):
-            await env_tools.publish_workspace("base", "prompt")
+        assert (await env_tools.list_workspaces())["ok"] is False
+        result = await env_tools.publish_workspace("base", "prompt")
+        assert result["ok"] is False
 
 
 # --- publish: capture this sandbox, then record ---
@@ -166,10 +164,10 @@ async def test_a_failed_capture_writes_nothing(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=None, saved=_saved()) as seams:
         seams.capture.side_effect = RuntimeError("snapshot service unavailable")
-        with pytest.raises(ToolError) as raised:
-            await env_tools.publish_workspace("base", "prompt")
+        result = await env_tools.publish_workspace("base", "prompt")
 
-    assert "snapshot service unavailable" in str(raised.value)
+    assert result["ok"] is False
+    assert "snapshot service unavailable" in result["error"]
     seams.publish.assert_not_awaited()
 
 
@@ -182,10 +180,10 @@ async def test_a_failed_record_write_discards_the_orphaned_image(
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with _Publish(existing=None, saved=_saved()) as seams:
         seams.publish.side_effect = RuntimeError("store unavailable")
-        with pytest.raises(ToolError) as raised:
-            await env_tools.publish_workspace("base", "prompt")
+        result = await env_tools.publish_workspace("base", "prompt")
 
-    assert "store unavailable" in str(raised.value)
+    assert result["ok"] is False
+    assert "store unavailable" in result["error"]
     seams.discard.assert_awaited_once_with("base", "snap-new")
     seams.retire.assert_not_awaited()
 
@@ -200,10 +198,9 @@ async def test_a_repository_another_workspace_owns_is_refused_before_the_capture
         seams.validate.side_effect = ValueError(
             "repository acme/api already belongs to workspace core"
         )
-        with pytest.raises(ValueError) as raised:
-            await env_tools.publish_workspace("oss", "prompt", repos=["acme/api"])
+        result = await env_tools.publish_workspace("oss", "prompt", repos=["acme/api"])
 
-    assert str(raised.value) == "repository acme/api already belongs to workspace core"
+    assert result == {"ok": False, "error": "repository acme/api already belongs to workspace core"}
     seams.capture.assert_not_awaited()
     seams.publish.assert_not_awaited()
 
@@ -265,11 +262,10 @@ async def test_refresh_start_refuses_while_one_is_running(
         ),
         patch.object(env_tools.refresh, "start_refresh_run", start),
     ):
-        with pytest.raises(ToolError) as raised:
-            await env_tools.refresh_workspace_start("base")
+        result = await env_tools.refresh_workspace_start("base")
 
-    assert raised.value.details["status"] == "error"
-    assert raised.value.details["task_id"] == "ws-run-1"
+    assert result["status"] == "error"
+    assert result["task_id"] == "ws-run-1"
     start.assert_not_awaited()
 
 

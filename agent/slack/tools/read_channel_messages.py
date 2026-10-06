@@ -6,7 +6,6 @@ from agent.slack.client import (
     get_slack_user_names,
 )
 from agent.tools.access import Policy, access
-from agent.tools.errors import ToolError
 
 DEFAULT_CHANNEL_MESSAGE_LIMIT = 30
 
@@ -21,17 +20,19 @@ _NOT_PUBLIC = (
 async def slack_read_channel_messages(channel_id: str, limit: int = 30) -> dict[str, Any]:
     """Implement the `slack_read_channel_messages` tool."""
     if not channel_id or not channel_id.strip():
-        raise ToolError("channel_id is required")
+        return {"success": False, "error": "channel_id is required"}
     channel = await SlackChannel.load(channel_id.strip())
     if channel is None or not channel.public:
-        raise ToolError(_NOT_PUBLIC)
+        return {"success": False, "error": _NOT_PUBLIC}
 
     requested = limit if isinstance(limit, int) and limit > 0 else DEFAULT_CHANNEL_MESSAGE_LIMIT
     messages = await channel.messages(requested)
     if not messages:
-        raise ToolError(
-            "Could not read that channel. The bot may not be a member, or the channel may have no messages."
-        )
+        return {
+            "success": False,
+            "error": "Could not read that channel. The bot may not be a member, or the "
+            "channel may have no messages.",
+        }
 
     user_ids = [message.user for message in messages if message.user]
     user_names = await get_slack_user_names(user_ids) if user_ids else {}

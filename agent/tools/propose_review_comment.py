@@ -4,8 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from agent.tools.errors import ToolError
-
 MAX_BODY_CHARS = 10_000
 
 DiffSide = Literal["LEFT", "RIGHT"]
@@ -36,6 +34,7 @@ class ProposeReviewCommentResult(BaseModel):
     range: DiffRange | None = None
     body: str | None = None
     note: str | None = None
+    error: str | None = None
 
 
 async def propose_review_comment(
@@ -54,12 +53,14 @@ def _propose(
 ) -> ProposeReviewCommentResult:
     text = body.strip()
     if not text:
-        raise ToolError("body must not be empty")
+        return ProposeReviewCommentResult(proposed=False, error="body must not be empty")
     if len(text) > MAX_BODY_CHARS:
-        raise ToolError(f"body must be at most {MAX_BODY_CHARS} characters")
+        return ProposeReviewCommentResult(
+            proposed=False, error=f"body must be at most {MAX_BODY_CHARS} characters"
+        )
     checked = validate_range(file, start_line if start_line is not None else line, line, side)
     if isinstance(checked, str):
-        raise ToolError(checked)
+        return ProposeReviewCommentResult(proposed=False, error=checked)
     return ProposeReviewCommentResult(
         proposed=True,
         range=checked,

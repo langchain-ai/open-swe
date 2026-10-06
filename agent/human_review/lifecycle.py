@@ -57,6 +57,7 @@ from agent.slack.client import (
     wait_for_slack_file,
 )
 from agent.slack.dm import note_for_concierge, send_dm, send_dm_with_location
+from agent.slack.http import SlackRequestError
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -122,13 +123,14 @@ async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile])
             exc_info=True,
         )
         return None
-    file_id, error = await upload_slack_thread_file(
-        None, None, f"diff-{approval.head_sha[:12]}.png", png, title="Diff"
-    )
-    if not file_id:
+    try:
+        file_id = await upload_slack_thread_file(
+            None, None, f"diff-{approval.head_sha[:12]}.png", png, title="Diff"
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Failed to upload expedited review diff image",
-            extra={"approval_id": str(approval.id), "slack_error": error},
+            extra={"approval_id": str(approval.id), "slack_error": exc.code},
         )
         return None
     if not await wait_for_slack_file(file_id):
@@ -146,18 +148,13 @@ def _requester_login(request: HumanReviewRequest) -> str:
     return RunConfig.parse(request.run_config).github_login or ""
 
 
-async def post_card(
-    approval: HumanReviewRequest, *, title: str, files: list[ChangedFile]
-) -> tuple[str | None, str | None]:
-    """Post an expedited card into its thread: ``(message_ts, slack_error)``.
-
-    Sets ``slack_diff_file_id`` on ``approval``; the caller saves it with the message ts.
-    """
+async def post_card(approval: HumanReviewRequest, *, title: str, files: list[ChangedFile]) -> str:
+    """Post an expedited card and return its timestamp."""
     if approval.awaiting_ready:
-        return None, "draft card is author-only"
+        raise SlackRequestError("draft card is author-only")
     location = approval.slack_location
     if location is None:
-        return None, "no Slack thread"
+        raise SlackRequestError("no Slack thread")
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
     if not approval.slack_channel_choices:
         approval.slack_channel_choices = await channel_choices(approval)
@@ -220,7 +217,7 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
     return None
 
 
-async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, str | None]:
+async def post_standard_card(request: HumanReviewRequest) -> str:
     """Post a standard card: a thread reply also sent to the channel, or a top-level post."""
     text, blocks = await render(request, None)
     location = request.slack_location
@@ -236,7 +233,7 @@ async def post_standard_card(request: HumanReviewRequest) -> tuple[str | None, s
         )
     channel = await SlackChannel.load(request.slack_channel_id)
     if channel is None:
-        return None, "channel_not_found"
+        raise SlackRequestError("channel_not_found")
     return await channel.post(text, blocks=block_payload(blocks), login=_requester_login(request))
 
 
@@ -398,40 +395,45 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
         if token is None:
             logger.warning("Could not publish ready expedited card without a GitHub token")
             return
-        message_ts, error = await post_card(
-            request, title=request.pull_request.title, files=await _files_for(request, token)
-        )
-        if message_ts:
+        try:
+            message_ts = await post_card(
+                request, title=request.pull_request.title, files=await _files_for(request, token)
+            )
+        except SlackRequestError as exc:
+            logger.warning(
+                "Could not publish ready expedited card", extra={"slack_error": exc.code}
+            )
+        else:
             request.slack_message_ts = message_ts
             await request.save()
             await broadcast_configured(request)
-        else:
-            logger.warning("Could not publish ready expedited card", extra={"slack_error": error})
         return
     if not request.has_card or not request.slack_channel_id or not request.slack_message_ts:
         return
     text, blocks = await render(request, outcome)
-    ok, error = await update_slack_message(
-        request.slack_channel_id,
-        request.slack_message_ts,
-        text,
-        blocks=block_payload(blocks),
-        login=_requester_login(request),
-    )
-    if not ok:
+    try:
+        await update_slack_message(
+            request.slack_channel_id,
+            request.slack_message_ts,
+            text,
+            blocks=block_payload(blocks),
+            login=_requester_login(request),
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Failed to update human review card",
-            extra={"request_id": str(request.id), "kind": request.kind, "slack_error": error},
+            extra={"request_id": str(request.id), "kind": request.kind, "slack_error": exc.code},
         )
     if outcome is None and (copy := request.slack_copy) is not None:
         text, blocks = await render(request, None, copy=True)
-        ok, error = await update_slack_message(
-            *copy, text, blocks=block_payload(blocks), login=_requester_login(request)
-        )
-        if not ok:
+        try:
+            await update_slack_message(
+                *copy, text, blocks=block_payload(blocks), login=_requester_login(request)
+            )
+        except SlackRequestError as exc:
             logger.warning(
                 "Failed to update the copy of a human review card",
-                extra={"request_id": str(request.id), "slack_error": error},
+                extra={"request_id": str(request.id), "slack_error": exc.code},
             )
 
 
@@ -483,15 +485,16 @@ async def broadcast_card(approval: HumanReviewRequest) -> bool:
 async def copy_card(approval: HumanReviewRequest, channel: SlackChannel) -> str | None:
     """Post the open card at the top of another channel; why it was not, or ``None``."""
     text, blocks = await render(approval, None, copy=True)
-    message_ts, error = await channel.post(
-        text, blocks=block_payload(blocks), login=_requester_login(approval)
-    )
-    if not message_ts:
+    try:
+        message_ts = await channel.post(
+            text, blocks=block_payload(blocks), login=_requester_login(approval)
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Could not copy an expedited review card to another channel",
-            extra={"approval_id": str(approval.id), "slack_error": error},
+            extra={"approval_id": str(approval.id), "slack_error": exc.code},
         )
-        return f"Slack refused the post: {error or 'unknown error'}."
+        return f"Slack refused the post: {exc.code or 'unknown error'}."
     async with HumanReviewRequest.locked(approval.id) as (_, row):
         kept = (
             row is not None and row.state == "open" and not row.approved and not row.sent_elsewhere

@@ -522,13 +522,20 @@ async def ensure_sandbox_for_thread(
     return published
 
 
+class SandboxRecreationStopError(RuntimeError):
+    def __init__(self, old_sandbox_id: str, new_sandbox_id: str, reason: str) -> None:
+        super().__init__(reason)
+        self.old_sandbox_id = old_sandbox_id
+        self.new_sandbox_id = new_sandbox_id
+
+
 async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
-) -> tuple[str, str, str | None]:
-    """Best-effort stop the old sandbox and bind the thread to a fresh one."""
+) -> tuple[str, str]:
+    """Bind a fresh sandbox, then raise with its IDs if stopping the old one failed."""
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata = await get_sandbox_metadata(thread_id)
     raw_sandbox_id = metadata.get("sandbox_id")
@@ -599,7 +606,9 @@ async def recreate_sandbox_for_thread(
         old_sandbox_id,
         new_sandbox.id,
     )
-    return old_sandbox_id, new_sandbox.id, stop_error
+    if stop_error is not None:
+        raise SandboxRecreationStopError(old_sandbox_id, new_sandbox.id, stop_error)
+    return old_sandbox_id, new_sandbox.id
 
 
 def get_cached_sandbox_backend(

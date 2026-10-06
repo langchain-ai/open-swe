@@ -23,7 +23,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any, Literal, NoReturn, Self, TypedDict, cast
+from typing import Any, Literal, Self, TypedDict, cast
 from uuid import UUID, uuid7
 
 from langgraph_sdk import get_client
@@ -37,7 +37,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.run_config import RunConfig
-from agent.tools.errors import ToolError
 from agent.users.models import UserIdentity
 
 logger = logging.getLogger(__name__)
@@ -905,16 +904,22 @@ async def _record_finding_telemetry(thread_id: str, findings: list[Finding]) -> 
         logger.debug("Failed to update reviewer usage telemetry: %s", failures[0])
 
 
-def thread_missing_tool_result(exc: ReviewerThreadMissingError) -> NoReturn:
-    """Raise a missing-storage failure with do-not-retry guidance."""
-    raise ToolError(
-        "thread_not_found",
-        details={
-            "thread_id": exc.thread_id,
-            "note": "Reviewer findings storage is unavailable. Do not retry; report the blocker and include intended findings inline in the final message.",
-            "detail": str(exc),
-        },
-    )
+def thread_missing_tool_result(exc: ReviewerThreadMissingError) -> dict[str, Any]:
+    """Structured tool result for a missing reviewer thread.
+
+    Returned (not raised) so the agent sees an explicit do-not-retry contract
+    instead of an empty error blob it retries against.
+    """
+    return {
+        "success": False,
+        "error": "thread_not_found",
+        "thread_id": exc.thread_id,
+        "note": (
+            "Reviewer findings storage is unavailable. Do not retry; report the "
+            "blocker and include intended findings inline in the final message."
+        ),
+        "detail": str(exc),
+    }
 
 
 async def mutate_findings(

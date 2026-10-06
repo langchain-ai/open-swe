@@ -21,7 +21,6 @@ from agent.run_config import RunConfig
 from agent.slack.client import SLACK_THREAD_MAX_MESSAGES, fetch_slack_thread_messages
 from agent.source_context import SourceContext
 from agent.tools.admin_gate import actor_is_admin, configurable, is_private_admin_surface
-from agent.tools.errors import ToolError
 from agent.users import User
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_participants import (
@@ -280,12 +279,12 @@ def access(
                     return await fn(*args, **kwargs)
             mode = (await resolve_access()).mode(applied)
             if mode is None:
-                raise ToolError(_REFUSED)
+                return cast(R, {"ok": False, "error": _REFUSED})
             result = await fn(*args, **kwargs)
             if mode == "full" or applied.sole is None:
                 return result
             if not isinstance(result, Mapping):
-                raise ToolError(_WITHHELD)
+                return cast(R, {"ok": False, "error": _WITHHELD})
             return cast(R, dict(applied.sole(result)))
 
         setattr(guarded, "__access__", policy)  # noqa: B010

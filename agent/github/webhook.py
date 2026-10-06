@@ -45,7 +45,6 @@ from agent.thread_ids import (
     thread_id_from_branch,
 )
 from agent.threads.creation import create_thread
-from agent.tools.errors import ToolError
 from agent.users import User
 from agent.webhooks import common
 
@@ -273,11 +272,11 @@ async def trigger_pr_review_from_ref(
     app_token, app_token_expires_at = await common.get_github_app_installation_token_with_expiry()
     if not app_token:
         common.logger.warning("No GitHub App token available for PR reviewer request")
-        raise ToolError("No GitHub App token available")
+        return {"success": False, "error": "No GitHub App token available"}
 
     pr_metadata = await common.fetch_github_pr_metadata(pr_ref, token=app_token)
     if not pr_metadata:
-        raise ToolError("Could not fetch pull request metadata")
+        return {"success": False, "error": "Could not fetch pull request metadata"}
 
     repo_private = common.repo_private_from_pr_metadata(pr_metadata)
     repo_id = common.repo_id_from_pr_metadata(pr_metadata)
@@ -288,7 +287,7 @@ async def trigger_pr_review_from_ref(
     )
     if not app_token:
         common.logger.warning("No GitHub App token available for PR reviewer request")
-        raise ToolError("No GitHub App token available")
+        return {"success": False, "error": "No GitHub App token available"}
 
     base_sha = pr_metadata.get("base", {}).get("sha", "")
     head = pr_metadata.get("head", {})
@@ -299,7 +298,7 @@ async def trigger_pr_review_from_ref(
     pr_url = pr_metadata.get("html_url", "") or pr_ref.url
     if not base_sha or not head_sha:
         common.logger.warning("Missing base/head SHA for Slack PR review request")
-        raise ToolError("Pull request metadata is missing base/head SHA")
+        return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
 
     thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
@@ -308,7 +307,7 @@ async def trigger_pr_review_from_ref(
         langgraph_client,
         title=reviewer_thread_title({"number": pr_ref.number, "title": pr_title}),
     ):
-        raise ToolError("Could not create reviewer thread")
+        return {"success": False, "error": "Could not create reviewer thread"}
 
     pr_meta: ReviewerPRMeta = {
         "owner": pr_ref.owner,

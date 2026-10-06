@@ -9,7 +9,6 @@ from agent import run_config
 from agent.incidents import channels, service, tools
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.slack.channels import SlackChannel
-from agent.tools.errors import ToolError
 
 CHANNEL = {
     "id": "C7",
@@ -69,21 +68,21 @@ async def configured(fake_store, monkeypatch):
 
 async def test_start_needs_a_connected_account_and_an_eligible_channel(configured, monkeypatch):
     use_config(monkeypatch, github_login=None)
-    with pytest.raises(ToolError, match="connected Open SWE account"):
-        await tools.manage_incident("start")
+    denied = await tools.manage_incident("start")
+    assert denied["success"] is False and "connected Open SWE account" in denied["error"]
 
     use_config(monkeypatch)
     SlackChannel.fetch.return_value = {**CHANNEL, "is_private": True}
-    with pytest.raises(ToolError, match="public internal"):
-        await tools.manage_incident("start")
+    private = await tools.manage_incident("start")
+    assert private["success"] is False and "public internal" in private["error"]
 
     SlackChannel.fetch.return_value = dict(CHANNEL)
     policy = await service.get_policy()
     await service.POLICIES.put(
         "default", policy.model_copy(update={"excluded_channel_ids": ["C7"]})
     )
-    with pytest.raises(ToolError, match="excluded"):
-        await tools.manage_incident("start")
+    excluded = await tools.manage_incident("start")
+    assert excluded["success"] is False
     channels.enroll_channel.assert_not_awaited()
 
 
@@ -120,6 +119,7 @@ async def test_a_run_cannot_reopen_the_incident_it_just_completed(configured):
     await service.INCIDENTS.put(record.id, record)
 
     for action in ("resume", "start"):
-        with pytest.raises(ToolError, match="completed"):
-            await tools.manage_incident(action)
+        refused = await tools.manage_incident(action)
+        assert refused["success"] is False
+        assert "completed" in refused["error"]
     channels.apply_control.assert_not_awaited()

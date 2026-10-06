@@ -7,7 +7,6 @@ from langgraph.config import get_config
 
 from agent.review.analyzer_cron import ensure_continual_cron
 from agent.review.styles import REVIEW_STYLES, ReviewStyle
-from agent.tools.errors import ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ async def save_review_style_prompt(
     configurable = config.get("configurable") or {}
     full_name = configurable.get("review_style_full_name")
     if not isinstance(full_name, str) or "/" not in full_name:
-        raise ToolError("review_style_full_name missing from config")
+        return {"ok": False, "error": "review_style_full_name missing from config"}
 
     reviewers_from_args = [r.strip() for r in top_reviewers.split(",") if r.strip()]
     reviewers_from_config = configurable.get("review_style_top_reviewers") or []
@@ -54,7 +53,7 @@ async def save_review_style_prompt(
 
     if not custom_prompt.strip():
         await REVIEW_STYLES.mark_failed(full_name, "custom_prompt was empty")
-        raise ToolError("custom_prompt cannot be empty")
+        return {"ok": False, "error": "custom_prompt cannot be empty"}
 
     record = await _complete_and_register(
         full_name,

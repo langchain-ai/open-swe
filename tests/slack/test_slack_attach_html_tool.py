@@ -5,8 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from deepagents.backends.protocol import FileDownloadResponse
 
-from agent.tools.errors import ToolError
-
 attach_tool = importlib.import_module("agent.slack.tools.attach_html")
 
 
@@ -63,7 +61,7 @@ def _setup(
         yield current[-1]
 
     monkeypatch.setattr(attach_tool, "slack_thread_mutation_lock", unlocked)
-    upload = AsyncMock(return_value=("F1", None))
+    upload = AsyncMock(return_value="F1")
     monkeypatch.setattr(attach_tool, "upload_slack_thread_file", upload)
     return upload
 
@@ -96,8 +94,9 @@ async def test_slack_attach_html_rejects_non_html_file(monkeypatch: pytest.Monke
         AsyncMock(return_value=(backend, "/workspace/test.txt", "/workspace")),
     )
 
-    with pytest.raises(ToolError, match="file_path must identify an HTML file"):
-        await attach_tool.slack_attach_html("test.txt")
+    result = await attach_tool.slack_attach_html("test.txt")
+
+    assert result == {"success": False, "error": "file_path must identify an HTML file"}
     backend.aexecute.assert_not_awaited()
 
 
@@ -110,8 +109,9 @@ async def test_slack_attach_html_rejects_large_file(monkeypatch: pytest.MonkeyPa
         AsyncMock(return_value=(backend, "/workspace/big.html", "/workspace")),
     )
 
-    with pytest.raises(ToolError, match="file exceeds the 10 MB attachment limit"):
-        await attach_tool.slack_attach_html("big.html")
+    result = await attach_tool.slack_attach_html("big.html")
+
+    assert result == {"success": False, "error": "file exceeds the 10 MB attachment limit"}
     backend.adownload_files.assert_not_awaited()
 
 
@@ -122,8 +122,9 @@ async def test_slack_attach_html_rejects_control_characters(
     backend = _backend()
     _setup(monkeypatch, backend)
 
-    with pytest.raises(ToolError, match="title contains control characters"):
-        await attach_tool.slack_attach_html("test.html", title="bad\x00title")
+    result = await attach_tool.slack_attach_html("test.html", title="bad\x00title")
+
+    assert result == {"success": False, "error": "title contains control characters"}
     backend.adownload_files.assert_not_awaited()
 
 
@@ -132,8 +133,9 @@ async def test_slack_attach_html_requires_active_thread(monkeypatch: pytest.Monk
     backend = _backend()
     _setup(monkeypatch, backend, active=[None])
 
-    with pytest.raises(ToolError, match="Missing active Slack thread in config"):
-        await attach_tool.slack_attach_html("test.html")
+    result = await attach_tool.slack_attach_html("test.html")
+
+    assert result == {"success": False, "error": "Missing active Slack thread in config"}
     backend.adownload_files.assert_not_awaited()
 
 
@@ -149,6 +151,7 @@ async def test_slack_attach_html_rejects_thread_move(monkeypatch: pytest.MonkeyP
         ],
     )
 
-    with pytest.raises(ToolError, match="Slack thread moved; retry the attachment"):
-        await attach_tool.slack_attach_html("test.html")
+    result = await attach_tool.slack_attach_html("test.html")
+
+    assert result == {"success": False, "error": "Slack thread moved; retry the attachment"}
     upload.assert_not_awaited()

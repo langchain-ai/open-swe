@@ -157,32 +157,32 @@ export class LocalExecutor {
   async dispatch(
     method: string,
     params: Record<string, unknown>
-  ): Promise<{ result: JsonObject }> {
+  ): Promise<DispatchOutcome> {
     switch (method) {
       case "execute": {
         const command = stringAt(params, "command")
         if (command === null)
-          throw new Error("execute requires a command string")
+          return { error: "execute requires a command string" }
         const result = await this.execute(command, numberAt(params, "timeout"))
         return { result: { ...result } }
       }
       case "upload_files": {
         const files = uploadEntries(params)
         if (files === null) {
-          throw new Error(
-            "upload_files requires files with path and content_base64"
-          )
+          return {
+            error: "upload_files requires files with path and content_base64",
+          }
         }
         return { result: { responses: await this.uploadFiles(files) } }
       }
       case "download_files": {
         const paths = stringArrayAt(params, "paths")
         if (paths === null)
-          throw new Error("download_files requires a paths array")
+          return { error: "download_files requires a paths array" }
         return { result: { responses: await this.downloadFiles(paths) } }
       }
       default:
-        throw new Error(`unsupported method ${method}`)
+        return { error: `unsupported method ${method}` }
     }
   }
 

@@ -26,7 +26,6 @@ from agent.tools.background_execute import (
     background_execute,
     control_script,
 )
-from agent.tools.errors import ToolError
 from agent.utils.background_task_state import update_background_task_state
 
 # _launch_command refuses to run without setsid, which macOS does not ship; the
@@ -333,15 +332,14 @@ async def test_background_execute_reports_monitor_scheduling_failure() -> None:
             AsyncMock(side_effect=RuntimeError("invalid assistant ID")),
         ),
     ):
-        with pytest.raises(ToolError) as raised:
-            await background_execute("sleep 10")
+        result = await background_execute("sleep 10")
 
-    assert raised.value.details["task_id"] == "task-1"
-    assert raised.value.details["status"] == "running"
-    assert (
-        str(raised.value)
-        == "command started, but automatic completion monitoring could not be scheduled"
-    )
+    assert result == {
+        "success": False,
+        "task_id": "task-1",
+        "status": "running",
+        "error": "command started, but automatic completion monitoring could not be scheduled",
+    }
 
 
 @pytest.mark.parametrize("tracking_failure", [False, True])
@@ -594,11 +592,9 @@ async def test_callback_launch_tracks_the_task_before_its_runner_can_call_back(
         patch("agent.tools.background_execute.update_background_task_state", side_effect=update),
         patch("agent.tools.background_execute.langgraph_client"),
     ):
-        if launch_fails:
-            with pytest.raises(RuntimeError, match="active task limit"):
-                await background_execute("true")
-        else:
-            assert (await background_execute("true"))["success"] is True
+        result = await background_execute("true")
+
+    assert result["success"] is not launch_fails
     assert bool(tracked) is not launch_fails
 
 

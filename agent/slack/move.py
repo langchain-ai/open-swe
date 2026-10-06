@@ -17,9 +17,9 @@ from agent.slack.client import (
     store_slack_run_mapping,
 )
 from agent.slack.code_channels import is_code_channel_session
+from agent.slack.http import SlackRequestError
 from agent.slack.thinking import release_slack_location_status, sync_slack_background_status
 from agent.source_context import SlackThreadRef, SourceContext
-from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import JsonObject, thread_metadata
 
@@ -184,17 +184,20 @@ async def move_slack_thread(
 ) -> dict[str, Any]:
     """Post `message` as a new root in `target_channel` and move the thread's Slack binding there."""
     root_text = append_slack_web_link_footer(message, dashboard_thread_url(thread_id))
-    new_ts, slack_error = await post_slack_top_level_message_with_ts(
-        target_channel,
-        root_text,
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if not new_ts:
-        raise ToolError(
-            slack_error or "Slack post failed",
-            details={"slack_error": slack_error, "hint": _slack_error_hint(slack_error)},
+    try:
+        new_ts = await post_slack_top_level_message_with_ts(
+            target_channel,
+            root_text,
+            unfurl_links=False,
+            unfurl_media=False,
         )
+    except SlackRequestError as exc:
+        return {
+            "success": False,
+            "error": exc.code or "Slack post failed",
+            "slack_error": exc.code,
+            "hint": _slack_error_hint(exc.code),
+        }
 
     source_ref = SlackThreadRef.model_validate(dict(source))
     try:
@@ -203,13 +206,18 @@ async def move_slack_thread(
         )
     except SlackRebindError as exc:
         if exc.moved:
-            raise ToolError(
-                f"Move cleanup failed: {exc}",
-                details={"retryable": True, "channel_id": target_channel, "thread_ts": new_ts},
-            ) from exc
-        raise ToolError(
-            f"Could not persist Slack move: {exc}", details={"retryable": True}
-        ) from exc
+            return {
+                "success": False,
+                "error": f"Move cleanup failed: {exc}",
+                "retryable": True,
+                "channel_id": target_channel,
+                "thread_ts": new_ts,
+            }
+        return {
+            "success": False,
+            "error": f"Could not persist Slack move: {exc}",
+            "retryable": True,
+        }
 
     return {
         "success": True,

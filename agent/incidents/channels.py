@@ -20,7 +20,7 @@ from agent.slack.client import (
     slack_message_bot_id,
 )
 from agent.slack.events import claim_slack_event
-from agent.slack.http import SlackClient
+from agent.slack.http import SlackClient, SlackRequestError
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.store import store_client
 from agent.users import User
@@ -129,17 +129,20 @@ async def _post(
 ) -> str | None:
     if record.is_archived:
         return None
-    ts, error = await post_slack_thread_reply_with_ts(
-        record.channel_id,
-        turns.SESSION_TS,
-        text,
-        blocks=blocks,
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if error:
+    try:
+        ts = await post_slack_thread_reply_with_ts(
+            record.channel_id,
+            turns.SESSION_TS,
+            text,
+            blocks=blocks,
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+    except SlackRequestError as exc:
+        ts = None
         logger.warning(
-            "Incident notice not delivered", extra={"incident_id": record.id, "slack_error": error}
+            "Incident notice not delivered",
+            extra={"incident_id": record.id, "slack_error": exc.code},
         )
     return ts
 

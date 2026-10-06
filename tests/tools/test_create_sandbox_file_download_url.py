@@ -88,10 +88,9 @@ async def test_create_download_url_rejects_paths_outside_work_dir(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError) as raised:
-        await download_tool.create_sandbox_file_download_url(file_path)
+    result = await download_tool.create_sandbox_file_download_url(file_path)
 
-    assert "must resolve within the sandbox work directory" in str(raised.value)
+    assert "must resolve within the sandbox work directory" in result["error"]
 
     assert client.calls == []
 
@@ -102,9 +101,8 @@ async def test_create_download_url_rejects_symlink_outside_work_dir(
     backend = _Backend()
     client = _configure(monkeypatch, backend)
 
-    with pytest.raises(ValueError) as raised:
-        await download_tool.create_sandbox_file_download_url("link-to-secret")
+    result = await download_tool.create_sandbox_file_download_url("link-to-secret")
 
-    assert "must resolve within the sandbox work directory" in str(raised.value)
+    assert "must resolve within the sandbox work directory" in result["error"]
 
     assert client.calls == []

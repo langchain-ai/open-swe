@@ -11,8 +11,8 @@ from agent.slack.client import (
     slack_thread_mutation_lock,
     upload_slack_thread_file,
 )
+from agent.slack.http import SlackRequestError
 from agent.tools.create_sandbox_file_download_url import resolve_sandbox_file
-from agent.tools.errors import ToolError
 from agent.utils.thread_ops import langgraph_client
 
 _MAX_SLACK_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -27,48 +27,48 @@ async def slack_attach_html(
     """Implement the `slack_attach_html` tool."""
     backend, path, work_dir = await resolve_sandbox_file(file_path)
     if not path.lower().endswith(".html"):
-        raise ToolError("file_path must identify an HTML file")
+        return {"success": False, "error": "file_path must identify an HTML file"}
     staged_path = posixpath.join(work_dir, f".open-swe-slack-upload-{uuid.uuid4().hex}")
     prepare = await backend.aexecute(_prepare_file_command(path, staged_path))
     if prepare.exit_code != 0:
         await _remove_staged_file(backend, staged_path)
-        raise ToolError(_prepare_error(prepare.output))
+        return {"success": False, "error": _prepare_error(prepare.output)}
     try:
         size = int(prepare.output.strip())
-    except (AttributeError, ValueError) as exc:
+    except AttributeError, ValueError:
         await _remove_staged_file(backend, staged_path)
-        raise ToolError("failed to determine file size") from exc
+        return {"success": False, "error": "failed to determine file size"}
     if size < 1:
         await _remove_staged_file(backend, staged_path)
-        raise ToolError("file cannot be empty")
+        return {"success": False, "error": "file cannot be empty"}
     if size > _MAX_SLACK_ATTACHMENT_BYTES:
         await _remove_staged_file(backend, staged_path)
-        raise ToolError("file exceeds the 10 MB attachment limit")
+        return {"success": False, "error": "file exceeds the 10 MB attachment limit"}
 
     try:
         filename = posixpath.basename(path)
         if len(filename) > 255:
-            raise ToolError("filename exceeds 255 characters")
+            return {"success": False, "error": "filename exceeds 255 characters"}
         if _has_control_chars(filename):
-            raise ToolError("filename contains control characters")
+            return {"success": False, "error": "filename contains control characters"}
 
         comment = initial_comment.strip() if isinstance(initial_comment, str) else None
         if comment and len(comment) > _MAX_COMMENT_CHARS:
-            raise ToolError("initial_comment exceeds 3000 characters")
+            return {"success": False, "error": "initial_comment exceeds 3000 characters"}
         if comment and _has_control_chars(comment, allowed="\n\t"):
-            raise ToolError("initial_comment contains control characters")
+            return {"success": False, "error": "initial_comment contains control characters"}
         display_title = title.strip() if isinstance(title, str) and title.strip() else None
         if display_title and len(display_title) > 255:
-            raise ToolError("title exceeds 255 characters")
+            return {"success": False, "error": "title exceeds 255 characters"}
         if display_title and _has_control_chars(display_title):
-            raise ToolError("title contains control characters")
+            return {"success": False, "error": "title contains control characters"}
 
         config = get_config()
         configurable = config.get("configurable", {})
         slack_thread = configurable.get("slack_thread", {})
         thread_id = configurable.get("thread_id")
         if not isinstance(thread_id, str) or not thread_id:
-            raise ToolError("Missing thread_id in config")
+            return {"success": False, "error": "Missing thread_id in config"}
         client = langgraph_client()
         active = await get_active_slack_thread(
             client,
@@ -79,12 +79,12 @@ async def slack_attach_html(
         channel_id = active.get("channel_id")
         thread_ts = active.get("thread_ts")
         if not channel_id or not thread_ts:
-            raise ToolError("Missing active Slack thread in config")
+            return {"success": False, "error": "Missing active Slack thread in config"}
 
         downloads = await backend.adownload_files([staged_path])
         content = _download_content(downloads[0] if downloads else None)
         if content is None or len(content) != size:
-            raise ToolError("failed to read staged sandbox file")
+            return {"success": False, "error": "failed to read staged sandbox file"}
 
         async with slack_thread_mutation_lock(
             client,
@@ -96,9 +96,9 @@ async def slack_attach_html(
                 channel_id,
                 thread_ts,
             ):
-                raise ToolError("Slack thread moved; retry the attachment")
+                return {"success": False, "error": "Slack thread moved; retry the attachment"}
 
-            file_id, error = await upload_slack_thread_file(
+            file_id = await upload_slack_thread_file(
                 channel_id,
                 thread_ts,
                 filename,
@@ -106,9 +106,9 @@ async def slack_attach_html(
                 title=display_title,
                 initial_comment=comment,
             )
-        if error:
-            raise ToolError(error)
         return {"success": True, "file_id": file_id, "filename": filename}
+    except SlackRequestError as exc:
+        return {"success": False, "error": exc.code or "upload_failed"}
     finally:
         await _remove_staged_file(backend, staged_path)
 

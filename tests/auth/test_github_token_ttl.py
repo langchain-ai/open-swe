@@ -19,7 +19,6 @@ from fastapi import HTTPException
 from agent.github import comments as github_comments
 from agent.github import thread_token as github_token
 from agent.github import webhook as github_webhooks
-from agent.tools.errors import ToolError
 from agent.users import User
 from agent.webhooks import common as webhook_common
 
@@ -291,8 +290,9 @@ async def test_publish_review_invalidates_cached_token_on_401(
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
     monkeypatch.setattr(publish_review_module, "_record_ranking", AsyncMock(return_value=None))
 
-    with pytest.raises(ToolError, match="401"):
-        await publish_review_module.publish_review(ranking=[])
+    result = await publish_review_module.publish_review(ranking=[])
+    assert result["success"] is False
+    assert "401" in result["error"]
     assert invalidated["calls"] == 1
     assert invalidated.get("thread_id") == "thread-xyz"
 

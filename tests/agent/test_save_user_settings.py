@@ -8,7 +8,6 @@ import langgraph_sdk
 import pytest
 
 from agent.dashboard.personal_settings import SettingValue, patch_personal_settings
-from agent.tools.errors import ToolError
 from agent.tools.read_user_settings import read_user_settings
 from agent.tools.save_user_settings import save_user_settings
 from tests.conftest import FakeStore
@@ -125,8 +124,8 @@ async def test_unauthorized_calls_never_read_or_write_settings(
     with patch(
         "agent.tools.save_user_settings.patch_personal_settings", new_callable=AsyncMock
     ) as save:
-        with pytest.raises(ToolError):
-            await save_user_settings({"draft_prs": False})
+        result = await save_user_settings({"draft_prs": False})
+    assert result["ok"] is False
     save.assert_not_awaited()
 
 
@@ -141,8 +140,7 @@ async def test_unavailable_thread_scope_fails_closed(
     with patch(
         "agent.tools.save_user_settings.patch_personal_settings", new_callable=AsyncMock
     ) as save:
-        with pytest.raises(ToolError):
-            await save_user_settings({"draft_prs": False})
+        assert (await save_user_settings({"draft_prs": False}))["ok"] is False
     save.assert_not_awaited()
 
 
@@ -171,8 +169,7 @@ async def test_invalid_patch_rejects_all_changes(
         ["profiles"], "Alice", {"default_model": "openai:gpt-6.1-sol", "reasoning_effort": "high"}
     )
     before = deepcopy(fake_store.items)
-    with pytest.raises(ValueError):
-        await save_user_settings(settings)
+    assert (await save_user_settings(settings))["ok"] is False
     assert fake_store.items == before
 
 
@@ -191,9 +188,9 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     if mixed:
         settings = {"auto_fix_ci": False, "default_workspace": "new", **settings}
     before = deepcopy(fake_store.items)
-    with pytest.raises(ToolError) as raised:
-        await save_user_settings(settings)
-    assert "dashboard" in str(str(raised.value))
+    result = await save_user_settings(settings)
+    assert result["ok"] is False
+    assert "dashboard" in str(result["error"])
     assert fake_store.items == before
 
 
@@ -205,8 +202,9 @@ async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
     ) as save:
-        with pytest.raises(ValueError):
-            await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False})
+        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+            "ok"
+        ] is False
         save.assert_awaited_once()
     assert not fake_store.items
     with patch.object(
@@ -300,8 +298,7 @@ async def test_private_read_rejects_unverified_requesters(
 ) -> None:
     requester["github_login"] = login
     with patch("agent.tools.read_user_settings.get_profile", new_callable=AsyncMock) as profile:
-        with pytest.raises(ToolError):
-            await read_user_settings()
+        assert "error" in await read_user_settings()
     profile.assert_not_awaited()
 
 

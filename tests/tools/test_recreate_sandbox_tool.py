@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.tools.errors import ToolError
+from agent.sandboxes.lifecycle import SandboxRecreationStopError
 from agent.tools.recreate_sandbox import recreate_sandbox
 
 
@@ -20,7 +20,12 @@ async def test_recreate_sandbox_workspace_overrides_thread_workspace_for_private
         patch(
             "agent.sandboxes.lifecycle.recreate_sandbox_for_thread",
             new_callable=AsyncMock,
-            return_value=("sandbox-old", "sandbox-new", stop_error),
+            return_value=("sandbox-old", "sandbox-new"),
+            side_effect=(
+                SandboxRecreationStopError("sandbox-old", "sandbox-new", stop_error)
+                if stop_error is not None
+                else None
+            ),
         ) as recreate,
     ):
         result = await recreate_sandbox(workspace="langchainplus")
@@ -50,8 +55,9 @@ async def test_recreate_sandbox_refuses_other_workspace_outside_private_admin_su
             new_callable=AsyncMock,
         ) as recreate,
     ):
-        with pytest.raises(ToolError, match="not available in this thread"):
-            await recreate_sandbox(workspace="langchainplus")
+        result = await recreate_sandbox(workspace="langchainplus")
+
+    assert "not available in this thread" in str(result["error"])
     recreate.assert_not_awaited()
 
 
@@ -67,7 +73,6 @@ async def test_recreate_sandbox_reports_failure_without_ids() -> None:
             side_effect=RuntimeError("creation failed"),
         ),
     ):
-        with pytest.raises(RuntimeError) as raised:
-            await recreate_sandbox()
+        result = await recreate_sandbox()
 
-    assert str(raised.value) == "creation failed"
+    assert result == {"success": False, "error": "creation failed"}

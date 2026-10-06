@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agent.tools.add_finding import add_finding
-from agent.tools.errors import ToolError
 from agent.tools.resolve_finding_thread import resolve_finding_thread
 from agent.tools.update_finding import update_finding
 
@@ -73,19 +72,19 @@ async def test_add_finding_left_anchor_outside_old_side_set_rejected() -> None:
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", new_callable=AsyncMock),
     ):
-        with pytest.raises(ToolError) as raised:
-            await add_finding(
-                severity="high",
-                confidence="high",
-                category="correctness",
-                file="foo.py",
-                title="Generated title",
-                description="d",
-                start_line=99,
-                end_line=99,
-                side="LEFT",
-            )
-    assert raised.value.details["in_diff"] is False
+        result = await add_finding(
+            severity="high",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            title="Generated title",
+            description="d",
+            start_line=99,
+            end_line=99,
+            side="LEFT",
+        )
+    assert result["success"] is False
+    assert result["in_diff"] is False
 
 
 async def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
@@ -172,9 +171,9 @@ async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
 
 async def test_update_finding_requires_note_for_resolution() -> None:
     with patch("agent.run_config.get_config", return_value=_config()):
-        with pytest.raises(ToolError) as raised:
-            await update_finding(finding_id="f_x", status="resolved")
-    assert "requires a note" in str(raised.value)
+        result = await update_finding(finding_id="f_x", status="resolved")
+    assert result["success"] is False
+    assert "requires a note" in result["error"]
 
 
 async def test_update_finding_rejects_long_suggestion_without_clobbering() -> None:
@@ -224,16 +223,21 @@ async def test_update_finding_leaves_open_when_github_resolution_fails() -> None
         patch(
             "agent.tools.resolve_finding_thread._resolve_finding_thread_async",
             new_callable=AsyncMock,
-            side_effect=ToolError("Could not resolve GitHub review thread id"),
+            return_value={
+                "success": False,
+                "error": "Could not resolve GitHub review thread id",
+            },
         ) as resolve_async,
     ):
-        with pytest.raises(ToolError, match="Could not resolve GitHub review thread id"):
-            await update_finding(
-                finding_id="f_a",
-                status="resolved",
-                note="The latest commit adds the missing guard.",
-            )
+        result = await update_finding(
+            finding_id="f_a",
+            status="resolved",
+            note="The latest commit adds the missing guard.",
+        )
 
+    assert result["success"] is False
+    assert "left open" in result["error"]
+    assert result["github_resolution"]["error"] == "Could not resolve GitHub review thread id"
     resolve_async.assert_awaited_once()
     update.assert_not_awaited()
 
@@ -285,17 +289,17 @@ async def test_add_finding_returns_structured_error_when_thread_missing() -> Non
         patch("agent.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
         patch("agent.tools.add_finding.append_finding", side_effect=fake_append),
     ):
-        with pytest.raises(ToolError) as raised:
-            await add_finding(
-                severity="medium",
-                confidence="high",
-                category="correctness",
-                file="foo.py",
-                title="Rename breaks reference",
-                description="rename",
-                start_line=11,
-            )
+        result = await add_finding(
+            severity="medium",
+            confidence="high",
+            category="correctness",
+            file="foo.py",
+            title="Rename breaks reference",
+            description="rename",
+            start_line=11,
+        )
 
-    assert str(raised.value) == "thread_not_found"
-    assert raised.value.details["thread_id"] == "tid-1"
-    assert "Do not retry" in raised.value.details["note"]
+    assert result["success"] is False
+    assert result["error"] == "thread_not_found"
+    assert result["thread_id"] == "tid-1"
+    assert "Do not retry" in result["note"]

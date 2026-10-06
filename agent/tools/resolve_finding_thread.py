@@ -22,7 +22,6 @@ from agent.review.publish import (
 )
 from agent.review.reconcile import reconcile_findings_with_review_threads
 from agent.run_config import RunConfig
-from agent.tools.errors import ToolError
 from agent.utils.reviewer_outcomes import emit_finding_status_outcome
 
 
@@ -40,20 +39,21 @@ async def resolve_finding_thread(
 ) -> dict[str, Any]:
     """Implement the `resolve_finding_thread` tool."""
     if status not in {"resolved", "dismissed"}:
-        raise ToolError(f"Invalid status: {status}")
+        return {"success": False, "error": f"Invalid status: {status}"}
     normalized_note = _normalize_note(note)
     if normalized_note is None:
-        raise ToolError(
-            "Resolving or dismissing a finding requires a note with the message to post."
-        )
+        return {
+            "success": False,
+            "error": "Resolving or dismissing a finding requires a note with the message to post.",
+        }
 
     cfg = RunConfig.from_runtime()
     if not cfg.repo or cfg.pr_number is None:
-        raise ToolError("Missing repo or PR info in run config")
+        return {"success": False, "error": "Missing repo or PR info in run config"}
 
     token = await resolve_thread_github_token()
     if not token:
-        raise ToolError("No GitHub token available")
+        return {"success": False, "error": "No GitHub token available"}
 
     try:
         result = await _resolve_finding_thread_async(
@@ -97,7 +97,7 @@ async def _resolve_finding_thread_async(
         token=token,
     )
     if finding is None:
-        raise ToolError(f"No finding found with id {finding_id}")
+        return {"success": False, "error": f"No finding found with id {finding_id}"}
 
     github_thread_ids = thread_ids_for_finding(finding)
     for comment_id in comment_ids_for_finding(finding):
@@ -111,14 +111,14 @@ async def _resolve_finding_thread_async(
         if thread_node_id and thread_node_id not in github_thread_ids:
             github_thread_ids.append(thread_node_id)
     if not github_thread_ids:
-        raise ToolError("Could not resolve GitHub review thread id")
+        return {"success": False, "error": "Could not resolve GitHub review thread id"}
 
     resolved_thread_ids = resolved_thread_ids_for_finding(finding)
     posted_resolution_comment_ids = posted_resolution_comment_ids_for_finding(finding)
     comment_ids = comment_ids_for_finding(finding)
     resolution_body = render_resolution_comment(finding, status, note=note)
     if resolution_body is None:
-        raise ToolError("Missing resolution note")
+        return {"success": False, "error": "Missing resolution note"}
 
     resolved_count = 0
     for idx, github_thread_id in enumerate(github_thread_ids):
@@ -143,7 +143,7 @@ async def _resolve_finding_thread_async(
     if resolved_count == 0 and not all(
         github_thread_id in resolved_thread_ids for github_thread_id in github_thread_ids
     ):
-        raise ToolError("GitHub did not resolve the review thread")
+        return {"success": False, "error": "GitHub did not resolve the review thread"}
 
     fully_resolved = all(
         github_thread_id in resolved_thread_ids for github_thread_id in github_thread_ids

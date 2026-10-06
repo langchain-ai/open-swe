@@ -6,7 +6,7 @@ import logging
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, NoReturn
+from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
@@ -39,7 +39,6 @@ from agent.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
-from agent.tools.errors import ToolError
 from agent.tools.sandbox_preference import sandbox_only
 from agent.users import User
 from agent.utils.dashboard_links import (
@@ -130,15 +129,16 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     return _Actor(login=login, email=email, name=login)
 
 
-def _failure(error: str, *, status_code: int | None = None) -> NoReturn:
-    raise ToolError(
-        error, details={"status_code": status_code} if status_code is not None else None
-    )
+def _failure(error: str, *, status_code: int | None = None) -> dict[str, Any]:
+    response: dict[str, Any] = {"success": False, "error": error}
+    if status_code is not None:
+        response["status_code"] = status_code
+    return response
 
 
-def _http_failure(exc: HTTPException) -> NoReturn:
+def _http_failure(exc: HTTPException) -> dict[str, Any]:
     detail = exc.detail if isinstance(exc.detail, str) else "thread operation failed"
-    raise ToolError(detail, details={"status_code": exc.status_code}) from exc
+    return _failure(detail, status_code=exc.status_code)
 
 
 def _web_link(item: Mapping[str, Any]) -> str | None:
@@ -307,8 +307,6 @@ async def list_threads(
         )
     except HTTPException as exc:
         return _http_failure(exc)
-    except ToolError:
-        raise
     except Exception:
         logger.exception("Could not list threads")
         return _failure("Could not list threads")
@@ -621,7 +619,7 @@ async def _private_thread_context(actor: _Actor) -> bool:
 
 async def _authorized_locator(
     locator: str, actor: _Actor, *, admin_override: bool = False
-) -> tuple[str, Mapping[str, Any]]:
+) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
     slack_locator = parse_slack_thread_url(locator)
     thread_id = dashboard_thread_id(locator) or ""
@@ -735,6 +733,8 @@ async def get_thread(
     locator = thread_id.strip()
     try:
         resolved = await _authorized_locator(locator, actor)
+        if isinstance(resolved, dict):
+            return resolved
         thread_id, summary = resolved
         client = langgraph_client()
         async with asyncio.TaskGroup() as tasks:
@@ -765,8 +765,6 @@ async def get_thread(
         queued_count += len(pending_runs_task.result())
     except HTTPException as exc:
         return _http_failure(exc)
-    except ToolError:
-        raise
     except Exception:
         logger.exception("Could not load thread %s", thread_id)
         return _failure("Could not load thread")
@@ -823,7 +821,7 @@ async def get_thread(
 
 def _message_args(
     message: str, model_id: str | None, effort: str | None
-) -> tuple[str | None, str | None]:
+) -> dict[str, Any] | tuple[str | None, str | None]:
     """Validate send_message arguments before any thread access."""
     if not message.strip():
         return _failure("message is required for send_message")
@@ -895,7 +893,7 @@ async def _send_message(
     }
 
 
-def _required(value: str | None, name: str, action: str) -> None:
+def _required(value: str | None, name: str, action: str) -> dict[str, Any] | None:
     if isinstance(value, str) and value.strip():
         return None
     return _failure(f"{name} is required for {action}")
@@ -980,6 +978,8 @@ async def manage_thread(
         return _failure("Only workspace admins can cancel another user's thread")
     if action == "send_message":
         validated = _message_args(message or "", model_id, effort)
+        if isinstance(validated, dict):
+            return validated
         model_id, effort = validated
 
     try:
@@ -987,6 +987,8 @@ async def manage_thread(
         # admin_cancel is the exception, so its response must not leak details.
         admin_override = action == "admin_cancel" and actor.admin
         resolved = await _authorized_locator(thread_id, actor, admin_override=admin_override)
+        if isinstance(resolved, dict):
+            return resolved
         thread_id, summary = resolved
         if action == "send_message":
             return await _send_message(
@@ -1016,7 +1018,8 @@ async def manage_thread(
             )
             return {"success": True, "thread": _list_item(thread)}
         if action == "add_plan_comment":
-            _required(comment, "comment", action)
+            if error := _required(comment, "comment", action):
+                return error
             if len(comment or "") > _MAX_COMMENT_CHARS:
                 return _failure(f"comment must be at most {_MAX_COMMENT_CHARS} characters")
             result = await plan_api.post_plan_comment(
@@ -1026,7 +1029,8 @@ async def manage_thread(
             )
             return {"success": True, "comment": result}
         if action == "delete_plan_comment":
-            _required(comment_id, "comment_id", action)
+            if error := _required(comment_id, "comment_id", action):
+                return error
             result = await plan_api.remove_plan_comment(
                 thread_id,
                 comment_id or "",
@@ -1034,7 +1038,8 @@ async def manage_thread(
             )
             return {"success": True, **result}
         if action == "update_plan":
-            _required(content, "content", action)
+            if error := _required(content, "content", action):
+                return error
             if len(content or "") > _MAX_PLAN_CHARS:
                 return _failure(f"content must be at most {_MAX_PLAN_CHARS} characters")
             existing = await get_plan_content(thread_id, raise_on_error=True) or {}
@@ -1055,7 +1060,8 @@ async def manage_thread(
                 "plan_url": dashboard_plan_url(thread_id),
             }
         if action in {"approve_workflow_push", "reject_workflow_push"}:
-            _required(fingerprint, "fingerprint", action)
+            if error := _required(fingerprint, "fingerprint", action):
+                return error
             handler = (
                 workflow_approval_api.approve_workflow_push
                 if action == "approve_workflow_push"
@@ -1066,8 +1072,6 @@ async def manage_thread(
         return _failure(f"unsupported action: {action}")
     except HTTPException as exc:
         return _http_failure(exc)
-    except ToolError:
-        raise
     except Exception:
         logger.exception("Thread action %s failed for %s", action, thread_id)
         return _failure("Thread action failed")
@@ -1106,8 +1110,6 @@ async def start_thread(
         )
     except HTTPException as exc:
         return _http_failure(exc)
-    except ToolError:
-        raise
     except Exception:
         logger.exception("Starting a thread failed", extra={"repos": clean_repos})
         return _failure("Thread start failed")

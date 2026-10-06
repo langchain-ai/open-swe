@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from agent import store as agent_store
-from agent.tools.errors import ToolError
+from agent.slack.http import SlackRequestError
 
 notification_tool = importlib.import_module("agent.tools.notify_automation_channel")
 
@@ -79,8 +79,12 @@ async def test_notify_automation_channel_rejects_unauthorized_runs(
         lambda: {"configurable": {"source": "slack", "thread_id": "thread_1"}},
     )
 
-    with pytest.raises(ToolError, match="This tool is only available to scheduled runs"):
-        await notification_tool.notify_automation_channel("Changed dependencies")
+    result = await notification_tool.notify_automation_channel("Changed dependencies")
+
+    assert result == {
+        "success": False,
+        "error": "This tool is only available to scheduled runs",
+    }
 
 
 async def test_notify_automation_channel_rejects_nonconditional_schedule(
@@ -91,10 +95,12 @@ async def test_notify_automation_channel_rejects_nonconditional_schedule(
         lambda: {"configurable": {"source": "schedule", "thread_id": "thread_1"}},
     )
 
-    with pytest.raises(
-        ToolError, match="This schedule is not configured for action-only Slack notifications"
-    ):
-        await notification_tool.notify_automation_channel("Changed dependencies")
+    result = await notification_tool.notify_automation_channel("Changed dependencies")
+
+    assert result == {
+        "success": False,
+        "error": "This schedule is not configured for action-only Slack notifications",
+    }
 
 
 async def test_notify_automation_channel_posts_to_trusted_destination(
@@ -102,9 +108,9 @@ async def test_notify_automation_channel_posts_to_trusted_destination(
 ) -> None:
     posted: list[dict[str, Any]] = []
 
-    async def fake_post(channel_id: str, text: str, **kwargs: Any) -> tuple[str, None]:
+    async def fake_post(channel_id: str, text: str, **kwargs: Any) -> str:
         posted.append({"channel_id": channel_id, "text": text, "kwargs": kwargs})
-        return "1786504009.596419", None
+        return "1786504009.596419"
 
     monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
@@ -133,18 +139,18 @@ async def test_notify_automation_channel_retries_only_thread_reply_after_failure
     fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     channel_post_count = 0
-    thread_responses: list[tuple[str | None, str | None]] = [
-        (None, "rate_limited"),
-        ("1786504010.000001", None),
-    ]
+    thread_responses = [SlackRequestError("rate_limited"), "1786504010.000001"]
 
-    async def fake_channel_post(*args: Any, **kwargs: Any) -> tuple[str, None]:
+    async def fake_channel_post(*args: Any, **kwargs: Any) -> str:
         nonlocal channel_post_count
         channel_post_count += 1
-        return "1786504009.596419", None
+        return "1786504009.596419"
 
-    async def fake_thread_post(*args: Any, **kwargs: Any) -> tuple[str | None, str | None]:
-        return thread_responses.pop(0)
+    async def fake_thread_post(*args: Any, **kwargs: Any) -> str:
+        response = thread_responses.pop(0)
+        if isinstance(response, SlackRequestError):
+            raise response
+        return response
 
     monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(
@@ -153,9 +159,14 @@ async def test_notify_automation_channel_retries_only_thread_reply_after_failure
     monkeypatch.setattr(notification_tool, "post_slack_thread_reply_with_ts", fake_thread_post)
 
     content = "First\nSecond\nThird\nFourth\nFifth"
-    with pytest.raises(ToolError, match="Slack thread reply failed: rate_limited"):
-        await notification_tool.notify_automation_channel(content, summary="Summary")
+    first = await notification_tool.notify_automation_channel(content, summary="Summary")
     second = await notification_tool.notify_automation_channel(content, summary="Summary")
+
+    assert first == {
+        "success": False,
+        "error": "Slack thread reply failed: rate_limited",
+        "slack_error": "rate_limited",
+    }
     assert second == {"success": True, "message_ts": "1786504009.596419"}
     assert channel_post_count == 1
     assert thread_responses == []
@@ -166,10 +177,10 @@ async def test_notify_automation_channel_never_reposts_after_finalize_write_fail
 ) -> None:
     post_count = 0
 
-    async def fake_post(*args: Any, **kwargs: Any) -> tuple[str, None]:
+    async def fake_post(*args: Any, **kwargs: Any) -> str:
         nonlocal post_count
         post_count += 1
-        return "1786504009.596419", None
+        return "1786504009.596419"
 
     monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
@@ -191,13 +202,13 @@ async def test_notify_automation_channel_never_reposts_when_post_state_is_unknow
 ) -> None:
     post_count = 0
 
-    async def fake_post(*args: Any, **kwargs: Any) -> tuple[str, None]:
+    async def fake_post(*args: Any, **kwargs: Any) -> str:
         nonlocal post_count
         post_count += 1
-        return "1786504009.596419", None
+        return "1786504009.596419"
 
     async def fake_thread_post(*args: Any, **kwargs: Any) -> tuple[None, str]:
-        return None, "rate_limited"
+        raise SlackRequestError("rate_limited")
 
     monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(notification_tool, "post_slack_top_level_message_with_ts", fake_post)
@@ -205,9 +216,11 @@ async def test_notify_automation_channel_never_reposts_when_post_state_is_unknow
     fake_client.store.fail_put = lambda value: value["status"] == "posted"
 
     content = "First\nSecond\nThird\nFourth\nFifth"
-    with pytest.raises(ToolError, match="state could not be saved") as failed:
-        await notification_tool.notify_automation_channel(content, summary="Summary")
-    assert failed.value.details["message_ts"] == "1786504009.596419"
-    with pytest.raises(ToolError, match="not posting again"):
-        await notification_tool.notify_automation_channel(content, summary="Summary")
+    first = await notification_tool.notify_automation_channel(content, summary="Summary")
+    second = await notification_tool.notify_automation_channel(content, summary="Summary")
+
+    assert first["success"] is False
+    assert first["message_ts"] == "1786504009.596419"
+    assert second["success"] is False
+    assert "not posting again" in second["error"]
     assert post_count == 1

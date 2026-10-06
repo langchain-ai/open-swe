@@ -158,15 +158,19 @@ def apply() -> None:
     _real_validate_upload = slack_client._validate_slack_upload_url
     _real_resolve = url_safety.resolve_and_validate
 
-    def _validate_upload_url(url: str) -> tuple[bool, str]:
+    def _validate_upload_url(url: str) -> None:
         if url.startswith(_harness_upload):
-            return True, ""
+            return
         return _real_validate_upload(url)
 
-    def _resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
+    def _resolve_and_validate(url: str) -> tuple[str, list[str]]:
         if url.startswith(_harness_upload):
             host = urlparse(url).hostname or "127.0.0.1"
-            return True, "", host, socket.getaddrinfo(host, urlparse(url).port or 80)
+            return host, list(
+                dict.fromkeys(
+                    info[4][0] for info in socket.getaddrinfo(host, urlparse(url).port or 80)
+                )
+            )
         return _real_resolve(url)
 
     slack_client._validate_slack_upload_url = _validate_upload_url

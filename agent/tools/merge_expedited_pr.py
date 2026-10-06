@@ -9,30 +9,29 @@ from agent.expedited_review.merge import merge_approved
 from agent.human_review.requests import HumanReviewRequest
 from agent.run_config import RunConfig
 from agent.slack.client import parse_github_pr_url
-from agent.tools.errors import ToolError
 
 
 async def merge_expedited_pr(pr_url: str, keep_approval_reason: str = "") -> dict[str, Any]:
     """Implement the `merge_expedited_pr` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
-        raise ToolError("pr_url must be a canonical GitHub pull request URL")
+        return {"success": False, "error": "pr_url must be a canonical GitHub pull request URL"}
     thread_id = RunConfig.from_config(get_config()).thread_id
     if not thread_id:
-        raise ToolError("No executable agent thread is available")
+        return {"success": False, "error": "No executable agent thread is available"}
     if not (await get_workspace_settings()).expedited_review_enabled:
-        raise ToolError("Expedited review is disabled for this instance.")
+        return {"success": False, "error": "Expedited review is disabled for this instance."}
     approval = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if approval is None or approval.kind != "expedited":
-        raise ToolError(
-            "This pull request has no open expedited review card. Call `expedite_pr_approval` to post one, or ask for a normal GitHub review.",
-            details={"status": "no_card"},
-        )
+        return {
+            "success": False,
+            "status": "no_card",
+            "error": "This pull request has no open expedited review card. Call "
+            "`expedite_pr_approval` to post one, or ask for a normal GitHub review.",
+        }
     if approval.thread_id and approval.thread_id != thread_id:
-        raise ToolError("This expedited review belongs to another agent thread")
+        return {"success": False, "error": "This expedited review belongs to another agent thread"}
     result = await merge_approved(approval, keep_approval_reason)
-    if result.status != "merged":
-        raise ToolError(result.message, details={"merge_status": result.status})
     return {
         "success": result.status == "merged",
         "status": result.status,

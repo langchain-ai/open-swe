@@ -7,7 +7,6 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from agent.tools.background_task import background_task
-from agent.tools.errors import ToolError
 from agent.workspaces import refresh
 from agent.workspaces.store import RefreshStep, Workspace
 
@@ -111,11 +110,11 @@ async def test_one_provider_failing_does_not_blank_the_listing(admin: Any) -> No
 async def test_a_non_admin_cannot_read_a_refresh(member: Any) -> None:
     """Workspace-wide state, and a `bash -x` trace expands its arguments."""
     with _store(_running()):
-        with pytest.raises(ToolError) as raised:
-            await background_task("status", "ws-run-1")
+        result = await background_task("status", "ws-run-1")
 
-    assert "Only workspace admins" in str(raised.value)
-    assert "output" not in raised.value.details
+    assert result["success"] is False
+    assert "Only workspace admins" in result["error"]
+    assert "output" not in result
 
 
 @pytest.mark.asyncio
@@ -123,9 +122,9 @@ async def test_a_non_admin_cannot_cancel_a_rebuild(member: Any) -> None:
     """A stop would cancel a rebuild every other run depends on."""
     stop = AsyncMock()
     with _store(_running()), patch.object(refresh, "task_stop", stop):
-        with pytest.raises(ToolError):
-            await background_task("stop", "ws-run-1")
+        result = await background_task("stop", "ws-run-1")
 
+    assert result["success"] is False
     stop.assert_not_awaited()
 
 

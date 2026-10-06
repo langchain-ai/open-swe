@@ -33,7 +33,6 @@ from agent.source_context import SourceContext
 from agent.store import TypedStore, now_iso
 from agent.thread_ids import baby_sit_lock_thread_id
 from agent.threads.creation import create_lock_thread
-from agent.tools.errors import ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -615,7 +614,7 @@ async def record_retry(
 ) -> dict[str, Any]:
     async with _watch_lock(key) as acquired:
         if not acquired:
-            raise ToolError("A baby-sit update is already in progress")
+            return {"success": False, "error": "A baby-sit update is already in progress"}
         return await _record_retry(
             key,
             thread_id=thread_id,
@@ -637,14 +636,17 @@ async def _record_retry(
 ) -> dict[str, Any]:
     watch = await WATCHES.get(key)
     if not watch or not watch.active:
-        raise ToolError("No active baby-sit watch for this pull request")
+        return {"success": False, "error": "No active baby-sit watch for this pull request"}
     if watch.thread_id != thread_id:
-        raise ToolError("This watch belongs to another agent thread")
+        return {"success": False, "error": "This watch belongs to another agent thread"}
     if watch.head_sha != head_sha:
-        raise ToolError("Pull request head changed before the rerun was recorded")
+        return {
+            "success": False,
+            "error": "Pull request head changed before the rerun was recorded",
+        }
     retries = watch.retry_count
     if retries >= MAX_RETRIES_PER_HEAD:
-        raise ToolError("Flaky rerun limit reached")
+        return {"success": False, "error": "Flaky rerun limit reached"}
 
     retries += 1
     clean_name = check_name.strip()[:200] or "CI check"

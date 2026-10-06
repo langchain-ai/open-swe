@@ -10,8 +10,6 @@ from urllib.parse import urlparse
 import httpx2
 import pytest
 
-from agent.tools.errors import ToolError
-
 exa_py_stub = types.ModuleType("exa_py")
 exa_py_stub.__dict__["Exa"] = object
 sys.modules.setdefault("exa_py", exa_py_stub)
@@ -46,7 +44,6 @@ class FakeResponse:
         json_data: object = _NO_JSON,
     ) -> None:
         self.status_code = status_code
-        self.is_redirect = status_code in {301, 302, 303, 307, 308}
         self.url = url
         self.headers = headers or {}
         self.text = text
@@ -120,9 +117,8 @@ def _patch_public_dns(monkeypatch) -> None:
 
 
 def test_resolve_and_validate_rejects_unsupported_scheme() -> None:
-    is_safe, reason, _, _ = url_safety.resolve_and_validate("ftp://example.com/x")
-    assert is_safe is False
-    assert "scheme" in reason.lower()
+    with pytest.raises(url_safety.UnsafeUrlError, match="scheme"):
+        url_safety.resolve_and_validate("ftp://example.com/x")
 
 
 @pytest.mark.parametrize(
@@ -135,10 +131,9 @@ def test_resolve_and_validate_rejects_private_ranges(monkeypatch, ip: str) -> No
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info(ip, port)],
     )
-    is_safe, reason, hostname, _ = url_safety.resolve_and_validate("http://evil.test/")
-    assert is_safe is False
-    assert "blocked address" in reason
-    assert hostname == "evil.test"
+    with pytest.raises(url_safety.UnsafeUrlError, match="blocked address") as raised:
+        url_safety.resolve_and_validate("http://evil.test/")
+    assert raised.value.url == "http://evil.test/"
 
 
 def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
@@ -147,13 +142,9 @@ def test_resolve_and_validate_accepts_public_ip(monkeypatch) -> None:
         "getaddrinfo",
         lambda host, port, *a, **k: [_addr_info("93.184.216.34", port)],
     )
-    is_safe, reason, hostname, addr_infos = url_safety.resolve_and_validate(
-        "https://example.com/path"
-    )
-    assert is_safe is True
-    assert reason == ""
+    hostname, addresses = url_safety.resolve_and_validate("https://example.com/path")
     assert hostname == "example.com"
-    assert addr_infos[0][4][0] == "93.184.216.34"
+    assert addresses == ["93.184.216.34"]
 
 
 def test_pinned_url_rewrites_host_to_ip_keeping_path_and_port() -> None:
@@ -175,13 +166,13 @@ async def test_fetch_url_blocks_private_ip_without_issuing_a_request(monkeypatch
     _install_client(monkeypatch, fetch_url_tool, fail_responder)
     # Real DNS resolution of the metadata IP literal yields the private IP itself.
 
-    with pytest.raises(ToolError) as raised:
-        await fetch_url_tool.fetch_url(
-            "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
-        )
+    result = await fetch_url_tool.fetch_url(
+        "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+    )
 
-    assert "Request blocked" in str(raised.value)
-    assert raised.value.details["url"].startswith("http://169.254.169.254/")
+    assert result["status_code"] == 0
+    assert "Request blocked" in result["error"]
+    assert result["url"].startswith("http://169.254.169.254/")
 
 
 async def test_fetch_url_blocks_redirects_to_private_ips(monkeypatch) -> None:
@@ -200,8 +191,7 @@ async def test_fetch_url_blocks_redirects_to_private_ips(monkeypatch) -> None:
 
     _install_client(monkeypatch, fetch_url_tool, responder)
 
-    with pytest.raises(ToolError) as raised:
-        await fetch_url_tool.fetch_url("https://example.com/start")
+    result = await fetch_url_tool.fetch_url("https://example.com/start")
 
     # First hop targets the validated public IP, with Host preserved.
     client = FakeAsyncClient.last_instance
@@ -212,8 +202,9 @@ async def test_fetch_url_blocks_redirects_to_private_ips(monkeypatch) -> None:
     assert first["headers"]["Host"] == "example.com"
     assert first["extensions"]["sni_hostname"] == "example.com"
     # The redirect to a private IP was blocked before a second request was issued.
-    assert raised.value.details["url"] == "http://169.254.169.254/latest/meta-data"
-    assert "Request blocked" in str(raised.value)
+    assert result["status_code"] == 0
+    assert result["url"] == "http://169.254.169.254/latest/meta-data"
+    assert "Request blocked" in result["error"]
 
 
 # --- http_request ------------------------------------------------------------
@@ -273,10 +264,10 @@ async def test_http_request_blocks_when_only_private_ips(monkeypatch) -> None:
 
     _install_client(monkeypatch, http_request_tool, fail_responder)
 
-    with pytest.raises(ToolError) as raised:
-        await http_request_tool.http_request(f"http://{hostname}/")
+    result = await http_request_tool.http_request(f"http://{hostname}/")
 
-    assert "Request blocked" in str(raised.value)
+    assert result["status_code"] == 0
+    assert "Request blocked" in result["content"]
 
 
 async def test_http_request_downgrades_method_on_303(monkeypatch) -> None:
@@ -444,10 +435,11 @@ async def test_http_request_returns_timeout_result(monkeypatch) -> None:
 
     _install_client(monkeypatch, http_request_tool, responder)
 
-    with pytest.raises(ToolError) as raised:
-        await http_request_tool.http_request("https://example.com/", timeout=7)
+    result = await http_request_tool.http_request("https://example.com/", timeout=7)
 
-    assert "timed out after 7 seconds" in str(raised.value)
+    assert result["success"] is False
+    assert result["status_code"] == 0
+    assert "timed out after 7 seconds" in result["content"]
 
 
 async def test_http_request_offloads_oversized_response(monkeypatch) -> None:
@@ -500,16 +492,16 @@ async def test_http_request_does_not_inline_oversized_response_when_write_fails(
 
     monkeypatch.setattr(http_request_tool, "write_sandbox_output", fail_write)
 
-    with pytest.raises(ToolError) as raised:
-        await http_request_tool._offload_large_response(
-            {
-                "success": True,
-                "status_code": 200,
-                "headers": {},
-                "content": large_content,
-                "url": "https://example.com/data",
-            }
-        )
+    result = await http_request_tool._offload_large_response(
+        {
+            "success": True,
+            "status_code": 200,
+            "headers": {},
+            "content": large_content,
+            "url": "https://example.com/data",
+        }
+    )
 
-    assert "could not be saved" in str(raised.value)
-    assert large_content not in str(raised.value)
+    assert result["success"] is False
+    assert "could not be saved" in result["content"]
+    assert large_content not in str(result)

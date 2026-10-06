@@ -5,8 +5,6 @@ from typing import Any
 
 import pytest
 
-from agent.tools.errors import ToolError
-
 wakeup_tool = importlib.import_module("agent.tools.schedule_thread_wakeup")
 
 # Captured before the autouse stub replaces it, for the one test that needs the real wrapper.
@@ -134,18 +132,18 @@ def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]
 
 async def test_schedule_thread_wakeup_rejects_zero_delay(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agent.run_config.get_config", _config)
-    with pytest.raises(ToolError) as raised:
-        await wakeup_tool.schedule_thread_wakeup(0)
-    assert "positive" in str(raised.value).lower()
+    result = await wakeup_tool.schedule_thread_wakeup(0)
+    assert result["success"] is False
+    assert "positive" in result["error"].lower()
 
 
 async def test_schedule_thread_wakeup_rejects_delay_over_24h(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("agent.run_config.get_config", _config)
-    with pytest.raises(ToolError) as raised:
-        await wakeup_tool.schedule_thread_wakeup(1441)
-    assert "1440" in str(raised.value)
+    result = await wakeup_tool.schedule_thread_wakeup(1441)
+    assert result["success"] is False
+    assert "1440" in result["error"]
 
 
 async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,9 +240,9 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.Mon
     monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
-    with pytest.raises(ToolError):
-        await wakeup_tool.schedule_thread_wakeup(5)
+    result = await wakeup_tool.schedule_thread_wakeup(5)
 
+    assert result["success"] is False
     assert not client.crons.created
 
 
@@ -263,10 +261,10 @@ async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
     monkeypatch.setattr("agent.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
-    with pytest.raises(ToolError) as raised:
-        await wakeup_tool.schedule_thread_wakeup(5)
+    result = await wakeup_tool.schedule_thread_wakeup(5)
 
-    assert str(raised.value) == "Unable to record the thread wakeup limit"
+    assert result["success"] is False
+    assert result["error"] == "Unable to record the thread wakeup limit"
     assert not client.crons.created
 
 
@@ -287,11 +285,9 @@ async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.Mo
     results = await asyncio.gather(
         wakeup_tool.schedule_thread_wakeup(5),
         wakeup_tool.schedule_thread_wakeup(5),
-        return_exceptions=True,
     )
 
-    assert sum(isinstance(result, dict) and result["success"] is True for result in results) == 1
-    assert sum(isinstance(result, ToolError) for result in results) == 1
+    assert sum(result["success"] is True for result in results) == 1
     assert len(client.crons.created) == 1
     assert client.threads.metadata[wakeup_tool._WAKEUP_COUNT_METADATA_KEY] == 10
 

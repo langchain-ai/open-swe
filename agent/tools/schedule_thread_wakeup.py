@@ -16,7 +16,6 @@ from agent.input_messages import build_run_input
 from agent.prompts import load_prompt
 from agent.run_config import RunConfig
 from agent.slack.client import get_active_slack_thread
-from agent.tools.errors import ToolError
 from agent.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -251,17 +250,17 @@ async def _create_wakeup_cron(
 async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) -> dict[str, Any]:
     """Implement the `schedule_thread_wakeup` tool."""
     if not isinstance(delay_minutes, int) or delay_minutes < 1:
-        raise ToolError("delay_minutes must be a positive integer (>= 1)")
+        return {"success": False, "error": "delay_minutes must be a positive integer (>= 1)"}
     delay_seconds = delay_minutes * 60
     if delay_seconds < _MIN_DELAY_SECONDS:
-        raise ToolError("delay must be at least 1 minute")
+        return {"success": False, "error": "delay must be at least 1 minute"}
     if delay_seconds > _MAX_DELAY_SECONDS:
-        raise ToolError("delay must be at most 1440 minutes (24 hours)")
+        return {"success": False, "error": "delay must be at most 1440 minutes (24 hours)"}
 
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
     if not thread_id:
-        raise ToolError("No thread_id in current run config")
+        return {"success": False, "error": "No thread_id in current run config"}
 
     client = get_client(url=langgraph_url())
     fire_time = _ceil_to_next_minute(datetime.now(UTC) + timedelta(seconds=delay_seconds))
@@ -297,18 +296,23 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
     async with _wakeup_lock(thread_id):
         try:
             generation, wakeup_count = await _wakeup_budget(client, thread_id)
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to verify thread wakeup budget for %s", thread_id)
-            raise ToolError("Unable to verify the thread wakeup limit") from exc
+            return {"success": False, "error": "Unable to verify the thread wakeup limit"}
         if wakeup_count >= _MAX_WAKEUPS_BETWEEN_USER_MESSAGES:
-            raise ToolError(
-                f"Thread wakeup limit reached: at most {_MAX_WAKEUPS_BETWEEN_USER_MESSAGES} wakeups may be scheduled between user messages. Wait for a new user message before scheduling another."
-            )
+            return {
+                "success": False,
+                "error": (
+                    f"Thread wakeup limit reached: at most "
+                    f"{_MAX_WAKEUPS_BETWEEN_USER_MESSAGES} wakeups may be scheduled between "
+                    "user messages. Wait for a new user message before scheduling another."
+                ),
+            }
         try:
             await _record_wakeup(client, thread_id, generation, wakeup_count + 1)
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to record thread wakeup budget for %s", thread_id)
-            raise ToolError("Unable to record the thread wakeup limit") from exc
+            return {"success": False, "error": "Unable to record the thread wakeup limit"}
         try:
             return await _create_wakeup_cron(
                 thread_id=thread_id,
@@ -317,6 +321,6 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
                 configurable=wakeup_configurable,
                 client=client,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to schedule thread wakeup for %s", thread_id)
-            raise
+            return {"success": False, "error": str(exc)}

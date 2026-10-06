@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from agent.utils.url_safety import pinned_url, resolve_and_validate
+from agent.utils.url_safety import UnsafeUrlError, pinned_url, resolve_and_validate
 
 
 class MCPTransport(httpx.AsyncBaseTransport):
@@ -23,13 +23,13 @@ class MCPTransport(httpx.AsyncBaseTransport):
             parsed.port or 443,
         ) != self._origin or parsed.scheme != "https":
             raise ValueError("MCP requests must stay on the configured HTTPS origin")
-        safe, _, hostname, addresses = await asyncio.to_thread(resolve_and_validate, url)
-        if not safe or not hostname or not addresses:
-            raise ValueError("MCP server must resolve only to public addresses")
+        try:
+            hostname, public_ips = await asyncio.to_thread(resolve_and_validate, url)
+        except UnsafeUrlError as exc:
+            raise ValueError("MCP server must resolve only to public addresses") from exc
         # Pin the checked address so a second DNS lookup cannot reach a private host.
         headers = request.headers.copy()
         headers["Host"] = parsed.netloc
-        public_ips = list(dict.fromkeys(address[4][0] for address in addresses))
         for index, address in enumerate(public_ips):
             pinned = httpx.Request(
                 request.method,

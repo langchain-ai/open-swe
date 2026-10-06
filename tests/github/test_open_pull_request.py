@@ -9,7 +9,6 @@ import langgraph_sdk
 import pytest
 
 import agent.tools.open_pull_request  # noqa: F401
-from agent.tools.errors import ToolError
 
 opr = sys.modules["agent.tools.open_pull_request"]
 
@@ -202,16 +201,16 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
 
     client = httpx2.AsyncClient(transport=httpx2.MockTransport(github))
     monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **kwargs: client)
+    result = _open()
+
     if workspace_access == "allowed" and requester_access:
-        result = _open()
         assert result["success"] is True
         assert result["author"] == "bob"
         assert result["token_kind"] == "user"
         assert any(request.method == "POST" for request in requests)
     else:
-        with pytest.raises(ToolError) as raised:
-            _open()
-        assert ("403" if workspace_access == "allowed" else "workspace") in str(raised.value)
+        assert result["success"] is False
+        assert ("403" if workspace_access == "allowed" else "workspace") in result["error"]
         assert not any(request.method == "POST" for request in requests)
         assert all(request.headers["Authorization"] != "Bearer alice-token" for request in requests)
 
@@ -301,12 +300,12 @@ def test_404_create_returns_actionable_access_diagnostic(
     client = _FakeClient(post=_FakeResponse(404, {"message": "Not Found"}))
     _install_client(monkeypatch, client)
 
-    with pytest.raises(ToolError) as raised:
-        _open()
+    result = _open()
 
-    assert "Branch pushed: langchain-ai/open-swe:open-swe/feature (yes)" in str(raised.value)
-    assert "PR created: no" in str(raised.value)
-    assert "not installed on, granted access" in str(raised.value)
+    assert result["success"] is False
+    assert "Branch pushed: langchain-ai/open-swe:open-swe/feature (yes)" in result["error"]
+    assert "PR created: no" in result["error"]
+    assert "not installed on, granted access" in result["error"]
     assert (
         "open_pull_request_failed code=github_app_access_missing_or_repo_not_found" in caplog.text
     )
@@ -329,11 +328,11 @@ def test_preflight_head_branch_404_reports_branch_not_pushed(
     )
     _install_client(monkeypatch, client)
 
-    with pytest.raises(ToolError) as raised:
-        _open()
+    result = _open()
 
-    assert "head branch `open-swe/feature`" in str(raised.value)
-    assert "Branch pushed: langchain-ai/open-swe:open-swe/feature (no)" in str(raised.value)
+    assert result["success"] is False
+    assert "head branch `open-swe/feature`" in result["error"]
+    assert "Branch pushed: langchain-ai/open-swe:open-swe/feature (no)" in result["error"]
     assert client.post_calls == []
 
 
@@ -360,10 +359,10 @@ def test_preflight_base_branch_redirect_surfaces_raw_github_response(
     )
     _install_client(monkeypatch, client)
 
-    with pytest.raises(ToolError) as raised:
-        _open(base="master")
+    result = _open(base="master")
 
-    error = str(raised.value)
+    assert result["success"] is False
+    error = result["error"]
     assert (
         "GitHub responded to GET "
         "https://api.github.com/repos/langchain-ai/open-swe/branches/master with 301" in error
@@ -639,9 +638,8 @@ def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, fake_
     asyncio.run(profiles.upsert_access_token("johannes117", "j@x.dev", "tok"))
     _install_client(monkeypatch, _FakeClient(post=_FakeResponse(201), get=_FakeResponse(401)))
 
-    with pytest.raises(ToolError) as raised:
-        _open()
+    result = _open()
 
-    assert "sign in with GitHub again" in str(raised.value)
+    assert "sign in with GitHub again" in result["error"]
     assert asyncio.run(profiles.get_valid_access_token("johannes117")) is None
     assert asyncio.run(profiles.has_access_token_record("johannes117")) is True

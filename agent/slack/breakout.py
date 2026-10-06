@@ -17,9 +17,9 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
     update_slack_message,
 )
+from agent.slack.http import SlackRequestError
 from agent.slack.move import move_slack_thread
 from agent.slack.request import SlackRequest
-from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -133,27 +133,26 @@ async def _move(request: SlackRequest, target: str) -> None:
 
     title = str(metadata.get("title") or "").strip() or "Untitled"
     heading = f"`/breakout`: {_title(title)}"
-    try:
-        result = await move_slack_thread(
-            client,
-            thread_id,
-            active,
-            target,
-            await _root_text(request, heading),
-        )
-    except ToolError as exc:
+    result = await move_slack_thread(
+        client,
+        thread_id,
+        active,
+        target,
+        await _root_text(request, heading),
+    )
+    new_ts = result.get("thread_ts")
+    if not result.get("success") or not isinstance(new_ts, str):
         logger.warning(
-            "Slack breakout move failed", extra={"agent_thread_id": thread_id}, exc_info=True
+            "Slack breakout move failed",
+            extra={"agent_thread_id": thread_id, "move_error": result.get("error")},
         )
-        slack_error = exc.details.get("slack_error")
         await _tell_sender(
             request,
-            _post_failure(slack_error if isinstance(slack_error, str) else None, target, str(exc)),
+            _post_failure(
+                result.get("slack_error"), target, "Could not move this thread; try again."
+            ),
         )
         return
-    new_ts = result.get("thread_ts")
-    if not isinstance(new_ts, str):
-        raise RuntimeError("Slack move did not return a thread timestamp")
     await _mark_done(request, target, new_ts)
 
 
@@ -177,38 +176,13 @@ async def _start(
             return
     heading = f"`/breakout`: {_title(instruction)}"
     root_text = await _root_text(request, heading)
-    new_ts, slack_error = await post_slack_top_level_message_with_ts(
-        target,
-        root_text,
-        blocks=block_payload(
-            [
-                section(root_text),
-                *await origin_footer(
-                    request.thread_id or "", (request.channel_id, request.thread_ts)
-                ),
-            ]
-        ),
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if not new_ts:
-        logger.warning("Slack breakout root post failed", extra={"slack_error": slack_error})
-        await _tell_sender(
-            request,
-            _post_failure(slack_error, target, "Could not start a breakout thread; try again."),
-        )
-        return
-    await _mark_done(request, target, new_ts)
-    thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
-    web_url = dashboard_thread_url(thread_id)
-    if web_url:
-        ok, error = await update_slack_message(
+    try:
+        new_ts = await post_slack_top_level_message_with_ts(
             target,
-            new_ts,
-            append_slack_web_link_footer(root_text, web_url),
+            root_text,
             blocks=block_payload(
                 [
-                    section(append_slack_web_link_footer(root_text, web_url)),
+                    section(root_text),
                     *await origin_footer(
                         request.thread_id or "", (request.channel_id, request.thread_ts)
                     ),
@@ -217,9 +191,36 @@ async def _start(
             unfurl_links=False,
             unfurl_media=False,
         )
-        if not ok:
+    except SlackRequestError as exc:
+        logger.warning("Slack breakout root post failed", extra={"error": exc.code})
+        await _tell_sender(
+            request,
+            _post_failure(exc.code, target, "Could not start a breakout thread; try again."),
+        )
+        return
+    await _mark_done(request, target, new_ts)
+    thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
+    web_url = dashboard_thread_url(thread_id)
+    if web_url:
+        try:
+            await update_slack_message(
+                target,
+                new_ts,
+                append_slack_web_link_footer(root_text, web_url),
+                blocks=block_payload(
+                    [
+                        section(append_slack_web_link_footer(root_text, web_url)),
+                        *await origin_footer(
+                            request.thread_id or "", (request.channel_id, request.thread_ts)
+                        ),
+                    ]
+                ),
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+        except SlackRequestError as exc:
             logger.warning(
-                "Slack breakout header web link update failed", extra={"slack_error": error}
+                "Slack breakout header web link update failed", extra={"slack_error": exc.code}
             )
     moved_channel = target != request.channel_id
     if moved_channel:

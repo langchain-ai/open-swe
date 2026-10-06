@@ -10,7 +10,7 @@ participant never asks. Only people who turned on the
 
 import asyncio
 import logging
-from typing import Literal, NoReturn
+from typing import Literal, TypedDict
 
 from langgraph_sdk import get_client
 
@@ -26,7 +26,7 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
 )
 from agent.slack.dm import note_for_concierge, open_dm
-from agent.tools.errors import ToolError
+from agent.slack.http import SlackRequestError
 from agent.users import User
 from agent.utils.dashboard_links import dashboard_thread_url
 
@@ -38,7 +38,15 @@ _POLL_SECONDS = 2.0
 Refusal = Literal["pending", "denied", "unreachable"]
 
 
-def _refusal(login: str, refusal: Refusal, token_kind: str) -> NoReturn:
+class ActAsRefusal(TypedDict):
+    success: Literal[False]
+    error: str
+    act_as: Refusal
+    act_as_login: str
+    token_kind: str
+
+
+def _refusal(login: str, refusal: Refusal, token_kind: str) -> ActAsRefusal:
     reason = {
         "pending": (
             f"{login} did not answer within {int(_WAIT_SECONDS)} seconds. Their answer will "
@@ -47,10 +55,16 @@ def _refusal(login: str, refusal: Refusal, token_kind: str) -> NoReturn:
         "denied": f"{login} denied Open SWE acting as them in this thread.",
         "unreachable": f"{login} could not be sent the approval DM in Slack.",
     }[refusal]
-    raise ToolError(
-        f"This thread has more than one participant, so the person the PR opens as must approve it. {reason} PR created: no.",
-        details={"act_as": refusal, "act_as_login": login, "token_kind": token_kind},
-    )
+    return {
+        "success": False,
+        "error": (
+            "This thread has more than one participant, so the person the PR opens as must "
+            f"approve it. {reason} PR created: no."
+        ),
+        "act_as": refusal,
+        "act_as_login": login,
+        "token_kind": token_kind,
+    }
 
 
 async def require_consent(
@@ -63,8 +77,8 @@ async def require_consent(
     head: str,
     base: str,
     title: str,
-) -> None:
-    """Require consent before opening a PR as another participant."""
+) -> ActAsRefusal | None:
+    """``None`` when the PR may open as its author; otherwise why not."""
     if token_kind != "user" or not thread_id:
         return None
     thread = await ThreadActAs.load(thread_id)
@@ -113,19 +127,21 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
         "Approve, always allow, or deny."
     )
     dm_channel_id = await open_dm(slack_user_id)
-    message_ts, error = None, "dm_not_opened"
-    if dm_channel_id:
-        message_ts, error = await post_slack_top_level_message_with_ts(
+    if not dm_channel_id:
+        logger.error("Could not open act-as DM", extra={"login": request.login})
+        return False
+    try:
+        await post_slack_top_level_message_with_ts(
             dm_channel_id,
             message,
             blocks=block_payload(
                 [*card_blocks(message, request, thread_id), *await origin_footer(thread_id)]
             ),
         )
-    if not dm_channel_id or not message_ts:
+    except SlackRequestError as exc:
         logger.error(
             "Could not DM the act-as card",
-            extra={"login": request.login, "thread_id": thread_id, "error": error},
+            extra={"login": request.login, "thread_id": thread_id, "error": exc.code},
         )
         return False
     await note_for_concierge(
@@ -136,11 +152,13 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
     return True
 
 
-def _outcome(decision: Decision, login: str, token_kind: str) -> None:
+def _outcome(decision: Decision, login: str, token_kind: str) -> ActAsRefusal | None:
     return None if decision == "approved" else _refusal(login, "denied", token_kind)
 
 
-async def _wait_for_answer(thread: ThreadActAs, request: ActAsRequest, token_kind: str) -> None:
+async def _wait_for_answer(
+    thread: ThreadActAs, request: ActAsRequest, token_kind: str
+) -> ActAsRefusal | None:
     login = request.login
     if request.wake_on_answer:
         await thread.set_wake_on_answer(request, False)

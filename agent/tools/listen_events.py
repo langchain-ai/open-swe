@@ -3,7 +3,7 @@
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Literal, NoReturn
+from typing import Literal
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -13,7 +13,6 @@ from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
 from agent.run_config import RunConfig
 from agent.slack.client import parse_github_pr_url
-from agent.tools.errors import ToolError
 from agent.webhooks.event_log import RETAINED_DAYS, EventLog, WebhookSource
 from agent.webhooks.event_matches import MultitaskStrategy
 from agent.webhooks.event_subscriptions import EventSubscription
@@ -76,8 +75,8 @@ def _filters(values: list[str] | None) -> list[str]:
     return sorted({value.strip() for value in values or () if value.strip()})
 
 
-def _error(message: str) -> NoReturn:
-    raise ToolError(message)
+def _error(message: str) -> dict[str, object]:
+    return {"success": False, "error": message}
 
 
 async def listen_events(

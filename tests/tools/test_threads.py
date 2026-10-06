@@ -6,8 +6,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.tools.errors import ToolError
-
 threads_tool = importlib.import_module("agent.tools.threads")
 
 
@@ -68,10 +66,9 @@ async def test_list_threads_denies_actor_outside_allowed_org(
     page = AsyncMock()
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
 
-    with pytest.raises(ToolError) as raised:
-        await threads_tool.list_threads()
+    result = await threads_tool.list_threads()
 
-    assert str(raised.value) == "No verified triggering user is available"
+    assert result == {"success": False, "error": "No verified triggering user is available"}
     page.assert_not_awaited()
 
 
@@ -228,13 +225,14 @@ async def test_get_thread_rejects_untrusted_dashboard_url_before_access(
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(threads_tool, "get_dashboard_thread", get_dashboard_thread)
 
-    with pytest.raises(ToolError) as raised:
-        await threads_tool.get_thread("https://evil.example/agents/thread-1")
+    result = await threads_tool.get_thread("https://evil.example/agents/thread-1")
 
-    assert (
-        str(raised.value)
-        == "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, or LangSmith trace URL"
-    )
+    assert result == {
+        "success": False,
+        "error": (
+            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, or LangSmith trace URL"
+        ),
+    }
     get_dashboard_thread.assert_not_awaited()
 
 
@@ -316,11 +314,9 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
         ]
     }
 
-    with pytest.raises(ToolError) as raised:
-        await threads_tool.manage_thread("thread-1", "cancel", state=state)
+    result = await threads_tool.manage_thread("thread-1", "cancel", state=state)
 
-    assert str(raised.value) == "thread not found"
-    assert raised.value.details["status_code"] == 404
+    assert result == {"success": False, "error": "thread not found", "status_code": 404}
     cancel.assert_awaited_once_with("thread-1", "reviewer", email=None)
 
 
@@ -329,10 +325,12 @@ async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(threads_tool, "admin_cancel_dashboard_thread", cancel)
 
-    with pytest.raises(ToolError) as raised:
-        await threads_tool.manage_thread("thread-1", "admin_cancel")
+    result = await threads_tool.manage_thread("thread-1", "admin_cancel")
 
-    assert str(raised.value) == "Only workspace admins can cancel another user's thread"
+    assert result == {
+        "success": False,
+        "error": "Only workspace admins can cancel another user's thread",
+    }
     cancel.assert_not_awaited()
 
 
@@ -408,13 +406,12 @@ async def test_manage_thread_rejects_plan_format_conversion(
     )
     monkeypatch.setattr(threads_tool.plan_api, "update_plan", update)
 
-    with pytest.raises(ToolError) as raised:
-        await threads_tool.manage_thread(
-            "thread-1",
-            "update_plan",
-            content="# New plan",
-            content_format="markdown",
-        )
+    result = await threads_tool.manage_thread(
+        "thread-1",
+        "update_plan",
+        content="# New plan",
+        content_format="markdown",
+    )
 
-    assert str(raised.value) == "existing plan format is html"
+    assert result == {"success": False, "error": "existing plan format is html"}
     update.assert_not_awaited()

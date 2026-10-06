@@ -33,11 +33,11 @@ from agent.slack.client import (
     store_slack_run_mapping,
 )
 from agent.slack.dm import note_for_concierge, open_dm
+from agent.slack.http import SlackRequestError
 from agent.source_context import SourceContext
 from agent.store import delete_value, get_value, now_iso, now_ms, put_value, search_all_values
 from agent.threads.access import agent_version_metadata, resolve_run_email
 from agent.threads.creation import create_lock_thread, create_thread
-from agent.tools.errors import ToolError
 from agent.users import User
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
@@ -749,7 +749,7 @@ async def _launch_agent_schedule_record(
         # and connections, which nobody chose for it.
         error = f"workspace {workspace!r} no longer exists"
         await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
-        raise ToolError(error, details={"status": "unknown_workspace", "schedule_id": schedule_id})
+        return {"status": "unknown_workspace", "schedule_id": schedule_id, "error": error}
 
     repo = record.get("repo") if isinstance(record.get("repo"), dict) else None
     full_name = _repo_full_name(repo)
@@ -764,21 +764,19 @@ async def _launch_agent_schedule_record(
                     "last_error_at": now_iso(),
                 },
             )
-            raise ToolError(
-                exc.detail,
-                details={
-                    "status": "unauthorized",
-                    "schedule_id": schedule_id,
-                    "status_code": exc.status_code,
-                },
-            ) from exc
+            return {
+                "status": "unauthorized",
+                "schedule_id": schedule_id,
+                "error": exc.detail,
+                "status_code": exc.status_code,
+            }
 
     if dm_user_id := _slack_dm_user_id(record):
         dm_channel_id = await open_dm(dm_user_id)
         if not dm_channel_id:
             error = "Slack DM could not be opened"
             await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
-            raise ToolError(error, details={"status": "error", "schedule_id": schedule_id})
+            return {"status": "error", "schedule_id": schedule_id, "error": error}
         record = {**record, "slack_channel_id": dm_channel_id, "slack_dm_user_id": dm_user_id}
 
     client = langgraph_client()
@@ -792,19 +790,20 @@ async def _launch_agent_schedule_record(
     ):
         concierge = dm_user_id is not None and await User.concierge_mode_for_slack(dm_user_id)
         root_message = _slack_root_message(record, test_run=test_run, concierge=concierge)
-        message_ts, slack_error = await post_slack_top_level_message_with_ts(
-            slack_channel_id,
-            root_message,
-            unfurl_links=False,
-            unfurl_media=False,
-        )
-        if not message_ts:
-            error = f"Slack post failed: {slack_error or 'unknown error'}"
+        try:
+            message_ts = await post_slack_top_level_message_with_ts(
+                slack_channel_id,
+                root_message,
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+        except SlackRequestError as exc:
+            error = f"Slack post failed: {exc.code or 'unknown error'}"
             await _put_run_state(
                 record,
                 {"last_error": error, "last_error_at": now_iso()},
             )
-            raise ToolError(error, details={"status": "error", "schedule_id": schedule_id})
+            return {"status": "error", "schedule_id": schedule_id, "error": error}
         slack_thread = {
             "channel_id": slack_channel_id,
             "thread_ts": message_ts,
@@ -1069,15 +1068,16 @@ async def trigger_agent_schedule(schedule_id: str) -> dict[str, Any]:
     _assert_schedule_exists(record)
     assert record is not None
 
-    try:
-        return await _launch_agent_schedule_record(record, test_run=True)
-    except ToolError as exc:
-        status = exc.details.get("status")
-        status_code = exc.details.get("status_code")
-        if status == "unauthorized":
-            raise HTTPException(
-                status_code if isinstance(status_code, int) else 403, str(exc)
-            ) from exc
-        if status == "unknown_workspace":
-            raise HTTPException(409, str(exc)) from exc
-        raise HTTPException(502, str(exc)) from exc
+    result = await _launch_agent_schedule_record(record, test_run=True)
+    status = result.get("status")
+    if status == "started":
+        return result
+    if status == "unauthorized":
+        status_code = result.get("status_code")
+        raise HTTPException(
+            status_code if isinstance(status_code, int) else 403,
+            result.get("error") or "automation repository unavailable",
+        )
+    if status == "unknown_workspace":
+        raise HTTPException(409, result.get("error") or "automation workspace no longer exists")
+    raise HTTPException(502, result.get("error") or "failed to start automation test")

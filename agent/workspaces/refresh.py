@@ -35,7 +35,6 @@ from typing import Any
 from langgraph_sdk import get_client
 
 from agent.config import ENV, EnvVar
-from agent.tools.errors import ToolError
 from agent.workspaces.store import (
     WORKSPACES,
     RefreshKind,
@@ -283,7 +282,7 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
     try:
         require_capture_support()
     except RuntimeError as exc:
-        raise ToolError(str(exc), details={"status": "unsupported", "slug": slug}) from exc
+        return {"status": "unsupported", "slug": slug, "error": str(exc)}
 
     base = record.ready_snapshot_id if kind == "update" else record.base_snapshot_id
     await WORKSPACES.mark_refreshing(slug, kind)
@@ -309,16 +308,15 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
                     slug, label, "failed", exit_code=result.exit_code
                 )
                 error = f"{label} script exited {result.exit_code}"
-                raise ToolError(
-                    error,
-                    details={
-                        "refresh_status": "failed",
-                        "slug": slug,
-                        "script": label,
-                        "exit_code": result.exit_code,
-                        "log": log,
-                    },
-                )
+                await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=error)
+                return {
+                    "status": "failed",
+                    "slug": slug,
+                    "script": label,
+                    "exit_code": result.exit_code,
+                    "error": error,
+                    "log": log,
+                }
             await WORKSPACES.finish_refresh_step(slug, label, "success", exit_code=0)
         await WORKSPACES.start_refresh_step(slug, "capture")
         await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
@@ -326,9 +324,7 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
     except Exception as exc:
         logger.warning("Refresh failed", extra={"workspace": slug}, exc_info=True)
         await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
-        if isinstance(exc, ToolError):
-            raise
-        raise ToolError(str(exc), details={"slug": slug, "log": log}) from exc
+        return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
     finally:
         if sandbox_id:
             await _release_builder_sandbox(sandbox_id)
@@ -440,13 +436,14 @@ async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, An
     """One refresh, in the shape ``background_task`` reports every task in."""
     record = await _record_for_task(task_id)
     if record is None:
-        raise ToolError(
-            "task not found",
-            details={
-                "task_id": task_id,
-                "detail": "no workspace is tracking this refresh — it finished long enough ago to be superseded by a later one, or never started",
-            },
-        )
+        return {
+            "error": "task not found",
+            "task_id": task_id,
+            "detail": (
+                "no workspace is tracking this refresh — it finished long enough ago "
+                "to be superseded by a later one, or never started"
+            ),
+        }
     step = _running_step(record)
     state: dict[str, Any] = {
         "task_id": task_id,
@@ -493,17 +490,17 @@ async def task_stop(task_id: str) -> dict[str, Any]:
     """Cancel a running refresh. The previous snapshot stays in place."""
     record = await _record_for_task(task_id)
     if record is None:
-        raise ToolError("task not found", details={"task_id": task_id})
+        return {"error": "task not found", "task_id": task_id}
     if record.refresh_status != "refreshing":
         return await task_status(task_id)
     run_id = _run_id_of(task_id)
     try:
         await _client().runs.cancel(None, run_id)
-    except Exception as exc:
+    except Exception:
         logger.warning(
             "Could not cancel refresh run", extra={"refresh_run_id": run_id}, exc_info=True
         )
-        raise ToolError("could not cancel the refresh run", details={"task_id": task_id}) from exc
+        return {"error": "could not cancel the refresh run", "task_id": task_id}
     await WORKSPACES.mark_refresh_settled(record.slug, "failed", error="cancelled")
     if record.refresh_sandbox_id:
         await _release_builder_sandbox(record.refresh_sandbox_id)

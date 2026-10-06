@@ -4,8 +4,6 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from agent.tools.errors import ToolError
-
 connection = importlib.import_module("agent.tools.request_service_connection")
 
 
@@ -35,6 +33,8 @@ async def test_connection_card_follows_current_surface_and_reports_delivery_fail
     parsed = urlparse(link)
     assert (parsed.netloc, parsed.path) == ("api.example", "/dashboard/api/notion/login")
     assert parse_qs(parsed.query) == {"redirect_to": ["https://dashboard.example/agents/thread-1"]}
-    post.side_effect = ToolError("not_in_channel")
-    with pytest.raises(ToolError, match="not_in_channel"):
-        await connection.request_service_connection("notion", {"reply_surface": "slack"})
+    post.return_value = {"success": False, "error": "not_in_channel"}
+    assert await connection.request_service_connection("notion", {"reply_surface": "slack"}) == {
+        "success": False,
+        "error": "not_in_channel",
+    }

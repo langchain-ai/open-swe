@@ -23,9 +23,9 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
+from agent.slack.http import SlackRequestError
 from agent.source_context import SourceContext
 from agent.threads.creation import create_thread
-from agent.tools.errors import ToolError
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
@@ -69,14 +69,17 @@ def _rate_limit_delay(slack_error: str | None) -> float | None:
     return delay if 0 <= delay <= 60 else None
 
 
-def _validate_text(value: str, *, field: str, max_chars: int) -> str:
+def _validate_text(value: str, *, field: str, max_chars: int) -> str | dict[str, Any]:
     text = value.strip() if isinstance(value, str) else ""
     if not text:
-        raise ToolError(f"{field} is required")
+        return {"success": False, "error": f"{field} is required"}
     if len(text) > max_chars:
-        raise ToolError(
-            f"{field} is too long", details={"max_chars": max_chars, "actual_chars": len(text)}
-        )
+        return {
+            "success": False,
+            "error": f"{field} is too long",
+            "max_chars": max_chars,
+            "actual_chars": len(text),
+        }
     return text
 
 
@@ -169,7 +172,7 @@ async def slack_start_new_thread(
     """Implement the `slack_start_new_thread` tool."""
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:
-        raise ToolError("Missing slack_thread config")
+        return {"success": False, "error": "Missing slack_thread config"}
     client = langgraph_client()
     current_slack_thread = await get_active_slack_thread(
         client,
@@ -177,71 +180,98 @@ async def slack_start_new_thread(
         cfg.slack_thread.dump(),
     )
     if not current_slack_thread:
-        raise ToolError("Current Slack location is unavailable")
+        return {"success": False, "error": "Current Slack location is unavailable"}
 
     source_channel = current_slack_thread.get("channel_id")
     current_thread_ts = current_slack_thread.get("thread_ts")
     if not isinstance(source_channel, str) or not source_channel.strip():
-        raise ToolError("Missing slack_thread.channel_id in config")
+        return {"success": False, "error": "Missing slack_thread.channel_id in config"}
     source_channel = source_channel.strip()
     channel = await SlackChannel.load(source_channel, use_cache=False)
     if channel is None or not channel.public:
-        raise ToolError("Breakout threads can only be started in public channels; do not retry.")
+        return {
+            "success": False,
+            "error": "Breakout threads can only be started in public channels; do not retry.",
+        }
 
     clean_title = _validate_text(title, field="title", max_chars=_TITLE_MAX_CHARS)
+    if isinstance(clean_title, dict):
+        return clean_title
     clean_instructions = _validate_text(
         instructions, field="instructions", max_chars=_INSTRUCTIONS_MAX_CHARS
     )
+    if isinstance(clean_instructions, dict):
+        return clean_instructions
 
     repo = _resolve_repo(cfg, default_repo)
     if default_repo and default_repo.strip() and repo is None:
-        raise ToolError("default_repo must be a simple owner/name repository string")
+        return {
+            "success": False,
+            "error": "default_repo must be a simple owner/name repository string",
+        }
 
     if default_repo and default_repo.strip() and repo is not None:
         if not is_repo_allowed(repo):
-            raise ToolError(
-                f"Repository {repo['owner']}/{repo['name']} is not on the deployment allowlist"
-            )
+            return {
+                "success": False,
+                "error": (
+                    f"Repository {repo['owner']}/{repo['name']} is not on the deployment allowlist"
+                ),
+            }
         github_login = cfg.github_login
         if not github_login or not github_login.strip():
-            raise ToolError(
-                "Cannot verify access to the requested repository: no github_login on the parent thread"
-            )
+            return {
+                "success": False,
+                "error": (
+                    "Cannot verify access to the requested repository: no github_login on the "
+                    "parent thread"
+                ),
+            }
         try:
             await require_repo_access_for_user(
                 github_login.strip(), f"{repo['owner']}/{repo['name']}"
             )
         except HTTPException as exc:
-            raise ToolError(
-                f"Access to repository {repo['owner']}/{repo['name']} denied: {exc.detail}"
-            ) from exc
+            return {
+                "success": False,
+                "error": (
+                    f"Access to repository {repo['owner']}/{repo['name']} denied: {exc.detail}"
+                ),
+            }
         except Exception as exc:  # noqa: BLE001
-            raise ToolError(
-                f"Failed to verify access to repository {repo['owner']}/{repo['name']}: {exc}"
-            ) from exc
+            return {
+                "success": False,
+                "error": (
+                    f"Failed to verify access to repository {repo['owner']}/{repo['name']}: {exc}"
+                ),
+            }
 
     if not cfg.thread_id:
-        raise ToolError("Missing parent thread_id")
+        return {"success": False, "error": "Missing parent thread_id"}
     parent_metadata = thread_metadata(await client.threads.get(cfg.thread_id))
     visibility = parent_metadata.get("visibility", "public")
     owner_type = parent_metadata.get("owner_type", "user")
     if visibility not in ("public", "private") or owner_type not in ("user", "system"):
-        raise ToolError("Invalid parent thread ownership")
+        return {"success": False, "error": "Invalid parent thread ownership"}
     owner_login = (cfg.github_login or "").strip().lower()
     if owner_type == "system":
         if visibility != "public":
-            raise ToolError("System threads cannot be private")
+            return {"success": False, "error": "System threads cannot be private"}
         if owner_login and not cfg.background_task_completion:
             owner_type = "user"
     else:
         if cfg.background_task_completion or not owner_login:
-            raise ToolError(
-                "A direct authenticated user run is required to start a breakout thread"
-            )
+            return {
+                "success": False,
+                "error": "A direct authenticated user run is required to start a breakout thread",
+            }
         if visibility == "private":
             parent_owner = parent_metadata.get("owner_login")
             if not isinstance(parent_owner, str) or parent_owner.strip().lower() != owner_login:
-                raise ToolError("Only the private thread owner can start a breakout")
+                return {
+                    "success": False,
+                    "error": "Only the private thread owner can start a breakout",
+                }
 
     destination = await resolve_breakout_destination(
         source_channel, channel_id, workspace=cfg.workspace_slug
@@ -250,9 +280,10 @@ async def slack_start_new_thread(
     if clean_channel_id != source_channel:
         channel = await SlackChannel.load(clean_channel_id, use_cache=False)
         if visibility == "private" or channel is None or not channel.public:
-            raise ToolError(
-                "Breakouts between channels require a public source thread and destination."
-            )
+            return {
+                "success": False,
+                "error": "Breakouts between channels require a public source thread and destination.",
+            }
     source_line = (
         await source_thread_line(
             source_channel, cfg.slack_thread.triggering_event_ts or current_thread_ts
@@ -267,48 +298,50 @@ async def slack_start_new_thread(
         source_line,
         f"<@{requester}>" if requester else "",
     )
-    message_ts, slack_error = await post_slack_top_level_message_with_ts(
-        clean_channel_id,
-        append_slack_web_link_footer(
-            " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
-        ),
-        blocks=block_payload(
-            [
-                section(" · ".join(part for part in root_parts if part)),
-                *await origin_footer(cfg.thread_id),
-            ]
-        ),
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if message_ts is None:
-        raise ToolError(
-            slack_error or "post failed",
-            details={"slack_error": slack_error, "hint": _failure_hint(slack_error)},
-        )
-
-    details_ts: str | None = None
-    details_error: str | None = None
-    for attempt in range(2):
-        details_ts, details_error = await post_slack_thread_reply_with_ts(
+    try:
+        message_ts = await post_slack_top_level_message_with_ts(
             clean_channel_id,
-            message_ts,
-            _thread_details(clean_instructions, repo),
-            agent_thread_id=thread_id,
+            append_slack_web_link_footer(
+                " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
+            ),
+            blocks=block_payload(
+                [
+                    section(" · ".join(part for part in root_parts if part)),
+                    *await origin_footer(cfg.thread_id),
+                ]
+            ),
             unfurl_links=False,
             unfurl_media=False,
         )
-        if details_ts is not None:
+    except SlackRequestError as exc:
+        return {
+            "success": False,
+            "error": exc.code or "post failed",
+            "slack_error": exc.code,
+            "hint": _failure_hint(exc.code),
+        }
+
+    for attempt in range(2):
+        try:
+            await post_slack_thread_reply_with_ts(
+                clean_channel_id,
+                message_ts,
+                _thread_details(clean_instructions, repo),
+                agent_thread_id=thread_id,
+                unfurl_links=False,
+                unfurl_media=False,
+            )
             break
-        delay = _rate_limit_delay(details_error)
-        if attempt or delay is None:
-            break
-        await asyncio.sleep(delay)
-    if details_ts is None:
-        raise ToolError(
-            details_error or "thread details post failed",
-            details={"slack_error": details_error, "hint": _failure_hint(details_error)},
-        )
+        except SlackRequestError as exc:
+            delay = _rate_limit_delay(exc.code)
+            if attempt or delay is None:
+                return {
+                    "success": False,
+                    "error": exc.code,
+                    "slack_error": exc.code,
+                    "hint": _failure_hint(exc.code),
+                }
+            await asyncio.sleep(delay)
 
     await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
     new_slack_thread = _new_slack_thread_context(

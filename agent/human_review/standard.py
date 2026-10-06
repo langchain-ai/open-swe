@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Literal, NoReturn
+from typing import Literal
 from uuid import UUID
 
 import httpx2
@@ -52,8 +52,8 @@ from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import GitHubPrRef, get_slack_permalink, post_slack_thread_reply_with_ts
 from agent.slack.dm import send_dm
+from agent.slack.http import SlackRequestError
 from agent.threads.pr_fixes import dispatch_pull_request_prompt
-from agent.tools.errors import ToolError
 from agent.users import User
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_ops import langgraph_client
@@ -99,8 +99,8 @@ class Origin:
         return self.requester is not None and request.requested_by_user_id == self.requester.id
 
 
-def _failure(error: str) -> NoReturn:
-    raise ToolError(error)
+def _failure(error: str) -> RequestResult:
+    return RequestResult(success=False, error=error)
 
 
 def summary_line(text: str) -> str:
@@ -128,7 +128,9 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     return blockers
 
 
-async def _target_channel(pr_ref: GitHubPrRef, override: str, token: str) -> SlackChannel:
+async def _target_channel(
+    pr_ref: GitHubPrRef, override: str, token: str
+) -> SlackChannel | RequestResult:
     configured = override.strip()
     if not configured:
         configured = (
@@ -148,17 +150,18 @@ async def _target_channel(pr_ref: GitHubPrRef, override: str, token: str) -> Sla
 async def _point_to_card(request: HumanReviewRequest, origin: Origin, target: SlackChannel) -> None:
     """Tell the asking thread where the card went, since a broadcast cannot reach another channel."""
     # A channel mention, not the card's permalink: Slack unfurls that into a second card.
-    _, error = await post_slack_thread_reply_with_ts(
-        origin.slack_channel_id,
-        origin.slack_thread_ts,
-        f"Review requested in <#{target.id}>.",
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if error:
+    try:
+        await post_slack_thread_reply_with_ts(
+            origin.slack_channel_id,
+            origin.slack_thread_ts,
+            f"Review requested in <#{target.id}>.",
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Could not point the asking thread at its review card",
-            extra={"request_id": str(request.id), "slack_error": error},
+            extra={"request_id": str(request.id), "slack_error": exc.code},
         )
 
 
@@ -273,6 +276,8 @@ async def request_review(
         )
 
     target = await _target_channel(pr_ref, channel, token)
+    if isinstance(target, RequestResult):
+        return target
     recorded = await record_pull_request(pr_ref, token)
     if recorded is None:
         return _failure("Pull request is unavailable")
@@ -308,16 +313,16 @@ async def request_review(
         await _discard(request.id)
         return _failure("Open SWE could not schedule the review request's deadlines. Try again.")
     try:
-        message_ts, error = await post_standard_card(request)
+        message_ts = await post_standard_card(request)
+    except SlackRequestError as exc:
+        await _discard(request.id)
+        return _failure(
+            f"Could not post in #{target.name or target.id}: {exc.code}. "
+            "For a private channel, invite the bot first."
+        )
     except BaseException:
         await _discard(request.id)
         raise
-    if not message_ts:
-        await _discard(request.id)
-        return _failure(
-            f"Could not post in #{target.name or target.id}: {error or 'unknown error'}. "
-            "For a private channel, invite the bot first."
-        )
     request.slack_message_ts = message_ts
     request = await request.save()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:

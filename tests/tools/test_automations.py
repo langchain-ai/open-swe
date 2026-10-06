@@ -5,7 +5,6 @@ import pytest
 
 from agent.run_config import RunConfig
 from agent.tools import automations
-from agent.tools.errors import ToolError
 
 
 @pytest.fixture(autouse=True)
@@ -47,10 +46,10 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
 async def test_automation_tools_recheck_admin(grant_tool_access: Callable[..., None]) -> None:
     grant_tool_access()
 
-    with pytest.raises(ToolError) as raised:
-        await automations.delete_automation("schedule-1")
+    result = await automations.delete_automation("schedule-1")
 
-    assert "not available in this thread" in str(str(raised.value))
+    assert result["ok"] is False
+    assert "not available in this thread" in str(result["error"])
 
 
 async def test_sole_writer_sees_only_an_acknowledgement(

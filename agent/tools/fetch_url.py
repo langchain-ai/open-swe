@@ -3,8 +3,7 @@ from typing import Any
 import httpx2
 from markdownify import markdownify
 
-from agent.tools.errors import ToolError
-from agent.utils.url_safety import request_with_safe_redirects
+from agent.utils.url_safety import UnsafeUrlError, request_with_safe_redirects
 
 FETCH_URL_MAX_CHARS = 100_000
 
@@ -36,5 +35,7 @@ async def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
             "status_code": response.status_code,
             "content_length": len(markdown_content),
         }
+    except UnsafeUrlError as exc:
+        return {"error": str(exc), "status_code": 0, "url": exc.url}
     except httpx2.HTTPError as e:
-        raise ToolError(f"Fetch URL error: {e!s}", details={"url": url}) from e
+        return {"error": f"Fetch URL error: {e!s}", "url": url}

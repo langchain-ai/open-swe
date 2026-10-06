@@ -55,7 +55,7 @@ async def create_sandbox_file_download_url(
         backend_proxy, path, _ = await resolve_sandbox_file(file_path)
     except ValueError as exc:
         logger.warning("Sandbox download request rejected", extra={"error": str(exc)})
-        raise
+        return {"error": str(exc)}
     backend = unwrap_sandbox_backend(backend_proxy)
     async with get_async_sandbox_client() as client:
         download = await client.generate_download_url(

@@ -7,7 +7,6 @@ import pytest
 from agent.run_config import RunConfig
 from agent.tools import access as tool_access
 from agent.tools.access import Policy, ack, resolve_access
-from agent.tools.errors import ToolError
 
 _OWN = Policy(trusted="private", actor="owner", sole=ack("id"))
 _SLACK = {"channel_id": "C1", "thread_ts": "1.0"}
@@ -122,8 +121,7 @@ async def test_sharing_revokes_tools_despite_stale_private_admin_run_config(
 
     assert await tool() == {"secret": "private data"}
     metadata.update(visibility="public", admin_thread=False)
-    with pytest.raises(ToolError):
-        await tool()
+    assert (await tool())["ok"] is False
     assert calls == ["called"]
 
 
@@ -136,8 +134,7 @@ async def test_calls_are_rechecked_and_projected(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(tool_access, "resolve_access", resolved)
     assert await tool() == {"ok": True, "id": "x"}
     resolved.return_value = tool_access.Access()
-    with pytest.raises(ToolError):
-        await tool()
+    assert (await tool())["ok"] is False
 
 
 async def test_unreadable_slack_history_is_not_sole(

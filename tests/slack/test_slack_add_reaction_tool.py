@@ -3,8 +3,6 @@ from typing import Any
 
 import pytest
 
-from agent.tools.errors import ToolError
-
 slack_reaction_tool = importlib.import_module("agent.slack.tools.add_reaction")
 
 
@@ -82,5 +80,9 @@ async def test_slack_add_reaction_rejects_white_check_mark(
     monkeypatch.setattr(slack_reaction_tool, "get_config", _config)
     monkeypatch.setattr(slack_reaction_tool, "add_slack_reaction", fail_if_called)
 
-    with pytest.raises(ToolError, match="white_check_mark is not allowed"):
-        await slack_reaction_tool.slack_add_reaction(emoji=emoji)
+    result = await slack_reaction_tool.slack_add_reaction(emoji=emoji)
+
+    assert result == {
+        "success": False,
+        "error": "white_check_mark is not allowed because it can imply PR approval",
+    }

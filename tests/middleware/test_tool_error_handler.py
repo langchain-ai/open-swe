@@ -1,21 +1,17 @@
 import asyncio
-import json
 from collections.abc import Sequence
 from typing import Annotated, Any, TypedDict
-from unittest.mock import MagicMock
 
 import pytest
 from deepagents import create_deep_agent
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.errors import NodeCancelledError
 from langgraph.graph import StateGraph, add_messages
-from langgraph.prebuilt.tool_node import ToolCallRequest
 
 from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.tools.errors import ToolError
 
 
 class _State(TypedDict):
@@ -115,31 +111,3 @@ async def test_cancelling_run_stops_inflight_subagent() -> None:
 
     assert cancelled.is_set()
     assert parent_model.calls == 1
-
-
-@pytest.mark.asyncio
-async def test_tool_failure_preserves_partial_operation_context() -> None:
-    request = ToolCallRequest(
-        tool_call={"name": "slack_move_thread", "args": {}, "id": "move-1"},
-        tool=MagicMock(),
-        state={},
-        runtime=MagicMock(),
-    )
-
-    async def fail(_request: ToolCallRequest) -> ToolMessage:
-        raise ToolError(
-            "Move cleanup failed",
-            details={"channel_id": "C123", "thread_ts": "100.001", "retryable": True},
-        )
-
-    result = await ToolErrorMiddleware().awrap_tool_call(request, fail)
-
-    assert isinstance(result, ToolMessage)
-    assert result.status == "error"
-    assert result.tool_call_id == "move-1"
-    assert isinstance(result.content, str)
-    payload = json.loads(result.content)
-    assert payload["error"] == "Move cleanup failed"
-    assert payload["channel_id"] == "C123"
-    assert payload["thread_ts"] == "100.001"
-    assert payload["retryable"] is True

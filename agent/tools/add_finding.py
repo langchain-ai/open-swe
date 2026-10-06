@@ -23,7 +23,6 @@ from agent.review.findings import (
     thread_missing_tool_result,
 )
 from agent.run_config import RunConfig
-from agent.tools.errors import ToolError
 
 
 async def add_finding(
@@ -47,16 +46,16 @@ async def add_finding(
 
     normalized_title = normalize_finding_title(title)
     if normalized_title == DEFAULT_FINDING_TITLE:
-        raise ToolError("title must be a non-empty generated headline")
+        return {"success": False, "error": "title must be a non-empty generated headline"}
 
     if severity not in {"low", "medium", "high", "critical"}:
-        raise ToolError(f"Invalid severity: {severity}")
+        return {"success": False, "error": f"Invalid severity: {severity}"}
     if confidence not in {"low", "medium", "high"}:
-        raise ToolError(f"Invalid confidence: {confidence}")
+        return {"success": False, "error": f"Invalid confidence: {confidence}"}
     if side not in {"LEFT", "RIGHT"}:
-        raise ToolError(f"Invalid side: {side}")
+        return {"success": False, "error": f"Invalid side: {side}"}
     if start_line is not None and end_line is not None and end_line < start_line:
-        raise ToolError("end_line must be >= start_line")
+        return {"success": False, "error": "end_line must be >= start_line"}
 
     cfg = RunConfig.from_runtime()
     diff_line_set, diff_text = await _resolve_diff_context(state, cfg)
@@ -65,10 +64,15 @@ async def add_finding(
         diff_line_set, file, start_line, end_line, side=side
     )
     if not in_diff:
-        raise ToolError(
-            "Out-of-diff findings are disabled. This finding's lines are not part of this PR's diff. Only file findings anchored to a line the PR changed. Do not re-anchor or retry.",
-            details={"in_diff": False},
-        )
+        return {
+            "success": False,
+            "in_diff": False,
+            "error": (
+                "Out-of-diff findings are disabled. This finding's lines are not "
+                "part of this PR's diff. Only file findings anchored to a line the "
+                "PR changed. Do not re-anchor or retry."
+            ),
+        }
 
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
