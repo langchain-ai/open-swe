@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { SettingsSection } from "@/components/AppShell"
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -180,12 +181,7 @@ export function WorkspacesSection({
   renderConfigure?: (workspace: WorkspaceOption) => ReactNode
 }) {
   const qc = useQueryClient()
-  const workspaces = useQuery({
-    queryKey: WORKSPACE_OPTIONS_KEY,
-    queryFn: api.listWorkspaceOptions,
-    staleTime: 60_000,
-    refetchInterval: 5000,
-  })
+  const workspaces = useWorkspaceOptions()
   const options = workspaces.data
   // Channel names are an admin's view; everyone else sees the stored ids.
   const channelDirectory = useSlackChannelDirectory(isAdmin)
@@ -206,7 +202,6 @@ export function WorkspacesSection({
         repos: createDraft.repos,
         slack_channel_ids: createDraft.slackChannelIds,
         kitchen_channel_ids: createDraft.kitchenChannelIds,
-        breakout_channel_id: createDraft.breakoutChannelId,
       }
       const prompt = createDraft.prompt.trim()
       if (prompt) body.prompt = prompt

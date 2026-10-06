@@ -33,6 +33,7 @@ class WorkspaceRow(Base):
     slug: Mapped[str] = mapped_column(unique=True)
     name: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    inherit_default_sandbox: Mapped[bool] = mapped_column(server_default="false", default=False)
     prompt: Mapped[str] = mapped_column(server_default="", default="")
     setup_script: Mapped[str] = mapped_column(server_default="", default="")
     update_script: Mapped[str] = mapped_column(server_default="", default="")
@@ -107,6 +108,7 @@ def to_workspace(
     return Workspace.model_validate(
         {
             "slug": row.slug,
+            "inherit_default_sandbox": row.inherit_default_sandbox,
             "name": row.name,
             "prompt": row.prompt,
             "setup_script": row.setup_script,
@@ -115,7 +117,6 @@ def to_workspace(
             "repos": repos,
             "slack_channel_ids": channels,
             "kitchen_channel_ids": kitchen_channels,
-            "breakout_channel_id": row.breakout_channel_id,
             "mem_bytes": row.mem_bytes,
             "vcpus": row.vcpus,
             "fs_capacity_bytes": row.fs_capacity_bytes,
@@ -170,12 +171,12 @@ def apply_definition(row: WorkspaceRow, record: Workspace) -> None:
     same workspace; each side writing only its own columns is what keeps one
     from reverting the other, such as a refresh restoring revoked access.
     """
+    row.inherit_default_sandbox = record.inherit_default_sandbox
     row.name = record.name
     row.prompt = record.prompt
     row.setup_script = record.setup_script
     row.update_script = record.update_script
     row.base_snapshot_id = record.base_snapshot_id
-    row.breakout_channel_id = record.breakout_channel_id
     row.mem_bytes = record.mem_bytes
     row.vcpus = record.vcpus
     row.fs_capacity_bytes = record.fs_capacity_bytes

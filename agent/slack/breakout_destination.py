@@ -1,9 +1,8 @@
-"""Resolve breakout destinations from the source workspace."""
+"""Resolve breakout channels and the source workspace."""
 
 from dataclasses import dataclass
 
 from agent.workspaces.routing import resolve_workspace
-from agent.workspaces.store import WORKSPACES
 
 
 @dataclass(frozen=True)
@@ -28,12 +27,6 @@ async def resolve_breakout_destination(
         tag=tag,
         login=login,
     )
-    if explicit_channel:
-        return BreakoutDestination(explicit_channel.strip(), resolved.slug)
-    definition = await WORKSPACES.get(resolved.slug)
     return BreakoutDestination(
-        definition.breakout_channel_id
-        if definition and definition.breakout_channel_id
-        else source_channel,
-        resolved.slug,
+        explicit_channel.strip() if explicit_channel else source_channel, resolved.slug
     )

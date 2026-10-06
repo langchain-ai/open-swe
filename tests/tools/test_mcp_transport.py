@@ -1,5 +1,3 @@
-import socket
-
 import httpx
 import pytest
 
@@ -11,10 +9,8 @@ async def test_public_address_is_pinned_and_tls_hostname_preserved(monkeypatch):
         mcp_transport,
         "resolve_and_validate",
         lambda url: (
-            True,
-            "",
             "example.com",
-            [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+            ["93.184.216.34"],
         ),
     )
     seen = []
@@ -42,9 +38,10 @@ async def test_server_cannot_redirect_credentials_to_another_origin(url):
 
 
 async def test_private_or_unresolved_address_is_blocked(monkeypatch):
-    monkeypatch.setattr(
-        mcp_transport, "resolve_and_validate", lambda url: (False, "blocked", "example.com", None)
-    )
+    def reject(url: str) -> tuple[str, list[str]]:
+        raise mcp_transport.UnsafeUrlError(url, "blocked")
+
+    monkeypatch.setattr(mcp_transport, "resolve_and_validate", reject)
     async with mcp_transport.mcp_http_client("https://example.com/mcp") as client:
         with pytest.raises(ValueError, match="public addresses"):
             await client.get("https://example.com/mcp")
@@ -52,11 +49,11 @@ async def test_private_or_unresolved_address_is_blocked(monkeypatch):
 
 async def test_connection_failure_tries_next_validated_address(monkeypatch):
     addresses = [
-        (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 443, 0, 0)),
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+        "2606:4700:4700::1111",
+        "93.184.216.34",
     ]
     monkeypatch.setattr(
-        mcp_transport, "resolve_and_validate", lambda url: (True, "", "example.com", addresses)
+        mcp_transport, "resolve_and_validate", lambda url: ("example.com", addresses)
     )
     seen = []
 
