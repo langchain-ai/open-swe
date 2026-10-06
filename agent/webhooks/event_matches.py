@@ -29,6 +29,7 @@ from agent.input_messages import (
     delivered_event_match_ids,
 )
 from agent.tasks.presentation import TaskEventMetadata
+from agent.tasks.store import get_delegation
 from agent.webhooks.event_log import RETAINED_DAYS, WebhookSource
 
 logger = logging.getLogger(__name__)
@@ -154,6 +155,9 @@ class EventMatch(Base):
                 text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
                 {"key": f"{EVENT_MATCH_KIND}:{thread_id}"},
             )
+            delegation = await get_delegation(thread_id)
+            if delegation is not None and delegation.cancelled:
+                return False
             if strategy == "enqueue":
                 thread = _Thread.model_validate(await client.threads.get(thread_id))
                 if thread.status == "busy":

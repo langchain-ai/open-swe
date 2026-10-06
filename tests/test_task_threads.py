@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from agent.threads import creation
 from agent.users import User, UserPreferences
 from agent.webhooks import event_matches
 from agent.webhooks.event_matches import EventMatch
+from agent.webhooks.event_subscriptions import EventSubscription
 
 MODEL = "openai:gpt-6-astra"
 COORDINATOR = str(uuid4())
@@ -116,6 +118,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value=None))
     monkeypatch.setattr(thinking, "sync_slack_background_status", AsyncMock())
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
+    monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())
     monkeypatch.setattr(
         User,
         "preferences_for_login",
@@ -322,11 +325,33 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
         actor, instructions="Implement", model=None, effort=None, request_id="call"
     )
     worker_id = str(result["worker_thread_id"])
+    subscription = EventSubscription(
+        thread_id=worker_id,
+        workspace_id=uuid4(),
+        multitask_strategy="enqueue",
+        run_config={"thread_id": worker_id},
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+    event = EventMatch(
+        thread_id=worker_id,
+        subscription_id=subscription.id,
+        source="github",
+        delivery_id="ci-result",
+        content="Build finished",
+        run_config={"thread_id": worker_id},
+    )
+    async with postgres.session() as session:
+        session.add(subscription)
+        await event.record(session)
     monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True
     assert await EventMatch.owed(worker_id, []) == []
+    assert await EventSubscription.for_thread(worker_id) == []
     assert await EventMatch.deliver(worker_id, "enqueue") is False
+    async with postgres.session() as session:
+        await event.record(session)
+    assert await EventMatch.deliver(worker_id, "interrupt") is False
     assert client.created_runs[0]["status"] == "interrupted"
     with pytest.raises(ValueError, match="uncancelled"):
         await service.control_worker(actor, worker_thread_id=worker_id, action="retry")

@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -17,6 +19,51 @@ from agent.webhooks.event_matches import EventMatch
 _WORKER = "86186b55-1999-52e2-bf4b-ca3de907043e"
 _COORDINATOR = "3b8f4848-78b4-45d5-a617-3f4610feff4d"
 _RESULT = 'Login passes: "ready" & <result>\n```python\nassert ready < limit\n```'
+
+
+@pytest.mark.parametrize("strategy", ["enqueue", "interrupt"])
+async def test_event_waiting_on_cancellation_cannot_restart_the_worker(
+    monkeypatch: pytest.MonkeyPatch, strategy: event_matches.MultitaskStrategy
+) -> None:
+    delegation = store.TaskDelegation(
+        worker_thread_id=_WORKER,
+        task_id=uuid4(),
+        coordinator_thread_id=_COORDINATOR,
+        instructions="Fix login",
+        model="openai:gpt-5.5",
+        effort="high",
+    )
+
+    @asynccontextmanager
+    async def transaction() -> AsyncIterator[AsyncMock]:
+        # Cancellation commits while this delivery waits for the thread lock.
+        async def acquired(*args: object) -> None:
+            delegation.cancelled = True
+
+        yield AsyncMock(execute=AsyncMock(side_effect=acquired))
+
+    client = SimpleNamespace(threads=AsyncMock())
+    client.threads.get.return_value = {"status": "idle"}
+    client.threads.get_state.return_value = {"values": {"messages": []}}
+    match = EventMatch(
+        thread_id=_WORKER,
+        subscription_id=uuid4(),
+        source="github",
+        delivery_id="ci-result",
+        content="Build finished",
+        run_config={"thread_id": _WORKER},
+    )
+    match.delivery_attempts = 0
+    dispatch = AsyncMock()
+    monkeypatch.setattr(postgres, "transaction", transaction)
+    monkeypatch.setattr(postgres, "session", transaction)
+    monkeypatch.setattr(event_matches, "dispatch_client", lambda: client)
+    monkeypatch.setattr(event_matches, "get_delegation", AsyncMock(return_value=delegation))
+    monkeypatch.setattr(EventMatch, "owed", AsyncMock(return_value=[match]))
+    monkeypatch.setattr(event_matches, "create_durable_run", dispatch)
+
+    assert await EventMatch.deliver(_WORKER, strategy) is False
+    dispatch.assert_not_awaited()
 
 
 @pytest.fixture(autouse=True)

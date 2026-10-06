@@ -10,6 +10,7 @@ from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import NotFoundError
 
 from agent.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from agent.input_messages import build_run_input
@@ -181,6 +182,28 @@ async def purge_expired_wakeup_crons(client: Any, *, now: datetime) -> int:
         await client.crons.delete(cron_id)
         deleted += 1
     return deleted
+
+
+async def cancel_thread_wakeups(thread_id: str) -> None:
+    client = get_client(url=langgraph_url())
+    cron_ids: list[str] = []
+    offset = 0
+    while True:
+        page = await client.crons.search(
+            thread_id=thread_id,
+            metadata={"kind": _WAKEUP_KIND},
+            limit=_PURGE_PAGE_SIZE,
+            offset=offset,
+        )
+        cron_ids.extend(cron["cron_id"] for cron in page)
+        if len(page) < _PURGE_PAGE_SIZE:
+            break
+        offset += len(page)
+    for cron_id in cron_ids:
+        try:
+            await client.crons.delete(cron_id)
+        except NotFoundError:
+            logger.info("Thread wakeup already removed", extra={"cron_id": cron_id})
 
 
 async def _purge_expired_wakeups_best_effort() -> None:

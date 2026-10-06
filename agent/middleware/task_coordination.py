@@ -12,7 +12,7 @@ from agent.github.proxy import maybe_refresh_proxy_token
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import prompt
 from agent.tasks.flags import task_coordination_enabled, task_owner_login
-from agent.tasks.store import TaskContext, load_context
+from agent.tasks.store import TaskContext, get_delegation, load_context
 from agent.utils.json_types import thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,12 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         owner_login = task_owner_login(metadata)
         enabled = await task_coordination_enabled(owner_login)
         context = await load_context(thread_id)
+        if context is not None and context.membership.role == "worker":
+            delegation = await get_delegation(thread_id)
+            if delegation is not None and delegation.cancelled:
+                raise PermissionError(
+                    "This worker was cancelled; create a new worker for further work"
+                )
         return cls(thread_id, owner_login, enabled, context) if enabled or context else None
 
     @property

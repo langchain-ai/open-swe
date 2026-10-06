@@ -26,11 +26,13 @@ from agent.threads.access import resolve_run_email
 from agent.threads.creation import create_thread
 from agent.threads.handlers import interrupt_transcript_turns
 from agent.threads.summary import assert_thread_postable, assert_thread_readable, thread_is_owner
+from agent.tools.schedule_thread_wakeup import cancel_thread_wakeups
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_EMAILS_KEY, PARTICIPANT_LOGINS_KEY
 from agent.webhooks.event_matches import EventMatch
+from agent.webhooks.event_subscriptions import EventSubscription
 from agent.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
@@ -489,9 +491,10 @@ async def control_worker(
                 .values(cancelled=True)
             )
             await session.execute(
-                delete(EventMatch).where(
-                    EventMatch.thread_id == worker_thread_id, EventMatch.source == "task"
-                )
+                delete(EventMatch).where(EventMatch.thread_id == worker_thread_id)
+            )
+            await session.execute(
+                delete(EventSubscription).where(EventSubscription.thread_id == worker_thread_id)
             )
             try:
                 run_ids = await live_worker_runs(worker_thread_id)
@@ -506,6 +509,7 @@ async def control_worker(
                     thread_id=worker_thread_id, run_ids=run_ids, action="interrupt"
                 )
         await interrupt_transcript_turns(worker_thread_id, run_ids)
+        await cancel_thread_wakeups(worker_thread_id)
         delegation.cancelled = True
         return {**await worker_status(delegation), "cancellation_requested": True}
     return await worker_status(delegation)

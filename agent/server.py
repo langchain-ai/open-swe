@@ -1408,6 +1408,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         except Exception:
             logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
 
+    local_run = is_desktop_run(cfg)
+    task_coordination = (
+        None if local_run else await TaskCoordinationMiddleware.for_thread(thread_id)
+    )
+
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
@@ -1428,10 +1433,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # authorization. Personal integrations require verified private ownership.
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
-    local_run = is_desktop_run(cfg)
-    task_coordination = (
-        None if local_run else await TaskCoordinationMiddleware.for_thread(thread_id)
-    )
     reset_model_selection = (
         cfg.source == "dashboard" and cfg.model_selection == "auto" and cfg.model_selection_changed
     )
