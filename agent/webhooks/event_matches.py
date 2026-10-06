@@ -28,6 +28,7 @@ from agent.input_messages import (
     build_input_messages,
     delivered_event_match_ids,
 )
+from agent.tasks.presentation import TaskEventMetadata
 from agent.webhooks.event_log import RETAINED_DAYS, WebhookSource
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class EventMatch(Base):
     delivery_id: Mapped[str]
     content: Mapped[str]
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
+    task_event: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB, default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delivery_attempts: Mapped[int] = mapped_column(server_default="0", init=False)
     matched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -86,6 +88,7 @@ class EventMatch(Base):
                 delivery_id=self.delivery_id,
                 content=self.content,
                 run_config=self.run_config,
+                task_event=self.task_event,
             )
             .on_conflict_do_nothing(
                 index_elements=["thread_id", "source", "delivery_id"],
@@ -113,21 +116,27 @@ class EventMatch(Base):
     @classmethod
     def messages(cls, matches: Sequence[Self]) -> list[RunMessage]:
         introduced: set[str] = set()
-        return [
-            message
-            for match in matches
-            for message in build_input_messages(
+        messages: list[RunMessage] = []
+        for match in matches:
+            data: dict[str, object] = {"event_match": str(match.id)}
+            if match.source == "task" and match.task_event is not None:
+                data["task_event"] = TaskEventMetadata.model_validate(
+                    match.task_event
+                ).model_dump_json()
+            built = build_input_messages(
                 match.content,
                 {
                     "sender_id": _SYSTEM["id"],
                     "surface": "automation" if match.source == "task" else match.source,
                     "kind": "system",
-                    "data": {"event_match": str(match.id)},
+                    "data": data,
                 },
                 systems=[_SYSTEM],
                 injected_dynamic_context_hashes=introduced,
             )
-        ]
+            built[-1]["id"] = f"event-match:{match.id}"
+            messages.extend(built)
+        return messages
 
     @classmethod
     async def deliver(cls, thread_id: str, strategy: MultitaskStrategy) -> bool:
@@ -161,11 +170,17 @@ class EventMatch(Base):
                     .values(delivery_attempts=cls.delivery_attempts + 1)
                 )
             latest = owed[-1]
+            turn_id = uuid7()
             await create_durable_run(
                 thread_id,
                 "agent",
                 input={"messages": cls.messages(owed)},
-                config={"configurable": latest.run_config},
+                config={
+                    "configurable": {
+                        **latest.run_config,
+                        "transcript_turn_id": str(turn_id),
+                    }
+                },
                 metadata={
                     "kind": EVENT_MATCH_KIND,
                     "event_match_ids": [str(match_id) for match_id in owed_ids],

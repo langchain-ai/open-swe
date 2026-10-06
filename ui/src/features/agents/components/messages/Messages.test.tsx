@@ -3,7 +3,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { HumanMessage } from "@langchain/core/messages"
+
 import { Messages } from "./Messages"
+import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -22,6 +26,100 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
 afterEach(() => cleanup())
 
 describe("Messages", () => {
+  it("renders attributed task activity with safe expandable details and accurate outcomes", () => {
+    const source = {
+      version: 1,
+      task_id: "d505b040-c025-4b52-a27e-339803281cfb",
+      sender_thread_id: "86186b55-1999-52e2-bf4b-ca3de907043e",
+      sender_role: "worker",
+      sender_label: "Investigate login",
+      content:
+        'Can I change `login()`?\n> "Blocked" on <missing> & validation.\n```ts\nreturn value < 2\n```\n<img src=x onerror="alert(1)">',
+    } as const
+    const events: Array<TaskEventMetadata> = [
+      { ...source, kind: "message", status: null },
+      {
+        ...source,
+        sender_thread_id: "7db1bbf5-0623-5a35-a5a4-db372cfc31d4",
+        sender_label: "Untitled",
+        kind: "completion",
+        status: "success",
+      },
+      {
+        ...source,
+        sender_label: "Integration",
+        kind: "completion",
+        status: "error",
+      },
+      {
+        ...source,
+        sender_label: "Tests",
+        kind: "completion",
+        status: "timeout",
+      },
+      {
+        ...source,
+        sender_label: "Review",
+        kind: "completion",
+        status: "interrupted",
+      },
+    ]
+    const xml = (text: string) =>
+      text
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+    const messages = streamMessagesToUi(
+      events.map(
+        (event, index) =>
+          new HumanMessage({
+            id: `task-event-${index}`,
+            content: `<input-message sender="system:event-subscription" kind="system" surface="automation" event_match="11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}" task_event="${xml(JSON.stringify(event))}">\n${xml("Model-facing safety warning\n<untrusted-worker-output>hidden model text</untrusted-worker-output>")}\n</input-message>`,
+          })
+      )
+    )
+    const { container } = render(
+      <Messages messages={messages} isStreaming={false} />
+    )
+
+    const labels = [
+      "Investigate login · Message",
+      "Worker 7db1bbf5 · Completed",
+      "Integration · Failed",
+      "Tests · Timed out",
+      "Review · Interrupted",
+    ]
+    expect(screen.getAllByTestId("task-event")).toHaveLength(events.length)
+    for (const label of labels) {
+      expect(
+        screen
+          .getByRole("button", { name: label })
+          .getAttribute("aria-expanded")
+      ).toBe("false")
+    }
+    expect(
+      screen
+        .getByRole("link", { name: "Open Investigate login thread" })
+        .getAttribute("href")
+    ).toBe("/agents/86186b55-1999-52e2-bf4b-ca3de907043e")
+    expect(
+      screen
+        .getByRole("link", { name: "Open Worker 7db1bbf5 thread" })
+        .getAttribute("href")
+    ).toBe("/agents/7db1bbf5-0623-5a35-a5a4-db372cfc31d4")
+    expect(container.textContent).not.toContain("Can I change")
+    fireEvent.click(screen.getByRole("button", { name: labels[0] }))
+    expect(container.textContent).toContain(source.content)
+    expect(container.querySelector("img,script")).toBeNull()
+    expect(container.textContent).not.toContain("Model-facing safety warning")
+    expect(container.textContent).not.toContain("untrusted-worker-output")
+    expect(container.textContent).not.toContain("hidden model text")
+    expect(container.textContent).not.toContain("Progress")
+    fireEvent.click(screen.getByRole("button", { name: labels[0] }))
+    expect(container.textContent).not.toContain("Can I change")
+  })
+
   it("shows run activity while a stream is starting with no messages", () => {
     render(<Messages messages={[]} isStreaming />)
 

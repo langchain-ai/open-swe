@@ -273,6 +273,108 @@ function completed(
 }
 
 describe("transcript events", () => {
+  it("keeps initial and injected task events ordered once across replay and reload", () => {
+    const envelope = (sender: string, content: string) => {
+      const data = JSON.stringify({
+        version: 1,
+        task_id: "d505b040-c025-4b52-a27e-339803281cfb",
+        sender_thread_id: sender,
+        sender_role: "worker",
+        sender_label: null,
+        kind: "message",
+        status: null,
+        content,
+      })
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+      return `<input-message sender="system:event-subscription" kind="system" surface="automation" event_match="${sender}" task_event="${data}">\nModel-only warning\n</input-message>`
+    }
+    const initial = [
+      messageRow({
+        message_id: "initial-b",
+        turn_id: "turn-1",
+        role: "human",
+        text: envelope(
+          "7db1bbf5-0623-5a35-a5a4-db372cfc31d4",
+          "Checking the tests"
+        ),
+        created_at: "2026-01-01T00:00:00Z",
+      }),
+      messageRow({
+        message_id: "initial-c",
+        turn_id: "turn-1",
+        role: "human",
+        text: envelope(
+          "52872bfa-e2d8-49a6-8a23-2db4044c164f",
+          "Is the API change allowed?"
+        ),
+        created_at: "2026-01-01T00:00:01Z",
+      }),
+    ]
+    const injected = messageRow({
+      message_id: "injected-a",
+      turn_id: "turn-1",
+      role: "human",
+      text: envelope(
+        "86186b55-1999-52e2-bf4b-ca3de907043e",
+        'Found "<blocked>" in `login()`'
+      ),
+      created_at: "2026-01-01T00:00:02Z",
+    })
+    const reply = messageRow({
+      message_id: "coordinator-reply",
+      turn_id: "turn-1",
+      text: "I received the worker reports.",
+      created_at: "2026-01-01T00:00:03Z",
+    })
+    const base = snapshot({
+      turns: [turn("turn-1", "2026-01-01T00:00:00Z", "running")],
+      messages: initial,
+    })
+    const events = [completed(11, injected), completed(12, reply)]
+    const streamed = events.reduce(applyEvent, fromSnapshot(base))
+    const replayed = events.reduce(applyEvent, streamed)
+    const reloaded = fromSnapshot({
+      ...base,
+      version: 12,
+      messages: [...initial, injected, reply],
+    })
+    const expectedIds = [
+      "initial-b",
+      "initial-c",
+      "injected-a",
+      "coordinator-reply",
+    ]
+    for (const state of [
+      streamed,
+      replayed,
+      reloaded,
+      applySnapshot(streamed, {
+        ...base,
+        version: 12,
+        messages: [...initial, injected, reply],
+      }),
+    ]) {
+      const messages = toMessages(state)
+      expect(messages.map((message) => message.id)).toEqual(expectedIds)
+      expect(
+        messages.slice(0, 3).map((message) => message.taskEvent?.content)
+      ).toEqual([
+        "Checking the tests",
+        "Is the API change allowed?",
+        'Found "<blocked>" in `login()`',
+      ])
+      expect(messages[3]?.author).toBe("agent")
+      expect(messages[3]?.taskEvent).toBeUndefined()
+      expect(state.messages["injected-a"]?.text).toContain("Model-only warning")
+      expect(messages[2]?.chunks).toEqual([
+        { kind: "text", text: 'Found "<blocked>" in `login()`' },
+      ])
+    }
+  })
+
   it("concatenates fragments and then takes the completed text as canonical", () => {
     const base = fromSnapshot(twoTurnSnapshot())
     const streamed = applyEvent(

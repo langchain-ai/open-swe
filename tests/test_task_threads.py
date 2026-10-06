@@ -9,7 +9,8 @@ from pydantic import JsonValue
 from sqlalchemy import func, select
 
 from agent.database import postgres
-from agent.tasks import service, store
+from agent.tasks import presentation, service, store
+from agent.tasks.presentation import TaskEventMetadata
 from agent.threads import creation
 from agent.webhooks import event_matches
 from agent.webhooks.event_matches import EventMatch
@@ -68,6 +69,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
             "assistant_id": assistant_id,
             "config": kwargs.get("config", {}),
             "metadata": kwargs.get("metadata", {}),
+            "input": kwargs.get("input", {}),
         }
         client.created_runs.append(result)
         if client.fail_after_accept:
@@ -100,6 +102,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     client.runs.list = AsyncMock(side_effect=list_runs)
     client.runs.cancel_many = AsyncMock(side_effect=cancel_many)
     monkeypatch.setattr(service, "langgraph_client", lambda: client)
+    monkeypatch.setattr(presentation, "langgraph_client", lambda: client)
     monkeypatch.setattr(event_matches, "dispatch_client", lambda: client)
     monkeypatch.setattr(service, "enforce_github_login_gate", AsyncMock())
     monkeypatch.setattr(service, "get_profile", AsyncMock(return_value={}))
@@ -344,6 +347,12 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert sent["recipient_thread_id"] == worker_id
     (follow_up,) = await EventMatch.owed(worker_id, initial_messages)
     assert "Check logout too" in follow_up.content
+    follow_up_display = TaskEventMetadata.model_validate(follow_up.task_event)
+    assert follow_up_display.sender_role == "coordinator"
+    assert str(follow_up_display.sender_thread_id) == COORDINATOR
+    assert follow_up_display.content == "Check logout too"
+    assert follow_up_display.kind == "message"
+    assert follow_up_display.status is None
     assert len(client.created_runs) == 2
     assert client.created_runs[-1]["thread_id"] == worker_id
     assert client.created_runs[-1]["status"] == "pending"
@@ -360,3 +369,29 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert str(context.task.id) == first["task_id"]
     assert context.membership.role == "worker"
     assert len(await store.list_delegations(context.task.id)) == 2
+
+    client.statuses[COORDINATOR] = "busy"
+    senders = [worker_id, str(sibling["worker_thread_id"])]
+    reports = ['Blocked on "login" & <schema>; can you help?', "Checked:\n```python\na < b\n```"]
+    for sender, report in zip(senders, reports, strict=True):
+        await service.message_task_thread(
+            service.Actor(sender, OWNER),
+            message=report,
+            worker_thread_id=None,
+            request_id="report",
+        )
+    assert len(client.created_runs) == 3
+    owed = await EventMatch.owed(COORDINATOR, [])
+    displays = [TaskEventMetadata.model_validate(event.task_event) for event in owed]
+    assert [str(display.sender_thread_id) for display in displays] == senders
+    assert [display.content for display in displays] == reports
+    assert all(display.sender_label is None for display in displays)
+    assert all(display.kind == "message" and display.status is None for display in displays)
+    message_ids = [f"event-match:{event.id}" for event in owed]
+    client.statuses[COORDINATOR] = "idle"
+    assert await EventMatch.deliver(COORDINATOR, "enqueue")
+    assert len(client.created_runs) == 4
+    wake = client.created_runs[-1]
+    assert wake["thread_id"] == COORDINATOR
+    delivered_ids = [message["id"] for message in wake["input"]["messages"] if "id" in message]
+    assert delivered_ids == message_ids

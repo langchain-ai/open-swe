@@ -9,12 +9,19 @@ from sqlalchemy import update
 
 from agent import completion
 from agent.database import postgres
-from agent.tasks import events, store
+from agent.tasks import events, presentation, store
+from agent.tasks.presentation import TaskEventMetadata
 from agent.webhooks import event_matches
 from agent.webhooks.event_matches import EventMatch
 
-_WORKER = "worker"
-_COORDINATOR = "coordinator"
+_WORKER = "86186b55-1999-52e2-bf4b-ca3de907043e"
+_COORDINATOR = "3b8f4848-78b4-45d5-a617-3f4610feff4d"
+_RESULT = 'Login passes: "ready" & <result>\n```python\nassert ready < limit\n```'
+
+
+@pytest.fixture(autouse=True)
+def label_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(presentation, "sender_label", AsyncMock(return_value=None))
 
 
 @pytest.fixture
@@ -69,14 +76,20 @@ async def test_result_uses_completed_payload_and_invocation_not_newer_thread_sta
     [
         (
             "success",
-            {"values": {"messages": [{"type": "ai", "content": "Login passes"}]}},
-            "Login passes",
+            {"values": {"messages": [{"type": "ai", "content": _RESULT}]}},
+            _RESULT,
         ),
         (
             "error",
             {"error": {"error": "SandboxGoneError", "message": "Shared sandbox deleted"}},
-            "Shared sandbox deleted",
+            "SandboxGoneError: Shared sandbox deleted",
         ),
+        (
+            "timeout",
+            {"error": "Timed out waiting for <command>"},
+            "Timed out waiting for <command>",
+        ),
+        ("interrupted", {}, "Worker invocation ended with status interrupted."),
     ],
 )
 async def test_worker_outcome_returns_to_its_task_coordinator(
@@ -92,11 +105,21 @@ async def test_worker_outcome_returns_to_its_task_coordinator(
     monkeypatch.setattr(service, "notify", notify)
     assert await events.worker_finished(_WORKER, "run", status, payload)
     task, recipient, delivery_id, content = notify.await_args.args
+    display = notify.await_args.kwargs["task_event"]
+    assert isinstance(display, TaskEventMetadata)
     assert recipient == _COORDINATOR
-    assert delivery_id == "finished:worker:run"
-    assert expected in content
+    assert delivery_id == f"finished:{_WORKER}:run"
+    assert display.content == expected
+    assert display.kind == "completion"
+    assert display.status == status
+    assert display.sender_role == "worker"
+    assert str(display.sender_thread_id) == _WORKER
+    assert display.task_id == task.id == worker_context.task.id
     assert _WORKER in content
-    assert task.id == worker_context.task.id
+    enclosed = content.split("<untrusted-worker-output>", 1)[1].split(
+        "</untrusted-worker-output>", 1
+    )[0]
+    assert ElementTree.fromstring(f"<result>{enclosed}</result>").text.strip() == expected
 
 
 @pytest.mark.parametrize("is_message", [False, True])
@@ -130,6 +153,7 @@ async def test_worker_text_cannot_close_its_untrusted_boundary(
             {"values": {"messages": [{"type": "ai", "content": payload}]}},
         )
     task, recipient, delivery_id, content = notify.await_args.args
+    display = notify.await_args.kwargs["task_event"]
     match = EventMatch(
         thread_id=recipient,
         subscription_id=task.id,
@@ -137,11 +161,15 @@ async def test_worker_text_cannot_close_its_untrusted_boundary(
         delivery_id=delivery_id,
         content=content,
         run_config={},
+        task_event=display.model_dump(mode="json"),
     )
+    messages = EventMatch.messages([match])
+    envelope = messages[-1]["content"]
+    assert isinstance(envelope, str)
+    encoded = ElementTree.fromstring(envelope).attrib["task_event"]
+    assert TaskEventMetadata.model_validate_json(encoded).content == payload
     delivered = "\n".join(
-        text
-        for message in EventMatch.messages([match])
-        if (text := input_message_text(message["content"])) is not None
+        text for message in messages if (text := input_message_text(message["content"])) is not None
     )
     opening, closing = "<untrusted-worker-output>", "</untrusted-worker-output>"
     assert delivered.count(opening) == delivered.count(closing) == 1
@@ -213,12 +241,17 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     client.threads.get.return_value = {"status": "busy" if busy else "idle"}
     client.threads.get_state.return_value = {"values": {"messages": []}}
     dispatched: list[dict[str, object]] = []
+    attempted_turns: list[object] = []
+    inherited_turn = str(uuid4())
     fail_first_wake = not busy
 
     async def dispatch(thread_id: str, assistant_id: str, **kwargs: object) -> dict[str, str]:
         nonlocal fail_first_wake
         assert thread_id == _COORDINATOR
         assert kwargs["multitask_strategy"] == "enqueue"
+        config = kwargs["config"]
+        assert isinstance(config, dict)
+        attempted_turns.append(config["configurable"]["transcript_turn_id"])
         if fail_first_wake:
             fail_first_wake = False
             raise ConnectionError("temporary dispatch failure")
@@ -228,9 +261,11 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
 
     monkeypatch.setattr(event_matches, "dispatch_client", lambda: client)
     monkeypatch.setattr(event_matches, "create_durable_run", dispatch)
-    monkeypatch.setattr(service, "recipient_config", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        service, "recipient_config", AsyncMock(return_value={"transcript_turn_id": inherited_turn})
+    )
     monkeypatch.setattr(events.EventSubscription, "deliver_to", AsyncMock())
-    payload = {"values": {"messages": [{"type": "ai", "content": "Login passes"}]}}
+    payload = {"values": {"messages": [{"type": "ai", "content": _RESULT}]}}
     if not busy:
         with pytest.raises(ConnectionError, match="temporary dispatch failure"):
             await events.worker_finished(_WORKER, "run", "success", payload)
@@ -255,12 +290,26 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
         client.threads.get.return_value = {"status": "idle"}
         assert await EventMatch.deliver(_COORDINATOR, "enqueue")
     assert len(dispatched) == 1
+    assert inherited_turn not in attempted_turns
+    assert len(set(attempted_turns)) == len(attempted_turns)
+    display = TaskEventMetadata.model_validate(retried.task_event)
+    assert display.content == _RESULT
+    assert display.status == "success"
     messages = EventMatch.messages([retried])
+    assert messages[-1]["id"] == f"event-match:{original.id}"
+    assert messages == EventMatch.messages([retried])
+    envelope = messages[-1]["content"]
+    assert isinstance(envelope, str)
+    serialized = ElementTree.fromstring(envelope)
+    assert TaskEventMetadata.model_validate_json(serialized.attrib["task_event"]) == display
     assert await EventMatch.owed(_COORDINATOR, messages) == []
     client.threads.get_state.return_value = {"values": {"messages": messages}}
     client.threads.get.return_value = {"status": "idle"}
     assert await events.worker_finished(_WORKER, "run", "success", payload)
     assert len(dispatched) == 1
+    assert await events.worker_finished(_WORKER, "next-run", "success", payload)
+    assert len(dispatched) == 2
+    assert attempted_turns[-1] != attempted_turns[-2]
     context = await store.load_context(_COORDINATOR)
     worker_context = await store.load_context(_WORKER)
     assert context is not None and worker_context is not None

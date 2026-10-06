@@ -42,6 +42,7 @@ from sqlalchemy import text as sql
 
 from agent.database import postgres
 from agent.input_messages import (
+    delivered_event_match_ids,
     input_message_text,
     message_sender_id,
 )
@@ -211,6 +212,7 @@ class RunIds:
     run_id: str
     turn_id: UUID | None
     configurable: Mapping[str, object]
+    event_match_ids: frozenset[str]
 
 
 def _run_ids() -> RunIds | None:
@@ -232,11 +234,16 @@ def _run_ids() -> RunIds | None:
     if not isinstance(run_id, (str, UUID)) or not run_id:
         return None
     turn_id = configurable.get("transcript_turn_id")
+    metadata = config.get("metadata")
+    event_match_ids = metadata.get("event_match_ids") if isinstance(metadata, Mapping) else None
     return RunIds(
         thread_id=thread_id,
         run_id=str(run_id),
         turn_id=_parse_turn_id(turn_id if isinstance(turn_id, str) else None),
         configurable=configurable,
+        event_match_ids=frozenset(value for value in event_match_ids if isinstance(value, str))
+        if isinstance(event_match_ids, list)
+        else frozenset(),
     )
 
 
@@ -710,8 +717,19 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         run_state.writer = asyncio.create_task(_writer_loop(run_state))
         _runs[key] = run_state
 
+        input_events = [
+            message
+            for message in messages
+            if isinstance(message, HumanMessage)
+            and delivered_event_match_ids([message]) & ids.event_match_ids
+        ]
+        input_event_ids = {message.id for message in input_events}
         commands: list[Command] = []
-        if (not transcribed or ids.turn_id is None) and human is not None:
+        if (
+            (not transcribed or ids.turn_id is None)
+            and human is not None
+            and not delivered_event_match_ids([human])
+        ):
             commands.append(_turn_requested(run_state, human, ids, metadata))
         commands.append(
             Command(
@@ -722,19 +740,13 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 turn_id=turn_id,
             )
         )
-        # Every human message already in state belongs to a turn that is over.
-        # Only a message injected after the run started is new, and recording
-        # an older one again would move it into this turn. The exception is a
-        # ``<dynamic-context>`` introduction: it names a sender the reader has
-        # to resolve, it is injected once per thread rather than per turn, and
-        # it renders as nothing, so recording it is what makes attribution work
-        # and moving it costs nothing.
         run_state.seen_human_ids.update(
             message.id
             for message in messages
             if isinstance(message, HumanMessage)
             and isinstance(message.id, str)
             and message.id
+            and message.id not in input_event_ids
             and not _is_dynamic_context(message)
         )
         commands.extend(
@@ -748,6 +760,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             for kind, data in pending_notices
         )
         run_state.enqueue(*commands)
+        self._record_human_messages(run_state, input_events)
 
     async def awrap_model_call(
         self,
@@ -793,7 +806,10 @@ class TranscriptMiddleware(OpenSWEMiddleware):
 
     def _record_injected_humans(self, state: RunState, request: ModelRequest) -> None:
         """Human messages the queue injected mid-run are not in ``turn.requested``."""
-        for message in request.messages:
+        self._record_human_messages(state, request.messages)
+
+    def _record_human_messages(self, state: RunState, messages: Sequence[BaseMessage]) -> None:
+        for message in messages:
             if not isinstance(message, HumanMessage):
                 continue
             if message.additional_kwargs.get("lc_source") == "summarization":

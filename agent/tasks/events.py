@@ -1,10 +1,13 @@
 """Return worker invocation outcomes through the existing durable event path."""
 
 from collections.abc import Mapping
+from typing import cast
+from uuid import UUID
 
 from agent.invocation import resolve_invocation_id
 from agent.prompts import prompt
-from agent.tasks import store
+from agent.tasks import presentation, store
+from agent.tasks.presentation import TaskEventMetadata, TaskEventStatus
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.event_subscriptions import EventSubscription
@@ -100,6 +103,15 @@ async def worker_finished(
             run_id=run_id,
             status=status,
             result=result,
+        ),
+        task_event=TaskEventMetadata(
+            task_id=context.task.id,
+            sender_thread_id=UUID(thread_id),
+            sender_role="worker",
+            sender_label=await presentation.sender_label(thread_id),
+            kind="completion",
+            status=cast(TaskEventStatus, status),
+            content=result,
         ),
     )
     delegation = await store.get_delegation(thread_id)
