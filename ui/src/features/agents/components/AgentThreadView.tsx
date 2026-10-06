@@ -888,6 +888,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
+                      targetControlsBelow: true,
                       selectedLocalRepoPath: localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,
