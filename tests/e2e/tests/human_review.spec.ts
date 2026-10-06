@@ -357,6 +357,15 @@ test.describe("Human review in Slack", () => {
       `https://github.com/${REPO.owner}/${REPO.repo}/pull/${seeded.number}`,
     );
     await shootCard(page, "open");
+    await loginAs(page, ALICE);
+    await page.goto(
+      `/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
+    );
+    const reviewRequested = page.getByRole("button", {
+      name: "Review requested",
+      exact: true,
+    });
+    await expect(reviewRequested).toBeDisabled();
 
     // Asked in the same thread, the agent corrects the card's summary in place.
     await control(request, "/mock/slack/send", {
@@ -392,6 +401,8 @@ test.describe("Human review in Slack", () => {
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toMatch(/<@U_ALICE>.*reviewing[\s\S]*<@U_BOB>.*reviewing/);
+    await page.reload();
+    await expect(reviewRequested).toBeDisabled();
 
     // 3. Alice approves. With Bob still reviewing, it waits for him.
     await approveOnGitHub(request, seeded.number, ALICE.login);
