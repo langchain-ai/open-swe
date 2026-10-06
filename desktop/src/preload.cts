@@ -161,9 +161,13 @@ window.addEventListener("DOMContentLoaded", () => {
       left: 0;
     }
 
-    [data-sidebar-frame] > div:first-child,
     [data-desktop-drag-region] {
       -webkit-app-region: drag;
+    }
+
+    /* The traffic lights are wider than the 48px icon rail. */
+    html:not(.desktop-fullscreen) [data-slot="app-shell"][data-rail-collapsed="true"] > [data-slot="app-shell-rail"] {
+      width: 84px !important;
     }
 
     a, button, input, textarea, select, summary, [contenteditable="true"],
@@ -171,15 +175,6 @@ window.addEventListener("DOMContentLoaded", () => {
     [role="menuitem"], [role="separator"], [role="switch"], [role="tab"],
     [role="textbox"], [data-no-drag] {
       -webkit-app-region: no-drag;
-    }
-
-    [data-sidebar-expand] {
-      -webkit-app-region: no-drag;
-      left: 90px !important;
-    }
-
-    .desktop-fullscreen :is([data-sidebar-collapse], [data-sidebar-expand]) {
-      left: 12px !important;
     }
   `;
   document.head.append(style);
