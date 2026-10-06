@@ -46,7 +46,7 @@ def download_http(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         url_safety,
         "resolve_and_validate",
-        lambda url: (True, "", urlparse(url).hostname, [(None, None, None, None, ("1.1.1.1", 0))]),
+        lambda url: (urlparse(url).hostname, ["1.1.1.1"]),
     )
     monkeypatch.setattr(slack_client, "SLACK_BOT_TOKEN", "test-slack-token")
     monkeypatch.setattr(slack_client, "SLACK_FILE_DOWNLOAD_MAX_BYTES", 3)
@@ -123,11 +123,13 @@ async def test_download_slack_file_closes_redirect_before_blocking_private_host(
         httpx2.Response(302, headers={"Location": "http://127.0.0.1/file"}, stream=stream)
     )
     resolve = url_safety.resolve_and_validate
-    monkeypatch.setattr(
-        url_safety,
-        "resolve_and_validate",
-        lambda url: (False, "private host", None, None) if "127.0.0.1" in url else resolve(url),
-    )
+
+    def public_host(url: str) -> tuple[str, list[str]]:
+        if "127.0.0.1" in url:
+            raise url_safety.UnsafeUrlError(url, "private host")
+        return resolve(url)
+
+    monkeypatch.setattr(url_safety, "resolve_and_validate", public_host)
 
     with pytest.raises(slack_client.SlackFileDownloadError, match="unsafe_download_url"):
         await slack_client.download_slack_file("https://files.slack.com/a.zip")

@@ -24,6 +24,7 @@ from agent.dashboard.oauth import (
     refresh_user_access_token,
     require_session,
 )
+from agent.dashboard.oauth_refresh import refresh_guard
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
@@ -59,8 +60,9 @@ class ProfileUpdate(BaseModel):
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     preserve_sandbox_memory: bool | None = None
-    human_review_requests: bool | None = None
-    review_channel_watch: bool | None = None
+    pr_review_links: bool | None = None
+    pr_failure_reactions: bool | None = None
+    prefer_tools_in_sandbox: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = Field(
@@ -217,17 +219,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
     return value
 
 
-_refresh_locks: dict[str, asyncio.Lock] = {}
-
-
-def _refresh_lock(login: str) -> asyncio.Lock:
-    lock = _refresh_locks.get(login)
-    if lock is None:
-        lock = asyncio.Lock()
-        _refresh_locks[login] = lock
-    return lock
-
-
 def _token_expired(expires_at: str | None, *, skew_seconds: int = 300) -> bool:
     if not isinstance(expires_at, str) or not expires_at:
         return False
@@ -362,7 +353,7 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
     if not _decrypt_refresh_token(record):
         return access_token
 
-    async with _refresh_lock(login):
+    async with refresh_guard("github", login):
         record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
         if not record:
             return None
@@ -449,8 +440,9 @@ async def put_my_profile(
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
             preserve_sandbox_memory=update.preserve_sandbox_memory,
-            human_review_requests=update.human_review_requests,
-            review_channel_watch=update.review_channel_watch,
+            pr_review_links=update.pr_review_links,
+            pr_failure_reactions=update.pr_failure_reactions,
+            prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
             act_as_always_allowed=(
@@ -461,8 +453,9 @@ async def put_my_profile(
     if preferences is None and (
         update.concierge_mode
         or update.preserve_sandbox_memory
-        or update.human_review_requests
-        or update.review_channel_watch
+        or update.pr_review_links
+        or update.pr_failure_reactions
+        or update.prefer_tools_in_sandbox
         or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")

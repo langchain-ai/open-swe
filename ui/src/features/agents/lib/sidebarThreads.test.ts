@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { DesktopLocalThreadSummary, DesktopProject } from "@/desktop"
+import type { DesktopLegacyLocalThread, DesktopProject } from "@/desktop"
 import type { AgentThread } from "./types"
 import {
   applyRepoKeyAliases,
@@ -31,8 +31,8 @@ function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
 }
 
 function localThread(
-  overrides: Partial<DesktopLocalThreadSummary> = {}
-): DesktopLocalThreadSummary {
+  overrides: Partial<DesktopLegacyLocalThread> = {}
+): DesktopLegacyLocalThread {
   return {
     id: "same-id",
     cwd: "/Users/example/open-swe",

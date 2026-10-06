@@ -82,6 +82,21 @@ class OpenThreadIntent(_PullRequestIntentBase):
         return self.title
 
 
+class MessageIntent(_PullRequestIntentBase):
+    intent: Literal["message"]
+    title: str = Field(min_length=1, max_length=1000)
+    message: str = Field(min_length=1, max_length=10_000)
+
+    dispatches_run: ClassVar[bool] = True
+    queues_behind_running: ClassVar[bool] = True
+
+    def prompt(self, url: str) -> str:
+        return prompt("runs/pull-request-message", url=url, message=self.message)
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return self.title
+
+
 FixScope = Literal["conflicts", "checks"]
 
 # The snapshot carries only the fields its scope concerns, so a conflict fix is
@@ -201,6 +216,7 @@ class CommentBatchIntent(_PullRequestIntentBase):
 
 PullRequestThreadIntent = Annotated[
     OpenThreadIntent
+    | MessageIntent
     | FixIntent
     | AddressCommentsIntent
     | AddressCommentIntent

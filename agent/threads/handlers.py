@@ -532,6 +532,8 @@ async def share_thread_with_workspace(
         raise HTTPException(403, "only the thread owner can share it")
     if metadata.get("visibility") != "private":
         raise HTTPException(409, "thread is not private")
+    if metadata.get("sandbox_bridge_client") == "desktop":
+        raise HTTPException(409, "a thread running on the owner's Mac cannot be shared")
     if _thread_is_busy(thread):
         raise HTTPException(409, "stop the run before sharing this thread")
     for status in ("pending", "running"):

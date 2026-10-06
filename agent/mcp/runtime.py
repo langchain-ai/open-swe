@@ -26,8 +26,9 @@ from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 from agent.analytics.segment import record_mcp_tool
 from agent.mcp.models import MCPConnection
 from agent.mcp.oauth import MCPOAuthError, connection_auth
-from agent.mcp.transport import mcp_http_client
+from agent.mcp.transport import MCPDiscoveryError, mcp_http_client
 from agent.utils.startup_trace import asubphase
+from mcp.shared.exceptions import McpError
 from mcp.types import PaginatedRequestParams, Tool
 
 logger = logging.getLogger(__name__)
@@ -97,23 +98,27 @@ async def _discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> 
         cursors: set[str] = set()
         while page.nextCursor:
             if page.nextCursor in cursors:
-                raise ValueError("MCP server repeated a catalog cursor")
+                raise MCPDiscoveryError("MCP server repeated a catalog cursor")
             cursors.add(page.nextCursor)
             page = await session.list_tools(params=PaginatedRequestParams(cursor=page.nextCursor))
             tools.extend(page.tools)
         if len({tool.name for tool in tools}) != len(tools):
-            raise ValueError("MCP server returned duplicate tool names")
+            raise MCPDiscoveryError("MCP server returned duplicate tool names")
         return tools
 
 
 def _discovery_error(error: Exception) -> str:
+    """Name the failure without echoing anything the request carried, such as credentials."""
     pending: list[BaseException] = [error]
+    unknown: list[str] = []
     while pending:
         current = pending.pop()
         if isinstance(current, BaseExceptionGroup):
             pending.extend(reversed(current.exceptions))
-        elif isinstance(current, MCPOAuthError):
+        elif isinstance(current, (MCPOAuthError, MCPDiscoveryError)):
             return str(current)
+        elif isinstance(current, McpError):
+            return f"MCP server returned error {current.error.code} while listing tools"
         elif isinstance(current, httpx.HTTPStatusError):
             status = current.response.status_code
             hint = {
@@ -125,7 +130,14 @@ def _discovery_error(error: Exception) -> str:
             return f"MCP tool discovery failed (HTTP {status}). {hint}"
         elif isinstance(current, (TimeoutError, httpx.TimeoutException)):
             return "MCP tool discovery timed out; check the server and try again"
-    return "Could not discover MCP tools; check the URL and authentication headers"
+        # OS and TLS errors name the host at most, never the path, query, or headers.
+        elif isinstance(current, httpx.NetworkError):
+            return f"Could not reach the MCP server: {current}"
+        elif isinstance(current, httpx.RemoteProtocolError):
+            return "The MCP server sent an invalid HTTP response; check the URL"
+        else:
+            unknown.append(type(current).__name__)
+    return f"Could not discover MCP tools ({unknown[0]}); check the URL and authentication headers"
 
 
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:

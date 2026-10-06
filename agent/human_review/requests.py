@@ -14,7 +14,8 @@ unique index enforces that. A participant is a ``users.id``, never a GitHub or S
 handle.
 """
 
-from collections.abc import AsyncIterator
+from collections import Counter
+from collections.abc import AsyncIterator, Collection
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal, Self, TypedDict
@@ -35,8 +36,10 @@ from agent.utils.json_types import JsonObject
 RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
 # ``approve`` and ``reject`` are Slack votes on an expedited card; ``review`` is a
-# person signed up to review a standard request on GitHub.
-ParticipantDecision = Literal["approve", "reject", "review"]
+# person signed up to review a standard request on GitHub; ``picked`` is someone
+# Open SWE asked who has not accepted yet, so the request is still open to anyone;
+# ``expired`` is a pick that was not accepted in time, kept so it is not picked again.
+ParticipantDecision = Literal["approve", "reject", "review", "picked", "expired"]
 
 
 class ChannelChoice(TypedDict):
@@ -154,6 +157,11 @@ class HumanReviewRequest(Base):
     def reviewers(self) -> list[HumanReviewParticipant]:
         """People signed up to review a standard request, in the order they joined."""
         return [p for p in self.participants if p.decision == "review"]
+
+    @property
+    def picks(self) -> list[HumanReviewParticipant]:
+        """People Open SWE asked to review who have not accepted yet."""
+        return [p for p in self.participants if p.decision == "picked"]
 
     async def author_mention(self) -> str:
         pr = self.pull_request
@@ -291,6 +299,27 @@ class HumanReviewRequest(Base):
                 .order_by(cls.created_at, cls.id)
             )
             return list(rows)
+
+    @classmethod
+    async def open_review_counts(
+        cls, user_ids: Collection[UUID], *, excluding: UUID
+    ) -> Counter[UUID]:
+        """How many other open requests each person is reviewing or has been picked for."""
+        if not user_ids:
+            return Counter()
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(HumanReviewParticipant.user_id, func.count())
+                .join(cls, cls.id == HumanReviewParticipant.request_id)
+                .where(
+                    HumanReviewParticipant.user_id.in_(user_ids),
+                    HumanReviewParticipant.decision.in_(("review", "picked")),
+                    cls.state == "open",
+                    cls.id != excluding,
+                )
+                .group_by(HumanReviewParticipant.user_id)
+            )
+            return Counter(dict(rows.tuples().all()))
 
     @classmethod
     async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:

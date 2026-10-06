@@ -26,7 +26,7 @@ from agent.threads.plan_store import (
 from agent.threads.runs import _build_dashboard_configurable
 from agent.threads.summary import (
     _assert_thread_postable,
-    thread_is_promptable,
+    _assert_thread_promptable,
     thread_is_readable,
 )
 from agent.utils.thread_ops import langgraph_client
@@ -119,8 +119,7 @@ async def update_plan(
 ) -> dict[str, Any]:
     """Save an edited HTML artifact while preserving review comments."""
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_promptable(metadata, session["sub"]):
-        raise HTTPException(404, "thread not found")
+    _assert_thread_promptable(metadata, session["sub"])
     content = await get_plan_content(thread_id) or {}
     if body.dismissed:
         if not content:
@@ -172,8 +171,7 @@ async def post_plan_comment(
     thread_id: str, body: CommentBody, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_promptable(metadata, session["sub"]):
-        raise HTTPException(404, "thread not found")
+    _assert_thread_promptable(metadata, session["sub"])
     text = body.body.strip()
     if not text:
         raise HTTPException(422, "comment body cannot be empty")
@@ -216,8 +214,7 @@ async def remove_plan_comment(
     thread_id: str, comment_id: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
-    if not thread_is_promptable(metadata, session["sub"]):
-        raise HTTPException(404, "thread not found")
+    _assert_thread_promptable(metadata, session["sub"])
     comments = await list_plan_comments(thread_id)
     target = next((c for c in comments if c.get("id") == comment_id), None)
     if target is None:
