@@ -10,6 +10,7 @@ sweeps a few lapsed ones, so the table stays about as large as the live claims.
 """
 
 from datetime import timedelta
+from typing import Literal
 
 from sqlalchemy import text
 
@@ -53,3 +54,33 @@ async def release(scope: str, key: str) -> None:
             text("DELETE FROM event_claim WHERE scope = :scope AND key = :key"),
             {"scope": scope, "key": key},
         )
+
+
+ClaimOutcome = Literal["claimed", "taken", "limited"]
+
+
+async def claim_within_limit(
+    scope: str, key: str, *, ttl: timedelta, group: str, limit: int, within: timedelta
+) -> ClaimOutcome:
+    """Claim ``(scope, key)`` unless ``limit`` claims whose keys start with ``group``
+    were taken in the last ``within``.
+
+    The count and the claim share one transaction under a lock on ``group``, so
+    a burst of deliveries can't all see room under the limit.
+    """
+    async with transaction() as conn:
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock))"), {"lock": f"{scope}:{group}"}
+        )
+        recent = await conn.execute(
+            text(
+                "SELECT count(*) FROM event_claim WHERE scope = :scope "
+                "AND left(key, length(:group)) = :group "
+                "AND claimed_at > clock_timestamp() - CAST(:within AS interval)"
+            ),
+            {"scope": scope, "group": group, "within": within},
+        )
+        if int(recent.scalar_one()) >= limit:
+            return "limited"
+        result = await conn.execute(_CLAIM, {"scope": scope, "key": key, "ttl": ttl})
+        return "claimed" if result.first() is not None else "taken"

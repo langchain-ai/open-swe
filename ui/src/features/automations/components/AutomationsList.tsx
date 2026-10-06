@@ -62,8 +62,8 @@ export function AutomationsList({
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
         <h1 className="text-base font-medium text-foreground">Automations</h1>
         <p className="mt-1 text-xs text-muted-foreground">
-          Run Open SWE on a schedule or when GitHub events happen. Each run
-          starts a fresh agent thread.{" "}
+          Run Open SWE on a schedule or on GitHub, Slack, and Linear events.
+          Each run starts a fresh agent thread.{" "}
           {!canManage && "Workspace admins manage automation setup."}
         </p>
         {canManage && (
@@ -183,8 +183,8 @@ function EmptyState({ canManage }: { canManage: boolean }) {
         No automations yet
       </h3>
       <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-        Run Open SWE on a schedule or when GitHub events happen — review code,
-        triage new issues, or write release notes when a pull request merges.
+        Run Open SWE on a schedule or on GitHub, Slack, and Linear events —
+        review code, triage new issues, or investigate an alert.
       </p>
       {canManage && (
         <Link
@@ -281,7 +281,6 @@ function AutomationRow({
                 {workspaceName}
               </span>
             )}
-            {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
             <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
           </div>
         </div>

@@ -4,8 +4,10 @@ import {
   CheckIcon,
   ClockIcon,
   GithubLogoIcon,
+  KanbanIcon,
   PencilSimpleIcon,
   PlusIcon,
+  SlackLogoIcon,
   TrashIcon,
 } from "@phosphor-icons/react"
 
@@ -13,7 +15,9 @@ import type { ModelOption } from "@/lib/api"
 import type {
   AgentSchedule,
   GitHubTriggerEvent,
-  SlackNotificationMode,
+  LinearTriggerEvent,
+  SlackTriggerEvent,
+  SlackTriggerSenders,
 } from "@/features/agents/lib/types"
 import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
@@ -24,23 +28,17 @@ import { AutomationRuns } from "@/features/automations/components/AutomationRuns
 import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
-import { SlackUserMention } from "@/features/agents/components/messages/SlackMrkdwn"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
   draftProblem,
   draftsFor,
   githubDraft,
+  linearDraft,
   scheduleDraft,
+  slackDraft,
   toTriggers,
 } from "@/features/automations/lib/triggers"
 import {
@@ -57,18 +55,35 @@ import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
-const GITHUB = AUTOMATION_EVENT_PROVIDERS.github
-const GITHUB_EVENT_ITEMS = (
-  Object.entries(GITHUB.events) as Array<[GitHubTriggerEvent, string]>
-).map(([value, label]) => ({ value, label }))
+function eventItems<E extends string>(
+  events: Record<E, string>
+): Array<{ value: E; label: string }> {
+  return (Object.entries(events) as Array<[E, string]>).map(
+    ([value, label]) => ({ value, label })
+  )
+}
 
-const NOTIFICATION_ITEMS: Array<{
-  value: SlackNotificationMode
-  label: string
-}> = [
-  { value: "always", label: "Every run" },
-  { value: "on_action", label: "Only when action is taken" },
+const GITHUB_EVENT_ITEMS = eventItems<GitHubTriggerEvent>(
+  AUTOMATION_EVENT_PROVIDERS.github.events
+)
+const SLACK_EVENT_ITEMS = eventItems<SlackTriggerEvent>(
+  AUTOMATION_EVENT_PROVIDERS.slack.events
+)
+const LINEAR_EVENT_ITEMS = eventItems<LinearTriggerEvent>(
+  AUTOMATION_EVENT_PROVIDERS.linear.events
+)
+const SENDER_ITEMS: Array<{ value: SlackTriggerSenders; label: string }> = [
+  { value: "anyone", label: "Anyone" },
+  { value: "people", label: "People" },
+  { value: "bots", label: "Bots" },
 ]
+
+/** ``list`` with ``item`` toggled, kept in ``order``. */
+function toggled<T>(list: Array<T>, item: T, order: Array<T>): Array<T> {
+  return order.filter((value) =>
+    value === item ? !list.includes(value) : list.includes(value)
+  )
+}
 
 interface AutomationEditorProps {
   mode: "create" | "edit"
@@ -113,13 +128,6 @@ export function AutomationEditor({
   const [prompt, setPrompt] = useState(
     schedule?.prompt ?? template?.prompt ?? ""
   )
-  const [slackChannelId, setSlackChannelId] = useState(
-    schedule?.slackChannelId ?? ""
-  )
-  const mySlackUserId = session.data?.slack_user_id
-  const isDm = /^[UW]/.test(slackChannelId)
-  const [slackNotificationMode, setSlackNotificationMode] =
-    useState<SlackNotificationMode>(schedule?.slackNotificationMode ?? "always")
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
   // null = untouched: an existing automation keeps its workspace, and a new
@@ -157,8 +165,6 @@ export function AutomationEditor({
       JSON.stringify(toTriggers(drafts)) !==
         JSON.stringify(toTriggers(initialDrafts)) ||
       drafts.length !== initialDrafts.length ||
-      slackChannelId !== (schedule?.slackChannelId ?? "") ||
-      slackNotificationMode !== (schedule?.slackNotificationMode ?? "always") ||
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
       (workspaceOverride !== null &&
@@ -204,20 +210,40 @@ export function AutomationEditor({
         : draft
     )
   }
-  const toggleEvent = (key: string, event: GitHubTriggerEvent) =>
-    updateDraft(key, (draft) =>
-      draft.kind === "github"
-        ? {
+  const toggleEvent = (key: string, event: string) =>
+    updateDraft(key, (draft) => {
+      switch (draft.kind) {
+        case "github":
+          return {
             ...draft,
-            events: GITHUB_EVENT_ITEMS.map((item) => item.value).filter(
-              (value) =>
-                value === event
-                  ? !draft.events.includes(value)
-                  : draft.events.includes(value)
+            events: toggled(
+              draft.events,
+              event as GitHubTriggerEvent,
+              GITHUB_EVENT_ITEMS.map((item) => item.value)
             ),
           }
-        : draft
-    )
+        case "slack":
+          return {
+            ...draft,
+            events: toggled(
+              draft.events,
+              event as SlackTriggerEvent,
+              SLACK_EVENT_ITEMS.map((item) => item.value)
+            ),
+          }
+        case "linear":
+          return {
+            ...draft,
+            events: toggled(
+              draft.events,
+              event as LinearTriggerEvent,
+              LINEAR_EVENT_ITEMS.map((item) => item.value)
+            ),
+          }
+        default:
+          return draft
+      }
+    })
 
   const handleSave = () => {
     if (!canSave || workspace === null) return
@@ -231,8 +257,6 @@ export function AutomationEditor({
           name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
-          slack_channel_id: slackChannelId.trim() || null,
-          slack_notification_mode: slackNotificationMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -255,8 +279,6 @@ export function AutomationEditor({
           name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
-          slack_channel_id: slackChannelId.trim() || null,
-          slack_notification_mode: slackNotificationMode,
           admin_thread: adminThread,
           model_id: modelId,
           effort,
@@ -372,19 +394,22 @@ export function AutomationEditor({
         <SectionLabel>Triggers</SectionLabel>
         <div className="flex flex-col gap-2">
           {drafts.map((draft) => {
-            const repoPicker = (placeholder: string) => (
-              <RepoSelector
-                repos={reposQuery.data?.repositories}
-                selectedRepo={draft.repo}
-                onRepoChange={(repo) =>
-                  updateDraft(draft.key, (current) => ({ ...current, repo }))
-                }
-                placeholder={placeholder}
-                triggerClassName="text-muted-foreground"
-                disabled={!canManage}
-              />
-            )
             const problem = draftProblem(draft)
+            const hint = (fallback: string) => (
+              <p
+                className={cn(
+                  "mt-2 text-xs",
+                  problem ? "text-destructive" : "text-muted-foreground/70"
+                )}
+              >
+                {problem ?? fallback}
+              </p>
+            )
+            const set = (change: Partial<TriggerDraft>) =>
+              updateDraft(
+                draft.key,
+                (current) => ({ ...current, ...change }) as TriggerDraft
+              )
             if (draft.kind === "schedule") {
               return (
                 <TriggerCard
@@ -408,12 +433,7 @@ export function AutomationEditor({
                   {draft.custom ? (
                     <input
                       value={draft.cron}
-                      onChange={(e) =>
-                        updateDraft(draft.key, (current) => ({
-                          ...current,
-                          cron: e.target.value,
-                        }))
-                      }
+                      onChange={(e) => set({ cron: e.target.value })}
                       disabled={!canManage}
                       placeholder="0 9 * * 1-5"
                       aria-label="Cron schedule"
@@ -427,11 +447,109 @@ export function AutomationEditor({
                       </span>
                     </p>
                   )}
-                  <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/70">
-                    Runs in {repoPicker("no repository")}
-                  </div>
                   {problem && (
                     <p className="mt-1 text-xs text-destructive">{problem}</p>
+                  )}
+                </TriggerCard>
+              )
+            }
+            if (draft.kind === "github") {
+              return (
+                <TriggerCard
+                  key={draft.key}
+                  icon={<GithubLogoIcon className="size-4" />}
+                  removeLabel="Remove GitHub trigger"
+                  onRemove={() => removeDraft(draft.key)}
+                  canManage={canManage}
+                >
+                  <div className="text-sm text-foreground">
+                    <RepoSelector
+                      repos={reposQuery.data?.repositories}
+                      selectedRepo={draft.repo}
+                      onRepoChange={(repo) => set({ repo })}
+                      placeholder="Choose repository"
+                      triggerClassName="text-muted-foreground"
+                      disabled={!canManage}
+                    />
+                  </div>
+                  <EventChips
+                    items={GITHUB_EVENT_ITEMS}
+                    selected={draft.events}
+                    onToggle={(event) => toggleEvent(draft.key, event)}
+                    disabled={!canManage}
+                  />
+                  {hint(
+                    draft.events.includes("pull_request.closed")
+                      ? "PR closed also fires when a pull request is merged."
+                      : "Event details reach the run as untrusted context."
+                  )}
+                </TriggerCard>
+              )
+            }
+            if (draft.kind === "slack") {
+              return (
+                <TriggerCard
+                  key={draft.key}
+                  icon={<SlackLogoIcon className="size-4" />}
+                  removeLabel="Remove Slack trigger"
+                  onRemove={() => removeDraft(draft.key)}
+                  canManage={canManage}
+                >
+                  <SlackChannelCombobox
+                    value={draft.channel}
+                    onValueChange={(channel) => set({ channel })}
+                    disabled={!canManage}
+                    placeholder="Choose a channel to watch"
+                    aria-label="Slack channel to watch"
+                    className="w-full"
+                  />
+                  <EventChips
+                    items={SLACK_EVENT_ITEMS}
+                    selected={draft.events}
+                    onToggle={(event) => toggleEvent(draft.key, event)}
+                    disabled={!canManage}
+                  />
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>From</span>
+                    <div className="flex overflow-hidden rounded-md border border-border">
+                      {SENDER_ITEMS.map((item) => (
+                        <button
+                          key={item.value}
+                          type="button"
+                          aria-pressed={draft.senders === item.value}
+                          onClick={() => set({ senders: item.value })}
+                          disabled={!canManage}
+                          className={cn(
+                            "px-2 py-1 transition-colors disabled:pointer-events-none",
+                            draft.senders === item.value
+                              ? "bg-primary/20 text-foreground"
+                              : "hover:text-foreground"
+                          )}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_9rem]">
+                    <FilterInput
+                      label="Text matches"
+                      value={draft.match}
+                      onChange={(match) => set({ match })}
+                      placeholder="Regular expression, e.g. FIRING|SEV-?1"
+                      disabled={!canManage}
+                    />
+                    <FilterInput
+                      label="Max runs per hour"
+                      value={draft.maxRunsPerHour}
+                      onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
+                      placeholder="No limit"
+                      inputMode="numeric"
+                      disabled={!canManage}
+                    />
+                  </div>
+                  {hint(
+                    "Top-level messages only. Open SWE must be in the channel; messages reach the run as untrusted context."
                   )}
                 </TriggerCard>
               )
@@ -439,48 +557,53 @@ export function AutomationEditor({
             return (
               <TriggerCard
                 key={draft.key}
-                icon={<GithubLogoIcon className="size-4" />}
-                removeLabel="Remove GitHub trigger"
+                icon={<KanbanIcon className="size-4" />}
+                removeLabel="Remove Linear trigger"
                 onRemove={() => removeDraft(draft.key)}
                 canManage={canManage}
               >
-                <div className="text-sm text-foreground">
-                  {repoPicker("Choose repository")}
+                <FilterInput
+                  label="Team key"
+                  value={draft.team}
+                  onChange={(team) => set({ team: team.toUpperCase() })}
+                  placeholder="ENG"
+                  disabled={!canManage}
+                />
+                <EventChips
+                  items={LINEAR_EVENT_ITEMS}
+                  selected={draft.events}
+                  onToggle={(event) => toggleEvent(draft.key, event)}
+                  disabled={!canManage}
+                />
+                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_9rem]">
+                  <FilterInput
+                    label="Labels"
+                    value={draft.labels}
+                    onChange={(labels) => set({ labels })}
+                    placeholder="Any; comma-separated"
+                    disabled={!canManage}
+                  />
+                  <FilterInput
+                    label="Project"
+                    value={draft.project}
+                    onChange={(project) => set({ project })}
+                    placeholder="Any"
+                    disabled={!canManage}
+                  />
+                  <FilterInput
+                    label="Max runs per hour"
+                    value={draft.maxRunsPerHour}
+                    onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
+                    placeholder="No limit"
+                    inputMode="numeric"
+                    disabled={!canManage}
+                  />
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {GITHUB_EVENT_ITEMS.map((item) => {
-                    const on = draft.events.includes(item.value)
-                    return (
-                      <button
-                        key={item.value}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => toggleEvent(draft.key, item.value)}
-                        disabled={!canManage}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:pointer-events-none",
-                          on
-                            ? "border-primary/60 bg-primary/20 text-foreground"
-                            : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
-                        )}
-                      >
-                        {on && <CheckIcon className="size-3 text-primary" />}
-                        {item.label}
-                      </button>
-                    )
-                  })}
-                </div>
-                <p
-                  className={cn(
-                    "mt-2 text-xs",
-                    problem ? "text-destructive" : "text-muted-foreground/70"
-                  )}
-                >
-                  {problem ??
-                    (draft.events.includes("pull_request.closed")
-                      ? "PR closed also fires when a pull request is merged."
-                      : "Event details reach the run as untrusted context.")}
-                </p>
+                {hint(
+                  draft.events.includes("issue.labeled")
+                    ? "Label added fires when the issue gains one of these labels, or any label when none are listed."
+                    : "Issue details reach the run as untrusted context."
+                )}
               </TriggerCard>
             )
           })}
@@ -489,6 +612,10 @@ export function AutomationEditor({
               onSchedule={(cron) => pickSchedule(null, cron)}
               onGitHub={() =>
                 setDrafts((current) => [...current, githubDraft()])
+              }
+              onSlack={() => setDrafts((current) => [...current, slackDraft()])}
+              onLinear={() =>
+                setDrafts((current) => [...current, linearDraft()])
               }
               className="flex items-center gap-1.5 self-start rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
             >
@@ -499,69 +626,6 @@ export function AutomationEditor({
           {!canManage && drafts.length === 0 && (
             <p className="text-xs text-muted-foreground/70">No triggers.</p>
           )}
-        </div>
-
-        <SectionLabel>Slack destination</SectionLabel>
-        <div className="rounded-xl border border-border bg-card p-3">
-          <div className="flex items-center gap-2">
-            {isDm ? (
-              <span className="flex-1 text-sm">
-                Direct message to <SlackUserMention userId={slackChannelId} />
-              </span>
-            ) : (
-              <SlackChannelCombobox
-                value={slackChannelId.trim() || null}
-                onValueChange={(id) => setSlackChannelId(id ?? "")}
-                disabled={!canManage}
-                placeholder="Search channels or paste a channel ID"
-                aria-label="Slack channel"
-                className="w-full"
-              />
-            )}
-            {(isDm || mySlackUserId) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!canManage}
-                onClick={() =>
-                  setSlackChannelId(isDm ? "" : (mySlackUserId ?? ""))
-                }
-              >
-                {isDm ? "Use a channel" : "DM me"}
-              </Button>
-            )}
-          </div>
-          <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-            <span className="text-xs text-muted-foreground">
-              {isDm ? "Notify" : "Notify channel"}
-            </span>
-            <Select
-              items={NOTIFICATION_ITEMS}
-              value={slackNotificationMode}
-              onValueChange={(value) =>
-                value && setSlackNotificationMode(value)
-              }
-              disabled={!canManage || !slackChannelId.trim()}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {NOTIFICATION_ITEMS.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground/70">
-            {slackNotificationMode === "on_action"
-              ? "The agent decides whether it performed an action; read-only and no-op runs stay silent."
-              : `Each run starts a new thread in the ${isDm ? "DM" : "channel"}.`}
-            {!isDm && " The Open SWE bot must be a member of the channel."}
-          </p>
         </div>
 
         <SectionLabel>Agent Instructions</SectionLabel>
@@ -617,6 +681,74 @@ export function AutomationEditor({
 
 const CARD_ACTION =
   "rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+
+function EventChips<E extends string>({
+  items,
+  selected,
+  onToggle,
+  disabled,
+}: {
+  items: Array<{ value: E; label: string }>
+  selected: Array<E>
+  onToggle: (event: E) => void
+  disabled: boolean
+}) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {items.map((item) => {
+        const on = selected.includes(item.value)
+        return (
+          <button
+            key={item.value}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onToggle(item.value)}
+            disabled={disabled}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:pointer-events-none",
+              on
+                ? "border-primary/60 bg-primary/20 text-foreground"
+                : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+            )}
+          >
+            {on && <CheckIcon className="size-3 text-primary" />}
+            {item.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function FilterInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  inputMode,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  disabled: boolean
+  inputMode?: "numeric"
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+      {label}
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        inputMode={inputMode}
+        disabled={disabled}
+        className="rounded-md border border-border bg-transparent px-2 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-foreground/30"
+      />
+    </label>
+  )
+}
 
 function TriggerCard({
   icon,
