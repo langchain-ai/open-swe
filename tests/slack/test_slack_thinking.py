@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import httpx
 import pytest
@@ -175,6 +175,7 @@ def _status_client() -> AsyncMock:
     client.runs.join.return_value = {}
     client.runs.list.return_value = []
     client.threads.get.return_value = {"metadata": {}}
+    client.threads.stream = Mock(side_effect=RuntimeError("stream unavailable"))
     return client
 
 
@@ -210,7 +211,13 @@ async def test_status_wait_keeps_refreshing_after_repeated_failures(
         client.runs.list.return_value = []
         return {}
 
-    async def set_status(_channel_id: str, _thread_ts: str, status: str) -> bool:
+    async def set_status(
+        _channel_id: str,
+        _thread_ts: str,
+        status: str,
+        *,
+        loading_messages: list[str] | None = None,
+    ) -> bool:
         statuses.append(status)
         if status == "Thinking..." and client.runs.join.await_count > 3:
             refreshed.set()
@@ -273,9 +280,87 @@ async def test_status_wait_cancellation_propagates_and_clears_idle_status(
 
     assert client.runs.join.await_count == 1
     assert set_status.await_args_list == [
-        call("C1", "1.0", "Thinking..."),
+        call("C1", "1.0", "Thinking...", loading_messages=slack_thinking._LOADING_MESSAGES),
         call("C1", "1.0", ""),
     ]
+
+
+async def test_tool_status_is_run_scoped_and_cleared_after_completion(
+    monkeypatch: pytest.MonkeyPatch, slack_api
+) -> None:
+    client = _status_client()
+    observed = asyncio.Event()
+    complete = asyncio.Event()
+
+    def lifecycle(run_id: str, phase: str) -> dict[str, object]:
+        event = _event("lifecycle", {"event": phase})
+        event["event_id"] = f"synth:{run_id}:lc||{phase}"
+        return event
+
+    tool = _event(
+        "tools",
+        {
+            "event": "tool-started",
+            "tool_name": "execute",
+            "input": {"command": "echo secret-token"},
+        },
+    )
+
+    class ThreadStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        def subscribe(self, _channels):
+            async def iterator():
+                yield tool
+                yield lifecycle("other-run", "running")
+                yield tool
+                yield lifecycle("run-1", "running")
+                yield {**tool, "params": {**tool["params"], "namespace": ["subagent"]}}
+                yield tool
+                yield tool
+                observed.set()
+                await complete.wait()
+                yield lifecycle("run-1", "completed")
+                yield _event("tools", {"event": "tool-started", "tool_name": "write_file"})
+
+            return iterator()
+
+    async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
+        await complete.wait()
+        return {}
+
+    client.threads.stream = lambda *_args, **_kwargs: ThreadStream()
+    client.runs.join.side_effect = join
+
+    async with asyncio.timeout(2):
+        observer = asyncio.create_task(
+            slack_thinking.show_slack_thinking_status(
+                client=client,
+                thread_id="thread-1",
+                run_id="run-1",
+                channel_id="C1",
+                thread_ts="1.0",
+            )
+        )
+        await observed.wait()
+        complete.set()
+        await observer
+
+    payloads = [
+        payload for method, payload in slack_api.calls if method == "assistant.threads.setStatus"
+    ]
+    assert [payload["status"] for payload in payloads] == [
+        "Thinking...",
+        "Running a development command",
+        "",
+    ]
+    assert payloads[0]["loading_messages"]
+    assert all("loading_messages" not in payload for payload in payloads[1:])
+    assert "secret-token" not in str(payloads)
 
 
 async def test_failed_status_clear_stops_retrying(

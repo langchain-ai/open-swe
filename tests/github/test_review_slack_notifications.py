@@ -154,7 +154,13 @@ async def test_review_notice_preserves_current_run_status(
     client, post = review_notice
     slack_status = "Thinking..."
 
-    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:
+    async def set_status(
+        channel_id: str,
+        thread_ts: str,
+        status: str,
+        *,
+        loading_messages: list[str] | None = None,
+    ) -> bool:
         nonlocal slack_status
         assert (channel_id, thread_ts) == ("C123", "1700000000.123456")
         slack_status = status

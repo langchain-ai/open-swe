@@ -103,7 +103,13 @@ class _LangGraph:
 def statuses(monkeypatch: pytest.MonkeyPatch) -> list[StatusCall]:
     calls: list[StatusCall] = []
 
-    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:
+    async def set_status(
+        channel_id: str,
+        thread_ts: str,
+        status: str,
+        *,
+        loading_messages: list[str] | None = None,
+    ) -> bool:
         calls.append((channel_id, thread_ts, status))
         return True
 

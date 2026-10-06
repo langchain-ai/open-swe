@@ -984,13 +984,23 @@ async def stop_slack_stream(
             raise
 
 
-async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) -> bool:
+async def set_slack_thread_status(
+    channel_id: str,
+    thread_ts: str,
+    status: str,
+    *,
+    loading_messages: list[str] | None = None,
+) -> bool:
     """Set (or clear, with "") the animated assistant status shown under a thread."""
+    payload: dict[str, str | list[str]] = {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "status": status,
+    }
+    if status and loading_messages:
+        payload["loading_messages"] = loading_messages[:10]
     try:
-        await _slack_stream_call(
-            "assistant.threads.setStatus",
-            {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
-        )
+        await _slack_stream_call("assistant.threads.setStatus", payload)
     except SlackStreamError as exc:
         logger.info("Slack thread status unavailable: %s", exc.code)
         return False
