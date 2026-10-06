@@ -673,18 +673,16 @@ export function useSidebarRepos({
 export function useSidebarActiveThread({
   activeThreadId,
   loadedThreads,
-  includeResolved = false,
   enabled = true,
 }: {
   activeThreadId?: string
   loadedThreads: Array<AgentThread>
-  includeResolved?: boolean
   enabled?: boolean
 }): AgentThread | undefined {
   const hierarchy = useProfile().data?.experimental_task_coordination === true
   const loaded = loadedThreads
     .flatMap((thread) => (hierarchy ? threadFamily(thread) : [thread]))
-    .some((thread) => thread.id === activeThreadId)
+    .find((thread) => thread.id === activeThreadId)
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
@@ -699,9 +697,7 @@ export function useSidebarActiveThread({
     select: (thread) => sidebarThreadForMode(thread, hierarchy),
     retry: false,
   })
-  return !loaded && (!query.data?.resolved || includeResolved)
-    ? query.data
-    : undefined
+  return loaded ?? query.data
 }
 
 function useSidebarThreadPages(
