@@ -10,7 +10,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest"
 
 import { api, type UserPreferences } from "@/lib/api"
-import { PreferencesSection } from "./PreferencesSection"
+import { GeneralSettings } from "./GeneralSettings"
 
 vi.mock("@/lib/theme", () => ({
   useTheme: () => ({ theme: "system", setTheme: vi.fn() }),
@@ -57,7 +57,7 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   })
   const { rerender } = render(
     <QueryClientProvider client={client}>
-      <PreferencesSection />
+      <GeneralSettings />
     </QueryClientProvider>
   )
   expect(screen.queryByText("Local tracing project")).toBeNull()
@@ -119,7 +119,7 @@ it("keeps preference labels when closed and saves workspace values, not labels",
   })
   rerender(
     <QueryClientProvider client={client}>
-      <PreferencesSection />
+      <GeneralSettings />
     </QueryClientProvider>
   )
   expect(screen.getByText("Local tracing project")).toBeTruthy()

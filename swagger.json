@@ -7117,6 +7117,18 @@
               }
             ],
             "title": "Sandbox Openai Enabled"
+          },
+          "slack_follow_up_suggestions": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Follow Up Suggestions"
           }
         },
         "title": "WorkspaceSettingsUpdate",

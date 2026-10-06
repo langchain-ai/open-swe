@@ -11,6 +11,11 @@ import {
 } from "@pierre/trees/react"
 import { CaretDownIcon } from "@phosphor-icons/react"
 import type { FileContents } from "@pierre/diffs/react"
+import { useDiffLineSelection } from "@/features/agents/utils/diffSelection"
+import { DiffSelectionPopover } from "@/features/agents/components/DiffSelectionPopover"
+import { reportError } from "@/lib/errorReporting"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
@@ -127,6 +132,7 @@ export function treeThemeStyle(): React.CSSProperties {
 
 interface DiffFilesViewProps {
   files: Array<PanelFile>
+  onComment?: (content: string) => Promise<void>
   /** Path to select and scroll to, set when a transcript row is clicked. */
   revealFilePath?: string | null
   /** Full-screen panels have room for the file tree alongside the diff. */
@@ -155,6 +161,7 @@ export function DiffFilesView({
   hideHeader,
   leading,
   actions,
+  onComment,
 }: DiffFilesViewProps) {
   const isMobile = useIsMobile()
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
@@ -241,6 +248,7 @@ export function DiffFilesView({
                 <FileDiffSection
                   key={file.filePath}
                   file={file}
+                  onComment={onComment}
                   sectionRef={(node) => {
                     sectionRefs.current[file.filePath] = node
                   }}
@@ -272,12 +280,77 @@ const FileDiffSection = memo(
   function FileDiffSection({
     file,
     sectionRef,
+    onComment,
   }: {
     file: PanelFile
+    onComment?: (content: string) => Promise<void>
     sectionRef: (node: HTMLDivElement | null) => void
   }) {
     const [open, setOpen] = useState(true)
     const diffOptions = useDiffOptions()
+    const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const lineSelection = useDiffLineSelection({ enabled: Boolean(onComment) })
+    const draft = lineSelection.committed?.range ?? null
+    const [comment, setComment] = useState("")
+    const [sending, setSending] = useState(false)
+    const [selectedFile, setSelectedFile] = useState(file)
+    if (
+      selectedFile.originalContent !== file.originalContent ||
+      selectedFile.modifiedContent !== file.modifiedContent
+    ) {
+      setSelectedFile(file)
+      lineSelection.close()
+    }
+    const options = useMemo(
+      () => ({ ...diffOptions, ...lineSelection.diffOptions }),
+      [diffOptions, lineSelection.diffOptions]
+    )
+    const submitComment = async () => {
+      if (!draft || !onComment || !comment.trim() || sending) return
+      const side = draft.side ?? "additions"
+      const endSide = draft.endSide ?? side
+      const excerpt = (source: string, start: number, end: number) =>
+        source
+          .split("\n")
+          .slice(Math.min(start, end) - 1, Math.max(start, end))
+          .join("\n")
+      const ranges =
+        side === endSide
+          ? [{ side, start: draft.start, end: draft.end }]
+          : [
+              { side, start: draft.start, end: draft.start },
+              { side: endSide, start: draft.end, end: draft.end },
+            ]
+      const context = ranges
+        .map(({ side: rangeSide, start, end }) => {
+          const code = excerpt(
+            rangeSide === "deletions"
+              ? file.originalContent
+              : file.modifiedContent,
+            start,
+            end
+          )
+          // Outlast any backtick run in the code so it can't close the fence.
+          const fence = "`".repeat(
+            Math.max(
+              3,
+              ...(code.match(/`+/g) ?? []).map((run) => run.length + 1)
+            )
+          )
+          return `${file.filePath} (${rangeSide} lines ${Math.min(start, end)}–${Math.max(start, end)})\n${fence}\n${code}\n${fence}`
+        })
+        .join("\n\n")
+      setSending(true)
+      try {
+        await onComment(`${comment.trim()}\n\n${context}`)
+        lineSelection.close()
+        setComment("")
+      } catch (error) {
+        reportError({ title: "Couldn't send the diff comment", error })
+      } finally {
+        setSending(false)
+      }
+    }
     const oldFile = useMemo<FileContents>(
       () => ({
         name: file.treePath,
@@ -344,6 +417,7 @@ const FileDiffSection = memo(
             )
           ) : (
             <div
+              {...lineSelection.wrapperProps}
               className="overflow-hidden bg-background"
               style={
                 {
@@ -354,15 +428,80 @@ const FileDiffSection = memo(
               <MultiFileDiff
                 oldFile={oldFile}
                 newFile={newFile}
-                options={diffOptions}
+                options={options}
+                selectedLines={lineSelection.selectedLines}
                 metrics={DIFF_VIRTUAL_METRICS}
               />
             </div>
           ))}
+        {onComment && (
+          <DiffSelectionPopover
+            selection={lineSelection}
+            initialFocus={textareaRef}
+            className="w-80 p-2"
+          >
+            <form
+              className="space-y-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void submitComment()
+              }}
+            >
+              {draft && (
+                <div className="truncate text-xs text-muted-foreground">
+                  {file.treePath} ·{" "}
+                  {draft.start === draft.end
+                    ? `line ${draft.start}`
+                    : `lines ${Math.min(draft.start, draft.end)}–${Math.max(draft.start, draft.end)}`}
+                </div>
+              )}
+              <Textarea
+                ref={textareaRef}
+                aria-label="Comment on selected code"
+                placeholder="Ask Open SWE about these lines…"
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault()
+                    void submitComment()
+                  }
+                }}
+                disabled={sending}
+                className="max-h-48 min-h-20"
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={sending}
+                  onClick={() => {
+                    lineSelection.close()
+                    setComment("")
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={sending || !comment.trim()}
+                >
+                  {sending ? "Sending…" : "Send to Open SWE"}
+                </Button>
+              </div>
+            </form>
+          </DiffSelectionPopover>
+        )}
       </div>
     )
   },
-  (prev, next) => prev.file === next.file
+  (prev, next) => prev.file === next.file && prev.onComment === next.onComment
 )
 
 function FileTreeExplorer({
