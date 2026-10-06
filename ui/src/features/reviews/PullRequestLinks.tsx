@@ -1,6 +1,18 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
 import { IoLogoGithub } from "react-icons/io5"
+import { useState } from "react"
+import { ChevronDown } from "lucide-react"
+import { toast } from "sonner"
+
+import { Menu, MenuTrigger, MenuPopup, MenuItem } from "@/components/ui/menu"
+import {
+  Dialog,
+  DialogPopup,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
 
 import { Button, buttonVariants } from "@/components/ui/button"
 import { api } from "@/lib/api"
@@ -24,6 +36,33 @@ export function PullRequestLinks({
 }) {
   const [owner, name] = repo.split("/")
   const navigate = useNavigate()
+  const [messageOpen, setMessageOpen] = useState(false)
+  const [message, setMessage] = useState("")
+  const send = useMutation({
+    mutationFn: () =>
+      api.messagePullRequestThread(repo, number, title, message.trim()),
+    meta: { errorTitle: "Couldn't send message" },
+    onSuccess: ({ thread_id, already_running }) => {
+      setMessageOpen(false)
+      setMessage("")
+      toast.success(
+        already_running
+          ? "Message queued for the agent"
+          : "Message sent to the agent",
+        {
+          action: {
+            label: "Open thread",
+            onClick: () =>
+              navigate({
+                to: "/agents/$threadId",
+                params: { threadId: thread_id },
+              }),
+          },
+        }
+      )
+    },
+    retry: false,
+  })
   const thread = useMutation({
     mutationFn: () => api.openPullRequestThread(repo, number, title),
     meta: { errorTitle: "Couldn't open agent thread" },
@@ -34,16 +73,71 @@ export function PullRequestLinks({
   return (
     <div className="text-xs">
       <span className="flex flex-wrap items-center gap-0.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="px-1.5 text-muted-foreground"
-          disabled={thread.isPending || thread.isSuccess}
-          aria-live="polite"
-          onClick={() => thread.mutate()}
-        >
-          {thread.isPending ? "Opening thread…" : "Agent"}
-        </Button>
+        <span className="inline-flex items-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={navLink}
+            disabled={thread.isPending || thread.isSuccess}
+            aria-live="polite"
+            onClick={() => thread.mutate()}
+          >
+            {thread.isPending ? "Opening thread…" : "Agent"}
+          </Button>
+          <Menu>
+            <MenuTrigger
+              className={cn(navLink, "border-l border-border px-1")}
+              aria-label="Agent options"
+            >
+              <ChevronDown className="size-3" />
+            </MenuTrigger>
+            <MenuPopup align="start">
+              <MenuItem onClick={() => setMessageOpen(true)}>
+                Send a message…
+              </MenuItem>
+            </MenuPopup>
+          </Menu>
+        </span>
+        <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
+          <DialogPopup className="gap-4 p-5">
+            <DialogTitle>Send a message to the agent</DialogTitle>
+            <DialogDescription>
+              {repo}#{number} · {title}
+            </DialogDescription>
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (message.trim() && !send.isPending) send.mutate()
+              }}
+            >
+              <Textarea
+                autoFocus
+                aria-label="Message"
+                placeholder="What should the agent do?"
+                value={message}
+                maxLength={10000}
+                disabled={send.isPending}
+                onChange={(event) => setMessage(event.target.value)}
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setMessageOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={!message.trim() || send.isPending}
+                >
+                  {send.isPending ? "Sending…" : "Send message"}
+                </Button>
+              </div>
+            </form>
+          </DialogPopup>
+        </Dialog>
         {!onReviewPage && (
           <>
             <Link

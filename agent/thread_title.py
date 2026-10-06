@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 
 from agent.input_messages import dynamic_context_hash, human_input, input_message_text
 from agent.prompts import load_prompt
+from agent.slack.client import update_slack_message
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
+from agent.slack.http import SlackRequestError
 from agent.source_context import SourceContext
 from agent.transcript.mirror import mirror_thread_metadata
 
@@ -129,6 +131,20 @@ async def generate_and_store_thread_title(
                 and await is_code_channel(context.slack_location[0])
             ):
                 await rename_session(context.slack_location[0], title)
+            elif (
+                (ref := context.slack_thread)
+                and ref.location
+                and ref.breakout_root_suffix is not None
+            ):
+                try:
+                    await update_slack_message(
+                        *ref.location,
+                        f"`/breakout`: {title}{ref.breakout_root_suffix}",
+                        unfurl_links=False,
+                        unfurl_media=False,
+                    )
+                except SlackRequestError as exc:
+                    raise RuntimeError(f"Slack breakout title update failed: {exc.code}") from exc
     except Exception:
         logger.warning(
             "Thread title persistence failed", extra={"thread_id": thread_id}, exc_info=True

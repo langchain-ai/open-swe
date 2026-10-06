@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request
 
 from agent.api_keys.models import ApiKey
+from agent.audit_logs.middleware import bind_actor
+from agent.audit_logs.models import AuditLogEnrichments
 from agent.dashboard.deps import ADMIN_DEP
 from agent.database import postgres
 
@@ -72,7 +74,17 @@ async def require_api_key(request: Request) -> ApiKey:
     key = await api_key_from_token(token)
     if key is None:
         raise HTTPException(401, _INVALID_KEY, headers={"WWW-Authenticate": "Bearer"})
+    bind_audit_key(request, key)
     return key
+
+
+def bind_audit_key(request: Request, key: ApiKey) -> None:
+    bind_actor(
+        request,
+        api_key_id=key.id,
+        workspace_id=key.workspace_id,
+        enrichments=AuditLogEnrichments(actor_kind="api_key", workspace=key.workspace),
+    )
 
 
 API_KEY_DEP = Depends(require_api_key)

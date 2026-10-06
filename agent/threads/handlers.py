@@ -12,7 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from agent.dashboard.options import normalize_model_choice
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
-from agent.github.pull_request_context import get_pull_request_context
+from agent.github.pull_request_context import PullRequestFixScope, get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
 from agent.github.thread_token import invalidate_cached_github_token
 from agent.review.session import ReviewSession, ReviewSessionMetadata
@@ -23,7 +23,7 @@ from agent.threads.access import (
     _readable_thread_metadata,
 )
 from agent.threads.blobs import copy_thread_blobs, referenced_blob_digests
-from agent.threads.creation import create_thread
+from agent.threads.creation import TITLE_LOCKED_KEY, create_thread
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
@@ -481,7 +481,7 @@ async def rename_dashboard_thread(
 ) -> dict[str, Any]:
     client = langgraph_client()
     thread = await _authorized_thread(thread_id, login, email=email)
-    metadata_update = {"title": title, "title_seed": None}
+    metadata_update = {"title": title, "title_seed": None, TITLE_LOCKED_KEY: True}
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:  # noqa: BLE001
@@ -532,6 +532,8 @@ async def share_thread_with_workspace(
         raise HTTPException(403, "only the thread owner can share it")
     if metadata.get("visibility") != "private":
         raise HTTPException(409, "thread is not private")
+    if metadata.get("sandbox_bridge_client") == "desktop":
+        raise HTTPException(409, "a thread running on the owner's Mac cannot be shared")
     if _thread_is_busy(thread):
         raise HTTPException(409, "stop the run before sharing this thread")
     for status in ("pending", "running"):
@@ -731,6 +733,7 @@ async def get_dashboard_thread_pull_request_context(
     *,
     repo_full_name: str,
     number: int,
+    scope: PullRequestFixScope,
     email: str | None = None,
 ) -> dict[str, Any]:
     """Return fresh model context for one PR already tracked by the thread."""
@@ -748,7 +751,7 @@ async def get_dashboard_thread_pull_request_context(
     if record is None:
         raise HTTPException(404, "pull request is not tracked by this thread")
     token = await _github_token_for_login(login)
-    result = await get_pull_request_context(record, token)
+    result = await get_pull_request_context(record, token, scope)
     if result is None:
         raise HTTPException(502, "could not scan pull request")
     return result

@@ -67,7 +67,7 @@ Resolution and dismissal notes are posted verbatim as the complete GitHub reply 
 
 ### Publication
 
-Call `publish_review` once after the review is complete, passing that order as `ranking`. If it returns `expected_finding_ids`, rank exactly those IDs and call it again. Include an `assessment` only when approval criteria are configured in the approval assessment section below. If it returns `unresolvable_findings`, do not retry unchanged arguments: resolve those IDs with `update_finding(status="resolved", note="<full GitHub reply body>")` or correct their file/line fields, then call `publish_review` again.
+Call `publish_review` once after the review is complete, passing that order as `ranking`. Call it on its own, never in parallel with other tools: wait until every `add_finding` and `update_finding` call has returned. If it returns `expected_finding_ids`, rank exactly those IDs and call it again. Include an `assessment` only when approval criteria are configured in the approval assessment section below. If it returns `unresolvable_findings`, do not retry unchanged arguments: resolve those IDs with `update_finding(status="resolved", note="<full GitHub reply body>")` or correct their file/line fields, then call `publish_review` again.
 
 {% if approval_policy and not reviewer_eval %}
 {% include "reviewer/approval-assessment.md.jinja" +%}

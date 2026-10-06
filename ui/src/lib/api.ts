@@ -245,8 +245,9 @@ export interface Profile {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
-  human_review_requests?: boolean
-  review_channel_watch?: boolean
+  pr_review_links?: boolean
+  pr_failure_reactions?: boolean
+  prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -270,8 +271,9 @@ export interface ProfileUpdate {
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
-  human_review_requests?: boolean
-  review_channel_watch?: boolean
+  pr_review_links?: boolean
+  pr_failure_reactions?: boolean
+  prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -294,6 +296,13 @@ export interface AllowedSlackBot {
   name: string
   created_by: string
   created_at: string
+  image_url: string
+}
+
+/** What any signed-in user may see of an allowed bot; `key` is `team_id:bot_id`. */
+export interface AllowedSlackBotEntry {
+  key: string
+  name: string
   image_url: string
 }
 
@@ -375,6 +384,13 @@ export interface MCPConnectionUpdate {
   oauth?: MCPOAuthUpdate | null
 }
 
+export interface LangSmithConnectionStatus {
+  available: boolean
+  connected: boolean
+  email?: string | null
+  updated_at?: string | null
+}
+
 export interface NotionCredentialStatus {
   connected: boolean
   token_expires_at?: string | null
@@ -429,6 +445,7 @@ export type UsageLeaderboardSort =
   | "merged_prs_per_thread"
   | "agent_loc"
   | "feedback_given"
+  | "prs_reviewed"
 export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
@@ -444,14 +461,16 @@ export interface AnalyticsMetadata {
   build_info?: BuildInfo
 }
 
+export interface LeaderboardUser {
+  name: string
+  github_login: string | null
+  email?: string | null
+  avatar_url?: string | null
+}
+
 export interface UsageLeaderboardRow {
   rank: number
-  user: {
-    name: string
-    github_login: string | null
-    email: string | null
-    avatar_url?: string | null
-  }
+  user: LeaderboardUser
   favorite_model: string
   favorite_model_effort?: string | null
   invocations: number
@@ -462,6 +481,7 @@ export interface UsageLeaderboardRow {
   merged_prs: number
   merged_prs_per_thread?: number
   agent_loc: number
+  prs_reviewed?: number
   feedback_given: number
   is_top_feedback_contributor?: boolean
   additions: number
@@ -694,7 +714,6 @@ export interface WorkspaceOption {
   slack_channel_ids: Array<string>
   /** Bound channels where untagged messages start and continue threads. */
   kitchen_channel_ids: Array<string>
-  breakout_channel_id?: string | null
   is_default: boolean
   has_snapshot: boolean
   refresh_status?: WorkspaceRefreshStatus
@@ -729,12 +748,12 @@ export interface WorkspaceOptionList {
 
 /** Body for `POST /workspaces`; `name` is the only required field. */
 export interface WorkspaceCreate {
+  inherit_default_sandbox?: boolean
   name: string
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
-  breakout_channel_id?: string | null
   setup_script?: string
   update_script?: string
 }
@@ -749,13 +768,13 @@ export type JsonValue =
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
+  inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
   name?: string
   prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
-  breakout_channel_id?: string | null
   setup_script?: string
   update_script?: string
   vcpus?: number | null
@@ -771,6 +790,7 @@ export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
  * the sandbox image and its last rebuild.
  */
 export interface WorkspaceRecord {
+  inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
   slug: string
   name: string
@@ -778,7 +798,6 @@ export interface WorkspaceRecord {
   repos: Array<string>
   slack_channel_ids: Array<string>
   kitchen_channel_ids: Array<string>
-  breakout_channel_id?: string | null
   setup_script?: string
   update_script?: string
   base_snapshot_id?: string | null
@@ -984,9 +1003,27 @@ export interface PullRequestActionResult {
 
 export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
-  | { intent: "fix"; context: OpenPullRequest | null }
+  | { intent: "message"; title: string; message: string }
+  | {
+      intent: "fix"
+      scope: PullRequestFixScope
+      context: OpenPullRequest | null
+    }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
+  | { intent: "comments"; comments: Array<AgentBatchComment> }
+
+/** One kind of PR problem a fix run handles; comments go through address-comments. */
+export type PullRequestFixScope = "conflicts" | "checks"
+
+export type AgentBatchComment =
+  | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
+  | { kind: "thread"; comment_url: string; instructions: string }
+
+export interface PostedReviewComment {
+  id: number
+  html_url: string
+}
 
 export interface ResolveReviewThreadsResult {
   resolved: Array<string>
@@ -996,6 +1033,20 @@ export interface ResolveReviewThreadsResult {
 export interface PullRequestThreadResult {
   thread_id: string
   already_running: boolean
+}
+
+export interface PullRequestSearchResult {
+  repo: string
+  number: number
+  url: string
+  title: string
+  body: string
+  state: "open" | "draft" | "merged" | "closed"
+}
+
+export interface PullRequestSearchResults {
+  pull_requests: PullRequestSearchResult[]
+  has_more: boolean
 }
 
 export interface OpenPullRequestsPayload {
@@ -1150,6 +1201,12 @@ export interface PreviewFile {
   deletions: number
 }
 
+export interface PreviewReply {
+  author: string | null
+  body: string
+  url: string | null
+}
+
 export interface PreviewThread {
   thread_id: string | null
   author: string | null
@@ -1157,6 +1214,7 @@ export interface PreviewThread {
   path: string
   line: number | null
   url: string | null
+  replies: Array<PreviewReply>
 }
 
 export interface PreviewCheck {
@@ -1235,6 +1293,17 @@ export interface ReviewerEvalConfig {
   severity_threshold: ReviewerEvalSeverity
 }
 
+export interface ReviewerEvalStartRequest {
+  dataset_name: string
+  experiment_prefix: string
+  max_concurrency: number
+  model_id: string
+  reasoning_effort: string
+  score_mode: ReviewerEvalScoreMode
+  severity_threshold: ReviewerEvalSeverity
+  limit: number | null
+}
+
 export interface ReviewerEvalProgress {
   completed: number
   total: number | null
@@ -1242,7 +1311,7 @@ export interface ReviewerEvalProgress {
 
 export interface ReviewerEvalStatus {
   name: string
-  status: "idle" | "running" | "completed" | "failed"
+  status: "idle" | "starting" | "running" | "completed" | "failed"
   run_name?: string
   langsmith_project: string
   limit: number | null
@@ -1256,7 +1325,7 @@ export interface ReviewerEvalStatus {
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
-  github_run_url?: string | null
+  worker_id?: string | null
   trigger?: string | null
   updated_at: string
 }
@@ -1297,11 +1366,20 @@ function pullRequestThread(
 }
 
 export const api = {
+  recordPageView: (page_name: string) =>
+    request<void>("/analytics/page", {
+      method: "POST",
+      body: JSON.stringify({ page_name }),
+    }),
   me: () => request<SessionUser>("/me"),
   /** Model list and defaults for one workspace; model defaults are per workspace. */
   options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
     request<OptionsPayload>(
       `/options?workspace=${encodeURIComponent(workspace)}`
+    ),
+  concierge: () =>
+    request<{ thread_id: string | null; channel_id: string | null }>(
+      "/slack/concierge"
     ),
   profile: () => request<Profile>("/profile"),
   dismissSlackOnboarding: () =>
@@ -1512,6 +1590,8 @@ export const api = {
       `/slack/channels${refresh ? "?refresh=true" : ""}`
     ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
+  listAllowedSlackBotDirectory: () =>
+    request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
       method: "POST",
@@ -1592,6 +1672,12 @@ export const api = {
       `/my-mcps/${encodeURIComponent(body.name)}/discover`,
       { method: "POST", body: JSON.stringify(body) }
     ),
+  getMyLangSmithStatus: () =>
+    request<LangSmithConnectionStatus>("/my-credentials/langsmith"),
+  disconnectLangSmith: () =>
+    request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
+      method: "DELETE",
+    }),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>
@@ -1636,6 +1722,10 @@ export const api = {
     ),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
+  searchPullRequests: (query: string, offset = 0) =>
+    request<PullRequestSearchResults>(
+      `/pull-requests/search?q=${encodeURIComponent(query)}&offset=${offset}`
+    ),
   myPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",
@@ -1647,21 +1737,19 @@ export const api = {
     ),
   myPullRequestDetails: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest) =>
-    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
+  fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
+    pullRequestThread(pr.repo, pr.number, {
+      intent: "fix",
+      scope,
+      context: pr,
+    }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
-  addressPullRequestComment: (
+  sendCommentsToAgent: (
     repo: string,
     number: number,
-    commentUrl: string,
-    instructions: string
-  ) =>
-    pullRequestThread(repo, number, {
-      intent: "address-comment",
-      comment_url: commentUrl,
-      instructions,
-    }),
+    comments: Array<AgentBatchComment>
+  ) => pullRequestThread(repo, number, { intent: "comments", comments }),
   resolveReviewThreads: (
     repo: string,
     number: number,
@@ -1677,6 +1765,12 @@ export const api = {
     ),
   openPullRequestThread: (repo: string, number: number, title: string) =>
     pullRequestThread(repo, number, { intent: "open", title }),
+  messagePullRequestThread: (
+    repo: string,
+    number: number,
+    title: string,
+    message: string
+  ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
     method: MergeMethod
@@ -1835,6 +1929,16 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/submit-review`,
       { method: "POST", body: JSON.stringify(review) }
     ),
+  postReviewComment: (
+    owner: string,
+    repo: string,
+    number: number,
+    comment: ReviewCommentCreate
+  ) =>
+    request<PostedReviewComment>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
+      { method: "POST", body: JSON.stringify(comment) }
+    ),
   listReviewComments: (owner: string, repo: string, number: number) =>
     request<ReviewCommentsPayload>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
@@ -1851,6 +1955,11 @@ export const api = {
       { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
+  startReviewerEval: (body: ReviewerEvalStartRequest) =>
+    request<ReviewerEvalStatus>("/admin/evals/reviewer", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 }
 
@@ -1872,6 +1981,12 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
+/** Starts Sign in with LangSmith, returning to `redirectTo` afterwards. */
+export function connectLangSmith(redirectTo: string) {
+  const query = new URLSearchParams({ redirect_to: redirectTo })
+  window.location.assign(`${API_BASE}/dashboard/api/langsmith/login?${query}`)
+}
+
 export function connectService(
   provider: "slack" | "notion",
   redirectTo?: string,

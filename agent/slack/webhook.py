@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
+from agent.human_review.requests import HumanReviewRequest
 from agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -63,6 +64,7 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_wor
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
 _KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
+_NON_KITCHEN_CONTEXT = load_prompt("runs/slack-non-kitchen.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
 
 
@@ -74,9 +76,7 @@ def _is_explicit_slack_request(
     message_update: bool,
 ) -> bool:
     return not message_update and bool(
-        treat_all_messages_as_mentions
-        or (bot_user_id and f"<@{bot_user_id}>" in text)
-        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+        treat_all_messages_as_mentions or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
 
 
@@ -1082,6 +1082,8 @@ async def _process_slack_mention_impl(
         "triggering_user_email": user_email or "",
         "triggering_event_ts": event_ts,
     }
+    if request.breakout_root_suffix is not None:
+        slack_thread_context["breakout_root_suffix"] = request.breakout_root_suffix
     if user_timezone:
         slack_thread_context["triggering_user_timezone"] = user_timezone
     if allowed_bot is not None:
@@ -1105,7 +1107,7 @@ async def _process_slack_mention_impl(
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
-            _KITCHEN_CONTEXT if request.kitchen_channel else "",
+            _KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT,
         )
         if section
     )
@@ -1113,6 +1115,19 @@ async def _process_slack_mention_impl(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
+            load_prompt("runs/slack-review-request.md")
+            if event_ts != thread_ts
+            and context_thread_ts == thread_ts
+            and any(
+                slack_utils.is_own_slack_message(message, bot_user_id)
+                and isinstance(message.get("text"), str)
+                and message["text"].startswith(
+                    ("Review requested for ", "Expedited review requested for ")
+                )
+                for message in thread_messages
+            )
+            and await HumanReviewRequest.is_card_thread(channel_id, thread_ts)
+            else "",
             resolved_links_section,
         )
         if section

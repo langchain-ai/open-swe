@@ -4,14 +4,16 @@ import {
   type PullRequestThreadResult,
 } from "@/lib/api"
 
-export type PullRequestThreadActionName = "fix" | "address-comments"
+export type PullRequestThreadActionName =
+  | "fix-conflicts"
+  | "fix-checks"
+  | "address-comments"
 
 export interface ThreadActionLabels {
   idle: string
   running: string
   checking: string
   unavailable: string
-  queuing: string
   queued: string
   retry: string
 }
@@ -30,22 +32,37 @@ export interface ThreadAction {
 
 export const threadActions: Record<PullRequestThreadActionName, ThreadAction> =
   {
-    fix: {
+    "fix-conflicts": {
       labels: {
-        idle: "Fix",
-        running: "Fix in progress",
+        idle: "Fix conflicts",
+        running: "Fixing conflicts",
         checking: "Checking…",
-        unavailable: "Fix unavailable",
-        queuing: "Queuing fix…",
-        queued: "Fix queued",
-        retry: "Retry fix",
+        unavailable: "Fix conflicts unavailable",
+        queued: "Conflict fix queued",
+        retry: "Retry fix conflicts",
       },
       toasts: {
-        queued: "Fix queued for",
-        running: "Fix already in progress for",
-        failed: "Could not queue fix for",
+        queued: "Conflict fix queued for",
+        running: "Already fixing conflicts for",
+        failed: "Could not queue a conflict fix for",
       },
-      run: (pr) => api.fixPullRequest(pr),
+      run: (pr) => api.fixPullRequest(pr, "conflicts"),
+    },
+    "fix-checks": {
+      labels: {
+        idle: "Fix checks",
+        running: "Fixing checks",
+        checking: "Checking…",
+        unavailable: "Fix checks unavailable",
+        queued: "Check fix queued",
+        retry: "Retry fix checks",
+      },
+      toasts: {
+        queued: "Check fix queued for",
+        running: "Already fixing checks for",
+        failed: "Could not queue a check fix for",
+      },
+      run: (pr) => api.fixPullRequest(pr, "checks"),
     },
     "address-comments": {
       labels: {
@@ -53,7 +70,6 @@ export const threadActions: Record<PullRequestThreadActionName, ThreadAction> =
         running: "Addressing comments",
         checking: "Checking…",
         unavailable: "Address comments unavailable",
-        queuing: "Queuing comment fixes…",
         queued: "Comment fixes queued",
         retry: "Retry address comments",
       },
