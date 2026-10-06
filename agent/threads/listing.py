@@ -295,6 +295,8 @@ async def _summarize_threads(
     threads: list[ThreadLike],
     *,
     minimal_run_update: bool = False,
+    viewer_login: str | None = None,
+    viewer_email: str | None = None,
 ) -> list[dict[str, Any]]:
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
 
@@ -314,6 +316,34 @@ async def _summarize_threads(
 
     summaries = list(await asyncio.gather(*(summarize(thread) for thread in threads)))
     await attach_subagents(summaries)
+    for summary in summaries:
+        guests = await client.threads.search(
+            metadata={"sandbox_host_thread_id": summary["id"]},
+            limit=100,
+            select=_THREAD_LIST_SELECT,
+        )
+        for guest in guests:
+            metadata = _thread_metadata(guest)
+            if not thread_is_readable(metadata, viewer_login, viewer_email):
+                continue
+            child = await _summarize_thread(client, guest)
+            summary["subagents"].append(
+                {
+                    "toolCallId": child["id"],
+                    "threadId": child["id"],
+                    "title": child["title"],
+                    "subagentType": "Responses API",
+                    "status": (
+                        "in_progress"
+                        if child["status"] == "running"
+                        else "error"
+                        if child["status"] == "error"
+                        else "completed"
+                    ),
+                    "startedAt": child["createdAt"],
+                    "endedAt": child["updatedAt"],
+                }
+            )
     return summaries
 
 
@@ -461,6 +491,8 @@ async def _pinned_thread_summaries(
         client,
         [threads_by_id[thread_id] for thread_id in pin_ids if thread_id in threads_by_id],
         minimal_run_update=True,
+        viewer_login=login,
+        viewer_email=email,
     )
 
 
@@ -588,6 +620,8 @@ async def list_dashboard_threads_page(
         summaries = await _summarize_threads(
             client,
             candidates,
+            viewer_login=login,
+            viewer_email=email,
         )
         filtered = [
             summary
@@ -610,6 +644,8 @@ async def list_dashboard_threads_page(
         items = await _summarize_threads(
             client,
             window,
+            viewer_login=login,
+            viewer_email=email,
         )
         has_more = len(candidates) > safe_offset + safe_limit
 
