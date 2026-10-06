@@ -1451,6 +1451,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
         thread_ids = list(await pull_request.discover_threads() or [])
 
     for thread_id in thread_ids:
+        metadata: dict[str, Any] | None = None
+        newly_merged = False
         try:
             async with agent_thread_pr_state_lock(langgraph_client, thread_id):
                 current = await langgraph_client.threads.get(thread_id)
@@ -1480,6 +1482,11 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if not updated_pull_requests and metadata.get("pr_url") == pr_url:
                     previous_state = metadata.get("pr_state")
                 state_changed = previous_state != new_state
+                newly_merged = (
+                    state_changed
+                    and new_state == "merged"
+                    and bool((event.pull_request.merge_commit_sha or "").strip())
+                )
                 if metadata.get("pr_url") == pr_url and metadata.get("pr_state") != new_state:
                     metadata_update["pr_state"] = new_state
 
@@ -1529,6 +1536,18 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from openswe.analytics.emitter import task_rework
 
             await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
+        if newly_merged and event.identity is not None:
+            from openswe.rollout_events import subscribe_merged_thread
+
+            owner, repo, number = event.identity
+            await subscribe_merged_thread(
+                thread_id,
+                owner=owner,
+                repo=repo,
+                number=number,
+                sha=event.pull_request.merge_commit_sha or "",
+                metadata=metadata if isinstance(metadata, dict) else {},
+            )
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:

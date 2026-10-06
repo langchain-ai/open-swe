@@ -30,17 +30,19 @@ def _no_feedback_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("openswe.thread_feedback.schedule_pr_feedback", AsyncMock())
 
 
-def _pr_payload(*, state: str, merged: bool = False, draft: bool = False) -> dict[str, Any]:
-    return {
-        "repository": {"full_name": "lc/repo"},
-        "pull_request": {
-            "number": 7,
-            "html_url": "https://github.com/lc/repo/pull/7",
-            "state": state,
-            "merged": merged,
-            "draft": draft,
-        },
+def _pr_payload(
+    *, state: str, merged: bool = False, draft: bool = False, merge_sha: str = ""
+) -> dict[str, Any]:
+    pull_request: dict[str, Any] = {
+        "number": 7,
+        "html_url": "https://github.com/lc/repo/pull/7",
+        "state": state,
+        "merged": merged,
+        "draft": draft,
     }
+    if merge_sha:
+        pull_request["merge_commit_sha"] = merge_sha
+    return {"repository": {"full_name": "lc/repo"}, "pull_request": pull_request}
 
 
 @pytest.mark.asyncio
@@ -417,3 +419,69 @@ async def test_upsert_agent_thread_metadata_keeps_manual_resolution() -> None:
 
     assert "resolved" not in metadata
     assert "attention_reason" not in metadata
+
+
+_MERGE_SHA = "d" * 40
+
+
+def _merging_client(metadata: dict[str, Any]) -> AsyncMock:
+    client = AsyncMock()
+    client.threads.search.return_value = [{"thread_id": "t1", "metadata": metadata}]
+    client.threads.get.return_value = {"metadata": metadata}
+    return client
+
+
+@pytest.mark.asyncio
+async def test_merged_pr_subscribes_the_thread_to_that_commit() -> None:
+    metadata = {
+        "kind": "agent",
+        "pr_url": "https://github.com/lc/repo/pull/7",
+        "pr_state": "open",
+    }
+    with (
+        patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
+        patch("openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock) as subscribe,
+    ):
+        await webhook_common.update_agent_thread_pr_state(
+            _pr_payload(state="closed", merged=True, merge_sha=_MERGE_SHA)
+        )
+    subscribe.assert_awaited_once()
+    assert subscribe.await_args is not None
+    assert subscribe.await_args.args[0] == "t1"
+    assert subscribe.await_args.kwargs["sha"] == _MERGE_SHA
+    assert subscribe.await_args.kwargs["owner"] == "lc"
+    assert subscribe.await_args.kwargs["repo"] == "repo"
+    assert subscribe.await_args.kwargs["number"] == 7
+
+
+@pytest.mark.asyncio
+async def test_merged_pr_without_a_merge_commit_does_not_subscribe() -> None:
+    metadata = {
+        "kind": "agent",
+        "pr_url": "https://github.com/lc/repo/pull/7",
+        "pr_state": "open",
+    }
+    with (
+        patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
+        patch("openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock) as subscribe,
+    ):
+        await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
+    subscribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reviewer_thread_does_not_subscribe_when_a_pr_merges() -> None:
+    metadata = {"kind": "reviewer", "pr_url": "https://github.com/lc/repo/pull/7"}
+    with (
+        patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock) as subscribe,
+    ):
+        await webhook_common.update_agent_thread_pr_state(
+            _pr_payload(state="closed", merged=True, merge_sha=_MERGE_SHA)
+        )
+    subscribe.assert_not_awaited()
