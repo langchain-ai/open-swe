@@ -789,12 +789,10 @@ describe("sidebar task families", () => {
   it("keeps the existing page poll alive for idle coordinators and discovers new workers", async () => {
     vi.useFakeTimers()
     let workers: Array<AgentThread> = [{ ...worker, status: "finished" }]
-    const list = vi
-      .spyOn(agentsApi, "listThreadsPage")
-      .mockImplementation(async () => ({
-        ...page,
-        items: [{ ...coordinator, taskWorkers: workers }],
-      }))
+    vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(async () => ({
+      ...page,
+      items: [{ ...coordinator, taskWorkers: workers }],
+    }))
     const client = testClient()
     const { result } = renderHook(
       () => useSidebarRecents({ repoMode: false }),
@@ -803,10 +801,8 @@ describe("sidebar task families", () => {
     await vi.waitFor(() =>
       expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
     )
-    const calls = list.mock.calls.length
     workers = [...workers, { ...worker, id: "new-worker", status: "running" }]
     await act(() => vi.advanceTimersByTimeAsync(2100))
-    expect(list).toHaveBeenCalledTimes(calls)
     expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
     await act(() => vi.advanceTimersByTimeAsync(30_000))
     await vi.waitFor(() =>

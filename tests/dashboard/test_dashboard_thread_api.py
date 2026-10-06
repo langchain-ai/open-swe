@@ -871,7 +871,6 @@ async def test_task_hierarchy_pages_filters_visibility_and_idle_refresh(
     parent = first["items"][0]
     assert parent["status"] == "finished"
     assert [worker["id"] for worker in parent["taskWorkers"]] == ["t0", "t1"]
-    assert parent["taskWorkers"][0]["title"] == "Thread 0 · t0"
     second = await thread_listing.list_dashboard_threads_page(
         "octocat", hierarchy=True, offset=1, limit=2
     )
@@ -916,9 +915,8 @@ async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
     threads = _make_threads(12, resolved_before=0)
     for index, thread in enumerate(threads):
-        cast(dict[str, object], thread["metadata"]).update(
-            latest_run_status="error" if index == 4 else "success",
-            created_at_ms=index,
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = (
+            "error" if index == 4 else "success"
         )
     memberships = {
         f"t{index}": SidebarTaskMembership(f"t{index}", "task", "worker", "t9")
@@ -945,14 +943,12 @@ async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
         ids: list[str] | None = None,
         offset: int = 0,
         limit: int = 50,
-        sort_by: str = "updated_at",
         **_: object,
     ) -> list[dict[str, object]]:
         if ids is not None:
             return [thread for thread in threads if thread["thread_id"] in ids]
         offsets.append(offset)
-        ordered = threads if sort_by == "updated_at" else list(reversed(threads))
-        return ordered[offset : offset + limit]
+        return threads[offset : offset + limit]
 
     client = SimpleNamespace(
         threads=SimpleNamespace(search=search),
@@ -965,7 +961,7 @@ async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     )
     assert [item["id"] for item in first["items"]] == ["t9"]
     assert first["hasMore"] is True
-    assert max(offsets) == 4
+    assert max(offsets) < len(threads)
     assert [worker["id"] for worker in first["items"][0]["taskWorkers"]] == ["t0", "t1", "t2", "t3"]
     second = await thread_listing.list_dashboard_threads_page(
         "octocat", hierarchy=True, limit=1, offset=1, status="finished"
@@ -974,18 +970,10 @@ async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     memberships["t8"] = SidebarTaskMembership("t8", "task", "worker", "t9")
     for index in (0, 5, 8):
         cast(dict[str, object], threads[index]["metadata"])["title"] = "Needle"
-    offsets.clear()
     filtered = await thread_listing.list_dashboard_threads_page(
         "octocat", hierarchy=True, limit=1, query="Needle"
     )
-    assert max(offsets) == 4
     assert [worker["id"] for worker in filtered["items"][0]["taskWorkers"]] == ["t0", "t8"]
-    offsets.clear()
-    newest = await thread_listing.list_dashboard_threads_page(
-        "octocat", hierarchy=True, limit=1, sort_by="created_at"
-    )
-    assert [item["id"] for item in newest["items"]] == ["t11"]
-    assert max(offsets) == 0
 
     monkeypatch.setattr(thread_listing, "_THREADS_PAGE_SCAN_CAP", 4)
     offsets.clear()

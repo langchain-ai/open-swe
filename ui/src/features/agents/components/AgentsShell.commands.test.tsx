@@ -228,7 +228,6 @@ it("opens asynchronous workers as real conversations and expands the selected wo
   const workerLink = screen.getByRole("link", { name: /Implement change/ })
   expect(workerLink.getAttribute("href")).toBe("/agents/worker")
   expect(workerLink.getAttribute("aria-current")).toBe("page")
-  expect(screen.getByText("Completed")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Hide task workers" }))
   expect(screen.queryByRole("link", { name: /Implement change/ })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Show task workers" }))

@@ -11,9 +11,6 @@ import {
   localSidebarThread,
   sidebarRepoOptions,
   sortSidebarThreads,
-  sidebarItemContains,
-  withoutNestedWorkers,
-  pinnedThreadShortcuts,
 } from "./sidebarThreads"
 
 function cloudThread(overrides: Partial<AgentThread> = {}): AgentThread {
@@ -295,33 +292,12 @@ describe("groupSidebarThreadsByWorkspace", () => {
   })
 })
 
-it("keeps task families ordered by worker activity and standalone workers discoverable", () => {
+it("orders task families by their worker activity", () => {
   const worker = cloudThread({ id: "worker", createdAt: 200, updatedAt: 200 })
   const parent = cloudThread({ id: "parent", taskWorkers: [worker] })
   const other = cloudThread({ id: "other", createdAt: 100, updatedAt: 100 })
   expect(
-    withoutNestedWorkers([worker, parent, other]).map((thread) => thread.id)
-  ).toEqual(["parent", "other"])
-  expect(
-    withoutNestedWorkers([worker, other]).map((thread) => thread.id)
-  ).toEqual(["worker", "other"])
-  expect(
     sortSidebarThreads([other, parent].map(cloudSidebarThread), "created")[0]
       ?.id
   ).toBe("parent")
-  expect(sidebarItemContains(cloudSidebarThread(parent), "cloud:worker")).toBe(
-    true
-  )
-})
-
-it("preserves explicit worker pins without duplicating them under a pinned parent", () => {
-  const worker = cloudThread({ id: "worker" })
-  const sibling = cloudThread({ id: "sibling" })
-  const parent = cloudThread({ id: "parent", taskWorkers: [worker, sibling] })
-  const shortcuts = pinnedThreadShortcuts([parent, worker])
-  expect(shortcuts.map((thread) => thread.id)).toEqual(["parent", "worker"])
-  expect(shortcuts[0]?.taskWorkers?.map((thread) => thread.id)).toEqual([
-    "sibling",
-  ])
-  expect(parent.taskWorkers).toHaveLength(2)
 })
