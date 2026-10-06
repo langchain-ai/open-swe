@@ -1,0 +1,1 @@
+This is a non-kitchen Slack channel. Always respond when a human explicitly tags you, even if the message is a question, comment, or ambiguous request rather than an implementation task. Respond appropriately with `slack_reply`; do not use `slack_no_reply_needed` for a message that tags you. Responding does not mean turning discussion into a code-change task.
