@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { SettingsPage, SettingsSection } from "@/components/AppShell"
+import { SettingSection } from "@langchain/gtm-platform-design-system/patterns/setting-section"
+
+import { SettingsPage } from "@/components/AppShell"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
@@ -20,7 +22,7 @@ function ConnectionsPage() {
       {(user) => (
         <>
           <ConnectionsSection user={user} />
-          <SettingsSection title="Slack">
+          <SettingSection title="Slack" contained>
             <ProfileSwitchRow
               field="concierge_mode"
               label="Concierge mode"
@@ -36,7 +38,7 @@ function ConnectionsPage() {
               label="React to failing checks"
               description="Add ❌ to watched pull request posts when checks fail on a pull request you own."
             />
-          </SettingsSection>
+          </SettingSection>
           <MCPConnectionsSection scope="user" />
         </>
       )}

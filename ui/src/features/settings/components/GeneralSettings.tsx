@@ -7,11 +7,17 @@ import {
 import { useState } from "react"
 
 import type { Theme } from "@/lib/theme"
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
+import {
+  SettingRow,
+  SettingSection,
+  type SettingValue,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
+import { ArchiveBox } from "@/components/glyphs"
 import {
   notificationsEnabled,
   notificationsSupported,
@@ -52,6 +58,18 @@ const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
 const PREFERENCES_KEY = ["myPreferences"]
 const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
 
+const UNKNOWN_CHOICE = "That is not one of the options."
+
+/** Narrows a row's saved value back to one of the options it offered. */
+function choiceOf<T extends string>(
+  options: ReadonlyArray<{ value: T }>,
+  value: SettingValue
+): T {
+  const choice = options.find((option) => option.value === value)?.value
+  if (choice === undefined) throw new Error(UNKNOWN_CHOICE)
+  return choice
+}
+
 export function GeneralSettings() {
   const { theme, setTheme } = useTheme()
   const { prefs, setCollapseSubagentsByDefault } = useSidebarPrefs()
@@ -73,10 +91,11 @@ export function GeneralSettings() {
         saved
       ),
   })
+  // Each row reports its own failure inline, so the toast is suppressed.
   const savePreferences = useMutation({
     mutationKey: SAVE_PREFERENCES_KEY,
     scope: { id: SAVE_PREFERENCES_KEY.join(":") },
-    meta: { errorTitle: "Couldn't save preferences" },
+    meta: { errorTitle: "Couldn't save preferences", silent: true },
     mutationFn: (patch: Partial<UserPreferences>) => {
       const saved = qc.getQueryData<UserPreferences>(PREFERENCES_KEY)
       if (!saved) throw new Error("Preferences are not loaded.")
@@ -91,6 +110,9 @@ export function GeneralSettings() {
         ? undefined
         : qc.invalidateQueries({ queryKey: PREFERENCES_KEY }),
   })
+  const savePreference = async (patch: Partial<UserPreferences>) => {
+    await savePreferences.mutateAsync(patch)
+  }
   const workspaceOptions = useWorkspaceOptions()
   const workspaceItems = [
     { value: NO_DEFAULT_WORKSPACE, label: "Workspace default" },
@@ -99,8 +121,9 @@ export function GeneralSettings() {
       label: workspace.name,
     })),
   ]
+  // The confirmation dialog reports a failure inline, so the toast is suppressed.
   const archiveThreads = useMutation({
-    meta: { errorTitle: "Couldn't archive threads" },
+    meta: { errorTitle: "Couldn't archive threads", silent: true },
     mutationFn: agentsApi.resolveAllThreads,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agent-threads"] }),
   })
@@ -127,17 +150,21 @@ export function GeneralSettings() {
 
   return (
     <>
-      <SettingsSection title="Appearance">
-        <SettingsRow
+      <SettingSection title="Appearance" contained>
+        <SettingRow
           label="Theme"
           description="Color theme for the dashboard on this device."
-          control={
+          control={(slot) => (
             <Select
               items={THEMES}
               value={theme}
               onValueChange={(v) => v && setTheme(v)}
             >
-              <SelectTrigger className="w-40">
+              <SelectTrigger
+                id={slot.id}
+                aria-describedby={slot.describedById}
+                className="w-full"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -148,27 +175,36 @@ export function GeneralSettings() {
                 ))}
               </SelectContent>
             </Select>
-          }
+          )}
         />
-      </SettingsSection>
+      </SettingSection>
 
-      <SettingsSection
+      <SettingSection
         title="Threads"
-        description="Defaults for new threads and how you interact with running ones."
+        description="Defaults for new threads and how follow-ups reach running ones. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
+        contained
       >
-        <SettingsRow
+        <SettingRow
           label="Default visibility"
-          description="Private threads can use your personal connections and only you can prompt them. Workspace threads are open to everyone. Visibility can't change later."
-          control={
+          description="Private threads can use your personal connections and only you can prompt them. Visibility can't change later."
+          onSave={(value) =>
+            savePreference({
+              default_visibility: choiceOf(VISIBILITIES, value),
+            })
+          }
+          control={(slot) => (
             <Select
               items={VISIBILITIES}
               value={preferences.data?.default_visibility ?? "private"}
-              onValueChange={(v) =>
-                v && savePreferences.mutate({ default_visibility: v })
-              }
-              disabled={preferences.isLoading}
+              onValueChange={(v) => v && slot.commit(v)}
+              disabled={preferences.isLoading || slot.saving}
             >
-              <SelectTrigger className="w-40">
+              <SelectTrigger
+                id={slot.id}
+                aria-describedby={slot.describedById}
+                aria-invalid={slot.invalid}
+                className="w-full"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -179,26 +215,36 @@ export function GeneralSettings() {
                 ))}
               </SelectContent>
             </Select>
-          }
+          )}
         />
-        <SettingsRow
+        <SettingRow
           label="Default workspace"
-          description="Preselected in the composer when the chosen repository doesn't belong to another workspace."
-          control={
+          description="Preselected in the composer when the repository doesn't belong to another workspace."
+          onSave={(value) => {
+            const slug = choiceOf(workspaceItems, value)
+            return savePreference({
+              default_workspace: slug === NO_DEFAULT_WORKSPACE ? null : slug,
+            })
+          }}
+          control={(slot) => (
             <Select
               items={workspaceItems}
               value={
                 preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE
               }
-              onValueChange={(v) =>
-                v &&
-                savePreferences.mutate({
-                  default_workspace: v === NO_DEFAULT_WORKSPACE ? null : v,
-                })
+              onValueChange={(v) => v && slot.commit(v)}
+              disabled={
+                preferences.isLoading ||
+                workspaceOptions.isLoading ||
+                slot.saving
               }
-              disabled={preferences.isLoading || workspaceOptions.isLoading}
             >
-              <SelectTrigger className="w-48">
+              <SelectTrigger
+                id={slot.id}
+                aria-describedby={slot.describedById}
+                aria-invalid={slot.invalid}
+                className="w-full"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -209,21 +255,29 @@ export function GeneralSettings() {
                 ))}
               </SelectContent>
             </Select>
-          }
+          )}
         />
-        <SettingsRow
+        <SettingRow
           label="Follow-up behavior"
-          description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
-          control={
+          description="Queue follow-ups until the run ends, or steer the current run with them."
+          onSave={(value) =>
+            savePreference({
+              follow_up_behavior: choiceOf(FOLLOW_UP_BEHAVIORS, value),
+            })
+          }
+          control={(slot) => (
             <Select
               items={FOLLOW_UP_BEHAVIORS}
               value={preferences.data?.follow_up_behavior ?? "steer"}
-              onValueChange={(v) =>
-                v && savePreferences.mutate({ follow_up_behavior: v })
-              }
-              disabled={preferences.isLoading}
+              onValueChange={(v) => v && slot.commit(v)}
+              disabled={preferences.isLoading || slot.saving}
             >
-              <SelectTrigger className="w-40">
+              <SelectTrigger
+                id={slot.id}
+                aria-describedby={slot.describedById}
+                aria-invalid={slot.invalid}
+                className="w-full"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -234,23 +288,26 @@ export function GeneralSettings() {
                 ))}
               </SelectContent>
             </Select>
-          }
+          )}
         />
-        <SettingsRow
+        <SettingRow
+          density="compact"
           label="Collapse subagent threads"
           description="Keep nested subagent threads folded in the sidebar until you expand them."
-          control={
+          control={(slot) => (
             <Switch
-              aria-label="Collapse subagent threads"
+              id={slot.id}
+              aria-describedby={slot.describedById}
               checked={prefs.collapseSubagentsByDefault}
               onCheckedChange={setCollapseSubagentsByDefault}
             />
-          }
+          )}
         />
-      </SettingsSection>
+      </SettingSection>
 
-      <SettingsSection title="Notifications">
-        <SettingsRow
+      <SettingSection title="Notifications" contained>
+        <SettingRow
+          density="compact"
           label="Desktop notifications"
           description={
             !supported
@@ -259,70 +316,84 @@ export function GeneralSettings() {
                 ? "Permission was denied. Re-enable it in your browser's site settings."
                 : "Notify me when an agent run finishes."
           }
-          control={
+          control={(slot) => (
             <Switch
-              aria-label="Desktop notifications"
+              id={slot.id}
+              aria-describedby={slot.describedById}
               checked={enabled}
               onCheckedChange={(v) => void toggleNotifications(v)}
               disabled={!supported || denied}
             />
-          }
+          )}
         />
-      </SettingsSection>
+      </SettingSection>
 
       {typeof window !== "undefined" && window.openSweDesktop && (
-        <SettingsSection title="Desktop app">
-          <SettingsRow
+        <SettingSection
+          title="Desktop app"
+          description="Restart the desktop app after changing these."
+          contained
+        >
+          <SettingRow
             label="Local tracing project"
-            description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
-            control={
+            description="Project for local desktop runs. Leave blank to use the shared cloud project."
+            onSave={(value) =>
+              savePreference({
+                local_tracing_project: String(value).trim() || null,
+              })
+            }
+            control={(slot) => (
               <Input
-                className="w-56"
+                id={slot.id}
+                aria-describedby={slot.describedById}
+                aria-invalid={slot.invalid}
+                className="w-full"
                 placeholder={
                   preferences.data?.default_local_tracing_project ??
                   "Shared cloud project"
                 }
                 defaultValue={preferences.data?.local_tracing_project ?? ""}
                 disabled={preferences.isLoading}
-                onBlur={(event) =>
-                  savePreferences.mutate({
-                    local_tracing_project: event.target.value.trim() || null,
-                  })
-                }
+                onBlur={(event) => slot.commit(event.target.value)}
               />
-            }
+            )}
           />
-        </SettingsSection>
+        </SettingSection>
       )}
 
-      <SettingsSection title="Data">
-        <SettingsRow
+      <SettingSection title="Data" contained>
+        <SettingRow
           label="Archive all threads"
           description={
             archiveThreads.isSuccess
               ? `${archiveThreads.data.resolved} threads archived.`
-              : "Resolve every thread you've participated in. They stay available in the resolved view."
+              : "Resolve every thread you've participated in. They stay in the resolved view."
           }
-          control={
-            <Button
-              size="compact"
-              variant="outline"
-              disabled={archiveThreads.isPending}
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Archive all your threads? They will remain available in the resolved view."
-                  )
-                ) {
-                  archiveThreads.mutate()
-                }
+          control={(slot) => (
+            <ConfirmableAction
+              tone="PRIMARY"
+              confirmIcon={ArchiveBox}
+              title="Archive all your threads?"
+              description="Every thread you've participated in is resolved. They remain available in the resolved view."
+              confirmLabel="Archive all"
+              onConfirm={async () => {
+                await archiveThreads.mutateAsync()
               }}
-            >
-              {archiveThreads.isPending ? "Archiving…" : "Archive all"}
-            </Button>
-          }
+              trigger={
+                <Button
+                  id={slot.id}
+                  aria-describedby={slot.describedById}
+                  size="compact"
+                  variant="outline"
+                  loading={archiveThreads.isPending}
+                >
+                  Archive all
+                </Button>
+              }
+            />
+          )}
         />
-      </SettingsSection>
+      </SettingSection>
     </>
   )
 }

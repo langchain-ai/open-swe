@@ -4,13 +4,14 @@ import {
   SlackChannelRow,
   slackChannelMatches,
 } from "@/components/SlackChannelCombobox"
+import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
+import { POPUP_SURFACE_DENSE } from "@langchain/gtm-platform-design-system/ui/popup-surface"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import {
   detectSlackChannelTrigger,
   slackChannelReference,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
-import { cn } from "@/lib/utils"
 
 const MAX_SUGGESTIONS = 8
 
@@ -130,7 +131,10 @@ export function SlackChannelTextarea({
         <div
           role="listbox"
           aria-label="Slack channels"
-          className="absolute top-full left-0 z-50 mt-1 w-full max-w-sm overflow-hidden rounded-compact bg-panel p-1 text-ink shadow-popup ring-1 ring-ink/10"
+          className={cn(
+            POPUP_SURFACE_DENSE,
+            "absolute top-full left-0 z-50 mt-1 w-full max-w-sm overflow-hidden"
+          )}
         >
           {matches.map((channel) => (
             <button
@@ -139,7 +143,7 @@ export function SlackChannelTextarea({
               role="option"
               aria-selected={channel.id === active?.id}
               className={cn(
-                "relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-badge px-2 py-1 text-left text-label select-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+                "relative flex min-h-control-sm w-full cursor-default items-center gap-2 rounded-badge px-2 py-1 text-left text-label select-none",
                 channel.id === active?.id && "bg-hover text-ink"
               )}
               // Keep focus in the textarea so the caret the insertion anchors to survives.

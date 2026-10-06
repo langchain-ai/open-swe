@@ -115,7 +115,7 @@ it("labels the shared date range and changes it independently of usage scope", a
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   const onPeriodChange = vi.fn()
   mountReport(onPeriodChange)
-  const range = screen.getByRole("combobox", { name: "Date range" })
+  const range = screen.getByRole("group", { name: "Date range" })
   const outcomes = screen.getByText("PR outcomes", { selector: "h2" })
   expect(
     range.compareDocumentPosition(outcomes) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -123,9 +123,7 @@ it("labels the shared date range and changes it independently of usage scope", a
   expect(
     screen.getByRole("group", { name: "Usage scope" }).contains(range)
   ).toBe(false)
-  fireEvent.click(range)
-  const option = await screen.findByRole("option", { name: "Last 24h" })
-  fireEvent.keyDown(option, { key: "Enter" })
+  fireEvent.click(within(range).getByRole("button", { name: "Last 24h" }))
   expect(onPeriodChange).toHaveBeenCalledWith("24h")
   fireEvent.click(screen.getByRole("button", { name: "threads" }))
   expect(onPeriodChange).toHaveBeenCalledTimes(1)
@@ -195,8 +193,8 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   expect(await screen.findByText("example-model")).toBeTruthy()
   expect(screen.getByText("Analytics are up to date")).toBeTruthy()
   expect(
-    screen.getByLabelText("Analytics coverage").querySelector("details")?.open
-  ).toBe(true)
+    screen.getByRole("button", { name: "Details" }).getAttribute("aria-expanded")
+  ).toBe("true")
   expect(screen.getAllByText(/Last event processed/).length).toBe(1)
   client.clear()
 })
@@ -861,8 +859,8 @@ it("refreshes the usage leaderboard and merge rate report from the coverage foot
     await screen.findByRole("button", { name: "Refresh now" })
   ).toBeTruthy()
   expect(
-    screen.getByLabelText("Analytics coverage").querySelector("details")?.open
-  ).toBe(false)
+    screen.getByRole("button", { name: "Details" }).getAttribute("aria-expanded")
+  ).toBe("false")
   client.clear()
 })
 

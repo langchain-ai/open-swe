@@ -1,5 +1,10 @@
-import { SettingsRow } from "@/components/AppShell"
+import {
+  SettingRow,
+  SettingSection,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
+import { AlertTriangle } from "@/components/glyphs"
 import {
   useExperimentalAssistantUi,
   useOptions,
@@ -12,6 +17,7 @@ import {
   useStreamPreference,
 } from "@/lib/streamPreference"
 
+/** The Interface experiments: conversation transport and the assistant UI. */
 export function AssistantUiPreference() {
   const profile = useProfile()
   const options = useOptions()
@@ -23,43 +29,50 @@ export function AssistantUiPreference() {
 
   return (
     <>
-      <SettingsRow
-        label="SDK useStream (experimental)"
-        htmlFor="sdk-use-stream"
-        description="Use SDK streaming instead of the transcript with the same conversation UI. Applies only to this browser; legacy threads always use SDK streaming."
-        control={
-          <Switch
-            id="sdk-use-stream"
-            checked={preferStream}
-            onCheckedChange={setUseStreamPreference}
-          />
-        }
-      />
-      <SettingsRow
-        label="Assistant UI (experimental)"
-        htmlFor="experimental-assistant-ui"
-        description="Use the new conversation interface for your account."
-        control={
-          <Switch
-            id="experimental-assistant-ui"
-            checked={enabled}
-            disabled={disabled}
-            onCheckedChange={(value) => {
-              if (!defaults) return
-              save.patch(
-                { experimental_assistant_ui: value },
-                defaults.default_agent_model,
-                defaults.default_agent_reasoning_effort
-              )
-            }}
-          />
-        }
-      />
       {(profile.error || options.error) && (
-        <p role="alert" className="px-4 py-2 text-label text-risk">
-          Could not load the conversation preference. Please try again.
-        </p>
+        <StateNotice
+          tone="RISK"
+          icon={AlertTriangle}
+          title="Could not load the conversation preference"
+          description="The Assistant UI switch is disabled until it loads. Please try again."
+        />
       )}
+      <SettingSection title="Interface" contained>
+        <SettingRow
+          density="compact"
+          label="SDK useStream (experimental)"
+          description="Stream with the SDK instead of the transcript, same UI. This browser only; legacy threads always do."
+          control={(slot) => (
+            <Switch
+              id={slot.id}
+              aria-describedby={slot.describedById}
+              checked={preferStream}
+              onCheckedChange={setUseStreamPreference}
+            />
+          )}
+        />
+        <SettingRow
+          density="compact"
+          label="Assistant UI (experimental)"
+          description="Use the new conversation interface for your account."
+          control={(slot) => (
+            <Switch
+              id={slot.id}
+              aria-describedby={slot.describedById}
+              checked={enabled}
+              disabled={disabled}
+              onCheckedChange={(value) => {
+                if (!defaults) return
+                save.patch(
+                  { experimental_assistant_ui: value },
+                  defaults.default_agent_model,
+                  defaults.default_agent_reasoning_effort
+                )
+              }}
+            />
+          )}
+        />
+      </SettingSection>
     </>
   )
 }

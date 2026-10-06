@@ -1,23 +1,85 @@
+import { useId, type ReactNode } from "react"
 import Editor from "@monaco-editor/react"
 
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Dialog, DialogClose, DialogDescription, DialogContent, DialogTitle, DialogTrigger } from "@langchain/gtm-platform-design-system/ui/dialog"
-import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@langchain/gtm-platform-design-system/ui/popover"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dialog"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/gtm-platform-design-system/ui/popover"
 import { useResolvedTheme } from "@/lib/theme"
 
 function WorkspaceReposPopover({ repos }: { repos: string[] }) {
+  const titleId = useId()
   return (
     <Popover>
       <PopoverTrigger className="cursor-pointer rounded-tick font-mono underline decoration-dotted underline-offset-4 hover:text-ink focus-visible:outline-2 focus-visible:outline-primary">
         OPENSWE_WORKSPACE_REPOS
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-96 max-w-[calc(100vw-2rem)]">
-        <PopoverTitle>Expanded value</PopoverTitle>
-        <pre className="mt-2 max-h-60 overflow-auto rounded-badge bg-muted p-3 font-mono text-label break-all whitespace-pre-wrap">
-          <code>{`OPENSWE_WORKSPACE_REPOS="${repos.join(" ")}"`}</code>
-        </pre>
+      <PopoverContent
+        align="start"
+        aria-labelledby={titleId}
+        className="w-96 max-w-(--available-width)"
+      >
+        <Stack gap="sm">
+          <Box
+            render={<h2 id={titleId} />}
+            className="text-label font-medium text-ink"
+          >
+            Expanded value
+          </Box>
+          <Box
+            render={<pre />}
+            padding="md"
+            bg="muted"
+            radius="compact"
+            className="max-h-60 overflow-auto font-mono text-label break-all whitespace-pre-wrap"
+          >
+            <code>{`OPENSWE_WORKSPACE_REPOS="${repos.join(" ")}"`}</code>
+          </Box>
+        </Stack>
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** A field whose control is the script dialog's trigger rather than an input. */
+export function ScriptField({
+  label,
+  help,
+  children,
+}: {
+  label: string
+  help: string
+  children: ReactNode
+}) {
+  return (
+    <Stack gap="sm">
+      <Stack gap="xs">
+        <Box render={<span />} className="text-label font-medium text-ink">
+          {label}
+        </Box>
+        <Box render={<span />} className="text-meta text-ink-subtle">
+          {help}
+        </Box>
+      </Stack>
+      {children}
+    </Stack>
   )
 }
 
@@ -39,27 +101,27 @@ export function WorkspaceScriptEditor({
 
   return (
     <Dialog>
-      <div className="mt-2 flex items-center gap-2">
+      <Inline gap="sm" align="center">
         <DialogTrigger render={<Button size="compact" variant="outline" />}>
           Edit {label.toLowerCase()}
         </DialogTrigger>
-        <span className="text-meta text-ink-subtle">
+        <Box render={<span />} className="text-meta text-ink-subtle">
           {lines
             ? `${lines} ${lines === 1 ? "line" : "lines"}`
             : "Not configured"}
-        </span>
-      </div>
-      <DialogContent className="max-w-4xl">
-        <div className="space-y-2 border-b border-line p-4">
+        </Box>
+      </Inline>
+      <DialogContent className="sm:max-w-4xl">
+        <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
-          <p className="text-body text-ink-subtle">
+          <Box render={<p />} className="text-meta text-ink-subtle">
             Bound repositories are available in{" "}
             <WorkspaceReposPopover repos={repos} /> to preload; runs clone any
             other repository on demand.
-          </p>
-        </div>
-        <div className="min-h-0 overflow-auto">
+          </Box>
+        </DialogHeader>
+        <Box border="line" radius="compact" className="min-h-0 overflow-hidden">
           <Editor
             height="min(60vh, 600px)"
             language="shell"
@@ -76,10 +138,10 @@ export function WorkspaceScriptEditor({
               tabSize: 2,
             }}
           />
-        </div>
-        <div className="flex justify-end border-t border-line p-3">
-          <DialogClose render={<Button size="compact" />}>Done</DialogClose>
-        </div>
+        </Box>
+        <DialogFooter>
+          <DialogClose render={<Button />}>Done</DialogClose>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

@@ -1,11 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
+import type { FormEvent } from "react"
 
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@langchain/gtm-platform-design-system/ui/combobox"
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { FormField } from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button, buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxTrigger } from "@langchain/gtm-platform-design-system/ui/combobox"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
-import { Label } from "@langchain/gtm-platform-design-system/ui/label"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { AlertTriangle, ChevronRight, FileText, GitHub, Lock } from "@/components/glyphs"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import {
   api,
@@ -15,6 +23,9 @@ import {
 } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
+
+const REPO_ROW_CLASS =
+  "h-row-data w-full px-5 text-left text-label text-ink transition-colors duration-fast ease-out-quint outline-none hover:bg-hover focus-visible:bg-hover aria-pressed:bg-selected aria-pressed:font-medium motion-reduce:transition-none"
 
 function formatMutationError(e: Error): string {
   return isGithubReauthError(e)
@@ -107,7 +118,7 @@ export function AgentInstructionsPanel() {
   })
 
   if (instructions.isLoading) {
-    return <Skeleton className="h-40" />
+    return <Skeleton className="h-40 w-full rounded-panel" />
   }
 
   const configured = new Set((instructions.data ?? []).map((s) => s.full_name))
@@ -123,7 +134,8 @@ export function AgentInstructionsPanel() {
     null
   const dirty = active != null && draft !== active.instructions
 
-  const handleAdd = () => {
+  const handleAdd = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
     if (!normalizedAddRepo || !canAdd) return
     create.mutate(normalizedAddRepo, { onSuccess: () => setAddRepo("") })
   }
@@ -131,70 +143,78 @@ export function AgentInstructionsPanel() {
   const githubReauth =
     (repos.isError && isGithubReauthError(repos.error)) ||
     (error !== null && /github token|re-login required/i.test(error))
+  const configuredList = instructions.data ?? []
 
   return (
-    <div className="flex flex-col gap-6 p-4">
+    <Stack gap="xl">
       {githubReauth && (
-        <div className="rounded-badge border border-risk/40 bg-risk-bg px-3 py-2 text-label text-risk">
-          Your GitHub connection expired.{" "}
-          <a
-            href={loginUrl()}
-            className="font-medium underline underline-offset-2"
-          >
-            Sign in with GitHub again
-          </a>{" "}
-          to list installed repos.
-        </div>
+        <StateNotice
+          tone="ATTENTION"
+          icon={GitHub}
+          title="Your GitHub connection expired"
+          description="Sign in again to list installed repos."
+          action={
+            <a
+              href={loginUrl()}
+              className={buttonVariants({ size: "compact", variant: "outline" })}
+            >
+              Sign in with GitHub again
+            </a>
+          }
+        />
       )}
-      <section className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="add-instruction-repo">Add repository</Label>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <Input
-              id="add-instruction-repo"
-              placeholder="owner/repo"
-              value={addRepo}
-              onChange={(e) => setAddRepo(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  handleAdd()
+
+      <PageSection title="Repositories" contained>
+        <Stack
+          render={<form onSubmit={handleAdd} />}
+          gap="md"
+          padding="lg"
+          className="border-b border-line"
+        >
+          <Inline gap="sm" align="end">
+            <Stack grow>
+              <FormField
+                label="Add repository"
+                control={
+                  <Input
+                    placeholder="owner/repo"
+                    value={addRepo}
+                    onChange={(e) => setAddRepo(e.target.value)}
+                  />
                 }
-              }}
-              className="sm:flex-1"
-            />
+              />
+            </Stack>
             <Button
-              size="compact"
-              className="shrink-0 sm:w-auto"
+              type="submit"
               disabled={!canAdd || create.isPending}
-              onClick={handleAdd}
+              loading={create.isPending}
             >
               Add
             </Button>
-          </div>
+          </Inline>
           {suggestedRepos.length > 0 && (
-            <Combobox
-              items={suggestedRepos.map((r) => r.full_name)}
-              value={addRepo}
-              onValueChange={(v) => setAddRepo(typeof v === "string" ? v : "")}
-            >
-              <ComboboxInput
-                placeholder="Search installed repos…"
-                showClear
-                className="w-full"
-              />
-              <ComboboxContent className="min-w-[var(--anchor-width)]">
-                <ComboboxList className="max-h-48">
+            <Combobox value={addRepo} onValueChange={setAddRepo}>
+              <ComboboxTrigger placeholder="Search installed repos…">
+                {suggestedRepos.some((r) => r.full_name === addRepo)
+                  ? addRepo
+                  : undefined}
+              </ComboboxTrigger>
+              <ComboboxContent>
+                <ComboboxInput placeholder="Search installed repos…" />
+                <ComboboxList>
                   <ComboboxEmpty>No matches</ComboboxEmpty>
                   {suggestedRepos.map((r) => (
                     <ComboboxItem key={r.full_name} value={r.full_name}>
-                      <span className="truncate" title={r.full_name}>
+                      <Box render={<span />} className="truncate" title={r.full_name}>
                         {r.full_name}
-                      </span>
+                      </Box>
                       {r.private && (
-                        <span className="ml-auto text-meta text-ink-subtle">
-                          private
-                        </span>
+                        <Icon
+                          icon={Lock}
+                          size="sm"
+                          label="Private"
+                          className="ml-auto text-ink-subtle"
+                        />
                       )}
                     </ComboboxItem>
                   ))}
@@ -202,53 +222,90 @@ export function AgentInstructionsPanel() {
               </ComboboxContent>
             </Combobox>
           )}
-        </div>
+        </Stack>
+        {configuredList.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title="No repositories yet"
+            description="Add a repository to give its runs custom instructions."
+          />
+        ) : (
+          <Stack render={<ul />} gap="none" aria-label="Repositories">
+            {configuredList.map((s) => (
+              <Box
+                key={s.full_name}
+                render={<li />}
+                className="border-b border-line last:border-b-0"
+              >
+                <Inline
+                  render={
+                    <button
+                      type="button"
+                      aria-pressed={selected === s.full_name}
+                      onClick={() => setSelected(s.full_name)}
+                    />
+                  }
+                  gap="sm"
+                  align="center"
+                  justify="between"
+                  className={REPO_ROW_CLASS}
+                >
+                  <Box render={<span />} className="truncate font-mono">
+                    {s.full_name}
+                  </Box>
+                  <Icon
+                    icon={ChevronRight}
+                    size="sm"
+                    className="shrink-0 text-ink-subtle"
+                  />
+                </Inline>
+              </Box>
+            ))}
+          </Stack>
+        )}
+      </PageSection>
 
-        <div className="space-y-2">
-          <p className="text-label font-medium text-ink">Repositories</p>
-          {(instructions.data ?? []).length === 0 ? (
-            <p className="text-meta text-ink-subtle">
-              No repositories yet.
-            </p>
-          ) : (
-            <ul className="flex flex-wrap gap-2">
-              {(instructions.data ?? []).map((s) => (
-                <li key={s.full_name}>
-                  <button
-                    type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-badge border px-2.5 py-1.5 text-left text-label transition-colors hover:bg-muted ${
-                      selected === s.full_name
-                        ? "border-primary bg-muted font-medium"
-                        : "border-line"
-                    }`}
-                    onClick={() => setSelected(s.full_name)}
-                  >
-                    <span className="truncate">{s.full_name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
-
-      <div className="border-t border-line" />
-
-      <section className="space-y-3">
-        {!selected || !active ? (
-          <p className="text-meta text-ink-subtle">
+      {!selected || !active ? (
+        configuredList.length === 0 ? null : (
+          <Box render={<p />} className="text-label text-ink-subtle">
             Select a repository above to view or edit its custom agent
             instructions.
-          </p>
-        ) : (
-          <>
-            <p className="text-body font-medium text-ink">
-              {active.full_name}
-            </p>
-            <div className="flex flex-wrap gap-2">
+          </Box>
+        )
+      ) : (
+        <PageSection
+          title={active.full_name}
+          contained
+          inset="padded"
+          actions={
+            <ConfirmableAction
+              title={`Remove custom instructions for ${active.full_name}?`}
+              description="Runs in this repository stop receiving these instructions. This cannot be undone."
+              confirmLabel="Remove instructions"
+              onConfirm={async () => {
+                // Removal is optimistic: the dialog closes at once and a
+                // failure restores the repository with a toast.
+                remove.mutate(active.full_name)
+              }}
+              trigger={
+                <Button size="compact" variant="outline">
+                  Remove
+                </Button>
+              }
+            />
+          }
+        >
+          <Stack gap="md">
+            <InstructionsEditor
+              value={draft}
+              onChange={setDraft}
+              placeholder="Write custom instructions for the coding agent on this repository (markdown)."
+            />
+            <Inline gap="sm" align="center">
               <Button
                 size="compact"
                 disabled={!dirty || save.isPending}
+                loading={save.isPending}
                 onClick={() =>
                   save.mutate({
                     full_name: active.full_name,
@@ -259,37 +316,26 @@ export function AgentInstructionsPanel() {
                 Save instructions
               </Button>
               {dirty && (
-                <span className="self-center text-meta text-ink-subtle">
+                <Box render={<span />} className="text-meta text-ink-subtle">
                   Unsaved changes
-                </span>
+                </Box>
               )}
-              <Button
-                size="compact"
-                variant="destructive"
-                className="ml-auto"
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      `Remove custom instructions for ${active.full_name}? This cannot be undone.`
-                    )
-                  ) {
-                    return
-                  }
-                  remove.mutate(active.full_name)
-                }}
-              >
-                Remove
-              </Button>
-            </div>
-            <InstructionsEditor
-              value={draft}
-              onChange={setDraft}
-              placeholder="Write custom instructions for the coding agent on this repository (markdown)."
-            />
-          </>
-        )}
-        {error && <p className="text-label text-risk">{error}</p>}
-      </section>
-    </div>
+            </Inline>
+          </Stack>
+        </PageSection>
+      )}
+
+      {error && (
+        <Inline
+          role="alert"
+          gap="sm"
+          align="start"
+          className="text-label text-risk"
+        >
+          <Icon icon={AlertTriangle} size="sm" />
+          <Box render={<span />}>{error}</Box>
+        </Inline>
+      )}
+    </Stack>
   )
 }

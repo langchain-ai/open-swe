@@ -1,23 +1,20 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-
-import { SettingsSection } from "@/components/AppShell"
+  SettingRow,
+  SettingSection,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { AlertTriangle, Loader2, Trash2 } from "@/components/glyphs"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
 import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import {
   useWorkspaceOptions,
   workspaceOptionKeys,
@@ -40,7 +37,7 @@ import {
   WorkspaceEditor,
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
-import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
+import { FormError, WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
 import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
@@ -95,7 +92,9 @@ function GeneralSection({
   }
 
   return (
-    <SettingsSection
+    <PageSection
+      contained
+      inset="padded"
       title="General"
       description="Its name, the instructions appended to every run, its bound repositories, and its Slack channels. A repository is bound to one workspace, and a Slack channel belongs to one workspace."
     >
@@ -107,14 +106,15 @@ function GeneralSection({
         workspaces={workspaces}
         channelLabel={channelLabel}
       />
-      <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3.5">
+      <Inline
+        gap="sm"
+        align="center"
+        wrap
+        className="border-t border-line pt-3"
+      >
         {rebuildStatus}
-        {error && (
-          <p role="alert" className="text-label text-risk">
-            {error}
-          </p>
-        )}
-        <div className="ml-auto flex gap-2">
+        {error && <FormError message={error} />}
+        <Inline gap="sm" className="ml-auto">
           {dirty && (
             <Button
               size="compact"
@@ -132,9 +132,9 @@ function GeneralSection({
           >
             {saving ? "Saving…" : "Save"}
           </Button>
-        </div>
-      </div>
-    </SettingsSection>
+        </Inline>
+      </Inline>
+    </PageSection>
   )
 }
 
@@ -149,7 +149,6 @@ export function WorkspaceSettingsPanel({
   onDeleted: () => void
 }) {
   const qc = useQueryClient()
-  const [deleting, setDeleting] = useState(false)
   const [repositoryRebuild, setRepositoryRebuild] = useState<{
     slug: string
     finishedAt: WorkspaceRecord["refresh_finished_at"]
@@ -166,11 +165,11 @@ export function WorkspaceSettingsPanel({
     (!workspace ||
       workspace.refresh_finished_at === repositoryRebuild.finishedAt ||
       !["success", "failed"].includes(workspace.refresh_status ?? "never"))
+  // The confirmation states a failure itself, so the toast stays quiet.
   const deleteWorkspace = useMutation({
-    meta: { errorTitle: "Couldn't delete workspace" },
+    meta: { errorTitle: "Couldn't delete workspace", silent: true },
     mutationFn: api.deleteWorkspace,
     onSuccess: async () => {
-      setDeleting(false)
       await qc.invalidateQueries({ queryKey: workspaceOptionKeys.all })
       onDeleted()
     },
@@ -190,14 +189,20 @@ export function WorkspaceSettingsPanel({
   const channelLabel = (id: string) =>
     slackChannelLabel(channelDirectory.data, id)
 
-  if (record.isLoading) return <Skeleton className="h-64 w-full" />
+  if (record.isLoading)
+    return <Skeleton className="h-64 w-full rounded-panel" />
   if (record.isError || !record.data) {
     return (
-      <p role="alert" className="text-body text-risk">
-        {record.error instanceof Error
-          ? record.error.message
-          : "Could not load this workspace."}
-      </p>
+      <StateNotice
+        tone="RISK"
+        icon={AlertTriangle}
+        title="This workspace did not load"
+        description={
+          record.error instanceof Error
+            ? record.error.message
+            : "Could not load this workspace."
+        }
+      />
     )
   }
 
@@ -247,39 +252,51 @@ export function WorkspaceSettingsPanel({
           (!repositoryRebuildTimedOut &&
             awaitingRepositoryRebuild(record.data)) ||
           record.data.refresh_status === "refreshing" ? (
-            <p
+            <Inline
+              render={<p />}
               role="status"
-              className="flex min-w-48 flex-1 items-center gap-2 text-meta text-ink-subtle"
+              gap="sm"
+              align="center"
+              className="min-w-48 flex-1 text-meta text-ink-subtle"
             >
-              <CircleNotchIcon
-                aria-hidden="true"
-                className="size-4 shrink-0 animate-spin"
+              <Icon
+                icon={Loader2}
+                size="sm"
+                className="animate-spin motion-reduce:animate-none"
               />
-              {record.data.refresh_status === "refreshing"
-                ? `${buildAction}ing sandbox image…`
-                : `Repositories saved. Sandbox image ${buildAction.toLowerCase()} queued…`}{" "}
-              Existing runs keep their current image.
-            </p>
+              <Box render={<span />}>
+                {record.data.refresh_status === "refreshing"
+                  ? `${buildAction}ing sandbox image…`
+                  : `Repositories saved. Sandbox image ${buildAction.toLowerCase()} queued…`}{" "}
+                Existing runs keep their current image.
+              </Box>
+            </Inline>
           ) : awaitingRepositoryRebuild(record.data) ? (
-            <p
+            <Box
+              render={<p />}
               role="alert"
-              className="min-w-48 flex-1 text-label text-risk"
+              ink="risk"
+              className="min-w-48 flex-1 text-label"
             >
               Repositories saved, but the image {buildAction.toLowerCase()}{" "}
               could not be confirmed. Check the sandbox image status or retry{" "}
               {buildAction} image.
-            </p>
+            </Box>
           ) : repositoryRebuild?.slug === slug ? (
-            <p
+            <Box
+              render={<p />}
               role={
                 record.data.refresh_status === "failed" ? "alert" : "status"
               }
-              className="min-w-48 flex-1 text-meta text-ink-subtle"
+              ink={
+                record.data.refresh_status === "failed" ? "risk" : "ink-subtle"
+              }
+              className="min-w-48 flex-1 text-meta"
             >
               {record.data.refresh_status === "failed"
                 ? `Image ${buildAction.toLowerCase()} failed. ${record.data.refresh_error ?? (record.data.snapshot_id ? "The previous image is still in use." : "No image is available yet.")}`
                 : "Sandbox image built with the saved repositories."}
-            </p>
+            </Box>
           ) : null
         }
       />
@@ -314,51 +331,36 @@ export function WorkspaceSettingsPanel({
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
-        <SettingsSection
+        <SettingSection
+          contained
           title="Delete workspace"
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
-          action={
-            <Button
-              size="compact"
-              variant="destructive"
-              aria-label={`Delete ${record.data.name}`}
-              onClick={() => setDeleting(true)}
-            >
-              Delete
-            </Button>
-          }
-        />
-      )}
-      {canEdit && deleting && (
-        <AlertDialog
-          open
-          onOpenChange={(open) => {
-            if (!open && !deleteWorkspace.isPending) setDeleting(false)
-          }}
         >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete {record.data.name}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This deletes the workspace, its settings and sandbox snapshot,
-                and releases its repository and Slack channel bindings. This
-                cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={deleteWorkspace.isPending}>
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                disabled={deleteWorkspace.isPending}
-                onClick={() => deleteWorkspace.mutate(slug)}
-              >
-                {deleteWorkspace.isPending ? "Deleting…" : "Delete workspace"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+          <SettingRow
+            label={record.data.name}
+            description="Releases its repository and Slack channel bindings."
+            density="compact"
+            control={() => (
+              <ConfirmableAction
+                trigger={
+                  <Button
+                    size="compact"
+                    variant="outline"
+                    className="border-risk text-risk hover:bg-risk-bg"
+                    aria-label={`Delete ${record.data.name}`}
+                  >
+                    <Icon icon={Trash2} size="sm" />
+                    Delete
+                  </Button>
+                }
+                title={`Delete ${record.data.name}?`}
+                description="This deletes the workspace, its settings and sandbox snapshot, and releases its repository and Slack channel bindings. This cannot be undone."
+                confirmLabel="Delete workspace"
+                onConfirm={() => deleteWorkspace.mutateAsync(slug)}
+              />
+            )}
+          />
+        </SettingSection>
       )}
     </>
   )

@@ -1,11 +1,7 @@
 import { useMemo } from "react"
-import {
-  FolderIcon,
-  GlobeIcon,
-  HashIcon,
-  LockSimpleIcon,
-} from "@phosphor-icons/react"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 
+import { Folder, Globe, Hash, Lock } from "@/components/glyphs"
 import { RefreshSlackChannels } from "@/components/SlackChannelCombobox"
 import { type WorkspaceOption } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
@@ -68,11 +64,7 @@ export function RepositoryPicker({
         id: repo.full_name,
         label: repo.full_name,
         meta: `${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`,
-        icon: repo.private ? (
-          <LockSimpleIcon size={14} />
-        ) : (
-          <FolderIcon size={14} />
-        ),
+        icon: <Icon icon={repo.private ? Lock : Folder} size="sm" />,
         owner: owners.get(repo.full_name.toLowerCase()) ?? null,
       })),
     [repos.data, owners]
@@ -152,12 +144,13 @@ export function SlackChannelPicker({
         ]
           .filter((part): part is string => part !== null)
           .join(" · "),
-        icon: channel.is_private ? (
-          <LockSimpleIcon size={14} />
-        ) : channel.is_ext_shared ? (
-          <GlobeIcon size={14} />
-        ) : (
-          <HashIcon size={14} />
+        icon: (
+          <Icon
+            icon={
+              channel.is_private ? Lock : channel.is_ext_shared ? Globe : Hash
+            }
+            size="sm"
+          />
         ),
         owner: owners.get(channel.id.toLowerCase()) ?? null,
         disabled: !channel.is_member,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { buildEnvironmentDiagnostics } from "@/lib/environment-diagnostics"
 import {
@@ -21,18 +22,14 @@ export function AboutSection({ user }: { user: SessionUser }) {
   }, [])
 
   return (
-    <SettingsSection id="about" title="About">
-      {version ? (
-        <SettingsRow
-          label="Open SWE Desktop"
-          control={
-            <span className="text-meta text-ink-subtle">
-              Version {version}
-            </span>
-          }
-        />
-      ) : null}
-      <div className="space-y-2 p-4 text-meta break-words text-ink-subtle">
+    <PageSection id="about" title="About" contained inset="padded">
+      <Stack gap="sm" className="text-meta break-words text-ink-subtle">
+        {version ? (
+          <p>
+            <span className="font-medium text-ink">Open SWE Desktop</span> ·
+            Version {version}
+          </p>
+        ) : null}
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
         </p>
@@ -43,14 +40,14 @@ export function AboutSection({ user }: { user: SessionUser }) {
         <CopyDiagnosticsButton
           getDiagnostics={() => buildEnvironmentDiagnostics(user, version)}
         />
-      </div>
-    </SettingsSection>
+      </Stack>
+    </PageSection>
   )
 }
 
 function IdentityValue({ value }: { value: string | null | undefined }) {
   return value ? (
-    <code className="select-all">{value}</code>
+    <code className="font-mono text-ink select-all">{value}</code>
   ) : (
     <span>Unavailable</span>
   )

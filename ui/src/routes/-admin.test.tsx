@@ -125,13 +125,13 @@ describe("UsersSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }))
     expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
-    fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search users" }), {
       target: { value: "user-24" },
     })
     expect(await screen.findByText("user-24")).toBeTruthy()
     expect(screen.queryByText("user-25")).toBeNull()
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search users" }), {
       target: { value: "nobody" },
     })
     expect(await screen.findByText("No users match your search.")).toBeTruthy()
@@ -176,10 +176,9 @@ describe("ReviewSettings", () => {
     )
 
     const view = render(section("alpha"))
-    const row = (
-      await within(view.container).findByText("Review Draft PRs")
-    ).closest("label")!.parentElement!
-    const toggle = within(row).getByRole("switch")
+    const toggle = await within(view.container).findByRole("switch", {
+      name: "Review Draft PRs",
+    })
     await waitFor(() => {
       expect(toggle.hasAttribute("disabled")).toBe(false)
       expect(toggle.hasAttribute("data-disabled")).toBe(false)

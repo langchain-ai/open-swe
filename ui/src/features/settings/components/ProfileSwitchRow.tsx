@@ -1,6 +1,4 @@
-import type { ReactNode } from "react"
-
-import { SettingsRow } from "@/components/AppShell"
+import { SettingRow } from "@langchain/gtm-platform-design-system/patterns/setting-section"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import type { ProfileUpdate } from "@/lib/api"
 import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
@@ -41,23 +39,24 @@ export function ProfileSwitchRow({
 }: {
   field: ProfileFlag
   label: string
-  description: ReactNode
+  description: string
   fallback?: boolean
 }) {
   const { profile, ready, save } = useProfileSettings()
   return (
-    <SettingsRow
+    <SettingRow
+      density="compact"
       label={label}
-      htmlFor={field}
       description={description}
-      control={
+      control={(slot) => (
         <Switch
-          id={field}
+          id={slot.id}
+          aria-describedby={slot.describedById}
           checked={profile?.[field] ?? fallback}
           disabled={!ready}
           onCheckedChange={(value) => save({ [field]: value })}
         />
-      }
+      )}
     />
   )
 }

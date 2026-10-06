@@ -3,13 +3,30 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
-import type { AdminUser } from "@/lib/api"
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { TablePagination } from "@/components/TablePagination"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { FormField } from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import {
+  SettingRow,
+  SettingSection,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
+
+import { AlertTriangle, Bot, Users } from "@/components/glyphs"
+import { TablePagination } from "@/components/TablePagination"
+import type { AdminUser } from "@/lib/api"
 import { api } from "@/lib/api"
 import {
   useAdminCancelAgentThread,
@@ -23,6 +40,17 @@ import { dashboardApiBase } from "@/lib/api-base"
 
 const SLACK_CODE_CHANNELS_STORAGE_KEY =
   "open-swe.admin.slack-code-channels-enabled"
+
+/** The bordered list body a section's rows sit in, with any notice kept above it. */
+const LIST_PANEL = {
+  gap: "none",
+  bg: "panel",
+  border: "line",
+  radius: "panel",
+  className: "overflow-hidden",
+} as const
+
+const LIST_ROW_CLASS = "border-b border-line px-5 py-3 last:border-b-0"
 
 export function SlackIntegrationSection({
   backendUrl,
@@ -64,52 +92,58 @@ export function SlackIntegrationSection({
       )
       setCopyState("copied")
     } catch {
+      // The button itself reports the failure; there is nothing else to retry.
       setCopyState("failed")
     }
   }
 
   return (
-    <SettingsSection
+    <SettingSection
       title="Slack integration"
-      description="Configure Slack and choose which bots can start Open SWE runs."
+      description="Configure Slack and choose which bots can start Open SWE runs. Reinstall the Slack app after pasting a new manifest."
+      contained
     >
-      <SettingsRow
-        htmlFor="slack-code-channels"
+      <SettingRow
         label="Slack Code Channels"
+        density="compact"
         description={
           enabled
-            ? "Early-access Code Channels manifest selected. Reinstall or re-authorize the Slack app after updating its manifest."
-            : "Legacy Slack manifest selected. Messages continue to use app mentions and Slack threads."
+            ? "Early-access Code Channels manifest is selected."
+            : "Legacy manifest: messages use app mentions and Slack threads."
         }
-        control={
+        control={(slot) => (
           <Switch
-            id="slack-code-channels"
+            id={slot.id}
+            aria-describedby={slot.describedById}
             checked={enabled}
             onCheckedChange={setCodeChannelsEnabled}
           />
-        }
+        )}
       />
-      <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-        <div className="flex flex-col gap-1">
-          <span className="text-body font-medium text-ink">
-            App manifest
-          </span>
-          <span className="text-meta text-ink-subtle">
-            {placeholdersRemain
-              ? "Copy the selected manifest, replace its remaining <…> placeholders, then paste it into your Slack app settings and reinstall the app."
-              : "Copy the selected manifest — its URLs are filled in from this deployment — then paste it into your Slack app settings and reinstall the app."}
-          </span>
-        </div>
-        <Button size="compact" variant="outline" onClick={() => void copyManifest()}>
-          {copyState === "copied"
-            ? "Copied"
-            : copyState === "failed"
-              ? "Copy failed"
-              : "Copy manifest"}
-        </Button>
-      </div>
+      <SettingRow
+        label="App manifest"
+        description={
+          placeholdersRemain
+            ? "Replace its remaining <…> placeholders before pasting it into Slack."
+            : "Its URLs are filled in from this deployment."
+        }
+        control={(slot) => (
+          <Button
+            aria-describedby={slot.describedById}
+            size="compact"
+            variant="outline"
+            onClick={() => void copyManifest()}
+          >
+            {copyState === "copied"
+              ? "Copied"
+              : copyState === "failed"
+                ? "Copy failed"
+                : "Copy manifest"}
+          </Button>
+        )}
+      />
       {children}
-    </SettingsSection>
+    </SettingSection>
   )
 }
 
@@ -139,15 +173,17 @@ export function RunningAgentsSection() {
   }
 
   return (
-    <SettingsSection
+    <PageSection
       title="Running agents"
-      description="Workspace-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
-    >
-      <div className="flex flex-col gap-3 p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-meta text-ink-subtle">
+      description="Workspace-wide active threads. Killing a thread interrupts its pending and running runs and keeps its history."
+      actions={
+        <>
+          <Box
+            render={<span />}
+            className="text-meta text-ink-subtle tabular-nums"
+          >
             {running.length} running
-          </span>
+          </Box>
           <Button
             size="compact"
             variant="outline"
@@ -156,49 +192,69 @@ export function RunningAgentsSection() {
           >
             {threads.isFetching ? "Refreshing…" : "Refresh"}
           </Button>
-        </div>
-
+        </>
+      }
+    >
+      {threads.error && (
+        <StateNotice
+          tone="RISK"
+          icon={AlertTriangle}
+          title="Running agents did not load"
+          description={threads.error.message}
+        />
+      )}
+      <Stack {...LIST_PANEL}>
         {threads.isLoading ? (
-          <Skeleton className="h-20" />
+          <Box padding="lg">
+            <Skeleton className="h-20 w-full" />
+          </Box>
         ) : running.length ? (
-          <div className="flex flex-col">
-            {running.map((thread) => (
-              <div
-                key={thread.id}
-                className="flex items-center justify-between gap-3 border-b border-line py-2 last:border-b-0"
+          running.map((thread) => (
+            <Inline
+              key={thread.id}
+              gap="md"
+              align="center"
+              justify="between"
+              className={LIST_ROW_CLASS}
+            >
+              <Link
+                to="/agents/$threadId"
+                params={{ threadId: thread.id }}
+                className="group min-w-0 flex-1"
               >
-                <Link
-                  to="/agents/$threadId"
-                  params={{ threadId: thread.id }}
-                  className="min-w-0 flex-1 hover:underline"
+                <Box
+                  render={<p />}
+                  className="truncate text-label font-medium text-ink group-hover:underline"
                 >
-                  <p className="truncate text-label font-medium text-ink">
-                    {thread.title}
-                  </p>
-                  <p className="truncate font-mono text-meta text-ink-subtle">
-                    {thread.repoFullName || "no repo"} · {thread.id}
-                  </p>
-                </Link>
-                <Button
-                  size="compact"
-                  variant="destructive"
-                  onClick={() => kill(thread)}
+                  {thread.title}
+                </Box>
+                <Box
+                  render={<p />}
+                  className="truncate font-mono text-meta text-ink-subtle"
                 >
-                  Kill
-                </Button>
-              </div>
-            ))}
-          </div>
+                  {thread.repoFullName || "no repo"} · {thread.id}
+                </Box>
+              </Link>
+              {/* Interrupting keeps history and can be re-run, so it stays one click. */}
+              <Button
+                size="compact"
+                variant="outline"
+                onClick={() => kill(thread)}
+              >
+                Kill
+              </Button>
+            </Inline>
+          ))
         ) : (
-          <p className="text-meta text-ink-subtle">No running agents.</p>
+          <EmptyState icon={Bot} title="No running agents" />
         )}
-
-        {threads.error && (
-          <p className="text-label text-risk">{threads.error.message}</p>
-        )}
-        {message && <p className="text-meta text-ink-subtle">{message}</p>}
-      </div>
-    </SettingsSection>
+      </Stack>
+      {message && (
+        <Box render={<p role="status" />} className="text-meta text-ink-subtle">
+          {message}
+        </Box>
+      )}
+    </PageSection>
   )
 }
 
@@ -238,54 +294,65 @@ export function TriggerReviewSection() {
   })
 
   return (
-    <SettingsSection
+    <PageSection
       title="Trigger a review"
       description="Manually start an Open SWE Review run on a pull request. The repository must be enabled for review."
+      contained
+      inset="padded"
     >
-      <div className="flex flex-col gap-2 p-4">
-        <div className="flex items-center gap-2">
-          <Input
-            className="flex-1"
-            placeholder="https://github.com/owner/repo/pull/123"
-            value={url}
-            onChange={(e) => {
-              setUrl(e.target.value)
-              setMessage(null)
-              setError(null)
+      <Stack
+        render={
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (parsed && !trigger.isPending) trigger.mutate()
             }}
           />
-          <Button
-            size="compact"
-            onClick={() => trigger.mutate()}
-            disabled={!parsed || trigger.isPending}
-          >
+        }
+        gap="lg"
+      >
+        <FormField
+          label="Pull request URL"
+          help="A full PR URL, like https://github.com/owner/repo/pull/123"
+          error={error ?? undefined}
+          control={
+            <Input
+              placeholder="https://github.com/owner/repo/pull/123"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value)
+                setMessage(null)
+                setError(null)
+              }}
+            />
+          }
+        />
+        <Inline gap="md" align="center" wrap>
+          <Button type="submit" disabled={!parsed || trigger.isPending}>
             {trigger.isPending ? "Starting…" : "Start review"}
           </Button>
-        </div>
-        {url.trim() && !parsed && (
-          <p className="text-meta text-ink-subtle">
-            Enter a full PR URL like https://github.com/owner/repo/pull/123
-          </p>
-        )}
-        {message && parsed && (
-          <p className="text-meta text-ink-subtle">
-            {message}{" "}
-            <Link
-              to="/agents/reviews/$owner/$repo/$number"
-              params={{
-                owner: parsed.owner,
-                repo: parsed.repo,
-                number: String(parsed.number),
-              }}
-              className="underline hover:text-ink"
+          {message && parsed && (
+            <Box
+              render={<p role="status" />}
+              className="text-meta text-ink-subtle"
             >
-              View review
-            </Link>
-          </p>
-        )}
-        {error && <p className="text-label text-risk">{error}</p>}
-      </div>
-    </SettingsSection>
+              {message}{" "}
+              <Link
+                to="/agents/reviews/$owner/$repo/$number"
+                params={{
+                  owner: parsed.owner,
+                  repo: parsed.repo,
+                  number: String(parsed.number),
+                }}
+                className="text-ink underline"
+              >
+                View review
+              </Link>
+            </Box>
+          )}
+        </Inline>
+      </Stack>
+    </PageSection>
   )
 }
 
@@ -305,67 +372,88 @@ export function UsersSection({ enabled }: { enabled: boolean }) {
   const items = users.data?.items ?? []
 
   return (
-    <SettingsSection
-      title="Users"
-      description="Everyone who has signed in with GitHub, and the Slack account each has connected from their own settings."
-    >
-      <div className="flex flex-col gap-3 p-4">
-        <Input
-          aria-label="Search users"
-          placeholder="Search by name, GitHub login, email, or Slack ID…"
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value)
-            setPage(1)
-          }}
-        />
-        <div className="flex flex-col gap-0.5">
-          {users.isLoading ? (
-            <Skeleton className="h-32" />
-          ) : users.isError ? (
-            <p role="alert" className="text-label text-risk">
-              Could not load users. Please try again.
-            </p>
-          ) : !items.length ? (
-            <p className="text-meta text-ink-subtle">
-              {query ? "No users match your search." : "No users yet."}
-            </p>
-          ) : (
-            items.map((user: AdminUser) => (
-              <div
-                key={user.user_id}
-                className="flex items-center justify-between gap-2 border-b border-line py-1.5 text-label last:border-b-0"
-              >
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium">
-                    {user.github_login || user.display_name || user.user_id}
-                  </span>
-                  <span className="truncate text-meta text-ink-subtle">
-                    {user.email}
-                    {user.slack_user_id ? ` · Slack ${user.slack_user_id}` : ""}
-                  </span>
-                </div>
-                {user.is_admin && (
-                  <span className="text-meta font-medium text-ink-subtle">
-                    Admin
-                  </span>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-      <TablePagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        disabled={users.isFetching}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => {
-          setPageSize(size)
+    <Stack gap="md">
+      <SearchInput
+        label="Search users"
+        placeholder="Search by name, GitHub login, email, or Slack ID…"
+        value={search}
+        onValueChange={(next) => {
+          setSearch(next)
           setPage(1)
         }}
       />
-    </SettingsSection>
+      {users.isError && (
+        <StateNotice
+          tone="RISK"
+          icon={AlertTriangle}
+          title="Users did not load"
+          description="Reload the page to try again."
+        />
+      )}
+      <Stack {...LIST_PANEL}>
+        {users.isLoading ? (
+          <Box padding="lg">
+            <Skeleton className="h-32 w-full" />
+          </Box>
+        ) : !items.length ? (
+          users.isError ? null : (
+            <EmptyState
+              icon={Users}
+              title={query ? "No users match your search." : "No users yet."}
+            />
+          )
+        ) : (
+          <Stack gap="none">
+            {items.map((user: AdminUser) => {
+              const name =
+                user.github_login || user.display_name || user.user_id
+              return (
+                <Inline
+                  key={user.user_id}
+                  gap="md"
+                  align="center"
+                  className={LIST_ROW_CLASS}
+                >
+                  <Avatar name={name} size="control" />
+                  <Stack gap="none" className="min-w-0 flex-1">
+                    <Box
+                      render={<span />}
+                      className="truncate text-label font-medium text-ink"
+                    >
+                      {name}
+                    </Box>
+                    <Box
+                      render={<span />}
+                      className="truncate text-meta text-ink-subtle"
+                    >
+                      {user.email}
+                      {user.slack_user_id
+                        ? ` · Slack ${user.slack_user_id}`
+                        : ""}
+                    </Box>
+                  </Stack>
+                  {user.is_admin && (
+                    <Badge tier="quiet" tone="info">
+                      Admin
+                    </Badge>
+                  )}
+                </Inline>
+              )
+            })}
+          </Stack>
+        )}
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          disabled={users.isFetching}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size)
+            setPage(1)
+          }}
+        />
+      </Stack>
+    </Stack>
   )
 }

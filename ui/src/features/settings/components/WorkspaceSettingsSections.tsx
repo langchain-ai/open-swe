@@ -1,11 +1,23 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
-import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  SettingRow,
+  SettingSection,
+  type SettingControlSlot,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Inline } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@langchain/gtm-platform-design-system/ui/select"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
+import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import {
   useScopedSettings,
@@ -31,43 +43,57 @@ function gatewayModeValue(mode: GatewayMode): boolean | null {
 /**
  * A settings row whose value may come from the tier above. On a workspace it
  * says whether the value is inherited or overridden and offers a way back.
+ * The reset rides with that statement beside the label, so the control lane
+ * keeps its one control.
  */
 export function TierRow({
   settings,
   fields,
   label,
   description,
+  density,
+  tag,
   control,
 }: {
   settings: ScopedSettings
   fields: Array<keyof WorkspaceSettings>
   label: string
-  description: string
-  control: ReactNode
+  description?: string
+  density?: "default" | "compact"
+  /** A statement about the setting itself, such as Experimental. */
+  tag?: ReactNode
+  control: (slot: SettingControlSlot) => ReactNode
 }) {
   const scoped = settings.scope.kind === "workspace"
   const inherits = settings.inherits(...fields)
   return (
-    <SettingsRow
+    <SettingRow
       label={label}
       description={description}
-      badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
-      badgeClassName={!inherits ? "text-risk" : undefined}
-      control={
-        <div className="flex items-center gap-2">
-          {control}
-          {scoped && !inherits && (
-            <Button
-              size="compact"
-              variant="ghost"
-              onClick={() => settings.reset(...fields)}
-              aria-label={`Reset ${label} to the instance value`}
-            >
-              Reset
-            </Button>
-          )}
-        </div>
+      density={density}
+      badge={
+        scoped || tag ? (
+          <Inline gap="xs" align="center">
+            {tag}
+            {scoped && (
+              <Badge tier="quiet" tone={inherits ? "neutral" : "attention"}>
+                {inherits ? "Inherited" : "Overridden"}
+              </Badge>
+            )}
+            {scoped && !inherits && (
+              <Button
+                size="compact"
+                variant="ghost"
+                onClick={() => settings.reset(...fields)}
+                aria-label={`Reset ${label} to the instance value`}
+              >
+                Reset
+              </Button>
+            )}
+          </Inline>
+        ) : undefined
       }
+      control={control}
     />
   )
 }
@@ -86,46 +112,49 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
   ] satisfies Array<{ value: GatewayMode; label: string }>
 
   return (
-    <SettingsSection
+    <SettingSection
+      contained
       title="LLM Gateway"
-      description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. Requires the gateway (private beta) enabled for your organization."
+      description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly. Requires the gateway (private beta) enabled for your organization."
     >
-      <div className="divide-y divide-line">
-        <TierRow
-          settings={settings}
-          fields={["gateway_enabled"]}
-          label="Route through the gateway"
-          description={
-            scoped
-              ? "Inherit follows the instance setting. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
-              : "Inherit uses the LANGSMITH_GATEWAY_ENABLED deployment default. OpenAI, Anthropic, Fireworks, and Google Gemini are routed; other providers call the provider directly."
-          }
-          control={
-            <Select
-              items={modes}
-              value={mode}
-              onValueChange={(next) => {
-                const value = gatewayModeValue(next as GatewayMode)
-                if (value === null && scoped) settings.reset("gateway_enabled")
-                else settings.save({ gateway_enabled: value })
-              }}
-              disabled={!settings.data}
+      <TierRow
+        settings={settings}
+        fields={["gateway_enabled"]}
+        label="Route through the gateway"
+        description={
+          scoped
+            ? "Inherit follows the instance setting."
+            : "Inherit uses the LANGSMITH_GATEWAY_ENABLED deployment default."
+        }
+        control={(slot) => (
+          <Select
+            items={modes}
+            value={mode}
+            onValueChange={(next) => {
+              const value = gatewayModeValue(next as GatewayMode)
+              if (value === null && scoped) settings.reset("gateway_enabled")
+              else settings.save({ gateway_enabled: value })
+            }}
+            disabled={!settings.data}
+          >
+            <SelectTrigger
+              id={slot.id}
+              aria-describedby={slot.describedById}
+              className="w-48"
             >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {modes.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
-      </div>
-    </SettingsSection>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {modes.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      />
+    </SettingSection>
   )
 }
 
@@ -140,7 +169,8 @@ export function DefaultRepoSection({
   const settings = useScopedSettings(scope)
   const scoped = scope.kind === "workspace"
   return (
-    <SettingsSection
+    <SettingSection
+      contained
       title="Default repository"
       description={
         scoped
@@ -148,30 +178,26 @@ export function DefaultRepoSection({
           : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
       }
     >
-      <div className="divide-y divide-line">
-        <TierRow
-          settings={settings}
-          fields={["default_repo"]}
-          label="Repository"
-          description="Used when a run names no repository and the user has no profile default."
-          control={
-            <div className="w-56">
-              <RepoSelector
-                repos={repositories}
-                allowArchived
-                selectedRepo={settings.data?.default_repo ?? null}
-                onRepoChange={(repo) => settings.save({ default_repo: repo })}
-                placeholder="Pick a repository…"
-                emptySelectionLabel="No default repository"
-                triggerClassName="h-7 w-full max-w-none rounded-badge border border-line-strong bg-line-strong/20 px-2 py-1.5 text-label text-ink transition-colors hover:opacity-100"
-                dropdownClassName="w-56"
-                disabled={!settings.data}
-              />
-            </div>
-          }
-        />
-      </div>
-    </SettingsSection>
+      <TierRow
+        settings={settings}
+        fields={["default_repo"]}
+        label="Repository"
+        description="Used when a run names no repository and the user has no profile default."
+        control={() => (
+          <RepoSelector
+            appearance="field"
+            className="w-full"
+            repos={repositories}
+            allowArchived
+            selectedRepo={settings.data?.default_repo ?? null}
+            onRepoChange={(repo) => settings.save({ default_repo: repo })}
+            placeholder="Pick a repository…"
+            emptySelectionLabel="No default repository"
+            disabled={!settings.data}
+          />
+        )}
+      />
+    </SettingSection>
   )
 }
 
@@ -211,8 +237,10 @@ function ModelRow({
       fields={[modelField, effortField]}
       label={label}
       description={description}
-      control={
+      control={(slot) => (
         <ModelPairControl
+          id={slot.id}
+          describedBy={slot.describedById}
           models={models}
           model={settings.data?.[modelField] ?? null}
           effort={settings.data?.[effortField] ?? null}
@@ -232,7 +260,7 @@ function ModelRow({
               : undefined
           }
         />
-      }
+      )}
     />
   )
 }
@@ -248,109 +276,111 @@ export function ModelDefaultsSection({
   const scoped = scope.kind === "workspace"
 
   return (
-    <SettingsSection
+    <SettingSection
+      contained
       title="Model defaults"
       description={
         scoped
-          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
+          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults. Review Chat unset here follows the instance setting, and only falls back to the Agent default when the instance leaves it unset too."
           : "Models for runs in every workspace that does not override them. Each user's Agent settings override the agent defaults."
       }
     >
-      <div className="divide-y divide-line">
-        <TierRow
-          settings={settings}
-          fields={["model_routing_enabled"]}
-          label="Adaptive model routing"
-          description="Automatically choose a model for each turn. Users can still override this in their personal settings."
-          control={
-            <Switch
-              checked={settings.data?.model_routing_enabled ?? false}
-              onCheckedChange={(next) =>
-                settings.save({ model_routing_enabled: next })
-              }
-              disabled={!settings.data}
-            />
-          }
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Open SWE Agent"
-          description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."
-          modelField="default_agent_model"
-          effortField="default_agent_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Open SWE Agent subagents"
-          description="Model used by delegated main-agent tasks."
-          modelField="default_agent_subagent_model"
-          effortField="default_agent_subagent_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Agent routing: fast"
-          description="Model used for straightforward agent turns."
-          modelField="default_agent_routing_fast_model"
-          effortField="default_agent_routing_fast_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Agent routing: balanced"
-          description="Model used for ordinary implementation and investigation turns."
-          modelField="default_agent_routing_balanced_model"
-          effortField="default_agent_routing_balanced_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Agent routing: performance"
-          description="Model used for complex reasoning."
-          modelField="default_agent_routing_performance_model"
-          effortField="default_agent_routing_performance_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Thread title generation"
-          description="Model used to name new agent threads in the background."
-          modelField="default_thread_title_model"
-          effortField="default_thread_title_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Open SWE Reviewer"
-          description="Model used for PR review runs."
-          modelField="default_reviewer_model"
-          effortField="default_reviewer_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Open SWE Reviewer subagents"
-          description="Model used by delegated reviewer tasks."
-          modelField="default_reviewer_subagent_model"
-          effortField="default_reviewer_subagent_reasoning_effort"
-        />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Open SWE Review Chat"
-          description={`Model used by the 'chat with this PR' assistant on the review page. ${
-            scoped
-              ? "Unset here it follows the instance setting, and only falls back to the Agent default when the instance leaves it unset too."
-              : "Falls back to the Agent default when unset."
-          }`}
-          modelField="default_chat_model"
-          effortField="default_chat_reasoning_effort"
-          inheritLabel="Agent default"
-        />
-      </div>
-    </SettingsSection>
+      <TierRow
+        settings={settings}
+        fields={["model_routing_enabled"]}
+        label="Adaptive model routing"
+        description="Automatically choose a model for each turn. Users can still override this in their personal settings."
+        density="compact"
+        control={(slot) => (
+          <Switch
+            id={slot.id}
+            aria-describedby={slot.describedById}
+            checked={settings.data?.model_routing_enabled ?? false}
+            onCheckedChange={(next) =>
+              settings.save({ model_routing_enabled: next })
+            }
+            disabled={!settings.data}
+          />
+        )}
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Open SWE Agent"
+        description="Model used for code-writing runs triggered from Slack, Linear, GitHub, and the Open SWE Agent."
+        modelField="default_agent_model"
+        effortField="default_agent_reasoning_effort"
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Open SWE Agent subagents"
+        description="Model used by delegated main-agent tasks."
+        modelField="default_agent_subagent_model"
+        effortField="default_agent_subagent_reasoning_effort"
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Agent routing: fast"
+        description="Model used for straightforward agent turns."
+        modelField="default_agent_routing_fast_model"
+        effortField="default_agent_routing_fast_reasoning_effort"
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Agent routing: balanced"
+        description="Model used for ordinary implementation and investigation turns."
+        modelField="default_agent_routing_balanced_model"
+        effortField="default_agent_routing_balanced_reasoning_effort"
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Agent routing: performance"
+        description="Model used for complex reasoning."
+        modelField="default_agent_routing_performance_model"
+        effortField="default_agent_routing_performance_reasoning_effort"
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Thread title generation"
+        description="Model used to name new agent threads in the background."
+        modelField="default_thread_title_model"
+        effortField="default_thread_title_reasoning_effort"
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Open SWE Reviewer"
+        description="Model used for PR review runs."
+        modelField="default_reviewer_model"
+        effortField="default_reviewer_reasoning_effort"
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Open SWE Reviewer subagents"
+        description="Model used by delegated reviewer tasks."
+        modelField="default_reviewer_subagent_model"
+        effortField="default_reviewer_subagent_reasoning_effort"
+      />
+      <ModelRow
+        settings={settings}
+        models={models}
+        label="Open SWE Review Chat"
+        description={
+          scoped
+            ? "Model used by the 'chat with this PR' assistant on the review page."
+            : "Model used by the 'chat with this PR' assistant on the review page. Falls back to the Agent default when unset."
+        }
+        modelField="default_chat_model"
+        effortField="default_chat_reasoning_effort"
+        inheritLabel="Agent default"
+      />
+    </SettingSection>
   )
 }
 
@@ -367,6 +397,9 @@ interface ModelPairControlProps {
    */
   inheritLabel?: string
   onInherit?: () => void
+  /** Lands on the model trigger, so a row's label names it. */
+  id?: string
+  describedBy?: string
 }
 
 const INHERIT_VALUE = "__inherit__"
@@ -380,6 +413,8 @@ export function ModelPairControl({
   disabled,
   inheritLabel,
   onInherit,
+  id,
+  describedBy,
 }: ModelPairControlProps) {
   const modelItems = [
     ...(inheritLabel ? [{ value: INHERIT_VALUE, label: inheritLabel }] : []),
@@ -424,14 +459,14 @@ export function ModelPairControl({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <Inline gap="sm" align="center">
       <Select
         items={modelItems}
         value={localModel}
         onValueChange={handleModelChange}
         disabled={disabled}
       >
-        <SelectTrigger className="w-40">
+        <SelectTrigger id={id} aria-describedby={describedBy} className="w-40">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -447,7 +482,7 @@ export function ModelPairControl({
         onValueChange={handleEffortChange}
         disabled={disabled || !localModel || isInherit}
       >
-        <SelectTrigger className="w-28">
+        <SelectTrigger aria-label="Reasoning effort" className="w-28">
           <SelectValue placeholder="effort" />
         </SelectTrigger>
         <SelectContent>
@@ -458,6 +493,6 @@ export function ModelPairControl({
           ))}
         </SelectContent>
       </Select>
-    </div>
+    </Inline>
   )
 }

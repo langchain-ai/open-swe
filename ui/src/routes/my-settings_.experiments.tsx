@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { SettingsPage, SettingsSection } from "@/components/AppShell"
+import { SettingSection } from "@langchain/gtm-platform-design-system/patterns/setting-section"
+
+import { SettingsPage } from "@/components/AppShell"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
@@ -18,10 +20,8 @@ function ExperimentsPage() {
       title="Experiments"
       description="Features under test. They may change or go away."
     >
-      <SettingsSection title="Interface">
-        <AssistantUiPreference />
-      </SettingsSection>
-      <SettingsSection title="Agent">
+      <AssistantUiPreference />
+      <SettingSection title="Agent" contained>
         <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks (experimental)"
@@ -30,18 +30,18 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="prefer_tools_in_sandbox"
           label="Prefer tools through the sandbox"
-          description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint so it can filter their output. Applies to threads you start afterwards."
+          description="MCP calls and large lookups run through the sandbox so the agent can filter their output. New threads only."
         />
         <ProfileSwitchRow
           field="experimental_act_as_approval"
           label="Approve PRs opened as you"
           description={
             profile.data?.act_as_always_allowed
-              ? "You chose Always allow, so Open SWE is not asking. Switch this off and on to be asked again."
-              : "In Slack threads with more than one person, Open SWE DMs you for approval before opening a PR under your name."
+              ? "You chose Always allow, so Open SWE is not asking. Toggle this to be asked again."
+              : "In multi-person Slack threads, Open SWE DMs you before opening a PR under your name."
           }
         />
-      </SettingsSection>
+      </SettingSection>
     </SettingsPage>
   )
 }

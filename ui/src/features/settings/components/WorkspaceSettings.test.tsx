@@ -231,14 +231,13 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage(true, onDeleted)
 
     fireEvent.click(await screen.findByRole("button", { name: "Delete OSS" }))
-    expect(screen.getByRole("alertdialog").textContent).toContain(
-      "cannot be undone"
-    )
+    expect(screen.getByRole("dialog").textContent).toContain("cannot be undone")
     fireEvent.click(
-      within(screen.getByRole("alertdialog")).getByRole("button", {
+      within(screen.getByRole("dialog")).getByRole("button", {
         name: "Cancel",
       })
     )
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(remove).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("button", { name: "Delete OSS" }))
@@ -264,19 +263,21 @@ describe("WorkspaceSettingsPanel", () => {
         })
     )
     fireEvent.click(screen.getByRole("button", { name: "Delete workspace" }))
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Delete workspace" })
+          .hasAttribute("disabled")
+      ).toBe(true)
+    )
     expect(
-      (await screen.findByRole("button", { name: "Deleting…" })).hasAttribute(
-        "disabled"
-      )
-    ).toBe(true)
-    expect(
-      within(screen.getByRole("alertdialog"))
+      within(screen.getByRole("dialog"))
         .getByRole("button", { name: "Cancel" })
         .hasAttribute("disabled")
     ).toBe(true)
     finish()
     await waitFor(() => expect(onDeleted).toHaveBeenCalledOnce())
-    expect(screen.queryByRole("alertdialog")).toBeNull()
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
   it("does not offer deletion without admin access", async () => {
@@ -327,7 +328,7 @@ describe("WorkspaceSettingsPanel", () => {
         (screen.getByLabelText("Workspace name") as HTMLInputElement).value
       ).toBe("OSS support")
     )
-    expect(screen.queryByRole("status")).toBeNull()
+    expect(within(general).queryByRole("status")).toBeNull()
   })
 
   it.each([
@@ -404,7 +405,7 @@ describe("WorkspaceSettingsPanel", () => {
         const reads = getWorkspace.mock.calls.length
         await invalidateWorkspaces()
         expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
-        expect(screen.getByRole("status").textContent).toContain(
+        expect(within(general).getByRole("status").textContent).toContain(
           "rebuild queued"
         )
 
@@ -774,10 +775,9 @@ describe("WorkspaceSettingsPanel", () => {
       })
     renderPage()
 
-    const row = (await screen.findByText("Review Draft PRs")).closest(
-      "label"
-    )!.parentElement!
-    const toggle = within(row).getByRole("switch")
+    const toggle = await screen.findByRole("switch", {
+      name: "Review Draft PRs",
+    })
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false))
     expect(toggle.getAttribute("aria-checked")).toBe("false")
 

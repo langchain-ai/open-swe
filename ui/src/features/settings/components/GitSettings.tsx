@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  SettingRow,
+  SettingSection,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
 import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
@@ -37,16 +40,16 @@ function TextSettingRow({
 }) {
   const { profile, ready, save } = useProfileSettings()
   return (
-    <SettingsRow
+    <SettingRow
       label={label}
       description={description}
-      htmlFor={field}
-      control={
+      control={(slot) => (
         <Input
           // Remount once the profile loads so the field shows the saved value.
           key={`${ready}`}
-          id={field}
-          className="w-56"
+          id={slot.id}
+          aria-describedby={slot.describedById}
+          className="w-full"
           placeholder={placeholder}
           defaultValue={profile?.[field] ?? ""}
           disabled={!ready}
@@ -56,7 +59,7 @@ function TextSettingRow({
               save({ [field]: value } satisfies Partial<ProfileUpdate>)
           }}
         />
-      }
+      )}
     />
   )
 }
@@ -93,27 +96,26 @@ export function GitSettings() {
 
   return (
     <>
-      <SettingsSection
+      <SettingSection
         title="Repository"
         description="Where runs work when a request doesn't name a repository or branch."
+        contained
       >
-        <SettingsRow
+        <SettingRow
           label="Default repository"
           description="Used when a request doesn't name a repository."
-          control={
-            <div className="w-56">
-              <RepoSelector
-                repos={repos.data?.repositories ?? []}
-                selectedRepo={profile?.default_repo ?? null}
-                onRepoChange={(repo) => save({ default_repo: repo })}
-                placeholder="Pick a repository…"
-                emptySelectionLabel="No default repository"
-                disabled={!ready}
-                triggerClassName="h-7 w-full max-w-none rounded-badge border border-line-strong bg-line-strong/20 px-2 py-1.5 text-label text-ink transition-colors hover:opacity-100"
-                dropdownClassName="w-56"
-              />
-            </div>
-          }
+          control={() => (
+            <RepoSelector
+              appearance="field"
+              className="w-full"
+              repos={repos.data?.repositories ?? []}
+              selectedRepo={profile?.default_repo ?? null}
+              onRepoChange={(repo) => save({ default_repo: repo })}
+              placeholder="Pick a repository…"
+              emptySelectionLabel="No default repository"
+              disabled={!ready}
+            />
+          )}
         />
         <TextSettingRow
           field="base_branch"
@@ -127,26 +129,27 @@ export function GitSettings() {
           description="Prefix for branches the agent creates."
           placeholder="open-swe/"
         />
-      </SettingsSection>
+      </SettingSection>
 
-      <SettingsSection
+      <SettingSection
         title="Pull requests"
         description="How pull requests you trigger are opened and reviewed."
+        contained
       >
         <ProfileSwitchRow
           field="draft_prs"
           label="Open as draft"
           description={
             expeditedOn
-              ? "New pull requests start as drafts, except ones the agent nominates for expedited Slack review."
+              ? "New pull requests start as drafts, except ones nominated for expedited Slack review."
               : "New pull requests start as drafts. Existing ones keep their status."
           }
           fallback
         />
-        <SettingsRow
+        <SettingRow
           label="Review my drafts"
           description="Whether Open SWE Review runs on draft pull requests you open."
-          control={
+          control={(slot) => (
             <Select
               items={draftReviewItems}
               value={toChoice(profile?.review_draft_prs)}
@@ -155,7 +158,11 @@ export function GitSettings() {
               }
               disabled={!ready}
             >
-              <SelectTrigger className="w-48">
+              <SelectTrigger
+                id={slot.id}
+                aria-describedby={slot.describedById}
+                className="w-full"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -166,9 +173,9 @@ export function GitSettings() {
                 ))}
               </SelectContent>
             </Select>
-          }
+          )}
         />
-      </SettingsSection>
+      </SettingSection>
     </>
   )
 }

@@ -1,15 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
+import type { ReactNode } from "react"
 
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { GitHub } from "@/components/glyphs"
+import { OpenSweMarkTile } from "@/components/rail/OpenSweMark"
 import { loginUrl } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import {
@@ -19,7 +18,6 @@ import {
   rememberAuthRedirect,
 } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
 
 type LoginSearch = { redirect?: string }
 
@@ -30,6 +28,36 @@ export const Route = createFileRoute("/login")({
   head: () => ({ meta: [{ title: pageTitle("Sign in") }] }),
   component: Login,
 })
+
+/** The sign-in door: one card centred on the desk, no rail. */
+function LoginFrame({ children }: { children: ReactNode }) {
+  return (
+    <Stack
+      render={<main />}
+      align="center"
+      justify="center"
+      padding="lg"
+      className="min-h-svh bg-desk"
+    >
+      <Stack
+        gap="xl"
+        bg="canvas"
+        border="line"
+        radius="shell"
+        className="w-full max-w-md px-6 py-8"
+      >
+        <Inline gap="sm" align="center">
+          <OpenSweMarkTile />
+          <Box render={<span />} className="text-title font-semibold text-ink">
+            Open SWE
+          </Box>
+        </Inline>
+        {children}
+      </Stack>
+    </Stack>
+  )
+}
+
 function Login() {
   const session = useSession()
   const search = Route.useSearch()
@@ -47,9 +75,9 @@ function Login() {
   )
   if (session.isLoading) {
     return (
-      <main className="flex min-h-svh items-center justify-center p-6">
-        <Skeleton className="h-40 w-80" />
-      </main>
+      <LoginFrame>
+        <Skeleton className="h-control w-full" />
+      </LoginFrame>
     )
   }
 
@@ -58,26 +86,28 @@ function Login() {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center p-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Sign in to Open SWE</CardTitle>
-          <CardDescription>
-            Use your GitHub account. We'll configure your default model,
-            reasoning effort, and default repo for Slack/Linear/GitHub triggered
-            runs.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <a
-            href={loginUrl(intendedPath)}
-            className={cn(buttonVariants({ size: "control" }), "w-full")}
-          >
-            Continue with GitHub
-          </a>
-        </CardContent>
-      </Card>
-    </main>
+    <LoginFrame>
+      <Stack gap="xs">
+        <Box
+          render={<h1 />}
+          className="text-page font-semibold tracking-tightish text-ink"
+        >
+          Sign in to Open SWE
+        </Box>
+        <Box render={<p />} className="text-body text-ink-subtle">
+          Use your GitHub account. We'll configure your default model,
+          reasoning effort, and default repo for Slack/Linear/GitHub triggered
+          runs.
+        </Box>
+      </Stack>
+      <a
+        href={loginUrl(intendedPath)}
+        className={cn(buttonVariants({ variant: "primary" }), "w-full")}
+      >
+        <Icon icon={GitHub} size="md" />
+        Continue with GitHub
+      </a>
+    </LoginFrame>
   )
 }
 
@@ -87,8 +117,8 @@ function ClientRedirect({ path }: { path: string }) {
   }, [path])
 
   return (
-    <main className="flex min-h-svh items-center justify-center p-6">
-      <Skeleton className="h-40 w-80" />
-    </main>
+    <LoginFrame>
+      <Skeleton className="h-control w-full" />
+    </LoginFrame>
   )
 }

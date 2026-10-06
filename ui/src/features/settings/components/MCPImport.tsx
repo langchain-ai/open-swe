@@ -1,5 +1,10 @@
 import { useState } from "react"
 
+import {
+  FormField,
+  FormSection,
+} from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import type { MCPConnectionUpdate, MCPOAuthUpdate } from "@/lib/api"
@@ -129,50 +134,56 @@ export function MCPImport({
   const [text, setText] = useState("")
   const [error, setError] = useState<string | null>(null)
   return (
-    <form
-      className="space-y-3 rounded-badge border p-4"
-      onSubmit={(event) => {
-        event.preventDefault()
-        try {
-          const connections = parseMCPConfig(text)
-          setText("")
-          onImport(connections)
-        } catch (cause) {
-          setError(
-            cause instanceof Error ? cause.message : "Unable to import JSON."
-          )
-        }
-      }}
+    <Stack
+      render={
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            try {
+              const connections = parseMCPConfig(text)
+              setText("")
+              onImport(connections)
+            } catch (cause) {
+              setError(
+                cause instanceof Error
+                  ? cause.message
+                  : "Unable to import JSON."
+              )
+            }
+          }}
+        />
+      }
+      gap="lg"
     >
-      <p className="text-body font-medium">Import MCP JSON</p>
-      <p className="text-meta text-ink-subtle">
-        Paste a Claude-style mcpServers configuration. Review each connection
-        before saving. New connections preselect all tools after discovery.
-      </p>
-      <Textarea
-        aria-label="MCP configuration JSON"
-        className="h-48 max-h-64 resize-y font-mono"
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        autoComplete="off"
-        spellCheck={false}
-        placeholder={
-          '{\n  "mcpServers": {\n    "datadog": {\n      "type": "http",\n      "url": "https://mcp.us5.datadoghq.com/v1/mcp",\n      "headers": {\n        "DD_API_KEY": "YOUR_API_KEY",\n        "DD_APPLICATION_KEY": "YOUR_APPLICATION_KEY"\n      }\n    }\n  }\n}'
-        }
-      />
-      {error && (
-        <p role="alert" className="text-body text-risk">
-          {error}
-        </p>
-      )}
-      <div className="flex gap-2">
+      <FormSection
+        title="Import MCP JSON"
+        description="Paste a Claude-style mcpServers configuration. Review each connection before saving. New connections preselect all tools after discovery."
+      >
+        <FormField
+          label="MCP configuration JSON"
+          error={error ?? undefined}
+          control={
+            <Textarea
+              className="h-48 max-h-64 resize-y font-mono"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={
+                '{\n  "mcpServers": {\n    "datadog": {\n      "type": "http",\n      "url": "https://mcp.us5.datadoghq.com/v1/mcp",\n      "headers": {\n        "DD_API_KEY": "YOUR_API_KEY",\n        "DD_APPLICATION_KEY": "YOUR_APPLICATION_KEY"\n      }\n    }\n  }\n}'
+              }
+            />
+          }
+        />
+      </FormSection>
+      <Inline gap="sm" align="center">
         <Button type="submit" size="compact" disabled={!text.trim()}>
           Review connections
         </Button>
         <Button type="button" size="compact" variant="ghost" onClick={onCancel}>
           {text ? "Cancel import" : "Close import"}
         </Button>
-      </div>
-    </form>
+      </Inline>
+    </Stack>
   )
 }

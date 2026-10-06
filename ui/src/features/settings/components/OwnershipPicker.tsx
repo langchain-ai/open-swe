@@ -1,13 +1,45 @@
-import { useMemo, useState, type ReactNode } from "react"
-import { MagnifyingGlassIcon, WarningIcon } from "@phosphor-icons/react"
+import { useId, useMemo, useState, type ReactNode } from "react"
 
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { FormField } from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@langchain/gtm-platform-design-system/ui/dialog"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
-import { Dialog, DialogDescription, DialogContent, DialogTitle, DialogTrigger } from "@langchain/gtm-platform-design-system/ui/dialog"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import { SearchInput } from "@langchain/gtm-platform-design-system/ui/search-input"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@langchain/gtm-platform-design-system/ui/toggle-group"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@langchain/gtm-platform-design-system/ui/tooltip"
+import { AlertTriangle, Search } from "@/components/glyphs"
 import { cn } from "@/lib/utils"
+
+/** The segmented filter's value for "no category". */
+const ALL_FILTER = "__all__"
 
 export interface PickerOwner {
   slug: string
@@ -101,6 +133,7 @@ export function OwnershipPicker({
   notice = null,
   disabled = false,
 }: OwnershipPickerProps) {
+  const rowIdPrefix = useId()
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<Array<string>>(selected)
   const [search, setSearch] = useState("")
@@ -175,59 +208,77 @@ export function OwnershipPicker({
     const checked = draftSet.has(item.id)
     // A conflicting row that is somehow already selected stays removable.
     const locked = (elsewhere || item.disabled) && !checked
+    // The row is the click target, but only the item's name labels the box.
+    const nameId = `${rowIdPrefix}-${encodeURIComponent(item.id)}`
     return (
-      <label
+      <Inline
+        render={<label />}
         key={item.id}
+        gap="md"
+        align="start"
         className={cn(
-          "flex items-start gap-3 px-3 py-2 text-body transition-colors hover:bg-muted/40",
+          "cursor-pointer rounded-compact px-2 py-1.5 text-label text-ink transition-colors duration-fast ease-out-quint hover:bg-hover motion-reduce:transition-none",
           elsewhere && "opacity-60"
         )}
       >
-        <input
-          type="checkbox"
-          className="mt-1 size-3.5 shrink-0 accent-primary"
-          aria-label={item.label}
+        <Checkbox
+          className="mt-0.5"
+          aria-labelledby={nameId}
           checked={checked}
           disabled={locked}
-          onChange={() => toggle(item.id)}
+          onCheckedChange={() => toggle(item.id)}
         />
         {item.icon && (
-          <span className="mt-0.5 shrink-0 text-ink-subtle">
+          <Box render={<span />} className="mt-0.5 shrink-0 text-ink-subtle">
             {item.icon}
-          </span>
+          </Box>
         )}
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex items-center gap-2">
-            <span className="truncate" title={item.label}>
+        <Stack gap="none" className="min-w-0 flex-1">
+          <Inline gap="sm" align="center" className="min-w-0">
+            <Box
+              render={<span id={nameId} />}
+              className="truncate"
+              title={item.label}
+            >
               {item.label}
-            </span>
+            </Box>
             {item.meta && (
-              <span className="shrink-0 text-meta text-ink-subtle">
+              <Box
+                render={<span />}
+                className="shrink-0 text-meta text-ink-subtle"
+              >
                 {item.meta}
-              </span>
+              </Box>
             )}
-          </span>
+          </Inline>
           {item.warning && !elsewhere && (
-            <span className="flex items-center gap-1 text-meta text-ink-subtle">
-              <WarningIcon size={12} /> {item.warning}
-            </span>
+            <Inline
+              gap="xs"
+              align="center"
+              className="text-meta text-ink-subtle"
+            >
+              <Icon icon={AlertTriangle} size="sm" />
+              <Box render={<span />}>{item.warning}</Box>
+            </Inline>
           )}
-        </span>
+        </Stack>
         {elsewhere && item.owner && (
-          <Badge variant="secondary">{item.owner.name}</Badge>
+          <Badge tier="quiet" tone="neutral">
+            {item.owner.name}
+          </Badge>
         )}
-      </label>
+      </Inline>
     )
   }
 
   const renderGroup = (heading: string, group: Array<PickerItem>) =>
     group.length > 0 && (
-      <div>
-        <div className="px-3 pt-3 pb-1 text-meta font-medium text-ink-subtle">
+      <Stack gap="none">
+        <Box className="px-2 pt-2 pb-1 text-meta font-medium text-ink-subtle">
           {heading} · {group.length}
-        </div>
+        </Box>
         {group.map(renderRow)}
-      </div>
+      </Stack>
     )
 
   const empty = inThis.length + available.length + owned.length === 0
@@ -254,133 +305,138 @@ export function OwnershipPicker({
       >
         {triggerLabel}
       </DialogTrigger>
-      <DialogContent className="w-full max-w-[520px]">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-3">
-          <DialogTitle>{title}</DialogTitle>
-          {actions}
-        </div>
-        {description && (
-          <DialogDescription className="px-3 pt-1">
-            {description}
-          </DialogDescription>
-        )}
-        <div className="flex items-center gap-3 px-3 pt-3 pb-2">
-          <div className="relative min-w-0 flex-1">
-            <MagnifyingGlassIcon
-              className="pointer-events-none absolute top-1.5 left-2 text-ink-subtle"
-              size={14}
-            />
-            <Input
-              aria-label={searchPlaceholder}
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader className="pr-8">
+          <Inline gap="sm" align="center" justify="between" wrap>
+            <DialogTitle>{title}</DialogTitle>
+            {actions}
+          </Inline>
+          {description && <DialogDescription>{description}</DialogDescription>}
+        </DialogHeader>
+        <Stack gap="sm">
+          <Inline gap="md" align="center">
+            <SearchInput
+              className="min-w-0 flex-1"
+              label={searchPlaceholder}
               placeholder={searchPlaceholder}
-              className="pl-7"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onValueChange={setSearch}
             />
-          </div>
-          {filter && (
-            <label className="flex shrink-0 items-center gap-2 text-meta text-ink-subtle">
-              {/* The enclosing label names the switch; an aria-label as well
-                  would double the announced name. */}
-              <Switch checked={filterOn} onCheckedChange={setFilterOn} />
-              {filter.label}
-            </label>
-          )}
-        </div>
-        {filters && (
-          <div
-            role="group"
-            aria-label={`${title} filter`}
-            className="flex gap-1 px-3 pb-2"
-          >
-            {[null, ...filters].map((option) => (
-              <Button
-                key={option?.label ?? "All"}
-                size="compact"
-                variant={
-                  activeFilter === (option?.label ?? null)
-                    ? "secondary"
-                    : "ghost"
-                }
-                aria-pressed={activeFilter === (option?.label ?? null)}
-                onClick={() => setActiveFilter(option?.label ?? null)}
+            {filter && (
+              <Inline
+                render={<label />}
+                gap="sm"
+                align="center"
+                className="shrink-0 text-meta text-ink-subtle"
               >
-                {option?.label ?? "All"}
-              </Button>
-            ))}
-          </div>
-        )}
-        <div className="min-h-0 flex-1 overflow-y-auto border-t border-line pb-2">
-          {notice && (
-            <p className="flex items-center gap-1 px-3 pt-3 text-meta text-ink-subtle">
-              <WarningIcon size={12} /> {notice}
-            </p>
+                {/* The enclosing label names the switch; an aria-label as well
+                    would double the announced name. */}
+                <Switch checked={filterOn} onCheckedChange={setFilterOn} />
+                {filter.label}
+              </Inline>
+            )}
+          </Inline>
+          {filters && (
+            <ToggleGroup
+              aria-label={`${title} filter`}
+              value={[activeFilter ?? ALL_FILTER]}
+              onValueChange={(groupValue) => {
+                const next = groupValue[0]
+                setActiveFilter(!next || next === ALL_FILTER ? null : next)
+              }}
+            >
+              <ToggleGroupItem value={ALL_FILTER}>All</ToggleGroupItem>
+              {filters.map((option) => (
+                <ToggleGroupItem key={option.label} value={option.label}>
+                  {option.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           )}
-          {loading && (
-            <p className="px-3 py-3 text-meta text-ink-subtle">Loading…</p>
-          )}
-          {loadError && (
-            <p role="alert" className="px-3 py-3 text-label text-risk">
-              {loadError}
-            </p>
-          )}
-          {!loading && !loadError && empty && (
-            <p className="px-3 py-3 text-meta text-ink-subtle">
-              Nothing matches.
-            </p>
-          )}
-          {renderGroup("In this workspace", inThis)}
-          {renderGroup("Available", available)}
-          {renderGroup("Owned by another workspace", owned)}
-        </div>
+        </Stack>
+        <Box border="line" radius="compact" className="overflow-hidden">
+          <ScrollArea overflow="vertical" viewportClassName="max-h-80">
+            <Stack gap="xs" padding="xs">
+              {notice && (
+                <Inline
+                  gap="xs"
+                  align="center"
+                  className="px-2 pt-1 text-meta text-ink-subtle"
+                >
+                  <Icon icon={AlertTriangle} size="sm" />
+                  <Box render={<span />}>{notice}</Box>
+                </Inline>
+              )}
+              {loading && (
+                <Stack gap="xs" padding="xs">
+                  <Skeleton className="h-control-sm w-full" />
+                  <Skeleton className="h-control-sm w-full" />
+                </Stack>
+              )}
+              {loadError && (
+                <StateNotice
+                  tone="RISK"
+                  icon={AlertTriangle}
+                  title={`Could not list ${pluralNoun}`}
+                  description={loadError}
+                />
+              )}
+              {!loading && !loadError && empty && (
+                <EmptyState icon={Search} title="Nothing matches." />
+              )}
+              {renderGroup("In this workspace", inThis)}
+              {renderGroup("Available", available)}
+              {renderGroup("Owned by another workspace", owned)}
+            </Stack>
+          </ScrollArea>
+        </Box>
         {manual && (
-          <form
-            className="flex items-start gap-2 border-t border-line px-3 py-2"
-            onSubmit={(event) => {
-              event.preventDefault()
-              addManual()
-            }}
-          >
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <Input
-                aria-label={manual.label}
-                placeholder={manual.placeholder}
-                value={manualValue}
-                onChange={(event) => {
-                  setManualValue(event.target.value)
-                  setManualError(null)
+          <Inline
+            render={
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  addManual()
                 }}
               />
-              {manualError ? (
-                <span role="alert" className="text-label text-risk">
-                  {manualError}
-                </span>
-              ) : (
-                manual.hint && (
-                  <span className="text-meta text-ink-subtle">
-                    {manual.hint}
-                  </span>
-                )
-              )}
-            </div>
+            }
+            gap="sm"
+            align="end"
+          >
+            <Box className="min-w-0 flex-1">
+              <FormField
+                label={manual.label}
+                help={manual.hint}
+                error={manualError ?? undefined}
+                control={
+                  <Input
+                    placeholder={manual.placeholder}
+                    value={manualValue}
+                    onChange={(event) => {
+                      setManualValue(event.target.value)
+                      setManualError(null)
+                    }}
+                  />
+                }
+              />
+            </Box>
             <Button
               type="submit"
-              size="compact"
               variant="outline"
               disabled={!manualValue.trim()}
             >
               Add
             </Button>
-          </form>
+          </Inline>
         )}
-        <div className="flex items-center justify-between gap-3 border-t border-line px-3 py-2">
-          <span className="text-meta text-ink-subtle">
+        <DialogFooter className="sm:items-center sm:justify-between">
+          <Box render={<span />} className="text-meta text-ink-subtle">
             {hiddenCount > 0 && (
               <Tooltip>
                 <TooltipTrigger className="cursor-help underline decoration-dotted underline-offset-4">
                   {hiddenCount} hidden by the filter
                 </TooltipTrigger>
-                <TooltipContent className="max-w-64">
+                <TooltipContent>
                   Hidden by{" "}
                   {[filterActive && filter.label, categoryFilter?.label]
                     .filter(Boolean)
@@ -390,13 +446,12 @@ export function OwnershipPicker({
                 </TooltipContent>
               </Tooltip>
             )}
-          </span>
-          <div className="flex gap-2">
-            <Button size="compact" variant="ghost" onClick={() => setOpen(false)}>
+          </Box>
+          <Inline gap="sm">
+            <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
             <Button
-              size="compact"
               onClick={() => {
                 onChange(draft)
                 setOpen(false)
@@ -404,8 +459,8 @@ export function OwnershipPicker({
             >
               Save {draft.length} {draft.length === 1 ? noun : pluralNoun}
             </Button>
-          </div>
-        </div>
+          </Inline>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

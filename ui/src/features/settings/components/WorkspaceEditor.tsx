@@ -1,11 +1,15 @@
-import { QuestionIcon } from "@phosphor-icons/react"
-
-import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
+import { FormField } from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
-import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
+import { ScriptField, WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
 import { slackChannelHref } from "@/lib/slack-channels"
 
@@ -27,30 +31,29 @@ export function Chips({
 }) {
   if (values.length === 0) return null
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <Inline gap="xs" wrap>
       {values.map((value) => {
         const href = hrefFor?.(value) ?? null
-        const className =
-          "rounded-full border border-line px-2 py-0.5 text-meta text-ink-subtle"
+        const text = labelFor?.(value) ?? value
         if (!href)
           return (
-            <span key={value} className={className}>
-              {labelFor?.(value) ?? value}
-            </span>
+            <Badge key={value} tier="quiet" tone="neutral">
+              {text}
+            </Badge>
           )
         return (
-          <a
+          <Badge
             key={value}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`${className} hover:border-ink/30 hover:text-ink`}
+            tier="quiet"
+            tone="neutral"
+            className="hover:text-ink"
+            render={<a href={href} target="_blank" rel="noopener noreferrer" />}
           >
-            {labelFor?.(value) ?? value}
-          </a>
+            {text}
+          </Badge>
         )
       })}
-    </div>
+    </Inline>
   )
 }
 
@@ -97,21 +100,40 @@ function SlackChannelRows({
 }) {
   const kitchen = new Set(draft.kitchenChannelIds)
   return (
-    <ul className="w-full divide-y divide-line rounded-badge border border-line">
+    <Stack
+      render={<ul />}
+      gap="none"
+      border="line"
+      radius="compact"
+      className="w-full overflow-hidden"
+    >
       {draft.slackChannelIds.map((id) => (
-        <li
+        <Inline
+          render={<li />}
           key={id}
-          className="flex items-center justify-between gap-3 px-2.5 py-1.5"
+          gap="md"
+          align="center"
+          justify="between"
+          className="border-b border-line px-3 py-1.5 last:border-b-0"
         >
-          <a
-            href={slackChannelHref(id)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="truncate text-label hover:underline"
+          <Box
+            render={
+              <a
+                href={slackChannelHref(id)}
+                target="_blank"
+                rel="noopener noreferrer"
+              />
+            }
+            className="truncate text-label text-ink hover:underline"
           >
             {channelLabel(id)}
-          </a>
-          <label className="flex shrink-0 items-center gap-2 text-meta text-ink-subtle">
+          </Box>
+          <Inline
+            render={<label />}
+            gap="sm"
+            align="center"
+            className="shrink-0 text-meta text-ink-subtle"
+          >
             Kitchen
             <Switch
               aria-label={`Kitchen mode for ${channelLabel(id)}`}
@@ -122,10 +144,10 @@ function SlackChannelRows({
                 onChange({ ...draft, kitchenChannelIds: [...kitchen].sort() })
               }}
             />
-          </label>
-        </li>
+          </Inline>
+        </Inline>
       ))}
-    </ul>
+    </Stack>
   )
 }
 
@@ -146,120 +168,100 @@ export function WorkspaceEditor({
   channelLabel: (id: string) => string
 }) {
   return (
-    <div className="space-y-3 border-t border-line px-4 py-3.5">
-      <label className="block text-body">
-        Name
-        <Input
-          aria-label="Workspace name"
-          value={draft.name}
-          onChange={(e) => onChange({ ...draft, name: e.target.value })}
-        />
-      </label>
-      <div className="text-body">
-        <span className="inline-flex items-center gap-1.5">
-          Bound repositories
-          <Tooltip>
-            <TooltipTrigger
-              aria-label="About workspace repositories"
-              className="rounded-full text-ink-subtle transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              type="button"
-            >
-              <QuestionIcon size={15} weight="fill" />
-            </TooltipTrigger>
-            <TooltipContent className="max-w-72">
-              Threads in any workspace can use any repository the GitHub App can
-              access. Binding a repository routes its GitHub issues, pull
-              requests, Linear tickets, and automations to this workspace and
-              preloads it into this workspace&apos;s sandbox image. A repository
-              is bound to one workspace.
-            </TooltipContent>
-          </Tooltip>
-        </span>
-        <div
-          role="group"
-          aria-label="Bound repositories"
-          className="mt-1 flex flex-wrap items-center gap-2"
-        >
-          {draft.repos.length > 0 ? (
-            <Chips values={draft.repos} hrefFor={githubRepoHref} />
-          ) : (
-            <span className="text-meta text-ink-subtle">None yet</span>
-          )}
-          <RepositoryPicker
-            selected={draft.repos}
-            onChange={(repos) => onChange({ ...draft, repos })}
-            workspaceSlug={workspaceSlug}
-            workspaces={workspaces}
+    <Stack gap="lg">
+      <FormField
+        label="Name"
+        control={
+          <Input
+            aria-label="Workspace name"
+            value={draft.name}
+            onChange={(e) => onChange({ ...draft, name: e.target.value })}
           />
-        </div>
-      </div>
-      <div className="text-body">
-        <span className="inline-flex items-center gap-1.5">
-          Slack channels
-          <Tooltip>
-            <TooltipTrigger
-              aria-label="About kitchen channels"
-              className="rounded-full text-ink-subtle transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              type="button"
-            >
-              <QuestionIcon size={15} weight="fill" />
-            </TooltipTrigger>
-            <TooltipContent className="max-w-72">
-              Mentions in these channels start runs in this workspace. Turn on
-              Kitchen for a channel to let every top-level message start a
-              thread and replies continue it without mentioning Open SWE.
-            </TooltipContent>
-          </Tooltip>
-        </span>
-        <div
-          role="group"
-          aria-label="Slack channels"
-          className="mt-1 flex flex-wrap items-center gap-2"
-        >
-          {draft.slackChannelIds.length > 0 ? (
-            <SlackChannelRows
-              draft={draft}
-              onChange={onChange}
-              channelLabel={channelLabel}
+        }
+      />
+      <FormField
+        label="Bound repositories"
+        help="Threads in any workspace can use any repository the GitHub App can access. Binding a repository routes its GitHub issues, pull requests, Linear tickets, and automations to this workspace and preloads it into this workspace's sandbox image. A repository is bound to one workspace."
+        control={
+          <Inline
+            role="group"
+            aria-label="Bound repositories"
+            gap="sm"
+            align="center"
+            wrap
+          >
+            {draft.repos.length > 0 ? (
+              <Chips values={draft.repos} hrefFor={githubRepoHref} />
+            ) : (
+              <Box render={<span />} className="text-meta text-ink-subtle">
+                None yet
+              </Box>
+            )}
+            <RepositoryPicker
+              selected={draft.repos}
+              onChange={(repos) => onChange({ ...draft, repos })}
+              workspaceSlug={workspaceSlug}
+              workspaces={workspaces}
             />
-          ) : (
-            <span className="text-meta text-ink-subtle">
-              None yet. Add a channel to turn on Kitchen mode for it.
-            </span>
-          )}
-          <SlackChannelPicker
-            selected={draft.slackChannelIds}
-            onChange={(slackChannelIds) =>
-              onChange({
-                ...draft,
-                slackChannelIds,
-                kitchenChannelIds: draft.kitchenChannelIds.filter((id) =>
-                  slackChannelIds.includes(id)
-                ),
-              })
-            }
-            workspaceSlug={workspaceSlug}
-            workspaces={workspaces}
+          </Inline>
+        }
+      />
+      <FormField
+        label="Slack channels"
+        help="Mentions in these channels start runs in this workspace. Turn on Kitchen for a channel to let every top-level message start a thread and replies continue it without mentioning Open SWE."
+        control={
+          <Inline
+            role="group"
+            aria-label="Slack channels"
+            gap="sm"
+            align="center"
+            wrap
+          >
+            {draft.slackChannelIds.length > 0 ? (
+              <SlackChannelRows
+                draft={draft}
+                onChange={onChange}
+                channelLabel={channelLabel}
+              />
+            ) : (
+              <Box render={<span />} className="text-meta text-ink-subtle">
+                None yet. Add a channel to turn on Kitchen mode for it.
+              </Box>
+            )}
+            <SlackChannelPicker
+              selected={draft.slackChannelIds}
+              onChange={(slackChannelIds) =>
+                onChange({
+                  ...draft,
+                  slackChannelIds,
+                  kitchenChannelIds: draft.kitchenChannelIds.filter((id) =>
+                    slackChannelIds.includes(id)
+                  ),
+                })
+              }
+              workspaceSlug={workspaceSlug}
+              workspaces={workspaces}
+            />
+          </Inline>
+        }
+      />
+      <FormField
+        label="Instructions"
+        control={
+          <SlackChannelTextarea
+            aria-label="Instructions"
+            placeholder={promptHint}
+            value={draft.prompt}
+            onValueChange={(prompt) => onChange({ ...draft, prompt })}
           />
-        </div>
-      </div>
-      <label className="block text-body">
-        Instructions
-        <SlackChannelTextarea
-          aria-label="Instructions"
-          placeholder={promptHint}
-          value={draft.prompt}
-          onValueChange={(prompt) => onChange({ ...draft, prompt })}
-        />
-      </label>
+        }
+      />
       {workspaceSlug === null && (
         <>
-          <div className="text-body">
-            <div>Setup script (optional)</div>
-            <p className="text-meta text-ink-subtle">
-              Builds the image from the base snapshot immediately after creation
-              and nightly. Without a setup script, no image is built.
-            </p>
+          <ScriptField
+            label="Setup script (optional)"
+            help="Builds the image from the base snapshot immediately after creation and nightly. Without a setup script, no image is built."
+          >
             <WorkspaceScriptEditor
               label="Setup script"
               repos={draft.repos}
@@ -267,13 +269,11 @@ export function WorkspaceEditor({
               onChange={(setupScript) => onChange({ ...draft, setupScript })}
               description="Edit the shell script, then create the workspace to save it and start building the image."
             />
-          </div>
-          <div className="text-body">
-            <div>Update script (optional)</div>
-            <p className="text-meta text-ink-subtle">
-              Runs after setup and refreshes the current image while it is in
-              use.
-            </p>
+          </ScriptField>
+          <ScriptField
+            label="Update script (optional)"
+            help="Runs after setup and refreshes the current image while it is in use."
+          >
             <WorkspaceScriptEditor
               label="Update script"
               repos={draft.repos}
@@ -281,9 +281,9 @@ export function WorkspaceEditor({
               onChange={(updateScript) => onChange({ ...draft, updateScript })}
               description="Edit the shell script, then create the workspace to save it."
             />
-          </div>
+          </ScriptField>
         </>
       )}
-    </div>
+    </Stack>
   )
 }

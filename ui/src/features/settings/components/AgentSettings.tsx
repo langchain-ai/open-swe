@@ -1,4 +1,7 @@
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  SettingRow,
+  SettingSection,
+} from "@langchain/gtm-platform-design-system/patterns/setting-section"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
 import { ModelPairControl } from "./WorkspaceSettingsSections"
@@ -26,11 +29,11 @@ export function AgentSettings() {
 
   return (
     <>
-      <SettingsSection title="Models">
-        <SettingsRow
+      <SettingSection title="Models" contained>
+        <SettingRow
           label="Adaptive routing"
           description="Pick a model for each turn automatically."
-          control={
+          control={(slot) => (
             <Select
               items={ROUTING_ITEMS}
               value={routingChoice(profile?.model_routing_enabled)}
@@ -39,7 +42,11 @@ export function AgentSettings() {
               }
               disabled={!ready}
             >
-              <SelectTrigger className="w-40">
+              <SelectTrigger
+                id={slot.id}
+                aria-describedby={slot.describedById}
+                className="w-full"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -50,13 +57,15 @@ export function AgentSettings() {
                 ))}
               </SelectContent>
             </Select>
-          }
+          )}
         />
-        <SettingsRow
+        <SettingRow
           label="Default model"
           description="Model and reasoning effort when adaptive routing is off."
-          control={
+          control={(slot) => (
             <ModelPairControl
+              id={slot.id}
+              describedBy={slot.describedById}
               models={models}
               model={
                 profile?.default_model ?? options?.default_agent_model ?? null
@@ -71,13 +80,15 @@ export function AgentSettings() {
               }
               disabled={!ready}
             />
-          }
+          )}
         />
-        <SettingsRow
+        <SettingRow
           label="Subagent model"
           description="Model and reasoning effort for delegated tasks."
-          control={
+          control={(slot) => (
             <ModelPairControl
+              id={slot.id}
+              describedBy={slot.describedById}
               models={models}
               model={profile?.default_subagent_model ?? null}
               effort={profile?.subagent_reasoning_effort ?? null}
@@ -96,11 +107,11 @@ export function AgentSettings() {
               }
               disabled={!ready}
             />
-          }
+          )}
         />
-      </SettingsSection>
+      </SettingSection>
 
-      <SettingsSection title="Runs">
+      <SettingSection title="Runs" contained>
         <ProfileSwitchRow
           field="recent_thread_context_enabled"
           label="Include recent work"
@@ -109,10 +120,10 @@ export function AgentSettings() {
         <ProfileSwitchRow
           field="preserve_sandbox_memory"
           label="Keep sandbox memory on auto-stop"
-          description="When an idle sandbox stops, save its running processes so the next run resumes where it left off. Applies to new sandboxes."
+          description="Idle sandboxes save running processes so the next run resumes there. New sandboxes only."
           fallback
         />
-      </SettingsSection>
+      </SettingSection>
     </>
   )
 }

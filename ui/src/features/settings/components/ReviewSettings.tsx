@@ -1,13 +1,23 @@
 import { useEffect, useState } from "react"
-import { SettingsSection } from "@/components/AppShell"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { SettingSection } from "@langchain/gtm-platform-design-system/patterns/setting-section"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { Lock } from "@/components/glyphs"
 import {
   useScopedSettings,
   type SettingsScope,
 } from "@/features/settings/lib/settingsScope"
 import { TierRow } from "./WorkspaceSettingsSections"
+
+type ReviewToggle = "review_draft_prs" | "pr_summaries" | "review_trace_links"
 
 /** Review guidelines and toggles at one tier: the instance, or one workspace's overrides. */
 export function ReviewSettings({
@@ -36,103 +46,115 @@ export function ReviewSettings({
   const savedGuidelines = (settings.data?.org_guidelines ?? "").trim()
   const guidelinesDirty = trimmedGuidelines !== savedGuidelines
 
-  const toggle = (
-    field: "review_draft_prs" | "pr_summaries" | "review_trace_links"
+  const toggleRow = (
+    field: ReviewToggle,
+    label: string,
+    description: string
   ) => (
-    <Switch
-      checked={!!settings.data?.[field]}
-      onCheckedChange={(v) => settings.save({ [field]: v })}
-      disabled={!editable}
+    <TierRow
+      settings={settings}
+      fields={[field]}
+      label={label}
+      description={description}
+      density="compact"
+      control={(slot) => (
+        <Switch
+          id={slot.id}
+          aria-describedby={slot.describedById}
+          checked={!!settings.data?.[field]}
+          onCheckedChange={(v) => settings.save({ [field]: v })}
+          disabled={!editable}
+        />
+      )}
     />
   )
 
   return (
     <>
-      <SettingsSection
+      <PageSection
+        contained
+        inset="padded"
         title="Review Guidelines"
         description={
           scoped
             ? "Instructions injected into every review this workspace runs, across all of its repositories. Until this workspace sets its own, the instance guidelines apply. Repository-specific style prompts take precedence when they conflict."
             : "Instructions injected into every review, in every workspace that does not set its own. Repository-specific style prompts take precedence when they conflict."
         }
-      >
-        <div className="flex flex-col gap-2 p-4">
-          {scoped && (
-            <p className="text-meta text-ink-subtle">
+        actions={
+          scoped ? (
+            <Badge
+              tier="quiet"
+              tone={guidelinesInherited ? "neutral" : "attention"}
+            >
               {guidelinesInherited
                 ? "Inherited from the instance."
                 : "Overridden for this workspace."}
-            </p>
-          )}
-          <Textarea
-            aria-label="Review guidelines"
-            className="min-h-[200px] w-full font-mono text-label"
-            value={guidelinesDraft}
-            onChange={(e) => setGuidelinesDraft(e.target.value)}
-            placeholder="e.g. Always flag missing input validation on new API endpoints. Prefer structured logging over print statements."
-            disabled={!editable}
-          />
-          {canEdit && (
-            <div className="flex items-center gap-2">
+            </Badge>
+          ) : undefined
+        }
+      >
+        <Textarea
+          aria-label="Review guidelines"
+          className="min-h-50 w-full font-mono"
+          value={guidelinesDraft}
+          onChange={(e) => setGuidelinesDraft(e.target.value)}
+          placeholder="e.g. Always flag missing input validation on new API endpoints. Prefer structured logging over print statements."
+          disabled={!editable}
+        />
+        {canEdit && (
+          <Inline gap="sm" align="center" wrap>
+            <Button
+              size="compact"
+              disabled={!editable || !guidelinesDirty}
+              onClick={() =>
+                settings.save({ org_guidelines: trimmedGuidelines || null })
+              }
+            >
+              Save guidelines
+            </Button>
+            {scoped && !guidelinesInherited && (
               <Button
                 size="compact"
-                disabled={!editable || !guidelinesDirty}
-                onClick={() =>
-                  settings.save({ org_guidelines: trimmedGuidelines || null })
-                }
+                variant="ghost"
+                disabled={!editable}
+                onClick={() => settings.reset("org_guidelines")}
               >
-                Save guidelines
+                Reset to instance
               </Button>
-              {scoped && !guidelinesInherited && (
-                <Button
-                  size="compact"
-                  variant="ghost"
-                  disabled={!editable}
-                  onClick={() => settings.reset("org_guidelines")}
-                >
-                  Reset to instance
-                </Button>
-              )}
-              {guidelinesDirty && (
-                <span className="text-meta text-ink-subtle">
-                  Unsaved changes
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </SettingsSection>
+            )}
+            {guidelinesDirty && (
+              <Box render={<span />} className="text-meta text-ink-subtle">
+                Unsaved changes
+              </Box>
+            )}
+          </Inline>
+        )}
+      </PageSection>
 
-      <SettingsSection title="Review configuration">
-        <div className="divide-y divide-line">
-          <TierRow
-            settings={settings}
-            fields={["review_draft_prs"]}
-            label="Review Draft PRs"
-            description="Whether Open SWE Review runs on draft PRs. Each user can override it in their Git settings."
-            control={toggle("review_draft_prs")}
-          />
-          <TierRow
-            settings={settings}
-            fields={["pr_summaries"]}
-            label="PR Summaries"
-            description="Generate descriptions on pull requests"
-            control={toggle("pr_summaries")}
-          />
-          <TierRow
-            settings={settings}
-            fields={["review_trace_links"]}
-            label="Reviewer trace links"
-            description="Link each review comment to the reviewer's own LangSmith run. Only members of your LangSmith workspace can open it."
-            control={toggle("review_trace_links")}
-          />
-        </div>
-      </SettingsSection>
+      <SettingSection contained title="Review configuration">
+        {toggleRow(
+          "review_draft_prs",
+          "Review Draft PRs",
+          "Whether Open SWE Review runs on draft PRs. Each user can override it in their Git settings."
+        )}
+        {toggleRow(
+          "pr_summaries",
+          "PR Summaries",
+          "Generate descriptions on pull requests"
+        )}
+        {toggleRow(
+          "review_trace_links",
+          "Reviewer trace links",
+          "Link each review comment to the reviewer's own LangSmith run. Only members of your LangSmith workspace can open it."
+        )}
+      </SettingSection>
 
       {!canEdit && (
-        <p className="text-meta text-ink-subtle">
-          These settings are read-only. Ask a workspace admin to change them.
-        </p>
+        <Alert tone="neutral" icon={Lock}>
+          <AlertDescription>
+            These settings are read-only. Ask a workspace admin to change them.
+          </AlertDescription>
+        </Alert>
       )}
     </>
   )

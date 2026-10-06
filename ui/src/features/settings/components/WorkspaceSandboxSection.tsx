@@ -1,12 +1,26 @@
 import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  FormField,
+  FormSection,
+} from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { SettingRow } from "@langchain/gtm-platform-design-system/patterns/setting-section"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { AlertTriangle } from "@/components/glyphs"
 import { api, type WorkspaceRecord } from "@/lib/api"
 
-import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
+import { ScriptField, WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 
 const SNAPSHOT_LABEL: Record<
   NonNullable<WorkspaceRecord["snapshot_status"]>,
@@ -16,6 +30,16 @@ const SNAPSHOT_LABEL: Record<
   capturing: "Capturing…",
   ready: "Image ready",
   failed: "Capture failed",
+}
+
+const SNAPSHOT_TONE: Record<
+  NonNullable<WorkspaceRecord["snapshot_status"]>,
+  "neutral" | "info" | "positive" | "risk"
+> = {
+  none: "neutral",
+  capturing: "info",
+  ready: "positive",
+  failed: "risk",
 }
 
 function resourceValue(value: number | null | undefined, divisor = 1) {
@@ -97,157 +121,175 @@ export function WorkspaceSandboxSection({
 
   const status = record.snapshot_status ?? "none"
   const refreshing = record.refresh_status === "refreshing"
+  const sizes = [
+    { label: "vCPUs", value: vcpus, set: setVcpus, step: "1" },
+    { label: "Memory (GiB)", value: memory, set: setMemory, step: "any" },
+    { label: "Disk (GiB)", value: disk, set: setDisk, step: "any" },
+  ]
 
   return (
-    <SettingsSection
+    <PageSection
+      contained
       title="Sandbox image"
       description="Every run in this workspace boots from this image. The setup script builds it nightly from the base snapshot; the update script refreshes it while it is in use."
     >
-      {record.slug !== "default" && (
-        <SettingsRow
-          label="Inherit sandbox from default"
-          description="Use the default workspace’s latest image, sizing, creation settings, and update script. Workspace instructions and integrations remain independent. Ensure you’re comfortable sharing all contents of the inherited sandbox image with members of this workspace."
-          control={
-            <input
-              type="checkbox"
-              aria-label="Inherit sandbox from default"
-              checked={inheritDefault}
-              onChange={(event) => setInheritDefault(event.target.checked)}
-            />
-          }
-        />
-      )}
-      <SettingsRow
-        label="Image"
-        description={record.status_message ?? record.snapshot_name ?? undefined}
-        control={
-          <span className="text-meta text-ink-subtle">
-            {record.inherit_default_sandbox
-              ? "Inherited from default"
-              : SNAPSHOT_LABEL[status]}
-          </span>
-        }
-      />
-      <SettingsRow
-        label="Base snapshot"
-        description="Set when the image is published from an admin thread."
-        control={
-          <span className="font-mono text-meta text-ink-subtle">
-            {record.base_snapshot_id ?? "instance default"}
-          </span>
-        }
-      />
-      <div className="space-y-3 border-b border-line px-4 py-3.5">
-        <p className="text-meta text-ink-subtle">
-          Applies to new sandboxes and image builders, not existing threads.
-          Leave sizes blank to inherit deployment defaults. If only CPU or
-          memory is set, the sandbox service chooses the other.
-        </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {[
-            { label: "vCPUs", value: vcpus, set: setVcpus, step: "1" },
-            {
-              label: "Memory (GiB)",
-              value: memory,
-              set: setMemory,
-              step: "any",
-            },
-            { label: "Disk (GiB)", value: disk, set: setDisk, step: "any" },
-          ].map(({ label, value, set, step }) => (
-            <label key={label} className="text-body">
-              {label}
-              <Input
-                aria-label={label}
-                type="number"
-                min="0"
-                step={step}
-                placeholder="Deployment default"
-                value={value}
-                onChange={(event) => set(event.target.value)}
-              />
-            </label>
-          ))}
-        </div>
-        {configuration.error && (
-          <p role="alert" className="text-label text-risk">
-            {configuration.error.message}
-          </p>
-        )}
-        <div className="flex justify-end gap-2">
-          {configurationDirty && (
+      <Stack gap="none">
+        <Stack gap="none" className="@container">
+          <SettingRow
+            label="Image"
+            badge={
+              record.inherit_default_sandbox ? (
+                <Badge tier="quiet" tone="neutral">
+                  Inherited from default
+                </Badge>
+              ) : (
+                <Badge tier="quiet" tone={SNAPSHOT_TONE[status]}>
+                  {SNAPSHOT_LABEL[status]}
+                </Badge>
+              )
+            }
+            description={
+              rebuild.isSuccess
+                ? `${buildAction} started; the image state follows its progress.`
+                : (record.status_message ?? record.snapshot_name ?? undefined)
+            }
+            control={() => (
+              <Button
+                size="compact"
+                variant="outline"
+                disabled={
+                  rebuild.isPending ||
+                  refreshing ||
+                  record.inherit_default_sandbox ||
+                  !(record.setup_script ?? "")
+                }
+                onClick={() => rebuild.mutate()}
+              >
+                {refreshing ? `${buildAction}ing…` : `${buildAction} image`}
+              </Button>
+            )}
+          />
+          <SettingRow
+            label="Base snapshot"
+            description="Set when the image is published from an admin thread."
+            control={() => (
+              <Box
+                render={<span />}
+                className="truncate font-mono text-meta text-ink-subtle"
+              >
+                {record.base_snapshot_id ?? "instance default"}
+              </Box>
+            )}
+          />
+        </Stack>
+
+        <Stack gap="lg" className="border-t border-line px-5 py-4">
+          <FormSection
+            title="Sandbox size"
+            description="Applies to new sandboxes and image builders, not existing threads. Leave sizes blank to inherit deployment defaults. If only CPU or memory is set, the sandbox service chooses the other."
+          >
+            {record.slug !== "default" && (
+              <Inline render={<label />} gap="sm" align="start">
+                <Checkbox
+                  aria-label="Inherit sandbox from default"
+                  className="mt-0.5"
+                  checked={inheritDefault}
+                  onCheckedChange={setInheritDefault}
+                />
+                <Stack gap="xs">
+                  <Box
+                    render={<span />}
+                    className="text-label font-medium text-ink"
+                  >
+                    Inherit sandbox from default
+                  </Box>
+                  <Box render={<span />} className="text-meta text-ink-subtle">
+                    Use the default workspace’s latest image, sizing, creation
+                    settings, and update script. Workspace instructions and
+                    integrations remain independent. Ensure you’re comfortable
+                    sharing all contents of the inherited sandbox image with
+                    members of this workspace.
+                  </Box>
+                </Stack>
+              </Inline>
+            )}
+            <Box className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {sizes.map(({ label, value, set, step }) => (
+                <FormField
+                  key={label}
+                  label={label}
+                  control={
+                    <Input
+                      type="number"
+                      min="0"
+                      step={step}
+                      placeholder="Deployment default"
+                      value={value}
+                      onChange={(event) => set(event.target.value)}
+                    />
+                  }
+                />
+              ))}
+            </Box>
+          </FormSection>
+          {configuration.error && (
+            <FormError message={configuration.error.message} />
+          )}
+          <Inline gap="sm" justify="end">
+            {configurationDirty && (
+              <Button
+                size="compact"
+                variant="ghost"
+                disabled={configuration.isPending}
+                onClick={() => {
+                  setInheritDefault(record.inherit_default_sandbox ?? false)
+                  setVcpus(resourceValue(record.vcpus))
+                  setMemory(resourceValue(record.mem_bytes, 1024 ** 3))
+                  setDisk(resourceValue(record.fs_capacity_bytes, 1024 ** 3))
+                }}
+              >
+                Cancel
+              </Button>
+            )}
             <Button
               size="compact"
-              variant="ghost"
-              disabled={configuration.isPending}
-              onClick={() => {
-                setInheritDefault(record.inherit_default_sandbox ?? false)
-                setVcpus(resourceValue(record.vcpus))
-                setMemory(resourceValue(record.mem_bytes, 1024 ** 3))
-                setDisk(resourceValue(record.fs_capacity_bytes, 1024 ** 3))
-              }}
+              disabled={!configurationDirty || configuration.isPending}
+              onClick={() => configuration.mutate()}
             >
-              Cancel
+              {configuration.isPending
+                ? "Saving…"
+                : "Save sandbox configuration"}
             </Button>
-          )}
-          <Button
-            size="compact"
-            disabled={!configurationDirty || configuration.isPending}
-            onClick={() => configuration.mutate()}
-          >
-            {configuration.isPending ? "Saving…" : "Save sandbox configuration"}
-          </Button>
-        </div>
-      </div>
-      <div className="space-y-3 px-4 py-3.5">
-        <div className="text-body">
-          <div>Setup script</div>
-          <span className="mt-0.5 block text-meta text-ink-subtle">
-            Runs on the base snapshot to build the image.
-          </span>
-          <WorkspaceScriptEditor
-            label="Setup script"
-            repos={record.repos}
-            value={setupScript}
-            onChange={setSetupScript}
-          />
-        </div>
-        <div className="text-body">
-          <div>Update script</div>
-          <span className="mt-0.5 block text-meta text-ink-subtle">
-            Runs on the current image to bring it up to date.
-          </span>
-          <WorkspaceScriptEditor
-            label="Update script"
-            repos={record.repos}
-            value={updateScript}
-            onChange={setUpdateScript}
-          />
-        </div>
-        {save.error && (
-          <p role="alert" className="text-label text-risk">
-            {save.error.message}
-          </p>
-        )}
-        {rebuild.isSuccess && (
-          <p className="text-meta text-ink-subtle">
-            {buildAction} started; the image state above follows its progress.
-          </p>
-        )}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <Button
-            size="compact"
-            variant="outline"
-            disabled={
-              rebuild.isPending ||
-              refreshing ||
-              record.inherit_default_sandbox ||
-              !(record.setup_script ?? "")
-            }
-            onClick={() => rebuild.mutate()}
-          >
-            {refreshing ? `${buildAction}ing…` : `${buildAction} image`}
-          </Button>
-          <div className="flex gap-2">
+          </Inline>
+        </Stack>
+
+        <Stack gap="lg" className="border-t border-line px-5 py-4">
+          <FormSection title="Image scripts">
+            <ScriptField
+              label="Setup script"
+              help="Runs on the base snapshot to build the image."
+            >
+              <WorkspaceScriptEditor
+                label="Setup script"
+                repos={record.repos}
+                value={setupScript}
+                onChange={setSetupScript}
+              />
+            </ScriptField>
+            <ScriptField
+              label="Update script"
+              help="Runs on the current image to bring it up to date."
+            >
+              <WorkspaceScriptEditor
+                label="Update script"
+                repos={record.repos}
+                value={updateScript}
+                onChange={setUpdateScript}
+              />
+            </ScriptField>
+          </FormSection>
+          {save.error && <FormError message={save.error.message} />}
+          <Inline gap="sm" justify="end">
             {dirty && (
               <Button
                 size="compact"
@@ -268,9 +310,24 @@ export function WorkspaceSandboxSection({
             >
               {save.isPending ? "Saving…" : "Save scripts"}
             </Button>
-          </div>
-        </div>
-      </div>
-    </SettingsSection>
+          </Inline>
+        </Stack>
+      </Stack>
+    </PageSection>
+  )
+}
+
+/** A save the server refused, stated under the form it belongs to. */
+export function FormError({ message }: { message: string }) {
+  return (
+    <Inline
+      role="alert"
+      gap="sm"
+      align="start"
+      className="text-label text-risk"
+    >
+      <Icon icon={AlertTriangle} size="sm" className="mt-0.5" />
+      <Box render={<span />}>{message}</Box>
+    </Inline>
   )
 }

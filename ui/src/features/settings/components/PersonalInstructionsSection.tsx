@@ -1,10 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { SettingsPanel, SettingsSection } from "@/components/AppShell"
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { InstructionsEditor } from "@/components/InstructionsEditor"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { AlertTriangle, RotateCcw } from "@/components/glyphs"
+import { InstructionsEditor } from "@/components/InstructionsEditor"
 import { api, type UserInstructions } from "@/lib/api"
 
 export function PersonalInstructionsSection() {
@@ -36,81 +41,99 @@ export function PersonalInstructionsSection() {
     onSuccess: (record) => onSuccess(record.instructions),
     onError: (e: Error) => setError(e.message),
   })
+  // The confirmation dialog reports a failure inline, so the toast is suppressed.
   const clear = useMutation({
-    meta: { errorTitle: "Couldn't clear instructions" },
+    meta: { errorTitle: "Couldn't clear instructions", silent: true },
     mutationFn: () => api.deleteMyInstructions(),
     onSuccess: () => onSuccess(""),
   })
   const mutating = save.isPending || clear.isPending
 
-  const onClear = () => {
-    if (
-      !window.confirm(
-        "Clear your personal instructions? This cannot be undone."
-      )
-    ) {
-      return
-    }
-    clear.mutate()
-  }
-
   return (
-    <SettingsSection title="Personal instructions">
-      <SettingsPanel>
-        {instructions.isLoading ? (
-          <Skeleton className="h-40 w-full" />
-        ) : instructions.isError ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-label text-risk">
-              Could not load your instructions:{" "}
-              {instructions.error instanceof Error
-                ? instructions.error.message
-                : "unknown error"}
-              . Editing is disabled so a failed load can't overwrite them.
-            </p>
+    <PageSection
+      title="Personal instructions"
+      description="Applied on every surface. Repository instructions and AGENTS.md win when they conflict."
+      contained
+      inset="padded"
+    >
+      {instructions.isLoading ? (
+        <Skeleton className="h-90 w-full rounded-compact" />
+      ) : instructions.isError ? (
+        <StateNotice
+          tone="RISK"
+          icon={AlertTriangle}
+          title="Couldn't load your instructions"
+          description={`${
+            instructions.error instanceof Error
+              ? instructions.error.message
+              : "Unknown error"
+          }. Editing is disabled so a failed load can't overwrite them.`}
+          action={
             <Button
               size="compact"
               variant="outline"
               onClick={() => void instructions.refetch()}
             >
+              <Icon icon={RotateCcw} size="sm" />
               Retry
             </Button>
-          </div>
-        ) : (
-          <>
-            <InstructionsEditor
-              value={value}
-              onChange={setDraft}
-              disabled={mutating}
-              placeholder="e.g. Always run the linter before pushing. Prefer terse Slack updates."
-            />
-            <div className="flex flex-wrap items-center gap-2">
+          }
+        />
+      ) : (
+        <Stack gap="md">
+          <InstructionsEditor
+            value={value}
+            onChange={setDraft}
+            disabled={mutating}
+            placeholder="e.g. Always run the linter before pushing. Prefer terse Slack updates."
+          />
+          <Inline gap="sm" align="center" justify="between" wrap>
+            <Inline gap="sm" align="center">
               <Button
                 size="compact"
                 disabled={!dirty || mutating}
+                loading={save.isPending}
                 onClick={() => save.mutate(value)}
               >
                 Save instructions
               </Button>
               {dirty && (
-                <span className="text-meta text-ink-subtle">
+                <Box render={<span />} className="text-meta text-ink-subtle">
                   Unsaved changes
-                </span>
+                </Box>
               )}
-              <Button
-                size="compact"
-                variant="outline"
-                className="ml-auto"
-                disabled={mutating || (!saved && !dirty)}
-                onClick={onClear}
-              >
-                Clear
-              </Button>
-            </div>
-            {error && <p className="text-label text-risk">{error}</p>}
-          </>
-        )}
-      </SettingsPanel>
-    </SettingsSection>
+            </Inline>
+            <ConfirmableAction
+              title="Clear your personal instructions?"
+              description="Your standing instructions are deleted and future runs stop using them. This cannot be undone."
+              confirmLabel="Clear instructions"
+              onConfirm={async () => {
+                await clear.mutateAsync()
+              }}
+              trigger={
+                <Button
+                  size="compact"
+                  variant="outline"
+                  disabled={mutating || (!saved && !dirty)}
+                >
+                  Clear
+                </Button>
+              }
+            />
+          </Inline>
+          {error && (
+            <Inline
+              role="alert"
+              gap="sm"
+              align="start"
+              className="text-label text-risk"
+            >
+              <Icon icon={AlertTriangle} size="sm" />
+              <Box render={<span />}>{error}</Box>
+            </Inline>
+          )}
+        </Stack>
+      )}
+    </PageSection>
   )
 }

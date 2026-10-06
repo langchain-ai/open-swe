@@ -1,53 +1,78 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import {
+  FormField,
+  FormSection,
+  FormStack,
+} from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import {
+  StatReadout,
+  type StatTone,
+} from "@langchain/gtm-platform-design-system/patterns/stat-readout"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
+import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@langchain/gtm-platform-design-system/ui/select"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 
 import type {
   ReviewerEvalConfig,
   ReviewerEvalStartRequest,
   ReviewerEvalStatus,
 } from "@/lib/api"
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Input } from "@langchain/gtm-platform-design-system/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
-import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { SettingsPage } from "@/components/AppShell"
+import {
+  AlertTriangle,
+  Copy,
+  ExternalLink,
+  Terminal,
+} from "@/components/glyphs"
 import { ModelPairControl } from "@/features/settings/components/WorkspaceSettingsSections"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
-import { RequireLogin } from "@/lib/auth-redirect"
 import { useOptions } from "@/lib/profile"
-import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/admin_/evals")({
   component: ReviewerEvalPage,
   head: () => ({ meta: [{ title: pageTitle("Reviewer evals") }] }),
 })
 
+const STATUS_TONE: Record<ReviewerEvalStatus["status"], StatTone> = {
+  idle: "neutral",
+  starting: "info",
+  running: "info",
+  completed: "positive",
+  failed: "risk",
+}
+
 function ReviewerEvalPage() {
-  const session = useSession()
-
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-64 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-  if (!session.data.is_admin) return <Navigate to="/my-settings" />
-
   return (
-    <AppShell
-      user={session.data}
+    <SettingsPage
+      adminOnly
       title="Reviewer eval"
-      description="Runs the reviewer benchmark in a LangSmith sandbox against this deployment. Progress streams here live."
+      description="Runs the reviewer benchmark in a LangSmith sandbox against this deployment."
     >
       <ReviewerEvalRunConfigSection />
       <ReviewerEvalStatusSection />
       <ReviewerEvalLogs />
-    </AppShell>
+    </SettingsPage>
   )
 }
 
@@ -101,124 +126,148 @@ function ReviewerEvalRunConfigSection() {
     value && setForm({ ...value, ...patch })
 
   return (
-    <SettingsSection
+    <PageSection
       title="Run config"
       description="Defaults to the previous run's config. Each run boots a sandbox at the deployed commit."
-      action={
+      contained
+      inset="padded"
+    >
+      <FormStack>
+        <FormSection title="Benchmark">
+          <FormField
+            label="Dataset"
+            control={
+              <Input
+                value={value?.dataset_name ?? ""}
+                onChange={(e) => update({ dataset_name: e.target.value })}
+              />
+            }
+          />
+          <FormField
+            label="Run name"
+            help="LangSmith experiment prefix."
+            control={
+              <Input
+                value={value?.experiment_prefix ?? ""}
+                onChange={(e) => update({ experiment_prefix: e.target.value })}
+              />
+            }
+          />
+          <FormField
+            label="Limit"
+            help="Run only the first N PRs. Blank runs the full dataset."
+            control={
+              <Input
+                className="w-24"
+                type="number"
+                min={1}
+                placeholder="all"
+                value={value?.limit ?? ""}
+                onChange={(e) =>
+                  update({
+                    limit: e.target.value ? Number(e.target.value) : null,
+                  })
+                }
+              />
+            }
+          />
+        </FormSection>
+        <FormSection title="Reviewer">
+          <FormField
+            label="Reviewer model"
+            control={
+              <Inline role="group" aria-label="Reviewer model">
+                <ModelPairControl
+                  models={models}
+                  model={value?.model_id ?? null}
+                  effort={value?.reasoning_effort ?? null}
+                  onChange={(model_id, reasoning_effort) =>
+                    update({ model_id, reasoning_effort })
+                  }
+                  disabled={!value}
+                />
+              </Inline>
+            }
+          />
+          <FormField
+            label="Max concurrency"
+            help="PRs reviewed at once on the deployment."
+            control={
+              <Input
+                className="w-24"
+                type="number"
+                min={1}
+                value={value?.max_concurrency ?? ""}
+                onChange={(e) =>
+                  update({ max_concurrency: Number(e.target.value) })
+                }
+              />
+            }
+          />
+          <FormField
+            label="Score mode"
+            control={
+              <ChoiceSelect
+                value={value?.score_mode}
+                options={["surfaced_findings", "all_findings"] as const}
+                onChange={(score_mode) => update({ score_mode })}
+              />
+            }
+          />
+          <FormField
+            label="Severity threshold"
+            control={
+              <ChoiceSelect
+                value={value?.severity_threshold}
+                options={["low", "medium", "high", "critical"] as const}
+                onChange={(severity_threshold) =>
+                  update({ severity_threshold })
+                }
+              />
+            }
+          />
+        </FormSection>
+      </FormStack>
+      <Inline justify="end">
         <Button
-          size="compact"
+          type="button"
           disabled={disabled}
           onClick={() => value && start.mutate(value)}
         >
           {start.isPending ? "Starting…" : "Start eval"}
         </Button>
-      }
-    >
-      <SettingsRow
-        label="Dataset"
-        control={
-          <Input
-            className="w-64"
-            value={value?.dataset_name ?? ""}
-            onChange={(e) => update({ dataset_name: e.target.value })}
-          />
-        }
-      />
-      <SettingsRow
-        label="Run name"
-        description="LangSmith experiment prefix."
-        control={
-          <Input
-            className="w-64"
-            value={value?.experiment_prefix ?? ""}
-            onChange={(e) => update({ experiment_prefix: e.target.value })}
-          />
-        }
-      />
-      <SettingsRow
-        label="Reviewer model"
-        control={
-          <ModelPairControl
-            models={models}
-            model={value?.model_id ?? null}
-            effort={value?.reasoning_effort ?? null}
-            onChange={(model_id, reasoning_effort) =>
-              update({ model_id, reasoning_effort })
-            }
-            disabled={!value}
-          />
-        }
-      />
-      <SettingsRow
-        label="Max concurrency"
-        description="PRs reviewed at once on the deployment."
-        control={
-          <Input
-            className="w-24"
-            type="number"
-            min={1}
-            value={value?.max_concurrency ?? ""}
-            onChange={(e) =>
-              update({ max_concurrency: Number(e.target.value) })
-            }
-          />
-        }
-      />
-      <SettingsRow
-        label="Limit"
-        description="Run only the first N PRs. Blank runs the full dataset."
-        control={
-          <Input
-            className="w-24"
-            type="number"
-            min={1}
-            placeholder="all"
-            value={value?.limit ?? ""}
-            onChange={(e) =>
-              update({ limit: e.target.value ? Number(e.target.value) : null })
-            }
-          />
-        }
-      />
-      <SettingsRow
-        label="Score mode"
-        control={
-          <ChoiceSelect
-            value={value?.score_mode}
-            options={["surfaced_findings", "all_findings"] as const}
-            onChange={(score_mode) => update({ score_mode })}
-          />
-        }
-      />
-      <SettingsRow
-        label="Severity threshold"
-        control={
-          <ChoiceSelect
-            value={value?.severity_threshold}
-            options={["low", "medium", "high", "critical"] as const}
-            onChange={(severity_threshold) => update({ severity_threshold })}
-          />
-        }
-      />
-    </SettingsSection>
+      </Inline>
+    </PageSection>
   )
 }
 
+/** A closed-vocabulary select. FormField hands it the id and aria wiring for its trigger. */
 function ChoiceSelect<T extends string>({
   value,
   options,
   onChange,
+  id,
+  "aria-describedby": describedBy,
+  "aria-invalid": invalid,
 }: {
   value: T | undefined
   options: ReadonlyArray<T>
   onChange: (value: T) => void
+  id?: string
+  "aria-describedby"?: string
+  "aria-invalid"?: boolean
 }) {
   return (
     <Select
       value={value ?? null}
       onValueChange={(next) => next && onChange(next)}
     >
-      <SelectTrigger className="w-40">
+      <SelectTrigger
+        id={id}
+        aria-describedby={describedBy}
+        aria-invalid={invalid}
+        className="w-40"
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -234,13 +283,27 @@ function ChoiceSelect<T extends string>({
 
 function ReviewerEvalStatusSection() {
   const status = useReviewerEvalStatus()
+  const data = status.data ?? null
   return (
-    <SettingsSection
+    <PageSection
       title="Current run"
       description="Status and resolved configuration for the latest reviewer eval run."
+      actions={
+        data?.experiment_url ? (
+          <a
+            href={data.experiment_url}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonVariants({ variant: "outline", size: "compact" })}
+          >
+            <Icon icon={ExternalLink} size="sm" />
+            View experiment in LangSmith
+          </a>
+        ) : undefined
+      }
     >
-      <ReviewerEvalStatusView data={status.data ?? null} />
-    </SettingsSection>
+      <ReviewerEvalStatusView data={data} />
+    </PageSection>
   )
 }
 
@@ -253,93 +316,110 @@ function progressLabel(data: ReviewerEvalStatus): string | null {
 function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
   if (!data) {
     return (
-      <div className="p-4 text-meta text-ink-subtle">
-        Loading reviewer eval status…
-      </div>
+      <Stack gap="sm" role="status" aria-label="Loading reviewer eval status">
+        <Skeleton className="h-row-data w-full" />
+        <Skeleton className="h-row-data w-full" />
+      </Stack>
     )
   }
 
   const config = data.config_snapshot
   return (
-    <div className="grid gap-2 p-4 text-meta text-ink-subtle sm:grid-cols-2">
-      <StatusLine label="Status" value={data.status} strong />
-      <StatusLine label="Progress" value={progressLabel(data)} />
-      <StatusLine
-        label="Run name"
-        value={data.run_name ?? config?.experiment_prefix}
-      />
-      <StatusLine label="Dataset" value={config?.dataset_name} />
-      <StatusLine
-        label="Limit"
-        value={data.limit ? String(data.limit) : "full dataset"}
-      />
-      <StatusLine label="Model" value={config?.model_id} />
-      <StatusLine label="Effort" value={config?.reasoning_effort} />
-      <StatusLine label="Score mode" value={config?.score_mode} />
-      <StatusLine label="Threshold" value={config?.severity_threshold} />
-      <StatusLine label="LangSmith project" value={data.langsmith_project} />
-      <StatusLine label="Triggered by" value={data.created_by} />
-      <StatusLine label="Sandbox" value={data.worker_id} />
-      {data.started_at && (
-        <StatusLine
-          label="Started"
-          value={new Date(data.started_at).toLocaleString()}
+    <Stack gap="lg">
+      {data.error ? (
+        <StateNotice
+          tone="RISK"
+          icon={AlertTriangle}
+          title="The reviewer eval stopped with an error"
+          description={data.error}
         />
-      )}
-      {data.finished_at && (
-        <StatusLine
-          label="Finished"
-          value={new Date(data.finished_at).toLocaleString()}
+      ) : null}
+      <Box className="grid gap-x-6 sm:grid-cols-2">
+        <StatReadout
+          shape="field"
+          label="Status"
+          value={data.status}
+          tone={STATUS_TONE[data.status]}
         />
-      )}
-      {data.experiment_url && (
-        <a
-          href={data.experiment_url}
-          target="_blank"
-          rel="noreferrer"
-          className="underline hover:text-ink"
-        >
-          View experiment in LangSmith
-        </a>
-      )}
-      {data.error && <span className="text-risk">{data.error}</span>}
-    </div>
+        <StatReadout shape="field" label="Progress" value={progressLabel(data)} />
+        <StatReadout
+          shape="field"
+          label="Run name"
+          value={data.run_name ?? config?.experiment_prefix}
+        />
+        <StatReadout shape="field" label="Dataset" value={config?.dataset_name} />
+        <StatReadout
+          shape="field"
+          label="Limit"
+          value={data.limit ? String(data.limit) : "full dataset"}
+        />
+        <StatReadout shape="field" label="Model" value={config?.model_id} />
+        <StatReadout
+          shape="field"
+          label="Effort"
+          value={config?.reasoning_effort}
+        />
+        <StatReadout shape="field" label="Score mode" value={config?.score_mode} />
+        <StatReadout
+          shape="field"
+          label="Threshold"
+          value={config?.severity_threshold}
+        />
+        <StatReadout
+          shape="field"
+          label="LangSmith project"
+          value={data.langsmith_project}
+        />
+        <StatReadout shape="field" label="Triggered by" value={data.created_by} />
+        <StatReadout shape="field" label="Sandbox" value={data.worker_id} />
+        {data.started_at && (
+          <StatReadout
+            shape="field"
+            label="Started"
+            value={new Date(data.started_at).toLocaleString()}
+          />
+        )}
+        {data.finished_at && (
+          <StatReadout
+            shape="field"
+            label="Finished"
+            value={new Date(data.finished_at).toLocaleString()}
+          />
+        )}
+      </Box>
+    </Stack>
   )
 }
 
-function StatusLine({
-  label,
-  value,
-  strong = false,
-}: {
-  label: string
-  value: string | null | undefined
-  strong?: boolean
-}) {
-  return (
-    <span>
-      {label}:{" "}
-      <span className={strong ? "font-medium text-ink" : ""}>
-        {value || "—"}
-      </span>
-    </span>
-  )
-}
+/** Within this distance of the bottom, the log counts as followed. */
+const FOLLOW_THRESHOLD_PX = 24
 
 function ReviewerEvalLogs() {
   const status = useReviewerEvalStatus()
   const logTail = status.data?.log_tail ?? null
   const running = isActive(status.data)
 
-  const scrollRef = useRef<HTMLPreElement>(null)
+  const [viewport, setViewport] = useState<HTMLDivElement | null>(null)
   const [follow, setFollow] = useState(true)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (follow && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    if (follow && viewport) {
+      viewport.scrollTop = viewport.scrollHeight
     }
-  }, [logTail, follow])
+  }, [logTail, follow, viewport])
+
+  useEffect(() => {
+    if (!viewport) return
+    const onScroll = () => {
+      setFollow(
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <
+          FOLLOW_THRESHOLD_PX
+      )
+    }
+    viewport.addEventListener("scroll", onScroll)
+    return () => viewport.removeEventListener("scroll", onScroll)
+  }, [viewport])
 
   const copyLogs = async () => {
     if (!logTail) return
@@ -349,52 +429,59 @@ function ReviewerEvalLogs() {
   }
 
   return (
-    <SettingsSection
+    <PageSection
       title="Output"
       description="Live tail of the eval output. Each PR logs start and finish lines while the run is active."
-      action={
-        <div className="flex items-center gap-2">
+      contained
+      actions={
+        <Inline gap="md" align="center">
+          <Inline
+            render={<label />}
+            gap="sm"
+            align="center"
+            className="text-label text-ink-subtle"
+          >
+            <Checkbox
+              checked={follow}
+              onCheckedChange={(checked) => setFollow(checked)}
+            />
+            Follow
+          </Inline>
           <Button
             size="compact"
             variant="outline"
             onClick={() => void copyLogs()}
             disabled={!logTail}
           >
+            <Icon icon={Copy} size="sm" />
             {copied ? "Copied" : "Copy logs"}
           </Button>
-          <label className="flex items-center gap-1.5 text-meta text-ink-subtle">
-            <input
-              type="checkbox"
-              checked={follow}
-              onChange={(e) => setFollow(e.target.checked)}
-            />
-            Follow
-          </label>
-        </div>
+        </Inline>
       }
     >
-      <div className="p-4">
-        {logTail ? (
-          <pre
-            ref={scrollRef}
-            onScroll={(e) => {
-              const el = e.currentTarget
-              const atBottom =
-                el.scrollHeight - el.scrollTop - el.clientHeight < 24
-              setFollow(atBottom)
-            }}
-            className="max-h-[28rem] overflow-auto rounded-badge bg-muted/50 p-3 font-mono text-label break-words whitespace-pre-wrap text-ink"
+      {logTail ? (
+        <ScrollArea
+          overflow="vertical"
+          viewportRef={setViewport}
+          viewportClassName="max-h-112"
+        >
+          <Box
+            render={<pre />}
+            padding="lg"
+            className="font-mono text-label break-words whitespace-pre-wrap text-ink"
           >
             {logTail}
-          </pre>
-        ) : (
-          <p className="text-meta text-ink-subtle">
-            {running
-              ? "Waiting for output…"
-              : "No output yet. Launch a reviewer eval to see logs here."}
-          </p>
-        )}
-      </div>
-    </SettingsSection>
+          </Box>
+        </ScrollArea>
+      ) : running ? (
+        <EmptyState icon={Terminal} title="Waiting for output" />
+      ) : (
+        <EmptyState
+          icon={Terminal}
+          title="No output yet"
+          description="Launch a reviewer eval to see logs here."
+        />
+      )}
+    </PageSection>
   )
 }

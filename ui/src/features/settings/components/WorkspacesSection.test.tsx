@@ -283,13 +283,8 @@ describe("WorkspacesSection", () => {
       target: { value: "Preview" },
     })
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
-    const repositoryHelp = screen.getByRole("button", {
-      name: "About workspace repositories",
-    })
-    fireEvent.mouseEnter(repositoryHelp)
-    fireEvent.mouseMove(repositoryHelp)
     expect(
-      await screen.findByText(
+      screen.getByText(
         /routes its GitHub issues, pull requests, Linear tickets/
       )
     ).toBeTruthy()
@@ -307,9 +302,10 @@ describe("WorkspacesSection", () => {
     expect(
       screen.getByText(/only channels the bot is in are listed/)
     ).toBeTruthy()
-    expect(taken.hasAttribute("disabled")).toBe(true)
+    expect(taken.hasAttribute("data-disabled")).toBe(true)
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-help" }))
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(screen.getByText("#oss-help")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))

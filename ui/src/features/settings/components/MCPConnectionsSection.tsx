@@ -1,10 +1,38 @@
 import { useId, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
-import { SettingsSection } from "@/components/AppShell"
+import { ConfirmableAction } from "@langchain/gtm-platform-design-system/patterns/confirmable-action"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import {
+  FormField,
+  FormSection,
+  FormStack,
+} from "@langchain/gtm-platform-design-system/patterns/form-field"
+import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
+import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@langchain/gtm-platform-design-system/ui/select"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+
+import { AlertTriangle, Eye, EyeOff, Server } from "@/components/glyphs"
 import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
@@ -15,6 +43,71 @@ import { MCPOAuthFields } from "./MCPOAuthFields"
 type Header = { name: string; value: string; revealed?: boolean }
 type Draft = Omit<MCPConnectionUpdate, "headers"> & { existing: boolean }
 type Catalog = { name: string; description: string }[]
+
+type Transport = MCPConnection["transport"]
+type AuthMode = "headers" | "oauth"
+
+const TRANSPORTS: Array<{ value: Transport; label: string }> = [
+  { value: "streamable_http", label: "Streamable HTTP" },
+  { value: "sse", label: "SSE" },
+]
+
+const AUTH_MODES: Array<{ value: AuthMode; label: string }> = [
+  { value: "headers", label: "Headers / API key" },
+  { value: "oauth", label: "OAuth client credentials" },
+]
+
+function isTransport(value: unknown): value is Transport {
+  return TRANSPORTS.some((transport) => transport.value === value)
+}
+
+/** One block in the connections panel; the panel's hairlines come from these. */
+const PANEL_BLOCK_CLASS = "border-b border-line last:border-b-0"
+
+function ConnectionSummary({
+  connection,
+  emphasis,
+}: {
+  connection: MCPConnection
+  emphasis: boolean
+}) {
+  return (
+    <Stack gap="none" className="min-w-0 flex-1">
+      <Box
+        render={<p />}
+        className={
+          emphasis ? "text-label font-medium text-ink" : "text-label text-ink"
+        }
+      >
+        {connection.name}{" "}
+        <Box render={<span />} className="font-normal text-ink-subtle">
+          · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
+          {connection.allowed_tools.length} tools
+        </Box>
+      </Box>
+      <Box
+        render={<p />}
+        className="font-mono text-meta break-all text-ink-subtle"
+      >
+        {connection.url}
+      </Box>
+    </Stack>
+  )
+}
+
+function FormFailure({ children }: { children: ReactNode }) {
+  return (
+    <Inline
+      role="alert"
+      gap="sm"
+      align="start"
+      className="text-label text-risk"
+    >
+      <Icon icon={AlertTriangle} size="sm" />
+      <Box render={<span />}>{children}</Box>
+    </Inline>
+  )
+}
 
 function editableValues(connection?: MCPConnectionUpdate): string {
   const oauth = connection?.oauth
@@ -52,7 +145,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
   const scopes: Record<MCPScope, MCPScopeConfig> = {
     instance: {
       description:
-        "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs.",
       queryKey: ["instanceMCPs"],
       list: api.getInstanceMCPs,
       save: api.saveInstanceMCP,
@@ -62,7 +155,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
     },
     workspace: {
       description:
-        "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name.",
       queryKey: ["workspaceMCPs", workspace],
       list: () => api.getWorkspaceMCPs(workspace),
       save: (body) => api.saveWorkspaceMCP(workspace, body),
@@ -72,7 +165,7 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
     },
     user: {
       description:
-        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
+        "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs.",
       queryKey: ["myMCPs"],
       list: api.getMyMCPs,
       save: api.saveMyMCP,
@@ -333,551 +426,442 @@ export function MCPConnectionsSection({
     )
 
   const editor = draft ? (
-    <form
-      id={editorId}
-      className={
-        draft.existing
-          ? "space-y-4 border-t p-4"
-          : "space-y-4 rounded-badge border p-4"
+    <Stack
+      render={
+        <form
+          id={editorId}
+          onSubmit={(event) => {
+            event.preventDefault()
+            void save(false)
+          }}
+        />
       }
-      onSubmit={(event) => {
-        event.preventDefault()
-        void save(false)
-      }}
+      gap="lg"
+      className={cn(
+        "px-5 py-4",
+        draft.existing ? "border-t border-line" : PANEL_BLOCK_CLASS
+      )}
     >
-      <fieldset disabled={busy} className="space-y-4">
-        {error && (
-          <p role="alert" className="text-body text-risk">
-            {error}
-          </p>
-        )}
-        {pendingImports.length > 0 && (
-          <p className="text-meta text-ink-subtle">
-            {pendingImports.length} more{" "}
-            {pendingImports.length === 1 ? "connection" : "connections"} to
-            review after saving.
-          </p>
-        )}
-        <label className="block text-body">
-          Connection name
-          <Input
-            aria-label="Connection name"
-            required
-            pattern={"[a-z][a-z0-9_\\-]{0,31}"}
-            maxLength={32}
-            title="Start with a lowercase letter; use lowercase letters, numbers, hyphens, or underscores."
-            placeholder="incident"
-            disabled={draft.existing}
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          />
-          <span className="text-meta text-ink-subtle">
-            Use a lowercase name such as incident. Dots and spaces are not
-            allowed.
-          </span>
-        </label>
-        <label className="block text-body">
-          Server URL
-          <Input
-            aria-label="Server URL"
-            required
-            type="url"
-            placeholder="https://example.com/mcp"
-            value={draft.url}
-            onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-          />
-        </label>
-        <label className="block text-body">
-          Transport
-          <select
-            aria-label="Transport"
-            className="mt-1 block w-full rounded-badge border bg-canvas p-2 text-body"
-            value={draft.transport}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                transport: e.target.value as MCPConnection["transport"],
-              })
-            }
-          >
-            <option value="streamable_http">Streamable HTTP</option>
-            <option value="sse">SSE</option>
-          </select>
-        </label>
-        <label className="block text-body">
-          Authentication
-          <select
-            aria-label="Authentication"
-            className="mt-1 block w-full rounded-badge border bg-canvas p-2 text-body"
-            value={draft.oauth ? "oauth" : "headers"}
-            onChange={(event) =>
-              setDraft({
-                ...draft,
-                oauth:
-                  event.target.value === "oauth"
-                    ? {
-                        grant_type: "client_credentials",
-                        token_url: "",
-                        client_id: "",
-                        scope: "",
-                        token_endpoint_auth_method: "client_secret_post",
-                      }
-                    : null,
-              })
-            }
-          >
-            <option value="headers">Headers / API key</option>
-            <option value="oauth">OAuth client credentials</option>
-          </select>
-        </label>
-        {draft.oauth && (
-          <MCPOAuthFields
-            key={draft.name}
-            value={draft.oauth}
-            hasSavedSecret={Boolean(
-              draft.existing &&
-              savedConnection?.oauth &&
-              draft.url.trim() === savedConnection.url &&
-              draft.oauth.token_url.trim() ===
-                savedConnection.oauth.token_url &&
-              draft.oauth.client_id === savedConnection.oauth.client_id
-            )}
-            onChange={(oauth) => setDraft({ ...draft, oauth })}
-          />
-        )}
-        <div className="space-y-2">
-          <p className="text-body font-medium">
-            {draft.oauth ? "Additional headers" : "Authentication headers"}
-          </p>
-          <p className="text-meta text-ink-subtle">
-            {draft.oauth
-              ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
-              : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
-          </p>
-          {!replaceHeaders ? (
-            <>
-              {savedHeaders && (
-                <div className="space-y-2" data-dd-privacy="hidden">
-                  {Object.entries(savedHeaders).map(([name, value]) => (
-                    <label key={name} className="block text-body">
-                      {name}
-                      <Input
-                        aria-label={`Saved ${name} value`}
-                        value={value}
-                        readOnly
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </label>
-                  ))}
-                  {Object.keys(savedHeaders).length === 0 && (
-                    <p className="text-meta text-ink-subtle">
-                      No saved headers.
-                    </p>
-                  )}
-                </div>
+      <Box render={<fieldset disabled={busy} />} className="m-0 min-w-0 p-0">
+        <FormStack>
+          {pendingImports.length > 0 && (
+            <Box render={<p />} className="text-meta text-ink-subtle">
+              {pendingImports.length} more{" "}
+              {pendingImports.length === 1 ? "connection" : "connections"} to
+              review after saving.
+            </Box>
+          )}
+          <FormSection title="Connection">
+            <FormField
+              label="Connection name"
+              help="Use a lowercase name such as incident. Dots and spaces are not allowed."
+              required
+              control={
+                <Input
+                  required
+                  pattern={"[a-z][a-z0-9_\\-]{0,31}"}
+                  maxLength={32}
+                  title="Start with a lowercase letter; use lowercase letters, numbers, hyphens, or underscores."
+                  placeholder="incident"
+                  disabled={draft.existing}
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+              }
+            />
+            <FormField
+              label="Server URL"
+              required
+              control={
+                <Input
+                  required
+                  type="url"
+                  placeholder="https://example.com/mcp"
+                  value={draft.url}
+                  onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+                />
+              }
+            />
+            <FormField
+              label="Transport"
+              control={
+                <Select
+                  items={TRANSPORTS}
+                  value={draft.transport}
+                  onValueChange={(transport) => {
+                    if (isTransport(transport))
+                      setDraft({ ...draft, transport })
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TRANSPORTS.map((transport) => (
+                      <SelectItem key={transport.value} value={transport.value}>
+                        {transport.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              }
+            />
+            <FormField
+              label="Authentication"
+              control={
+                <Select
+                  items={AUTH_MODES}
+                  value={draft.oauth ? "oauth" : "headers"}
+                  onValueChange={(mode) =>
+                    setDraft({
+                      ...draft,
+                      oauth:
+                        mode === "oauth"
+                          ? {
+                              grant_type: "client_credentials",
+                              token_url: "",
+                              client_id: "",
+                              scope: "",
+                              token_endpoint_auth_method: "client_secret_post",
+                            }
+                          : null,
+                    })
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AUTH_MODES.map((mode) => (
+                      <SelectItem key={mode.value} value={mode.value}>
+                        {mode.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              }
+            />
+          </FormSection>
+          {draft.oauth && (
+            <MCPOAuthFields
+              key={draft.name}
+              value={draft.oauth}
+              hasSavedSecret={Boolean(
+                draft.existing &&
+                savedConnection?.oauth &&
+                draft.url.trim() === savedConnection.url &&
+                draft.oauth.token_url.trim() ===
+                  savedConnection.oauth.token_url &&
+                draft.oauth.client_id === savedConnection.oauth.client_id
               )}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="outline"
-                  aria-label={
-                    savedHeaders ? "Hide saved headers" : "Show saved headers"
-                  }
-                  title={
-                    savedHeaders ? "Hide saved headers" : "Show saved headers"
-                  }
-                  aria-expanded={savedHeaders !== null}
-                  onClick={() => {
-                    if (savedHeaders) setSavedHeaders(null)
-                    else
-                      void run(async () => {
-                        setSavedHeaders(await client.revealHeaders(draft.name))
-                      })
-                  }}
-                >
-                  {savedHeaders ? (
-                    <EyeSlashIcon aria-hidden="true" />
-                  ) : (
-                    <EyeIcon aria-hidden="true" />
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  size="compact"
-                  variant="outline"
-                  onClick={() => {
-                    setSavedHeaders(null)
-                    setReplaceHeaders(true)
-                  }}
-                >
-                  Replace headers
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              {headers.map((header, index) => (
-                <div className="flex gap-2" key={index}>
-                  <Input
-                    aria-label={`Header ${index + 1} name`}
-                    placeholder="Authorization"
-                    value={header.name}
-                    onChange={(e) =>
-                      updateHeader(index, "name", e.target.value)
-                    }
-                  />
-                  <Input
-                    aria-label={`Header ${index + 1} value`}
-                    placeholder="Bearer …"
-                    type={header.revealed ? "text" : "password"}
-                    autoComplete="off"
-                    spellCheck={false}
-                    data-dd-privacy="hidden"
-                    value={header.value}
-                    onChange={(e) =>
-                      updateHeader(index, "value", e.target.value)
-                    }
-                  />
+              onChange={(oauth) => setDraft({ ...draft, oauth })}
+            />
+          )}
+          <FormSection
+            title={
+              draft.oauth ? "Additional headers" : "Authentication headers"
+            }
+            description={
+              draft.oauth
+                ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
+                : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."
+            }
+          >
+            {!replaceHeaders ? (
+              <>
+                {savedHeaders && (
+                  <Stack gap="lg" data-dd-privacy="hidden">
+                    {Object.entries(savedHeaders).map(([name, value]) => (
+                      <FormField
+                        key={name}
+                        label={name}
+                        control={
+                          <Input
+                            aria-label={`Saved ${name} value`}
+                            value={value}
+                            readOnly
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                        }
+                      />
+                    ))}
+                    {Object.keys(savedHeaders).length === 0 && (
+                      <Box render={<p />} className="text-meta text-ink-subtle">
+                        No saved headers.
+                      </Box>
+                    )}
+                  </Stack>
+                )}
+                <Inline gap="sm" wrap>
                   <Button
                     type="button"
                     size="icon-sm"
                     variant="outline"
-                    aria-label={`${header.revealed ? "Hide" : "Show"} header ${index + 1} value`}
-                    title={header.revealed ? "Hide value" : "Show value"}
-                    aria-pressed={Boolean(header.revealed)}
-                    onClick={() =>
-                      setHeaders(
-                        headers.map((item, i) =>
-                          i === index
-                            ? { ...item, revealed: !item.revealed }
-                            : item
-                        )
-                      )
+                    aria-label={
+                      savedHeaders ? "Hide saved headers" : "Show saved headers"
                     }
+                    title={
+                      savedHeaders ? "Hide saved headers" : "Show saved headers"
+                    }
+                    aria-expanded={savedHeaders !== null}
+                    onClick={() => {
+                      if (savedHeaders) setSavedHeaders(null)
+                      else
+                        void run(async () => {
+                          setSavedHeaders(
+                            await client.revealHeaders(draft.name)
+                          )
+                        })
+                    }}
                   >
-                    {header.revealed ? (
-                      <EyeSlashIcon aria-hidden="true" />
-                    ) : (
-                      <EyeIcon aria-hidden="true" />
-                    )}
+                    <Icon icon={savedHeaders ? EyeOff : Eye} size="sm" />
                   </Button>
                   <Button
                     type="button"
                     size="compact"
                     variant="outline"
-                    aria-label={`Remove header ${index + 1}`}
+                    onClick={() => {
+                      setSavedHeaders(null)
+                      setReplaceHeaders(true)
+                    }}
+                  >
+                    Replace headers
+                  </Button>
+                </Inline>
+              </>
+            ) : (
+              <>
+                {headers.map((header, index) => (
+                  <Inline gap="sm" align="center" key={index}>
+                    <Input
+                      aria-label={`Header ${index + 1} name`}
+                      placeholder="Authorization"
+                      value={header.name}
+                      onChange={(e) =>
+                        updateHeader(index, "name", e.target.value)
+                      }
+                    />
+                    <Input
+                      aria-label={`Header ${index + 1} value`}
+                      placeholder="Bearer …"
+                      type={header.revealed ? "text" : "password"}
+                      autoComplete="off"
+                      spellCheck={false}
+                      data-dd-privacy="hidden"
+                      value={header.value}
+                      onChange={(e) =>
+                        updateHeader(index, "value", e.target.value)
+                      }
+                    />
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      aria-label={`${header.revealed ? "Hide" : "Show"} header ${index + 1} value`}
+                      title={header.revealed ? "Hide value" : "Show value"}
+                      aria-pressed={Boolean(header.revealed)}
+                      onClick={() =>
+                        setHeaders(
+                          headers.map((item, i) =>
+                            i === index
+                              ? { ...item, revealed: !item.revealed }
+                              : item
+                          )
+                        )
+                      }
+                    >
+                      <Icon icon={header.revealed ? EyeOff : Eye} size="md" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      aria-label={`Remove header ${index + 1}`}
+                      onClick={() =>
+                        setHeaders(headers.filter((_, i) => i !== index))
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </Inline>
+                ))}
+                <Inline gap="md" align="center" wrap>
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="outline"
                     onClick={() =>
-                      setHeaders(headers.filter((_, i) => i !== index))
+                      setHeaders([...headers, { name: "", value: "" }])
                     }
                   >
-                    Remove
+                    Add header
                   </Button>
-                </div>
-              ))}
+                  {draft.existing && headers.length === 0 && (
+                    <Box render={<p />} className="text-meta text-ink-subtle">
+                      Saving with no headers clears the saved authentication.
+                    </Box>
+                  )}
+                </Inline>
+              </>
+            )}
+          </FormSection>
+          <FormSection
+            title="Allowed tools"
+            description="Discover tools, review the selection, then save. All discovered tools are selected by default for new connections."
+          >
+            {toolNames.length > 0 && (
+              <Stack gap="sm">
+                <Inline gap="sm" align="center" wrap>
+                  <Box
+                    render={<span />}
+                    className="mr-auto text-meta text-ink-subtle tabular-nums"
+                  >
+                    {draft.allowed_tools.length} of {toolNames.length} selected
+                  </Box>
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="outline"
+                    disabled={draft.allowed_tools.length === toolNames.length}
+                    onClick={() =>
+                      setDraft({ ...draft, allowed_tools: toolNames })
+                    }
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="outline"
+                    disabled={draft.allowed_tools.length === 0}
+                    onClick={() => setDraft({ ...draft, allowed_tools: [] })}
+                  >
+                    Clear all
+                  </Button>
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="ghost"
+                    aria-expanded={toolsExpanded}
+                    aria-controls={toolsId}
+                    onClick={() => setToolsExpanded(!toolsExpanded)}
+                  >
+                    {toolsExpanded ? "Hide tools" : "Show tools"}
+                  </Button>
+                </Inline>
+                <Box
+                  id={toolsId}
+                  role="region"
+                  aria-label="Available tools"
+                  hidden={!toolsExpanded}
+                  border="line"
+                  radius="compact"
+                  className="overflow-hidden"
+                >
+                  <ScrollArea overflow="vertical" viewportClassName="max-h-80">
+                    <Stack gap="md" padding="md">
+                      {toolNames.map((name) => (
+                        <Inline
+                          key={name}
+                          gap="sm"
+                          align="start"
+                          className="text-label text-ink"
+                        >
+                          <Checkbox
+                            className="mt-0.5"
+                            aria-label={`Allow ${name}`}
+                            checked={selectedTools.has(name)}
+                            onCheckedChange={(checked) =>
+                              setDraft({
+                                ...draft,
+                                allowed_tools: checked
+                                  ? [...draft.allowed_tools, name]
+                                  : draft.allowed_tools.filter(
+                                      (tool) => tool !== name
+                                    ),
+                              })
+                            }
+                          />
+                          <Stack gap="none" className="min-w-0 break-words">
+                            <Box render={<span />} className="font-mono">
+                              {name}
+                            </Box>
+                            <Box
+                              render={<span />}
+                              className="text-meta text-ink-subtle"
+                            >
+                              {toolDescriptions.get(name)}
+                            </Box>
+                          </Stack>
+                        </Inline>
+                      ))}
+                    </Stack>
+                  </ScrollArea>
+                </Box>
+              </Stack>
+            )}
+          </FormSection>
+          <Stack gap="md">
+            {error && <FormFailure>{error}</FormFailure>}
+            <Inline gap="sm" align="center" wrap>
+              <Button type="submit" size="compact">
+                Save connection
+              </Button>
               <Button
                 type="button"
                 size="compact"
                 variant="outline"
-                onClick={() =>
-                  setHeaders([...headers, { name: "", value: "" }])
-                }
+                disabled={!draft.name || !draft.url}
+                onClick={(event) => {
+                  if (event.currentTarget.form?.reportValidity())
+                    void save(true)
+                }}
               >
-                Add header
+                Save and discover tools
               </Button>
-              {draft.existing && headers.length === 0 && (
-                <p className="text-meta text-ink-subtle">
-                  Saving with no headers clears the saved authentication.
-                </p>
-              )}
-            </>
-          )}
-        </div>
-        <div className="space-y-2">
-          <p className="text-body font-medium">Allowed tools</p>
-          <p className="text-meta text-ink-subtle">
-            Discover tools, review the selection, then save. All discovered
-            tools are selected by default for new connections.
-          </p>
-          {toolNames.length > 0 && (
-            <>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-auto text-meta text-ink-subtle">
-                  {draft.allowed_tools.length} of {toolNames.length} selected
-                </span>
-                <Button
-                  type="button"
-                  size="compact"
-                  variant="outline"
-                  disabled={draft.allowed_tools.length === toolNames.length}
-                  onClick={() =>
-                    setDraft({ ...draft, allowed_tools: toolNames })
-                  }
-                >
-                  Select all
-                </Button>
-                <Button
-                  type="button"
-                  size="compact"
-                  variant="outline"
-                  disabled={draft.allowed_tools.length === 0}
-                  onClick={() => setDraft({ ...draft, allowed_tools: [] })}
-                >
-                  Clear all
-                </Button>
+              {pendingImports.length > 0 && (
                 <Button
                   type="button"
                   size="compact"
                   variant="ghost"
-                  aria-expanded={toolsExpanded}
-                  aria-controls={toolsId}
-                  onClick={() => setToolsExpanded(!toolsExpanded)}
+                  onClick={finishEditing}
                 >
-                  {toolsExpanded ? "Hide tools" : "Show tools"}
+                  Skip connection
                 </Button>
-              </div>
-              <div
-                id={toolsId}
-                role="region"
-                aria-label="Available tools"
-                tabIndex={0}
-                hidden={!toolsExpanded}
-                className="max-h-80 space-y-3 overflow-y-auto overscroll-contain rounded-badge border p-3"
+              )}
+              <Button
+                type="button"
+                size="compact"
+                variant="ghost"
+                onClick={closeEditor}
               >
-                {toolNames.map((name) => (
-                  <label key={name} className="flex items-start gap-2 text-body">
-                    <input
-                      type="checkbox"
-                      className="mt-1 shrink-0"
-                      aria-label={`Allow ${name}`}
-                      checked={selectedTools.has(name)}
-                      onChange={(e) =>
-                        setDraft({
-                          ...draft,
-                          allowed_tools: e.target.checked
-                            ? [...draft.allowed_tools, name]
-                            : draft.allowed_tools.filter(
-                                (tool) => tool !== name
-                              ),
-                        })
-                      }
-                    />
-                    <span className="min-w-0 break-words">
-                      {name}
-                      <span className="block text-meta text-ink-subtle">
-                        {toolDescriptions.get(name)}
-                      </span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="compact"
-            variant="outline"
-            disabled={!draft.name || !draft.url}
-            onClick={(event) => {
-              if (event.currentTarget.form?.reportValidity()) void save(true)
-            }}
-          >
-            Save and discover tools
-          </Button>
-          <Button type="submit" size="compact">
-            Save connection
-          </Button>
-          {pendingImports.length > 0 && (
-            <Button
-              type="button"
-              size="compact"
-              variant="ghost"
-              onClick={finishEditing}
-            >
-              Skip connection
-            </Button>
-          )}
-          <Button type="button" size="compact" variant="ghost" onClick={closeEditor}>
-            {dirty ? "Cancel" : "Close"}
-          </Button>
-        </div>
-      </fieldset>
-    </form>
+                {dirty ? "Cancel" : "Close"}
+              </Button>
+            </Inline>
+          </Stack>
+        </FormStack>
+      </Box>
+    </Stack>
   ) : null
 
+  const ownConnections = connections.data ?? []
+  const inheritedConnections =
+    scope === "workspace" ? (inherited.data ?? []) : []
+  const showPanel =
+    connections.isLoading ||
+    ownConnections.length > 0 ||
+    inheritedConnections.length > 0 ||
+    importing ||
+    (draft !== null && !draft.existing) ||
+    !connections.isError
+
   return (
-    <SettingsSection title="MCP servers" description={description}>
-      <div className="space-y-4 p-4">
-        {connections.isLoading && (
-          <p className="text-body text-ink-subtle">Loading connections…</p>
-        )}
-        {connections.error && (
-          <p role="alert" className="text-body text-risk">
-            {connections.error.message}
-          </p>
-        )}
-        {scope === "workspace" &&
-          inherited.data &&
-          inherited.data.length > 0 && (
-            <section
-              aria-label="Inherited instance MCP connections"
-              className="rounded-badge border border-dashed"
-            >
-              <p className="px-3 pt-3 text-meta font-medium text-ink-subtle">
-                Inherited from the instance
-              </p>
-              <ul className="divide-y divide-line">
-                {inherited.data.map((connection) => {
-                  const replaced = connections.data?.some(
-                    (own) => own.name === connection.name
-                  )
-                  return (
-                    <li
-                      key={connection.name}
-                      className="flex flex-wrap items-center justify-between gap-3 p-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-body">
-                          {connection.name}{" "}
-                          <span className="text-ink-subtle">
-                            · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
-                            {connection.allowed_tools.length} tools
-                          </span>
-                        </p>
-                        <p className="text-meta break-all text-ink-subtle">
-                          {connection.url}
-                        </p>
-                      </div>
-                      <span className="text-meta text-ink-subtle">
-                        {replaced
-                          ? "Replaced by this workspace's connection"
-                          : "Edit under Admin"}
-                      </span>
-                    </li>
-                  )
-                })}
-              </ul>
-            </section>
-          )}
-        {connections.data?.map((connection) => {
-          const isEditing = draft?.existing && draft.name === connection.name
-          return (
-            <section
-              key={connection.name}
-              aria-label={`${connection.name} MCP connection`}
-              className="rounded-badge border"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3 p-3">
-                <div className="min-w-0">
-                  <p className="text-body font-medium">
-                    {connection.name}{" "}
-                    <span className="text-ink-subtle">
-                      · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
-                      {connection.allowed_tools.length} tools
-                    </span>
-                  </p>
-                  <p className="text-meta break-all text-ink-subtle">
-                    {connection.url}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="compact"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => {
-                      if (isEditing) closeEditor()
-                      else edit(connection)
-                    }}
-                    aria-expanded={Boolean(isEditing)}
-                    aria-controls={isEditing ? editorId : undefined}
-                    aria-label={`${isEditing ? "Close" : "Edit"} ${connection.name}`}
-                  >
-                    {isEditing ? "Close" : "Edit"}
-                  </Button>
-                  <Button
-                    size="compact"
-                    variant="outline"
-                    disabled={busy || pendingRows.has(connection.name)}
-                    onClick={() => {
-                      const withEnabled =
-                        (enabled: boolean) => (list: MCPConnection[]) =>
-                          list.map((c) =>
-                            c.name === connection.name ? { ...c, enabled } : c
-                          )
-                      void optimistic(
-                        connection.name,
-                        `Couldn't ${connection.enabled ? "disable" : "enable"} ${connection.name}`,
-                        withEnabled(!connection.enabled),
-                        withEnabled(connection.enabled),
-                        async () => {
-                          await client.save({
-                            name: connection.name,
-                            url: connection.url,
-                            transport: connection.transport,
-                            enabled: !connection.enabled,
-                            allowed_tools: connection.allowed_tools,
-                          })
-                          if (draft?.name === connection.name) closeEditor()
-                        }
-                      )
-                    }}
-                    aria-label={`${connection.enabled ? "Disable" : "Enable"} ${connection.name}`}
-                  >
-                    {connection.enabled ? "Disable" : "Enable"}
-                  </Button>
-                  <Button
-                    size="compact"
-                    variant="outline"
-                    disabled={busy || pendingRows.has(connection.name)}
-                    onClick={() =>
-                      void optimistic(
-                        connection.name,
-                        `Couldn't delete ${connection.name}`,
-                        (list) =>
-                          list.filter((c) => c.name !== connection.name),
-                        (list) =>
-                          list.some((c) => c.name === connection.name)
-                            ? list
-                            : [...list, connection],
-                        async () => {
-                          await client.remove(connection.name)
-                          if (draft?.name === connection.name) closeEditor()
-                        }
-                      )
-                    }
-                    aria-label={`Delete ${connection.name}`}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-              {isEditing && editor}
-            </section>
-          )
-        })}
-        {importing ? (
-          <MCPImport
-            onImport={([first, ...rest]) => {
-              if (!first) return
-              setImporting(false)
-              setPendingImports(rest)
-              openImported(first)
-            }}
-            onCancel={() => setImporting(false)}
-          />
-        ) : !draft ? (
-          <div className="flex gap-2">
-            <Button
-              size="compact"
-              disabled={connections.isPending || connections.isError}
-              onClick={() => edit()}
-            >
-              Add MCP server
-            </Button>
+    <PageSection
+      title="MCP servers"
+      description={description}
+      actions={
+        importing || draft ? undefined : (
+          <>
             <Button
               size="compact"
               variant="outline"
@@ -889,11 +873,205 @@ export function MCPConnectionsSection({
             >
               Import JSON
             </Button>
-          </div>
-        ) : (
-          !draft.existing && editor
-        )}
-      </div>
-    </SettingsSection>
+            <Button
+              size="compact"
+              disabled={connections.isPending || connections.isError}
+              onClick={() => edit()}
+            >
+              Add MCP server
+            </Button>
+          </>
+        )
+      }
+    >
+      {connections.error && (
+        <StateNotice
+          tone="RISK"
+          icon={AlertTriangle}
+          title="MCP servers did not load"
+          description={`${connections.error.message} Adding a server is off until the list loads, so nothing is overwritten.`}
+        />
+      )}
+      {showPanel && (
+        <Stack
+          gap="none"
+          bg="panel"
+          border="line"
+          radius="panel"
+          className="overflow-hidden"
+        >
+          {connections.isLoading && (
+            <Box padding="lg" className={PANEL_BLOCK_CLASS}>
+              <Skeleton className="h-10 w-full" />
+            </Box>
+          )}
+          {ownConnections.map((connection) => {
+            const isEditing = draft?.existing && draft.name === connection.name
+            return (
+              <section
+                key={connection.name}
+                aria-label={`${connection.name} MCP connection`}
+                className={PANEL_BLOCK_CLASS}
+              >
+                <Inline
+                  gap="md"
+                  align="center"
+                  justify="between"
+                  wrap
+                  className="px-5 py-3"
+                >
+                  <ConnectionSummary connection={connection} emphasis />
+                  <Inline gap="sm" align="center">
+                    <Button
+                      size="compact"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        if (isEditing) closeEditor()
+                        else edit(connection)
+                      }}
+                      aria-expanded={Boolean(isEditing)}
+                      aria-controls={isEditing ? editorId : undefined}
+                      aria-label={`${isEditing ? "Close" : "Edit"} ${connection.name}`}
+                    >
+                      {isEditing ? "Close" : "Edit"}
+                    </Button>
+                    <Button
+                      size="compact"
+                      variant="outline"
+                      disabled={busy || pendingRows.has(connection.name)}
+                      onClick={() => {
+                        const withEnabled =
+                          (enabled: boolean) => (list: MCPConnection[]) =>
+                            list.map((c) =>
+                              c.name === connection.name ? { ...c, enabled } : c
+                            )
+                        void optimistic(
+                          connection.name,
+                          `Couldn't ${connection.enabled ? "disable" : "enable"} ${connection.name}`,
+                          withEnabled(!connection.enabled),
+                          withEnabled(connection.enabled),
+                          async () => {
+                            await client.save({
+                              name: connection.name,
+                              url: connection.url,
+                              transport: connection.transport,
+                              enabled: !connection.enabled,
+                              allowed_tools: connection.allowed_tools,
+                            })
+                            if (draft?.name === connection.name) closeEditor()
+                          }
+                        )
+                      }}
+                      aria-label={`${connection.enabled ? "Disable" : "Enable"} ${connection.name}`}
+                    >
+                      {connection.enabled ? "Disable" : "Enable"}
+                    </Button>
+                    <ConfirmableAction
+                      trigger={
+                        <Button
+                          size="compact"
+                          variant="outline"
+                          disabled={busy || pendingRows.has(connection.name)}
+                          aria-label={`Delete ${connection.name}`}
+                        >
+                          Delete
+                        </Button>
+                      }
+                      title={`Delete ${connection.name}?`}
+                      description="Runs stop loading this server's tools, and its saved headers and OAuth secret are deleted. This cannot be undone."
+                      confirmLabel="Delete connection"
+                      // The row leaves at once; a failed delete puts it back and reports.
+                      onConfirm={async () => {
+                        void optimistic(
+                          connection.name,
+                          `Couldn't delete ${connection.name}`,
+                          (list) =>
+                            list.filter((c) => c.name !== connection.name),
+                          (list) =>
+                            list.some((c) => c.name === connection.name)
+                              ? list
+                              : [...list, connection],
+                          async () => {
+                            await client.remove(connection.name)
+                            if (draft?.name === connection.name) closeEditor()
+                          }
+                        )
+                      }}
+                    />
+                  </Inline>
+                </Inline>
+                {isEditing && editor}
+              </section>
+            )
+          })}
+          {importing ? (
+            <Box className={cn("px-5 py-4", PANEL_BLOCK_CLASS)}>
+              <MCPImport
+                onImport={([first, ...rest]) => {
+                  if (!first) return
+                  setImporting(false)
+                  setPendingImports(rest)
+                  openImported(first)
+                }}
+                onCancel={() => setImporting(false)}
+              />
+            </Box>
+          ) : (
+            draft && !draft.existing && editor
+          )}
+          {inheritedConnections.length > 0 && (
+            <section
+              aria-label="Inherited instance MCP connections"
+              className={PANEL_BLOCK_CLASS}
+            >
+              <Box
+                render={<p />}
+                className="border-b border-line bg-muted px-5 py-2 text-meta font-medium text-ink-subtle"
+              >
+                Inherited from the instance
+              </Box>
+              {inheritedConnections.map((connection) => {
+                const replaced = ownConnections.some(
+                  (own) => own.name === connection.name
+                )
+                return (
+                  <Inline
+                    key={connection.name}
+                    gap="md"
+                    align="center"
+                    justify="between"
+                    wrap
+                    className={cn("px-5 py-3", PANEL_BLOCK_CLASS)}
+                  >
+                    <ConnectionSummary
+                      connection={connection}
+                      emphasis={false}
+                    />
+                    <Badge tier="plain" tone="neutral">
+                      {replaced
+                        ? "Replaced by this workspace's connection"
+                        : "Edit under Admin"}
+                    </Badge>
+                  </Inline>
+                )
+              })}
+            </section>
+          )}
+          {!connections.isLoading &&
+            !connections.isError &&
+            ownConnections.length === 0 &&
+            inheritedConnections.length === 0 &&
+            !importing &&
+            !draft && (
+              <EmptyState
+                icon={Server}
+                title="No MCP servers yet"
+                description="Add a server, or import a JSON configuration."
+              />
+            )}
+        </Stack>
+      )}
+    </PageSection>
   )
 }

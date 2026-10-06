@@ -1,6 +1,8 @@
 import Editor from "@monaco-editor/react"
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import { useIsHydrated } from "@/lib/hydration"
+import { useResolvedTheme } from "@/lib/theme"
 
 interface InstructionsEditorProps {
   value: string
@@ -17,11 +19,12 @@ export function InstructionsEditor({
   placeholder,
 }: InstructionsEditorProps) {
   const mounted = useIsHydrated()
+  const theme = useResolvedTheme()
 
   if (!mounted) {
     return (
       <Textarea
-        className="min-h-[360px] w-full font-mono text-label"
+        className="min-h-90 w-full font-mono text-label"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -31,7 +34,7 @@ export function InstructionsEditor({
   }
 
   return (
-    <div className="overflow-hidden rounded-badge border border-line">
+    <Box border="line" radius="compact" className="overflow-hidden">
       <Editor
         height="360px"
         language="markdown"
@@ -47,8 +50,8 @@ export function InstructionsEditor({
           padding: { top: 12, bottom: 12 },
           renderLineHighlight: "none",
         }}
-        theme="vs-dark"
+        theme={theme === "dark" ? "vs-dark" : "light"}
       />
-    </div>
+    </Box>
   )
 }

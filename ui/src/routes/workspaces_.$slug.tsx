@@ -1,10 +1,8 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 
-import { AppShell } from "@/components/AppShell"
-import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { SettingsPage } from "@/components/AppShell"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { WorkspaceSettingsPanel } from "@/features/settings/components/WorkspaceSettings"
-import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 
@@ -21,26 +19,19 @@ function WorkspaceSettingsPage() {
   const session = useSession()
   const options = useWorkspaceOptions(!!session.data)
 
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-40 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-  if (!session.data.is_admin) return <Navigate to="/workspaces" />
+  // Non-admins go back to the list, not to their own settings.
+  if (session.data && !session.data.is_admin)
+    return <Navigate to="/workspaces" />
 
   const name =
     options.data?.workspaces.find((workspace) => workspace.slug === slug)
       ?.name ?? slug
 
   return (
-    <AppShell
-      user={session.data}
+    <SettingsPage
       title={name}
       description="Everything configured for this workspace: what it owns, the sandbox image its runs boot from, model defaults, review settings, and MCP connections."
-      backTo={{ to: "/workspaces", label: "Back to Workspaces" }}
+      backTo={{ to: "/workspaces", label: "Workspaces" }}
     >
       <WorkspaceSettingsPanel
         key={slug}
@@ -48,6 +39,6 @@ function WorkspaceSettingsPage() {
         canEdit
         onDeleted={() => void navigate({ to: "/workspaces" })}
       />
-    </AppShell>
+    </SettingsPage>
   )
 }

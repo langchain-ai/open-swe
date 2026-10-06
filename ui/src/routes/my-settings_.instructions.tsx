@@ -8,7 +8,7 @@ export const Route = createFileRoute("/my-settings_/instructions")({
   component: () => (
     <SettingsPage
       title="Instructions"
-      description="Standing instructions added to the agent's system prompt for every run you trigger, on any surface. Repository instructions and AGENTS.md win when they conflict."
+      description="Standing instructions added to the agent's system prompt for every run you trigger."
     >
       <PersonalInstructionsSection />
     </SettingsPage>
