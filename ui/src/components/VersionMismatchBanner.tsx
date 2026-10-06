@@ -11,7 +11,8 @@ export function VersionMismatchBanner() {
   const { data: user } = useQuery(sessionQueryOptions)
   const running = hydrated ? window.__OPEN_SWE_BUNDLE__?.commit : null
   const deployed = normalizeBuildInfo(user?.build_info)?.backend.commit
-  if (!running || !deployed || running === deployed) return null
+  if (!running || !deployed || running === deployed || window.openSweDesktop)
+    return null
 
   return (
     <div
