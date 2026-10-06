@@ -1,4 +1,5 @@
 import { SubagentCard } from "./SubagentCard"
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
 /** Maximum number of subagent cards rendered per row. */
@@ -17,13 +18,13 @@ export function SubagentGroup({
 }) {
   const columns = Math.min(Math.max(chunks.length, 1), MAX_SUBAGENT_COLUMNS)
   return (
-    <div
+    <Box
       className="grid gap-2"
       style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
     >
       {chunks.map((chunk) => (
         <SubagentCard key={chunk.toolCallId} chunk={chunk} />
       ))}
-    </div>
+    </Box>
   )
 }

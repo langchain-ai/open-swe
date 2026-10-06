@@ -6,14 +6,21 @@ import {
 } from "streamdown"
 import type { ComponentProps, ReactNode } from "react"
 import type { Components, ExtraProps } from "streamdown"
+import "streamdown/styles.css"
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import type { AlertTone } from "@langchain/gtm-platform-design-system/ui/alert"
+import {
+  AlertCircle,
+  AlertTriangle,
   Info,
   Lightbulb,
-  MessageSquareWarning,
-  OctagonAlert,
-  TriangleAlert,
-} from "lucide-react"
-import "streamdown/styles.css"
+  MessageSquare,
+} from "@/components/glyphs"
+import type { Glyph } from "@/components/glyphs"
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
 import { MermaidDiagram } from "./MermaidDiagram"
@@ -63,14 +70,15 @@ const SHIKI_THEME: ["github-light", "github-dark"] = [
   "github-dark",
 ]
 
-/** GitHub's own five alert kinds; the colours live in styles/markdown.css. */
-const ALERTS: Record<string, { label: string; Icon: typeof Info }> = {
-  note: { label: "Note", Icon: Info },
-  tip: { label: "Tip", Icon: Lightbulb },
-  important: { label: "Important", Icon: MessageSquareWarning },
-  warning: { label: "Warning", Icon: TriangleAlert },
-  caution: { label: "Caution", Icon: OctagonAlert },
-}
+/** GitHub's own five alert kinds, each on the state pair nearest its meaning. */
+const ALERTS: Record<string, { label: string; icon: Glyph; tone: AlertTone }> =
+  {
+    note: { label: "Note", icon: Info, tone: "info" },
+    tip: { label: "Tip", icon: Lightbulb, tone: "positive" },
+    important: { label: "Important", icon: MessageSquare, tone: "info" },
+    warning: { label: "Warning", icon: AlertTriangle, tone: "attention" },
+    caution: { label: "Caution", icon: AlertCircle, tone: "risk" },
+  }
 
 /**
  * Streamdown's defaults dress every element in utility classes sized for a
@@ -129,6 +137,11 @@ const COMPONENTS: Components = {
   h5: passthrough("h5"),
   h6: passthrough("h6"),
   p: passthrough("p"),
+  thead: passthrough("thead"),
+  tbody: passthrough("tbody"),
+  tr: passthrough("tr"),
+  th: passthrough("th"),
+  td: passthrough("td"),
   ul: passthrough("ul"),
   li: passthrough("li"),
   hr: passthrough("hr"),
@@ -167,17 +180,19 @@ const COMPONENTS: Components = {
     ...props
   }: ExtraProps & ComponentProps<"blockquote"> & { "data-alert"?: string }) => {
     const alert = ALERTS[props["data-alert"] ?? ""]
-    // Not a <blockquote>: an alert's body is ordinary text under a coloured
+    // Not a <blockquote>: an alert's body is ordinary text under a toned
     // title rather than a muted quote.
     if (!alert) return <blockquote {...props}>{children}</blockquote>
     return (
-      <div role="note" data-alert={props["data-alert"]}>
-        <p>
-          <alert.Icon aria-hidden className="size-3.5 shrink-0" />
-          {alert.label}
-        </p>
-        {children}
-      </div>
+      <Alert
+        role="note"
+        tone={alert.tone}
+        icon={alert.icon}
+        data-alert={props["data-alert"]}
+      >
+        <AlertTitle>{alert.label}</AlertTitle>
+        <AlertDescription>{children}</AlertDescription>
+      </Alert>
     )
   },
   table: ({
@@ -198,7 +213,6 @@ const COMPONENTS: Components = {
       src={typeof src === "string" ? src : undefined}
       alt={alt ?? ""}
       loading="lazy"
-      className="border border-line/60"
     />
   ),
   a: ({
@@ -243,7 +257,7 @@ class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   render(): ReactNode {
     if (this.state.failed) {
       return (
-        <pre className="font-sans [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-ink">
+        <pre className="font-sans wrap-anywhere whitespace-pre-wrap text-ink">
           {this.props.content}
         </pre>
       )
@@ -270,7 +284,7 @@ export const Markdown = memo(function Markdown({
   }, [transformImageUrl])
 
   return (
-    <div className="chat-markdown max-w-full min-w-0 text-body leading-[1.6] [overflow-wrap:anywhere] break-words text-ink">
+    <div className="chat-markdown max-w-full min-w-0 text-body wrap-anywhere text-ink">
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}

@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 import { MultiFileDiff } from "@pierre/diffs/react"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import type { DiffData } from "@/features/agents/lib/types"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
@@ -25,33 +26,46 @@ export function DiffView({ diffData, snippet = false }: DiffViewProps) {
 
   if (isBinary) {
     return (
-      <div className="mt-2 font-mono text-meta text-ink-subtle">
+      <Box render={<p />} className="mt-2 font-mono text-meta text-ink-subtle">
         Binary file - diff not available
-      </div>
+      </Box>
     )
   }
 
   if (stats.additions === 0 && stats.deletions === 0) {
     return (
-      <div className="mt-2 font-mono text-meta text-ink-subtle">No changes</div>
+      <Box render={<p />} className="mt-2 font-mono text-meta text-ink-subtle">
+        No changes
+      </Box>
     )
   }
 
   return (
-    <div className="mt-2 font-mono text-label">
-      <div className="mb-1 flex items-center gap-2 text-ink-subtle">
-        <span className="text-ink-subtle">{displayPath}</span>
+    <Stack gap="xs" className="mt-2 font-mono text-label">
+      <Inline gap="sm" align="center" className="text-meta text-ink-subtle">
+        <Box render={<span />} className="min-w-0 truncate">
+          {displayPath}
+        </Box>
         {diffData.isNewFile && !snippet && <span>(new)</span>}
-        <span className="text-positive">+{stats.additions}</span>
-        <span className="text-risk">-{stats.deletions}</span>
-      </div>
-      <div className="max-h-60 overflow-auto rounded-compact border border-line/60 bg-panel">
+        <Box render={<span />} className="text-positive tabular-nums">
+          +{stats.additions}
+        </Box>
+        <Box render={<span />} className="text-risk tabular-nums">
+          -{stats.deletions}
+        </Box>
+      </Inline>
+      <Box
+        bg="panel"
+        border="line"
+        radius="compact"
+        className="max-h-60 overflow-auto"
+      >
         <MultiFileDiff
           oldFile={{ name: displayPath, contents: originalContent ?? "" }}
           newFile={{ name: displayPath, contents: newContent }}
           options={options}
         />
-      </div>
-    </div>
+      </Box>
+    </Stack>
   )
 }

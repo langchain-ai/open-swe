@@ -1,12 +1,16 @@
 import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { ArrowLeft } from "lucide-react"
 import { useIsHydrated } from "@/lib/hydration"
 
 import { PlanReview } from "@/features/agents/components/PlanReview"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import { Box, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+import { ArrowLeft, FileSearch, Lock } from "@/components/glyphs"
 import { loginUrl } from "@/lib/api"
 import { currentAuthRedirectPath } from "@/lib/auth-redirect"
 import { PlanApiError, getPlan } from "@/lib/plan"
@@ -68,14 +72,14 @@ function Centered({
   standalone: boolean
 }) {
   return (
-    <div
+    <Box
       className={cn(
         "flex min-w-0 flex-1 items-center justify-center px-4 py-6",
         standalone && "max-md:pt-14 md:p-6"
       )}
     >
       {children}
-    </div>
+    </Box>
   )
 }
 
@@ -84,9 +88,9 @@ function BackLink({ threadId }: { threadId: string }) {
     <Link
       to="/agents/$threadId"
       params={{ threadId }}
-      className="inline-flex items-center gap-1 text-meta text-ink-subtle/70 hover:text-ink"
+      className="inline-flex items-center gap-1.5 rounded-badge text-label text-ink-subtle outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-primary"
     >
-      <ArrowLeft className="size-3.5" />
+      <Icon icon={ArrowLeft} size="sm" />
       Back to conversation
     </Link>
   )
@@ -119,7 +123,7 @@ export function PlanView({
   if (!mounted || query.isLoading) {
     return (
       <Centered standalone={standalone}>
-        <Skeleton className="h-48 w-full max-w-2xl" />
+        <Skeleton className="h-48 w-full max-w-reading rounded-panel" />
       </Centered>
     )
   }
@@ -128,15 +132,22 @@ export function PlanView({
     const status = query.error instanceof PlanApiError ? query.error.status : 0
     return (
       <Centered standalone={standalone}>
-        <div className="space-y-3 text-center text-body text-ink-subtle/70">
-          <p>
-            {status === 401
+        <EmptyState
+          icon={status === 401 ? Lock : FileSearch}
+          title={
+            status === 401
               ? "Please sign in to view this artifact."
-              : "This artifact could not be found."}
-          </p>
-          {status === 401 ? <PlanSignInButton /> : null}
-          {backLink}
-        </div>
+              : "This artifact could not be found."
+          }
+          action={
+            status === 401 || backLink ? (
+              <Stack gap="md" align="center">
+                {status === 401 ? <PlanSignInButton /> : null}
+                {backLink}
+              </Stack>
+            ) : undefined
+          }
+        />
       </Centered>
     )
   }
@@ -145,13 +156,12 @@ export function PlanView({
   if (!plan?.html.trim() && !plan?.markdown.trim()) {
     return (
       <Centered standalone={standalone}>
-        <div className="space-y-3 text-center text-body text-ink-subtle/70">
-          <p>
-            The agent is still writing the content. This view will update
-            automatically…
-          </p>
-          {backLink}
-        </div>
+        <EmptyState
+          media={<Spinner size="lg" className="text-ink-subtle" />}
+          title="The agent is still writing the content."
+          description="This view will update automatically…"
+          action={backLink ?? undefined}
+        />
       </Centered>
     )
   }
@@ -159,9 +169,9 @@ export function PlanView({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {standalone && (
-        <div className="border-b border-line px-4 pt-14 md:px-6 md:pt-3">
+        <Box className="border-b border-line px-4 pt-14 pb-3 md:px-6 md:pt-3">
           {backLink}
-        </div>
+        </Box>
       )}
       <PlanReview plan={plan} />
     </div>

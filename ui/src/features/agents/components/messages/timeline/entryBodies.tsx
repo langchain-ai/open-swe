@@ -2,6 +2,8 @@ import { memo } from "react"
 
 import { ToolResultBody } from "./ToolResultBody"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
 
 export const ShellEntryBody = memo(function ShellEntryBody({
   chunk,
@@ -19,28 +21,35 @@ export const ShellEntryBody = memo(function ShellEntryBody({
   const pendingOutput = Boolean(chunk.loadOutput) && loadedText == null
 
   return (
-    <div className="space-y-1.5">
+    <Stack gap="sm">
       {command && (
-        <pre className="cursor-text overflow-x-auto font-mono text-meta leading-relaxed whitespace-pre text-ink/85 select-text">
-          <span className="text-ink-subtle/80">$ </span>
+        <pre className="cursor-text overflow-x-auto font-mono text-meta whitespace-pre text-ink select-text">
+          <span className="text-ink-subtle">$ </span>
           {command}
         </pre>
       )}
       {output && <ToolResultBody value={output} />}
-      {loadError && <p className="text-meta text-risk">{loadError}</p>}
+      {loadError && (
+        <Box render={<p />} className="text-meta text-risk">
+          {loadError}
+        </Box>
+      )}
       {!loadError && pendingOutput && (
-        <p className="font-mono text-meta text-ink-subtle">
+        <Inline gap="xs" align="center" className="text-meta text-ink-subtle">
+          <Spinner size="sm" />
           {output ? "Loading the rest of the output…" : "Loading output…"}
-        </p>
+        </Inline>
       )}
       {!output && !pendingOutput && chunk.status === "in_progress" && (
-        <p className="font-mono text-meta text-ink-subtle">Running…</p>
+        <Box render={<p />} className="shimmer-text text-meta">
+          Running…
+        </Box>
       )}
       {!output && !pendingOutput && chunk.status === "pending" && (
-        <p className="font-mono text-meta text-attention">
+        <Box render={<p />} className="text-meta text-attention">
           Waiting for approval…
-        </p>
+        </Box>
       )}
-    </div>
+    </Stack>
   )
 })

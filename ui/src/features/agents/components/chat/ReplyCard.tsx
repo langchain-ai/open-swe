@@ -1,9 +1,13 @@
 import { memo } from "react"
-import { MessageCircle } from "lucide-react"
 import { SlackMrkdwn } from "../messages/SlackMrkdwn"
 import { Markdown } from "./Markdown"
 import type { ReactNode } from "react"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import { ProviderMark } from "@langchain/gtm-platform-design-system/patterns/provider-mark"
+import { Receipt } from "@langchain/gtm-platform-design-system/patterns/receipt"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import { Separator } from "@langchain/gtm-platform-design-system/ui/separator"
 
 interface ReplyCardProps {
   chunk: ToolExecutionChunk
@@ -62,19 +66,21 @@ function blocksFromOptions(
   ]
 }
 
+/** Slack buttons are drawn as the outline controls they become, but stay inert here. */
+const SLACK_BUTTON_CLASS = buttonVariants({ variant: "outline", size: "compact" })
+
+const SLACK_TEXT_CLASS = "wrap-anywhere whitespace-pre-wrap"
+
 function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
   return (
-    <div className="flex flex-col gap-2">
+    <Stack gap="sm">
       {blocks.map((block, index) => {
         if (
           (block.type === "section" || block.type === "context") &&
           isSlackTextObject(block.text)
         ) {
           return (
-            <div
-              key={index}
-              className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap"
-            >
+            <div key={index} className={SLACK_TEXT_CLASS}>
               {block.text.type === "mrkdwn" ? (
                 <SlackMrkdwn text={block.text.text ?? ""} />
               ) : (
@@ -85,7 +91,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
         }
         if (block.type === "actions" && Array.isArray(block.elements)) {
           return (
-            <div key={index} className="flex flex-wrap gap-2">
+            <Inline key={index} gap="sm" wrap>
               {block.elements.map((element, elementIndex) => {
                 const label = isSlackTextObject(element.text)
                   ? element.text.text
@@ -93,21 +99,21 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
                 return (
                   <span
                     key={elementIndex}
-                    className="rounded-badge border border-line bg-panel px-2 py-1 text-meta text-ink"
+                    className={`${SLACK_BUTTON_CLASS} pointer-events-none`}
                   >
                     {label}
                   </span>
                 )
               })}
-            </div>
+            </Inline>
           )
         }
         if (block.type === "divider") {
-          return <div key={index} className="border-t border-line/60" />
+          return <Separator key={index} />
         }
         return null
       })}
-    </div>
+    </Stack>
   )
 }
 
@@ -123,26 +129,25 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
     : null
 
   return (
-    <div className="my-1">
-      <div className="flex items-center gap-1.5 py-1 text-meta text-ink-subtle">
-        <MessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span>{headerLabel(isLinear, chunk.status)}</span>
-      </div>
-      {body && (
-        <div className="overflow-hidden rounded-control border border-line/60 bg-muted/40">
-          <div className="max-h-[250px] overflow-auto px-3 py-2 text-body text-ink">
-            {isLinear ? (
-              <Markdown content={body} />
-            ) : blocks ? (
-              renderSlackBlocks(blocks)
-            ) : (
-              <div className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap">
-                <SlackMrkdwn text={body} />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    <Receipt
+      title={headerLabel(isLinear, chunk.status)}
+      titleClassName="text-label"
+      spacing="sm"
+      mark={<ProviderMark provider={isLinear ? "linear" : "slack"} />}
+    >
+      {body ? (
+        <Box className="max-h-64 overflow-auto px-1 text-body text-ink">
+          {isLinear ? (
+            <Markdown content={body} />
+          ) : blocks ? (
+            renderSlackBlocks(blocks)
+          ) : (
+            <div className={SLACK_TEXT_CLASS}>
+              <SlackMrkdwn text={body} />
+            </div>
+          )}
+        </Box>
+      ) : undefined}
+    </Receipt>
   )
 })

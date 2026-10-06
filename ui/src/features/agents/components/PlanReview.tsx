@@ -9,7 +9,17 @@ import {
   submitPlanComments,
 } from "@/lib/plan"
 import { reportError } from "@/lib/errorReporting"
+import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Shortcut } from "@langchain/gtm-platform-design-system/ui/shortcut"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { AlertTriangle, Check, Copy, FileText } from "@/components/glyphs"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 
@@ -154,41 +164,59 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     }
   }, [content, format])
 
+  const ownsComments = comments.some(
+    (comment) => comment.author_login === plan.user.login
+  )
+
   return (
     <main
       data-testid="plan-review"
       className="@container flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas text-ink"
     >
-      <div className="flex min-h-0 w-full flex-1 flex-col gap-3 p-3 md:p-4">
-        <header className="flex flex-col gap-3 border-b border-line pb-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
-          <div data-testid="plan-summary" className="min-w-0">
-            <h1 className="text-title font-semibold text-ink">Artifact</h1>
-            <p className="text-meta text-ink-subtle/70">
+      <Stack gap="md" className="min-h-0 w-full flex-1 p-3 md:p-4">
+        <Box
+          render={<header />}
+          className="flex flex-col gap-3 border-b border-line pb-3 @3xl:flex-row @3xl:items-center @3xl:justify-between"
+        >
+          <Stack gap="none" data-testid="plan-summary" className="min-w-0">
+            <Box
+              render={<h1 />}
+              className="text-page font-semibold tracking-tightish text-ink"
+            >
+              Artifact
+            </Box>
+            <Box render={<p />} className="text-meta text-ink-subtle">
               Viewing as {plan.user.name}
-            </p>
-          </div>
-          <div
-            data-testid="plan-actions"
-            className="flex flex-wrap items-center gap-2"
-          >
+            </Box>
+          </Stack>
+          <Inline data-testid="plan-actions" gap="sm" align="center" wrap>
             <Button
               data-testid="copy-plan"
               variant="outline"
               disabled={!content.trim()}
               onClick={() => void copyPlan()}
             >
+              <Icon icon={copied ? Check : Copy} size="sm" />
               {copied
                 ? "Copied!"
                 : `Copy ${format === "html" ? "HTML" : "Markdown"}`}
             </Button>
-          </div>
-        </header>
+          </Inline>
+        </Box>
 
-        {error && <p className="text-label text-risk">{error}</p>}
+        {error && (
+          <Alert tone="risk" icon={AlertTriangle}>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-        <section
+        <Box
+          render={<section />}
           data-testid="plan-document"
-          className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-control border border-line bg-panel"
+          bg="panel"
+          border="line"
+          radius="panel"
+          className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
         >
           {content.trim() ? (
             format === "html" ? (
@@ -202,35 +230,50 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   focusCommentKey={focusComment?.key ?? 0}
                   className="h-full min-h-0 min-w-0 flex-1"
                 />
-                <aside
+                <Box
+                  render={<aside />}
                   data-testid="plan-comments"
-                  className="flex max-h-1/2 shrink-0 flex-col overflow-y-auto border-t border-line bg-canvas/95 @3xl:max-h-none @3xl:w-80 @3xl:border-t-0 @3xl:border-l"
+                  bg="sidebar"
+                  className="flex max-h-1/2 shrink-0 flex-col overflow-y-auto border-t border-line @3xl:max-h-none @3xl:w-80 @3xl:border-t-0 @3xl:border-l"
                 >
-                  <div className="border-b border-line p-3">
-                    <h2 className="text-body font-semibold">Comments</h2>
-                    <p className="mt-0.5 text-meta text-ink-subtle">
-                      Highlight text in the preview to comment.
-                    </p>
-                  </div>
-                  {anchor && (
-                    <div
-                      data-testid="comment-composer"
-                      className="border-b border-line bg-muted/30 p-3"
+                  <Stack gap="xs" className="border-b border-line p-3">
+                    <Box
+                      render={<h2 />}
+                      className="text-title font-semibold text-ink"
                     >
-                      <blockquote className="line-clamp-3 border-l-2 border-primary pl-2 text-meta text-ink-subtle">
+                      Comments
+                    </Box>
+                    <Box render={<p />} className="text-meta text-ink-subtle">
+                      Highlight text in the preview to comment.
+                    </Box>
+                  </Stack>
+                  {anchor && (
+                    <Stack
+                      gap="sm"
+                      data-testid="comment-composer"
+                      className="border-b border-line p-3"
+                    >
+                      <Box
+                        render={<blockquote />}
+                        className="line-clamp-3 border-l-2 border-primary pl-2 text-meta text-ink-subtle"
+                      >
                         {anchor.exact}
-                      </blockquote>
-                      <textarea
+                      </Box>
+                      <Textarea
                         data-testid="comment-input"
+                        aria-label="Comment"
                         value={draft}
                         onChange={(event) => setDraft(event.target.value)}
                         onKeyDown={handleCommentKeyDown}
                         placeholder="Leave a comment"
                         rows={3}
                         autoFocus
-                        className="mt-3 w-full resize-none rounded-badge border border-line bg-canvas px-3 py-2 text-body outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        className="resize-none text-body"
                       />
-                      <div className="mt-2 flex justify-end gap-2">
+                      <Inline gap="sm" align="center" justify="end">
+                        <Box render={<span aria-hidden="true" />} className="mr-auto">
+                          <Shortcut keys={["mod", "enter"]} />
+                        </Box>
                         <Button
                           variant="ghost"
                           size="compact"
@@ -250,72 +293,72 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                           onClick={() => void submitComment()}
                         >
                           {posting ? "Posting…" : "Comment"}
-                          {!posting && (
-                            <kbd
-                              aria-hidden="true"
-                              className="ml-1 font-sans text-meta opacity-80"
-                            >
-                              ⌘ ↵
-                            </kbd>
-                          )}
                         </Button>
-                      </div>
-                    </div>
+                      </Inline>
+                    </Stack>
                   )}
-                  <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                  <Box className="min-h-0 flex-1 overflow-y-auto p-3">
                     {comments.length === 0 ? (
-                      <p className="text-meta text-ink-subtle">
+                      <Box
+                        render={<p />}
+                        className="text-meta text-ink-subtle"
+                      >
                         No comments yet.
-                      </p>
+                      </Box>
                     ) : (
-                      <div className="space-y-2">
+                      <Stack gap="sm">
                         {comments.map((comment, index) => (
-                          <article
+                          <Stack
                             key={comment.id}
-                            ref={(element) => {
+                            render={<article />}
+                            ref={(element: HTMLElement | null) => {
                               if (element)
                                 commentRefs.current.set(comment.id, element)
                               else commentRefs.current.delete(comment.id)
                             }}
                             data-testid="plan-comment"
-                            className="rounded-compact border border-line bg-panel p-3"
+                            gap="sm"
+                            bg="panel"
+                            border="line"
+                            radius="compact"
+                            padding="md"
                           >
                             <button
                               type="button"
-                              className="block w-full text-left focus-visible:outline-2 focus-visible:outline-primary"
+                              className="flex w-full cursor-pointer flex-col gap-2 rounded-badge text-left outline-none focus-visible:ring-2 focus-visible:ring-primary"
                               onClick={() => openComment(comment.id)}
                             >
-                              <span className="text-label font-semibold">
+                              <span className="text-label font-semibold text-ink">
                                 {index + 1}. {comment.author}
                               </span>
                               {comment.anchor && (
-                                <blockquote className="mt-2 line-clamp-2 border-l-2 border-attention pl-2 text-meta text-ink-subtle">
+                                <blockquote className="line-clamp-2 border-l-2 border-attention pl-2 text-meta text-ink-subtle">
                                   {comment.anchor.exact}
                                 </blockquote>
                               )}
-                              <span className="mt-2 block text-body whitespace-pre-wrap">
+                              <span className="block text-body whitespace-pre-wrap text-ink">
                                 {comment.body}
                               </span>
                             </button>
                             {comment.author_login === plan.user.login && (
-                              <button
+                              <Button
                                 type="button"
+                                variant="ghost"
+                                size="compact"
                                 data-testid="comment-delete"
-                                className="mt-2 text-meta text-ink-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+                                className="-ml-2.5 self-start text-ink-subtle hover:text-ink"
                                 onClick={() => void removeComment(comment.id)}
                               >
                                 Delete
-                              </button>
+                              </Button>
                             )}
-                          </article>
+                          </Stack>
                         ))}
-                      </div>
+                      </Stack>
                     )}
-                  </div>
-                  {comments.some(
-                    (comment) => comment.author_login === plan.user.login
-                  ) && (
-                    <div className="border-t border-line p-3">
+                  </Box>
+                  {ownsComments && (
+                    <Box className="border-t border-line p-3">
                       <Button
                         className="w-full"
                         disabled={submitting || posting || submitted}
@@ -327,25 +370,29 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                             ? "Comments submitted"
                             : "Submit comments"}
                       </Button>
-                    </div>
+                    </Box>
                   )}
-                </aside>
+                </Box>
               </div>
             ) : (
-              <div
+              <Box
                 data-testid="plan-markdown"
                 className="h-full w-full overflow-y-auto p-4 md:p-6"
               >
-                <Markdown content={content} />
-              </div>
+                <Box className="mx-auto max-w-reading">
+                  <Markdown content={content} />
+                </Box>
+              </Box>
             )
           ) : (
-            <p className="p-6 text-body text-ink-subtle/70">
-              The artifact hasn't been written yet.
-            </p>
+            <EmptyState
+              icon={FileText}
+              title="The artifact hasn't been written yet."
+              className="flex-1"
+            />
           )}
-        </section>
-      </div>
+        </Box>
+      </Stack>
     </main>
   )
 }

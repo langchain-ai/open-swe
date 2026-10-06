@@ -207,6 +207,40 @@ function frameScript(channel: string): string {
   })();`
 }
 
+/*
+ * The frame is its own document and cannot see the app's tokens, so the
+ * annotation colours are read from them here and written into its sheet. Only
+ * colour-shaped values pass; anything else falls back to a CSS system colour.
+ */
+const COLOR_VALUE = /^[#\w\s(),.%/-]+$/
+
+function tokenColor(
+  style: CSSStyleDeclaration | null,
+  token: string,
+  fallback: string
+): string {
+  const value = style?.getPropertyValue(token).trim() ?? ""
+  return value && COLOR_VALUE.test(value) ? value : fallback
+}
+
+function annotationPalette(): {
+  mark: string
+  pin: string
+  pinInk: string
+  edge: string
+} {
+  const style =
+    typeof document === "undefined"
+      ? null
+      : getComputedStyle(document.documentElement)
+  return {
+    mark: tokenColor(style, "--gtm-attention-bg", "Mark"),
+    pin: tokenColor(style, "--gtm-primary", "Highlight"),
+    pinInk: tokenColor(style, "--gtm-primary-ink", "HighlightText"),
+    edge: tokenColor(style, "--gtm-panel", "Canvas"),
+  }
+}
+
 function withViewerPolicy(
   html: string,
   theme: "light" | "dark",
@@ -214,7 +248,8 @@ function withViewerPolicy(
 ): string {
   const nonce = channel
   const policy = ARTIFACT_CSP
-  const head = `<meta http-equiv="Content-Security-Policy" content="${policy}"><style>::highlight(plan-comments){background:#facc15;color:inherit}.plan-annotation-marker{position:fixed;z-index:2147483647;width:24px;height:24px;padding:0;border:2px solid white;border-radius:999px;background:#2563eb;color:white;font:700 12px/20px system-ui;box-shadow:0 2px 8px #0005;cursor:pointer}.plan-annotation-marker-active{animation:plan-comment-pulse 1.2s ease-out}@keyframes plan-comment-pulse{0%{box-shadow:0 0 0 0 #2563ebaa}100%{box-shadow:0 0 0 12px transparent}}</style>`
+  const { mark, pin, pinInk, edge } = annotationPalette()
+  const head = `<meta http-equiv="Content-Security-Policy" content="${policy}"><style>::highlight(plan-comments){background:${mark};color:inherit}.plan-annotation-marker{position:fixed;z-index:2147483647;width:24px;height:24px;padding:0;border:2px solid ${edge};border-radius:999px;background:${pin};color:${pinInk};font:700 12px/20px system-ui;box-shadow:0 2px 8px color-mix(in srgb,${pin} 35%,transparent);cursor:pointer}.plan-annotation-marker-active{animation:plan-comment-pulse 1.2s ease-out}@keyframes plan-comment-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,${pin} 65%,transparent)}100%{box-shadow:0 0 0 12px transparent}}</style>`
   const script = `<script nonce="${nonce}">${frameScript(channel)}</script>`
   const themed = withArtifactShell(html, theme).replace(
     /<meta\s+[^>]*http-equiv\s*=\s*["']?Content-Security-Policy["']?[^>]*>/gi,

@@ -76,7 +76,8 @@ export function MermaidDiagram({ source }: MermaidDiagramProps) {
     <div
       role="img"
       aria-label="Mermaid diagram"
-      className="my-[0.65rem] flex max-w-full justify-center overflow-x-auto rounded-compact border border-line/70 bg-muted/30 p-3 [&_svg]:h-auto [&_svg]:max-w-full"
+      data-slot="mermaid-diagram"
+      className="flex max-w-full justify-center overflow-x-auto rounded-compact border border-line bg-muted p-3 [&_svg]:h-auto [&_svg]:max-w-full"
       dangerouslySetInnerHTML={{ __html: state.svg }}
     />
   )

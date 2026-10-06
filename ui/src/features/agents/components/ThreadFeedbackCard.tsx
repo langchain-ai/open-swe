@@ -1,37 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ThumbsDown, ThumbsUp } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { CheckCircle, ThumbsDown, ThumbsUp } from "@/components/glyphs"
+import type { Glyph } from "@/components/glyphs"
 import { agentsApi } from "@/features/agents/lib/api"
 import type {
   ThreadFeedbackRating,
   ThreadFeedbackSubmission,
 } from "@/features/agents/lib/api"
-import { cn } from "@/lib/utils"
 
 const ratings: Array<{
   value: ThreadFeedbackRating
   label: string
-  icon: LucideIcon
-  className: string
+  icon: Glyph
 }> = [
-  {
-    value: "good",
-    label: "Good",
-    icon: ThumbsUp,
-    className:
-      "border-positive/40 bg-positive-bg text-positive hover:bg-positive-bg hover:text-positive",
-  },
-  {
-    value: "bad",
-    label: "Bad",
-    icon: ThumbsDown,
-    className:
-      "border-risk/40 bg-risk-bg text-risk hover:bg-risk-bg hover:text-risk",
-  },
+  { value: "good", label: "Good", icon: ThumbsUp },
+  { value: "bad", label: "Bad", icon: ThumbsDown },
 ]
 
 export function ThreadFeedbackCard({
@@ -121,101 +113,105 @@ export function ThreadFeedbackCard({
 
   if (showConfirmation) {
     return (
-      <div
-        role="status"
-        className="mt-4 rounded-compact bg-panel px-4 py-3 text-body text-ink-subtle"
-      >
-        Thanks for your feedback.
-      </div>
+      <Alert role="status" tone="positive" icon={CheckCircle}>
+        <AlertDescription>Thanks for your feedback.</AlertDescription>
+      </Alert>
     )
   }
 
   return (
-    <form
-      aria-label="Thread feedback"
-      className={cn(
-        "mt-4 rounded-compact bg-panel p-4",
-        showComment
-          ? "space-y-3"
-          : "flex flex-wrap items-center justify-between gap-x-6 gap-y-3"
-      )}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!showComment || mutation.isPending || !comment.trim()) return
-        mutation.mutate({ action: "comment", comment: comment.trim() })
-      }}
+    <Stack
+      render={
+        <form
+          aria-label="Thread feedback"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!showComment || mutation.isPending || !comment.trim()) return
+            mutation.mutate({ action: "comment", comment: comment.trim() })
+          }}
+        />
+      }
+      gap="md"
+      bg="panel"
+      border="line"
+      radius="panel"
+      padding="lg"
     >
-      <p className="text-body font-medium">
-        {showComment ? "How could Open SWE do better?" : "How did Open SWE do?"}
-      </p>
       {showComment ? (
-        <label className="flex flex-col gap-1.5 text-meta text-ink-subtle">
-          Comment (optional)
-          <Textarea
-            autoFocus
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-            maxLength={3000}
-            disabled={mutation.isPending}
-            placeholder="What could be better?"
-            className="min-h-20 border-ink/20 bg-canvas text-body"
-          />
-        </label>
-      ) : (
-        <div
-          className="flex flex-wrap items-center gap-2"
-          role="group"
-          aria-label="Rating"
-        >
-          {ratings.map((option) => (
-            <Button
-              key={option.value}
-              type="button"
-              variant="outline"
-              size="control"
-              className={cn("px-3 text-body", option.className)}
+        <>
+          <Box render={<p />} className="text-label font-medium text-ink">
+            How could Open SWE do better?
+          </Box>
+          <Stack
+            render={<label />}
+            gap="xs"
+            className="text-meta text-ink-subtle"
+          >
+            Comment (optional)
+            <Textarea
+              autoFocus
+              value={comment}
+              onChange={(event) => setComment(event.target.value)}
+              maxLength={3000}
               disabled={mutation.isPending}
-              onClick={() => mutation.mutate({ rating: option.value })}
+              placeholder="What could be better?"
+              className="min-h-20 text-body"
+            />
+          </Stack>
+          <Inline gap="sm" align="center">
+            <Button
+              type="submit"
+              size="compact"
+              disabled={!comment.trim() || mutation.isPending}
             >
-              <option.icon aria-hidden="true" className="size-4" />
-              {option.label}
+              {mutation.isPending ? "Saving…" : "Submit comment"}
             </Button>
-          ))}
-          <Button
-            type="button"
-            size="control"
-            variant="ghost"
-            className="text-ink-subtle"
-            disabled={mutation.isPending}
-            onClick={() => mutation.mutate({ action: "dismiss" })}
-          >
-            Dismiss
-          </Button>
-        </div>
+            <Button
+              type="button"
+              size="compact"
+              variant="ghost"
+              disabled={mutation.isPending}
+              onClick={() => {
+                setShowComment(false)
+                setShowConfirmation(true)
+              }}
+            >
+              Skip
+            </Button>
+          </Inline>
+        </>
+      ) : (
+        <Inline gap="md" align="center" justify="between" wrap>
+          <Box render={<p />} className="text-label font-medium text-ink">
+            How did Open SWE do?
+          </Box>
+          <Inline gap="sm" align="center" wrap role="group" aria-label="Rating">
+            {ratings.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                variant="outline"
+                size="compact"
+                disabled={mutation.isPending}
+                onClick={() => mutation.mutate({ rating: option.value })}
+              >
+                <Icon icon={option.icon} size="sm" />
+                {option.label}
+              </Button>
+            ))}
+            <Button
+              type="button"
+              size="compact"
+              variant="ghost"
+              className="text-ink-subtle hover:text-ink"
+              disabled={mutation.isPending}
+              onClick={() => mutation.mutate({ action: "dismiss" })}
+            >
+              Dismiss
+            </Button>
+          </Inline>
+        </Inline>
       )}
-      {showComment && (
-        <div className="flex items-center gap-2">
-          <Button
-            type="submit"
-            size="compact"
-            disabled={!comment.trim() || mutation.isPending}
-          >
-            {mutation.isPending ? "Saving…" : "Submit comment"}
-          </Button>
-          <Button
-            type="button"
-            size="compact"
-            variant="ghost"
-            disabled={mutation.isPending}
-            onClick={() => {
-              setShowComment(false)
-              setShowConfirmation(true)
-            }}
-          >
-            Skip
-          </Button>
-        </div>
-      )}
-    </form>
+    </Stack>
   )
 }

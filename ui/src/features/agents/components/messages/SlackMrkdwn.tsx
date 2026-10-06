@@ -7,7 +7,8 @@ import { PreviewablePullRequestLink } from "@/features/agents/components/PullReq
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"])
 const LINK_CLASS =
-  "text-ink/90 underline decoration-ink/40 break-words [overflow-wrap:anywhere]"
+  "text-info underline decoration-info/40 underline-offset-2 wrap-anywhere hover:decoration-info"
+const MENTION_CLASS = "font-medium text-ink"
 
 function decodeSlackText(text: string): string {
   return text.replace(/&(?:amp|lt|gt);/g, (entity) => {
@@ -72,7 +73,7 @@ export function SlackUserMention({ userId }: { userId: string }) {
     queryFn: () => api.slackUserName(userId),
     staleTime: 60 * 60 * 1000,
   })
-  return <span className="text-ink/90">@{data?.name || userId}</span>
+  return <span className={MENTION_CLASS}>@{data?.name || userId}</span>
 }
 
 function slackTokenNode(token: string, key: string): ReactNode {
@@ -90,7 +91,7 @@ function slackTokenNode(token: string, key: string): ReactNode {
     const sigil = target[0]
     const displayLabel = (label || target.slice(1)).replace(/^[@#]/, "")
     return (
-      <span key={key} className="text-ink/90">
+      <span key={key} className={MENTION_CLASS}>
         {sigil}
         {displayLabel}
       </span>
@@ -103,7 +104,7 @@ function slackTokenNode(token: string, key: string): ReactNode {
 
   if (target.startsWith("!subteam^")) {
     return (
-      <span key={key} className="text-ink/90">
+      <span key={key} className={MENTION_CLASS}>
         {label || "@subteam"}
       </span>
     )
@@ -112,7 +113,7 @@ function slackTokenNode(token: string, key: string): ReactNode {
   if (target.startsWith("!")) {
     const displayLabel = label || target.slice(1)
     return (
-      <span key={key} className="text-ink/90">
+      <span key={key} className={MENTION_CLASS}>
         {displayLabel.startsWith("@") ? displayLabel : `@${displayLabel}`}
       </span>
     )
@@ -167,7 +168,7 @@ function renderRange(
       if (closing !== -1) {
         flushLiteral(cursor)
         nodes.push(
-          <code key={key} className="rounded-tick bg-canvas/60 px-1 font-mono">
+          <code key={key} className="rounded-tick bg-hover px-1 font-mono text-meta">
             {decodeSlackText(text.slice(cursor + 1, closing))}
           </code>
         )

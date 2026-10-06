@@ -1,10 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { ArrowUpRight, X } from "lucide-react"
 
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ArrowUpRight, X } from "@/components/glyphs"
 import { dismissPlan, getPlan, type PlanData } from "@/lib/plan"
+import { cn } from "@/lib/utils"
+
+/** The preview window; the artifact itself opens on its own route. */
+const PREVIEW_HEIGHT_CLASS = "h-64"
 
 export function InlinePlanArtifact({ threadId }: { threadId: string }) {
   const navigate = useNavigate()
@@ -27,7 +37,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
   if ((!html && !markdown) || query.data?.dismissed) return null
 
   return (
-    <div className="group relative mt-4">
+    <Box className="group relative">
       <button
         type="button"
         data-testid="inline-plan-artifact"
@@ -38,38 +48,51 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
             params: { threadId },
           })
         }
-        className="block h-[250px] w-full overflow-hidden rounded-control border border-line bg-canvas text-left shadow-control transition-[border-color,box-shadow] outline-none hover:border-ink/25 hover:shadow-popup focus-visible:ring-2 focus-visible:ring-primary"
+        className={cn(
+          PREVIEW_HEIGHT_CLASS,
+          "block w-full cursor-pointer overflow-hidden rounded-panel border border-line bg-canvas text-left shadow-control outline-none transition-[border-color,box-shadow] duration-fast ease-out-quint hover:border-line-strong hover:shadow-raised-hover focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
+        )}
       >
         {html ? (
           <PlanArtifactFrame
             html={html}
             title="Artifact preview"
-            className="pointer-events-none h-[250px]"
+            className={cn(PREVIEW_HEIGHT_CLASS, "pointer-events-none")}
           />
         ) : (
-          <div className="pointer-events-none h-[250px] overflow-hidden p-5">
+          <Box
+            padding="lg"
+            className={cn(
+              PREVIEW_HEIGHT_CLASS,
+              "pointer-events-none overflow-hidden"
+            )}
+          >
             <Markdown content={markdown} />
-          </div>
+          </Box>
         )}
         <span
           data-testid="inline-plan-fade"
-          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-canvas/75 to-canvas p-3"
+          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end rounded-b-panel bg-linear-to-b from-transparent via-canvas/75 to-canvas p-3"
         >
-          <span className="inline-flex items-center gap-1 rounded-badge bg-ink px-2.5 py-1.5 text-label font-medium text-canvas shadow-control">
+          <span
+            className={buttonVariants({ variant: "secondary", size: "compact" })}
+          >
             Open artifact
-            <ArrowUpRight className="size-3.5" />
+            <Icon icon={ArrowUpRight} size="sm" />
           </span>
         </span>
       </button>
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="icon-sm"
         aria-label="Dismiss artifact"
         disabled={dismiss.isPending}
         onClick={() => dismiss.mutate()}
-        className="absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-full border border-line bg-canvas/90 text-ink-subtle shadow-control backdrop-blur-sm transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-primary"
+        className="absolute top-2 right-2 z-10 text-ink-subtle shadow-control hover:text-ink"
       >
-        <X className="size-3.5" />
-      </button>
-    </div>
+        <Icon icon={X} size="sm" />
+      </Button>
+    </Box>
   )
 }

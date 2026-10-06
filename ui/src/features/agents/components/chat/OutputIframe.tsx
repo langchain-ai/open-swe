@@ -1,5 +1,4 @@
 import { useState } from "react"
-import { ChevronDown, Download } from "lucide-react"
 
 import type { OutputIframeDisplay } from "@/features/agents/lib/types"
 import {
@@ -7,8 +6,16 @@ import {
   ARTIFACT_SANDBOX,
 } from "@/features/agents/lib/artifactShell"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { cn } from "@/lib/utils"
+import {
+  Collapsible,
+  CollapsibleChevron,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@langchain/gtm-platform-design-system/ui/collapsible"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Download } from "@/components/glyphs"
 
 const IFRAME_HEIGHT = 480
 
@@ -26,38 +33,39 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
   const isLegacy = "html" in display
 
   return (
-    <section className="my-2 overflow-hidden rounded-compact border border-line bg-panel">
-      <header className="flex items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <ChevronDown
-            className={cn(
-              "size-3.5 shrink-0 text-ink-subtle transition-transform",
-              !expanded && "-rotate-90"
-            )}
-          />
-          <span className="truncate text-label font-medium text-ink">
+    <Collapsible
+      open={expanded}
+      onOpenChange={setExpanded}
+      render={<section />}
+      className="overflow-hidden rounded-panel border border-line bg-panel"
+    >
+      <Inline
+        render={<header />}
+        align="center"
+        gap="sm"
+        className="min-h-row-data px-3"
+      >
+        <CollapsibleTrigger className="min-w-0 flex-1 cursor-pointer text-label font-medium text-ink">
+          <CollapsibleChevron />
+          <Box render={<span />} className="truncate">
             {display.title}
-          </span>
-        </button>
+          </Box>
+        </CollapsibleTrigger>
         {!isLegacy && (
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
             aria-label="Download HTML"
+            className="text-ink-subtle hover:text-ink"
             onClick={() => openDownload(display.downloadUrl)}
           >
-            <Download />
+            <Icon icon={Download} size="sm" />
           </Button>
         )}
-      </header>
-      {expanded &&
-        (isLegacy ? (
+      </Inline>
+      <CollapsibleContent>
+        {isLegacy ? (
           <SandboxedHtmlFrame
             title={display.title}
             html={display.html}
@@ -75,7 +83,8 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
             className="border-t border-line bg-canvas"
             style={{ height: IFRAME_HEIGHT }}
           />
-        ))}
-    </section>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }

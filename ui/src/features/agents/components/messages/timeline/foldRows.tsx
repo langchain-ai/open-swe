@@ -1,6 +1,9 @@
-import { ChevronDown, ChevronRight } from "lucide-react"
-
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { ChevronDown, ChevronRight } from "@/components/glyphs"
 import { cn } from "@/lib/utils"
+
+const CHEVRON_MOTION_CLASS =
+  "transition-transform duration-fast ease-out-quint motion-reduce:transition-none"
 
 /**
  * Collapses a settled turn's work log behind a single "Worked for …" line, so
@@ -17,20 +20,20 @@ export function TurnFoldRow({
   expanded: boolean
   onToggle: () => void
 }) {
-  const Icon = expanded ? ChevronDown : ChevronRight
-
   return (
-    <div className={cn("pt-1 pb-2", !active && "border-b border-line/60")}>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={onToggle}
-        className="flex cursor-pointer items-center gap-1 rounded-badge px-1 text-label text-ink-subtle tabular-nums transition-colors select-none hover:text-ink focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:outline-none focus-visible:ring-inset"
-      >
-        <span className={active ? "shimmer-text" : undefined}>{label}</span>
-        <Icon className="size-3.5" />
-      </button>
-    </div>
+    <button
+      type="button"
+      aria-expanded={expanded}
+      onClick={onToggle}
+      className="inline-flex min-h-5 cursor-pointer items-center gap-1.5 self-start rounded-compact text-label text-ink-subtle tabular-nums outline-none select-none hover:text-ink focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      <Icon
+        icon={ChevronRight}
+        size="sm"
+        className={cn(CHEVRON_MOTION_CLASS, expanded && "rotate-90")}
+      />
+      <span className={active ? "shimmer-text" : undefined}>{label}</span>
+    </button>
   )
 }
 
@@ -54,18 +57,16 @@ export function WorkGroupToggleRow({
       type="button"
       aria-expanded={expanded}
       onClick={onToggle}
-      className="flex w-full cursor-pointer items-center gap-1.5 rounded-badge px-0.5 py-0.5 text-left text-meta leading-5 transition-colors duration-150 hover:bg-hover/20 focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:outline-none focus-visible:ring-inset"
+      className="-mx-1.5 flex w-fit cursor-pointer items-center gap-2 rounded-compact px-1.5 py-0.5 text-left text-label text-ink-subtle outline-none transition-colors duration-fast ease-out-quint hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset motion-reduce:transition-none"
     >
-      <span className="flex size-5 shrink-0 items-center justify-center text-ink-subtle/65">
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 opacity-70 transition-transform duration-200",
-            expanded && "rotate-180"
-          )}
-          aria-hidden
+      <span className="flex size-5 shrink-0 items-center justify-center">
+        <Icon
+          icon={ChevronDown}
+          size="sm"
+          className={cn(CHEVRON_MOTION_CLASS, expanded && "rotate-180")}
         />
       </span>
-      <span className="font-medium text-ink/82">
+      <span className="font-medium">
         {expanded ? `Show fewer ${noun}` : `+${hiddenCount} previous ${noun}`}
       </span>
     </button>

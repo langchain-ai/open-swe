@@ -73,15 +73,16 @@ describe("WorkflowApprovalCard", () => {
   it("renders the pending approval as a compact inline card", () => {
     renderCard({ threadId: "thread-1", pollWhileActive: true })
 
-    const group = screen.getByTestId("workflow-approval-group")
-    expect(group.className).toContain("mt-4")
+    expect(screen.getByTestId("workflow-approval-group")).toBeTruthy()
     expect(
       screen.getByText("Confirm GitHub Actions workflow changes")
     ).toBeTruthy()
     expect(screen.getByText("Why you need to confirm")).toBeTruthy()
     expect(
-      screen.getByText("Review files and diff").closest("details")?.open
-    ).toBe(false)
+      screen
+        .getByRole("button", { name: /Review files and diff/ })
+        .getAttribute("aria-expanded")
+    ).toBe("false")
     expect(mocks.useWorkflowApprovals).toHaveBeenCalledWith("thread-1", {
       pollWhileActive: true,
     })

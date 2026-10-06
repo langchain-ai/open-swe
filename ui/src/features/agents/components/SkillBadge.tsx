@@ -1,10 +1,11 @@
 import { splitPromptIntoSegments } from "./composer/composerMentions"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
 
 export function SkillBadge({ name }: { name: string }) {
   return (
-    <span className="inline-flex items-center rounded-badge bg-attention-bg px-1.5 py-0.5 leading-tight font-medium text-attention select-none">
+    <Badge tier="quiet" tone="attention" className="align-baseline select-none">
       /{name}
-    </span>
+    </Badge>
   )
 }
 

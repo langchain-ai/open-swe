@@ -1,3 +1,15 @@
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@langchain/gtm-platform-design-system/ui/table"
+import { cn } from "@/lib/utils"
+
 export interface SqlResult {
   ok: true
   columns: Array<string>
@@ -49,55 +61,74 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
   if (!result) return null
 
   return (
-    <div className="my-2 overflow-hidden rounded-compact border border-line/60 bg-muted/30 text-label">
-      <div className="flex items-center justify-between gap-3 border-b border-line/60 px-3 py-2 text-ink-subtle">
+    <Box
+      data-slot="sql-result"
+      bg="panel"
+      border="line"
+      radius="compact"
+      className="overflow-hidden"
+    >
+      <Inline
+        align="center"
+        justify="between"
+        gap="md"
+        className="min-h-control border-b border-line px-3 py-1.5 text-meta text-ink-subtle"
+      >
         <span>
           {result.row_count.toLocaleString()} row
           {result.row_count === 1 ? "" : "s"}
         </span>
-        {result.truncated && <span>Results truncated</span>}
-      </div>
-      <div className="max-h-[28rem] overflow-auto">
-        <table className="min-w-max border-collapse text-left">
-          <thead className="sticky top-0 z-10 bg-muted">
-            <tr>
+        {result.truncated && (
+          <Badge tier="quiet" tone="attention">
+            Results truncated
+          </Badge>
+        )}
+      </Inline>
+      <Box className="max-h-112 overflow-auto">
+        <Table container={false} className="min-w-max text-label">
+          <TableHeader className="sticky top-0 z-10 bg-muted">
+            <TableRow>
               {result.columns.map((column, index) => (
-                <th
+                <TableHead
                   key={`${index}:${column}`}
                   scope="col"
-                  className="border-b border-line px-3 py-2 font-medium whitespace-nowrap text-ink"
+                  className="px-3 text-ink"
                 >
                   {column}
-                </th>
+                </TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {result.rows.map((row, rowIndex) => (
-              <tr
-                key={rowIndex}
-                className="border-t border-line/50 first:border-t-0"
-              >
+              <TableRow key={rowIndex}>
                 {row.map((value, columnIndex) => (
-                  <td
+                  <TableCell
                     key={columnIndex}
-                    className={`max-w-96 px-3 py-2 align-top font-mono text-meta leading-5 text-ink ${value === null ? "text-ink-subtle italic" : ""}`}
+                    className={cn(
+                      "max-w-96 px-3 py-2 align-top font-mono text-meta whitespace-normal",
+                      value === null && "text-ink-subtle italic"
+                    )}
                   >
                     <div className="max-h-24 overflow-auto break-words whitespace-pre-wrap">
                       {displayCell(value)}
                     </div>
-                  </td>
+                  </TableCell>
                 ))}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
         {result.rows.length === 0 && (
-          <div className="px-3 py-6 text-center text-ink-subtle">
+          <Box
+            render={<p />}
+            padding="lg"
+            className="text-center text-label text-ink-subtle"
+          >
             No rows
-          </div>
+          </Box>
         )}
-      </div>
-    </div>
+      </Box>
+    </Box>
   )
 }

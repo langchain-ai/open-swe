@@ -1,5 +1,8 @@
 import { useToolCalls } from "@langchain/react"
-import { Check, Loader2, X } from "lucide-react"
+import { Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+import { Check, X } from "@/components/glyphs"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -71,23 +74,22 @@ function ActivityLine({
   steps: number
 }) {
   return (
-    <div className="mt-1 flex min-w-0 items-center gap-1.5 border-t border-line pt-1.5">
+    <Inline
+      gap="sm"
+      align="center"
+      className="min-w-0 border-t border-line pt-1.5 text-meta text-ink-subtle"
+    >
       {status === "completed" ? (
-        <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
+        <Icon icon={Check} size="sm" className="text-positive" />
       ) : status === "error" ? (
-        <X className="h-3 w-3 shrink-0 text-risk" aria-hidden />
+        <Icon icon={X} size="sm" className="text-risk" />
       ) : (
-        <Loader2
-          className="h-3 w-3 shrink-0 animate-spin text-ink-subtle/70"
-          aria-hidden
-        />
+        <Spinner size="sm" />
       )}
-      <span className="truncate text-meta text-ink-subtle/70">
-        {humanizeToolName(name)}
-      </span>
-      <span className="ml-auto shrink-0 text-meta text-ink-subtle/70 tabular-nums">
+      <span className="min-w-0 truncate">{humanizeToolName(name)}</span>
+      <span className="ml-auto shrink-0 tabular-nums">
         {steps} {steps === 1 ? "step" : "steps"}
       </span>
-    </div>
+    </Inline>
   )
 }

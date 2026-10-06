@@ -1,5 +1,7 @@
 import { toast } from "sonner"
 
+import { cn } from "@/lib/utils"
+
 type MessageTimestampProps = {
   timestamp: string
   startedAt?: string
@@ -63,7 +65,11 @@ export function MessageTimestamp({
 
   return (
     <div
-      className={`flex ${align === "right" ? "justify-end" : "justify-start"} ${className}`}
+      className={cn(
+        "flex",
+        align === "right" ? "justify-end" : "justify-start",
+        className
+      )}
     >
       <button
         type="button"
@@ -79,7 +85,7 @@ export function MessageTimestamp({
             )
           }
         }}
-        className="cursor-pointer text-meta leading-4 text-ink-subtle/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-hover/turn:opacity-100 hover:text-ink focus-visible:opacity-100"
+        className="cursor-pointer rounded-tick text-meta text-ink-subtle tabular-nums opacity-0 transition-opacity duration-fast ease-out-quint outline-none select-none group-hover/turn:opacity-100 group-focus-within/turn:opacity-100 hover:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
       >
         <time dateTime={date.toISOString()}>{shortTimestamp(date)}</time>
       </button>

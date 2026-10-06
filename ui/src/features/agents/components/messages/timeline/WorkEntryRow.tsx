@@ -1,98 +1,88 @@
 import { useCallback, useEffect, useState } from "react"
-import {
-  Bot,
-  Check,
-  ChevronDown,
-  CircleAlert,
-  Eye,
-  Globe,
-  Hammer,
-  MessageCircle,
-  SquarePen,
-  Terminal,
-  Wrench,
-  X,
-  Zap,
-} from "lucide-react"
 import { ToolResultBody } from "./ToolResultBody"
 import type { KeyboardEvent, ReactNode } from "react"
 
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import { Box, Inline } from "@langchain/gtm-platform-design-system/ui/box"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@langchain/gtm-platform-design-system/ui/tooltip"
+import {
+  AlertCircle,
+  AlertTriangle,
+  Bot,
+  Check,
+  ChevronRight,
+  Clock,
+  Eye,
+  Globe,
+  Hammer,
+  MessageCircle,
+  Pencil,
+  Terminal,
+  Wrench,
+  Zap,
+} from "@/components/glyphs"
+import type { Glyph } from "@/components/glyphs"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
 
-const ICONS: Record<WorkEntryIconName, typeof Bot> = {
+const GLYPHS: Record<WorkEntryIconName, Glyph> = {
   bot: Bot,
   check: Check,
-  "circle-alert": CircleAlert,
+  "circle-alert": AlertCircle,
   eye: Eye,
   globe: Globe,
   hammer: Hammer,
   "message-circle": MessageCircle,
-  "square-pen": SquarePen,
+  "square-pen": Pencil,
   terminal: Terminal,
   wrench: Wrench,
   zap: Zap,
 }
 
-function WorkEntryIcon({
-  name,
-  className,
-}: {
-  name: WorkEntryIconName
-  className: string
-}) {
-  const Icon = ICONS[name]
-  return <Icon className={className} aria-hidden />
-}
-
 const stopRowToggle = (event: { stopPropagation: () => void }) =>
   event.stopPropagation()
 
-function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
-  if (status === "error") {
+/**
+ * The row's mark, in one 20px slot so the heading never shifts as a call
+ * resolves: the tool's glyph once settled, a spinner while it runs, a clock
+ * while it waits on approval, and the alert when it failed.
+ */
+function EntryMark({ entry }: { entry: WorkEntryView }) {
+  if (entry.status === "error") {
     return (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              className="flex size-4 items-center justify-center"
-              aria-label="Tool call failed"
-            />
-          }
-        >
-          <X className="block size-3 shrink-0 text-risk" aria-hidden />
-        </TooltipTrigger>
-        <TooltipContent>Failed</TooltipContent>
-      </Tooltip>
+      <Icon
+        icon={AlertTriangle}
+        size="sm"
+        label="Tool call failed"
+        className="text-risk"
+      />
     )
   }
-
-  if (status === "completed") {
+  if (entry.status === "in_progress") {
+    return <Spinner size="sm" label="Running" className="text-ink-subtle" />
+  }
+  if (entry.status === "pending") {
     return (
-      <Tooltip>
-        <TooltipTrigger
-          render={<span className="flex size-4 items-center justify-center" />}
-        >
-          <Check className="block size-3 shrink-0 stroke-current" aria-hidden />
-        </TooltipTrigger>
-        <TooltipContent>Completed</TooltipContent>
-      </Tooltip>
+      <Icon
+        icon={Clock}
+        size="sm"
+        label="Waiting"
+        className="text-attention"
+      />
     )
   }
-
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={<span className="flex size-4 items-center justify-center" />}
-      >
-        <span className="block size-1.5 shrink-0 animate-status-pulse rounded-full bg-current" />
-      </TooltipTrigger>
-      <TooltipContent>
-        {status === "pending" ? "Waiting" : "Running"}
-      </TooltipContent>
-    </Tooltip>
+    <Icon
+      icon={GLYPHS[entry.icon]}
+      size="sm"
+      className={entry.tone === "thinking" ? "text-ink" : "text-ink-subtle"}
+    />
   )
 }
 
@@ -115,9 +105,9 @@ export type WorkEntryBody =
   | ((detail: WorkEntryBodyDetail) => ReactNode)
 
 /**
- * One line in the agent's work log: icon, heading, dimmed argument, status.
- * Expanding reveals `body` when a tool has a richer renderer (a diff, terminal
- * output) and falls back to the entry's plain text otherwise.
+ * One line in the agent's work log: mark, heading, dimmed argument. Expanding
+ * reveals `body` when a tool has a richer renderer (a diff, terminal output)
+ * and falls back to the entry's plain text otherwise.
  */
 export function WorkEntryRow({
   entry,
@@ -169,7 +159,9 @@ export function WorkEntryRow({
     (body != null || detailText != null || loadExpandedText != null)
   const activate = onActivate ?? (canExpand ? toggle : null)
   const isError = entry.tone === "error"
+  const isLive = entry.status === "pending" || entry.status === "in_progress"
   const hoverTimestamp = formatHoverTimestamp(timestamp)
+  const open = expanded && canExpand
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
@@ -196,122 +188,126 @@ export function WorkEntryRow({
   return (
     <div
       className={cn(
-        "group/entry flex flex-col rounded-badge px-0.5 py-0.5 transition-colors",
+        "group/entry flex min-w-0 flex-col rounded-compact outline-none",
         activate &&
-          "cursor-pointer hover:bg-hover/20 focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:outline-none focus-visible:ring-inset"
+          "cursor-pointer focus-visible:ring-2 focus-visible:ring-primary"
       )}
       {...rowToggleProps}
     >
-      <div className="flex items-center gap-1.5 select-none">
-        <span
-          className={cn(
-            "flex size-5 shrink-0 items-center justify-center",
-            isError
-              ? "text-risk"
-              : entry.tone === "thinking"
-                ? "text-ink/92"
-                : "text-ink-subtle/65"
-          )}
+      <Inline
+        gap="sm"
+        align="center"
+        className={cn(
+          "-mx-1.5 min-h-6 rounded-compact px-1.5 py-0.5 select-none",
+          activate &&
+            "transition-colors duration-fast ease-out-quint hover:bg-hover motion-reduce:transition-none"
+        )}
+      >
+        <Box
+          render={<span />}
+          className="flex size-5 shrink-0 items-center justify-center"
         >
-          <WorkEntryIcon
-            name={entry.icon}
-            className="block size-3.5 shrink-0 stroke-[1.8] opacity-80"
-          />
-        </span>
+          <EntryMark entry={entry} />
+        </Box>
 
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-label leading-5">
-              <span
-                className={cn(
-                  "shrink-0 truncate font-medium",
-                  isError
-                    ? "text-risk"
-                    : entry.status === "pending" ||
-                        entry.status === "in_progress"
-                      ? "shimmer-text"
-                      : "text-ink/82"
-                )}
-              >
-                {entry.heading}
-              </span>
-              {entry.preview &&
-                (entry.previewTooltip ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className="min-w-0 flex-1 truncate text-ink-subtle" />
-                      }
-                    >
-                      {entry.preview}
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-md break-all">
-                      {entry.previewTooltip}
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate text-ink-subtle">
-                    {entry.preview}
-                  </span>
-                ))}
-              {entry.diffStats && (
-                <span className="flex shrink-0 items-center gap-1 font-mono text-meta text-ink-subtle tabular-nums">
-                  <span className="transition-colors group-focus-within/entry:text-positive group-hover/entry:text-positive">
-                    +{entry.diffStats.additions}
-                  </span>
-                  <span aria-hidden>/</span>
-                  <span className="transition-colors group-focus-within/entry:text-risk group-hover/entry:text-risk">
-                    -{entry.diffStats.deletions}
-                  </span>
-                </span>
-              )}
-            </p>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1 text-ink-subtle">
-            {trailing}
-            {hoverTimestamp && (
-              <time className="text-meta tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
-                {hoverTimestamp}
-              </time>
+        <Box
+          render={<p />}
+          className="flex min-w-0 flex-1 items-baseline gap-1.5 text-label"
+        >
+          <Box
+            render={<span />}
+            className={cn(
+              "shrink-0 truncate font-medium",
+              isError ? "text-risk" : isLive ? "shimmer-text" : "text-ink"
             )}
-            <span
-              className="flex size-4 shrink-0 items-center justify-center"
-              aria-hidden={!canExpand}
+          >
+            {entry.heading}
+          </Box>
+          {entry.preview &&
+            (entry.previewTooltip ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="min-w-0 flex-1 truncate text-ink-subtle" />
+                  }
+                >
+                  {entry.preview}
+                </TooltipTrigger>
+                <TooltipContent className="max-w-md break-all">
+                  {entry.previewTooltip}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Box
+                render={<span />}
+                className="min-w-0 flex-1 truncate text-ink-subtle"
+              >
+                {entry.preview}
+              </Box>
+            ))}
+          {entry.diffStats && (
+            <Inline
+              render={<span />}
+              gap="xs"
+              align="center"
+              className="shrink-0 font-mono text-meta text-ink-subtle tabular-nums"
             >
-              {canExpand ? (
-                <ChevronDown
-                  className={cn(
-                    "size-3 shrink-0 opacity-70 transition-transform duration-200",
-                    expanded && "rotate-180"
-                  )}
-                  aria-hidden
-                />
-              ) : null}
-            </span>
-            <span className="flex size-4 shrink-0 items-center justify-center">
-              <StatusIndicator status={entry.status} />
-            </span>
-          </div>
-        </div>
-      </div>
+              <span className="transition-colors duration-fast ease-out-quint group-focus-within/entry:text-positive group-hover/entry:text-positive motion-reduce:transition-none">
+                +{entry.diffStats.additions}
+              </span>
+              <span aria-hidden>/</span>
+              <span className="transition-colors duration-fast ease-out-quint group-focus-within/entry:text-risk group-hover/entry:text-risk motion-reduce:transition-none">
+                -{entry.diffStats.deletions}
+              </span>
+            </Inline>
+          )}
+        </Box>
 
-      {expanded && canExpand && (
+        <Inline gap="xs" align="center" className="shrink-0 text-ink-subtle">
+          {trailing}
+          {hoverTimestamp && (
+            <time className="text-meta tabular-nums opacity-0 transition-opacity duration-fast ease-out-quint group-hover/entry:opacity-100 motion-reduce:transition-none">
+              {hoverTimestamp}
+            </time>
+          )}
+          {canExpand && (
+            <Icon
+              icon={ChevronRight}
+              size="sm"
+              className={cn(
+                "transition-[opacity,rotate] duration-fast ease-out-quint group-hover/entry:opacity-100 group-focus-visible/entry:opacity-100 motion-reduce:transition-none",
+                open ? "rotate-90 opacity-100" : "opacity-0"
+              )}
+            />
+          )}
+        </Inline>
+      </Inline>
+
+      {open && (
         <div
-          className="ms-7 mt-1 cursor-default border-s border-line/45 ps-3 pt-0.5"
+          className="mt-1 mb-1.5 ml-2.5 cursor-default border-l border-line pl-4"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          {typeof body === "function"
-            ? body({ loadedText, loadError })
-            : (body ??
-              (detailText != null ? (
-                <ToolResultBody value={detailText} />
-              ) : (
-                <p className="text-meta text-ink-subtle">
-                  {loadError ?? "Loading output…"}
-                </p>
-              )))}
+          {typeof body === "function" ? (
+            body({ loadedText, loadError })
+          ) : (body ??
+            (detailText != null ? (
+              <ToolResultBody value={detailText} />
+            ) : loadError ? (
+              <Box render={<p />} className="text-meta text-risk">
+                {loadError}
+              </Box>
+            ) : (
+              <Inline
+                gap="xs"
+                align="center"
+                className="text-meta text-ink-subtle"
+              >
+                <Spinner size="sm" />
+                Loading output…
+              </Inline>
+            )))}
         </div>
       )}
     </div>

@@ -1,9 +1,13 @@
 import { memo } from "react"
 import { Link } from "@tanstack/react-router"
-import { ArrowUpRight, Bot, Loader2 } from "lucide-react"
 
 import { SubagentActivity } from "./SubagentActivity"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
+import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
+import { ArrowUpRight, Bot } from "@/components/glyphs"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useOptionalThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
@@ -13,8 +17,8 @@ export function asString(value: unknown): string {
 }
 
 /**
- * A single subagent spawned via the `task` tool. Shows the subagent type and
- * the task input (its `description`) as a compact rectangle.
+ * A single subagent spawned via the `task` tool: its type, the brief it was
+ * given (the `description`), and while it runs, what it is doing now.
  */
 export const SubagentCard = memo(function SubagentCard({
   chunk,
@@ -35,42 +39,59 @@ export const SubagentCard = memo(function SubagentCard({
     ) : null
 
   return (
-    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-compact border border-line bg-hover p-2.5">
-      <div className="flex min-w-0 items-center gap-1.5">
+    <Stack
+      gap="xs"
+      bg="panel"
+      border="line"
+      radius="control"
+      className="min-w-0 overflow-hidden px-3 py-2"
+    >
+      <Inline gap="sm" align="center" className="min-h-control-sm min-w-0">
         {isRunning ? (
-          <Loader2
-            className="h-3 w-3 shrink-0 animate-spin text-primary"
-            aria-hidden
-          />
+          <Spinner size="sm" className="text-ink-subtle" />
         ) : (
-          <Bot
-            className={`h-3 w-3 shrink-0 ${isError ? "text-risk" : "text-primary"}`}
-            aria-hidden
+          <Icon
+            icon={Bot}
+            size="sm"
+            className={isError ? "text-risk" : "text-ink-subtle"}
           />
         )}
-        <span className="truncate text-meta font-medium text-ink-subtle">
+        <Box
+          render={<span />}
+          className="min-w-0 flex-1 truncate text-label font-medium text-ink"
+        >
           {subagentType}
-        </span>
+        </Box>
         {source?.kind === "transcript" && namespace && namespace.length > 0 && (
-          <Link
-            to="/agents/$threadId"
-            params={{ threadId: source.threadId }}
-            search={{ subagent: chunk.toolCallId }}
-            className="ml-auto flex shrink-0 items-center gap-0.5 rounded-tick px-1 text-meta text-ink-subtle/70 hover:bg-canvas hover:text-ink"
+          <Button
+            variant="ghost"
+            size="compact"
+            nativeButton={false}
+            className="-mr-1.5 shrink-0 gap-1 px-1.5 text-ink-subtle hover:text-ink"
             aria-label="Open subagent transcript"
             title="Open subagent transcript"
+            render={
+              <Link
+                to="/agents/$threadId"
+                params={{ threadId: source.threadId }}
+                search={{ subagent: chunk.toolCallId }}
+              />
+            }
           >
             Open
-            <ArrowUpRight className="h-3 w-3" aria-hidden />
-          </Link>
+            <Icon icon={ArrowUpRight} size="sm" />
+          </Button>
         )}
-      </div>
+      </Inline>
       {description && (
-        <p className="line-clamp-5 text-meta leading-4 break-words whitespace-pre-wrap text-ink-subtle/70">
+        <Box
+          render={<p />}
+          className="line-clamp-5 text-meta break-words whitespace-pre-wrap text-ink-subtle"
+        >
           {description}
-        </p>
+        </Box>
       )}
       {activity}
-    </div>
+    </Stack>
   )
 })

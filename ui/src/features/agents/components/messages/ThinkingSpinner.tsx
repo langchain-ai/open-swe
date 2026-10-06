@@ -1,3 +1,6 @@
+import { Inline } from "@langchain/gtm-platform-design-system/ui/box"
+
+/** The thread's one working line: the words say what, the shimmer says it is live. */
 export function ThinkingSpinner({
   isActive,
   settingUpSandbox = false,
@@ -10,8 +13,10 @@ export function ThinkingSpinner({
   if (!isActive) return null
 
   return (
-    <div
-      className="my-2 flex items-center gap-2"
+    <Inline
+      align="center"
+      gap="sm"
+      className="min-h-5"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -21,6 +26,6 @@ export function ThinkingSpinner({
           ? "Agent is setting up the environment…"
           : (label ?? "Working…")}
       </span>
-    </div>
+    </Inline>
   )
 }

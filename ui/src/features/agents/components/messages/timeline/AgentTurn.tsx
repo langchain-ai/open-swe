@@ -10,7 +10,6 @@ import {
   selectCollapsedTurnItems,
   splitWorkAndReply,
 } from "../renderItems"
-import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
@@ -24,6 +23,11 @@ import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
 import { ServiceConnectionCard } from "@/features/agents/components/chat/ServiceConnectionCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
+import {
+  AgentTurn as AgentTurnShell,
+  TurnCopyButton,
+} from "@langchain/gtm-platform-design-system/patterns/agent-thread"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
 import { formatElapsed } from "@/lib/utils"
 
 /**
@@ -77,7 +81,7 @@ function WorkGroup({
     : chunks.slice(chunks.length - MAX_VISIBLE_WORK_LOG_ENTRIES)
 
   return (
-    <div>
+    <Stack gap="xs">
       {hiddenCount > 0 && (
         <WorkGroupToggleRow
           hiddenCount={hiddenCount}
@@ -92,7 +96,7 @@ function WorkGroup({
           timestamp={chunk.timestamp}
         />
       ))}
-    </div>
+    </Stack>
   )
 }
 
@@ -194,12 +198,12 @@ export function AgentTurn({
         const reasoningChunk =
           item.chunk.kind === "reasoning" ? item.chunk : null
         return (
-          <div key={item.key} className="min-w-0 flex-1">
+          <Box key={item.key} className="min-w-0">
             <ReasoningBlock
               text={reasoningChunk?.text ?? ""}
               isLive={!!isStreaming && index === total - 1}
             />
-          </div>
+          </Box>
         )
       }
 
@@ -270,14 +274,14 @@ export function AgentTurn({
       // here too, so this has to go through the full chunk renderer.
       case "text-chunk":
         return (
-          <div key={item.key} className="min-w-0 px-1 py-0.5">
+          <Box key={item.key} className="min-w-0">
             <ChunkRenderer
               chunk={item.chunk}
               repoPath={repoPath}
               isMarkdownLive={isMarkdownLive}
               {...callbacks}
             />
-          </div>
+          </Box>
         )
     }
   }
@@ -310,40 +314,39 @@ export function AgentTurn({
       firstWorkIndex
   ).length
 
+  // The footer keeps the copy button's height while streaming, so the turn
+  // does not change shape when the run settles and Copy appears.
   return (
-    <div className="group/turn my-2 min-w-0 space-y-1.5">
-      {visibleItems
-        .slice(0, foldIndex)
-        .map((item, index) => renderItem(item, index, visibleItems.length))}
-      {canFoldWork && (
-        <TurnFoldRow
-          label={foldLabelWithCount}
-          active={!!isStreaming}
-          expanded={workFoldExpanded}
-          onToggle={toggleWorkFold}
-        />
-      )}
-      {visibleItems
-        .slice(foldIndex)
-        .map((item, index) =>
-          renderItem(item, foldIndex + index, visibleItems.length)
+    <Box className="group/turn min-w-0">
+      <AgentTurnShell>
+        {visibleItems
+          .slice(0, foldIndex)
+          .map((item, index) => renderItem(item, index, visibleItems.length))}
+        {canFoldWork && (
+          <TurnFoldRow
+            label={foldLabelWithCount}
+            active={!!isStreaming}
+            expanded={workFoldExpanded}
+            onToggle={toggleWorkFold}
+          />
         )}
+        {visibleItems
+          .slice(foldIndex)
+          .map((item, index) =>
+            renderItem(item, foldIndex + index, visibleItems.length)
+          )}
 
-      <div className="mt-1 flex items-center gap-1">
-        {replyText && !isStreaming && (
-          <MessageCopyButton
-            className="opacity-0 transition-opacity duration-200 group-hover/turn:opacity-100 focus-visible:opacity-100"
-            text={replyText}
-          />
-        )}
-        {!message.timestampIsFallback && (
-          <MessageTimestamp
-            timestamp={message.timestamp}
-            startedAt={message.startedAt}
-          />
-        )}
-      </div>
-    </div>
+        <Inline gap="xs" align="center" className="min-h-control-sm">
+          {replyText && !isStreaming && <TurnCopyButton text={replyText} />}
+          {!message.timestampIsFallback && (
+            <MessageTimestamp
+              timestamp={message.timestamp}
+              startedAt={message.startedAt}
+            />
+          )}
+        </Inline>
+      </AgentTurnShell>
+    </Box>
   )
 }
 

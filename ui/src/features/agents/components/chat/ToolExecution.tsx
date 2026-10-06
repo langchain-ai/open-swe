@@ -1,18 +1,19 @@
-import {
-  memo,
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { memo, useMemo, useState } from "react"
 import { MultiFileDiff } from "@pierre/diffs/react"
 import { DiffView } from "./DiffView"
 import { SqlResultTable, parseSqlResult } from "./SqlResultTable"
 import { formatToolDisplay } from "./toolExecutionDisplay"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Collapsible,
+  CollapsibleChevron,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@langchain/gtm-platform-design-system/ui/collapsible"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
+import { cn } from "@/lib/utils"
 
 interface ToolExecutionProps {
   chunk: ToolExecutionChunk
@@ -34,6 +35,8 @@ function getFileName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
+const ROW_CLASS = "min-h-5 text-label"
+
 const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   filePath,
   fileName,
@@ -52,95 +55,68 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
   isError: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
-  const toggle = useCallback(() => setExpanded((prev) => !prev), [])
   const diffOptions = useDiffOptions()
   const inlineDiffOptions = useMemo(
     () => ({ ...diffOptions, disableFileHeader: true }),
     [diffOptions]
   )
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [scrolledFromTop, setScrolledFromTop] = useState(false)
-  const [scrolledFromBottom, setScrolledFromBottom] = useState(false)
-
-  const updateScrollIndicators = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    setScrolledFromTop(el.scrollTop > 0)
-    setScrolledFromBottom(el.scrollTop < el.scrollHeight - el.clientHeight - 1)
-  }, [])
-
-  useLayoutEffect(() => {
-    if (expanded) updateScrollIndicators()
-  }, [expanded, updateScrollIndicators])
-
-  const edgeShadows = [
-    scrolledFromTop ? "inset 0 12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-    scrolledFromBottom ? "inset 0 -12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
-  ]
-    .filter(Boolean)
-    .join(", ")
 
   const oldFile = { name: filePath, contents: originalContent }
   const newFile = { name: filePath, contents: newContent }
 
-  if (!expanded) {
-    return (
-      <div className="my-0.5 text-meta leading-5">
-        <button
-          type="button"
-          onClick={toggle}
-          className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
-        >
-          <span className={isError ? "text-risk" : "text-ink-subtle"}>
-            Edited <span className="text-primary">{fileName}</span>
-          </span>
-        </button>
-      </div>
-    )
-  }
-
   return (
-    <div className="my-1">
-      <div className="my-0.5 mb-1.5 text-meta leading-5">
-        <button
-          type="button"
-          onClick={toggle}
-          className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
+    <Collapsible open={expanded} onOpenChange={setExpanded}>
+      <CollapsibleTrigger
+        className={cn(
+          ROW_CLASS,
+          "cursor-pointer hover:text-ink",
+          isError ? "text-risk" : "text-ink-subtle"
+        )}
+      >
+        <CollapsibleChevron />
+        {expanded ? (
+          "Edited file"
+        ) : (
+          <span>
+            Edited <span className="font-medium text-ink">{fileName}</span>
+          </span>
+        )}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <Box
+          bg="muted"
+          border="line"
+          radius="compact"
+          className="mt-1.5 overflow-hidden"
         >
-          <span className={isError ? "text-risk" : "text-ink-subtle"}>
-            Edited file
-          </span>
-          <span className="text-meta text-ink-subtle/70">▾</span>
-        </button>
-      </div>
-
-      <div className="overflow-hidden rounded-compact border border-line/60 bg-muted">
-        <div className="flex items-center gap-2 px-3 py-2">
-          <span
-            className={`min-w-0 flex-1 truncate text-label ${isError ? "text-risk" : "text-primary"}`}
-          >
-            {filePath}
-          </span>
-          <span className="flex shrink-0 items-center gap-2 text-label">
-            <span className="text-positive">+{additions}</span>
-            <span className="text-risk">-{deletions}</span>
-          </span>
-        </div>
-
-        <div
-          ref={scrollRef}
-          onScroll={updateScrollIndicators}
-          className="max-h-[250px] overflow-auto border-t border-line"
-          style={{ boxShadow: edgeShadows || "none" }}
-        >
-          <MultiFileDiff
-            oldFile={oldFile}
-            newFile={newFile}
-            options={inlineDiffOptions}
-          />
-        </div>
-      </div>
-    </div>
+          <Inline gap="sm" align="center" className="px-3 py-2">
+            <Box
+              render={<span />}
+              className={cn(
+                "min-w-0 flex-1 truncate font-mono text-label",
+                isError ? "text-risk" : "text-ink"
+              )}
+            >
+              {filePath}
+            </Box>
+            <Inline
+              gap="sm"
+              className="shrink-0 font-mono text-label tabular-nums"
+            >
+              <span className="text-positive">+{additions}</span>
+              <span className="text-risk">-{deletions}</span>
+            </Inline>
+          </Inline>
+          <Box className="max-h-60 overflow-auto border-t border-line">
+            <MultiFileDiff
+              oldFile={oldFile}
+              newFile={newFile}
+              options={inlineDiffOptions}
+            />
+          </Box>
+        </Box>
+      </CollapsibleContent>
+    </Collapsible>
   )
 })
 
@@ -191,12 +167,10 @@ export const ToolExecution = memo(function ToolExecution({
 
   if (isEditOp && status === "pending" && diffData) {
     return (
-      <div className="my-1 text-meta leading-5">
+      <Stack gap="xs" className="text-label">
         <DiffView diffData={diffData} />
-        <span className="text-ink-subtle/70">
-          Waiting for approval...
-        </span>
-      </div>
+        <span className="text-ink-subtle">Waiting for approval...</span>
+      </Stack>
     )
   }
 
@@ -209,9 +183,9 @@ export const ToolExecution = memo(function ToolExecution({
       repoPath
     )
     return (
-      <div className="my-0.5 text-meta leading-5">
-        <span className="text-attention">Editing {getFileName(path)}...</span>
-      </div>
+      <Box className={ROW_CLASS}>
+        <span className="shimmer-text">Editing {getFileName(path)}...</span>
+      </Box>
     )
   }
 
@@ -224,19 +198,15 @@ export const ToolExecution = memo(function ToolExecution({
     status === "error"
       ? "text-risk"
       : status === "in_progress" || status === "pending"
-        ? "text-attention"
+        ? "shimmer-text"
         : "text-ink-subtle"
 
   return (
-    <div className="my-0.5 text-meta leading-5">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className={`${statusTextClass} truncate`}>{displayName}</span>
-        {status === "error" && output && (
-          <span className="truncate text-risk">
-            {output.slice(0, 80)}
-          </span>
-        )}
-      </div>
-    </div>
+    <Inline gap="sm" align="center" className={cn(ROW_CLASS, "min-w-0")}>
+      <span className={cn("truncate", statusTextClass)}>{displayName}</span>
+      {status === "error" && output && (
+        <span className="truncate text-risk">{output.slice(0, 80)}</span>
+      )}
+    </Inline>
   )
 })

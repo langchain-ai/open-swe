@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronRight } from "lucide-react"
 
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Collapsible,
+  CollapsibleChevron,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@langchain/gtm-platform-design-system/ui/collapsible"
 import { formatElapsed } from "@/lib/utils"
 
 function reasoningLabel(elapsedMs: number | null): string {
@@ -11,9 +17,9 @@ function reasoningLabel(elapsedMs: number | null): string {
 
 /**
  * Renders a model's reasoning ("thinking") tokens. While the reasoning is live
- * it streams in muted gray text under a shimmering "Thinking…" header; once the
- * reasoning ends it auto-collapses into a "Thought for …" toggle the user can
- * expand on demand.
+ * it streams in muted text under a shimmering "Thinking…" line; once the
+ * reasoning ends it collapses into a "Thought for …" disclosure the user can
+ * open on demand.
  */
 export function ReasoningBlock({
   text,
@@ -45,35 +51,32 @@ export function ReasoningBlock({
   const expanded = isLive || userExpanded
 
   return (
-    <div className="my-1">
-      <button
-        type="button"
-        onClick={() => {
-          if (!isLive) setUserExpanded((value) => !value)
-        }}
-        className="flex items-center gap-1 text-left transition-opacity hover:opacity-90 disabled:cursor-default"
-        aria-expanded={expanded}
+    <Collapsible
+      open={expanded}
+      onOpenChange={(open) => {
+        if (!isLive) setUserExpanded(open)
+      }}
+    >
+      <CollapsibleTrigger
         disabled={isLive}
+        className="min-h-5 cursor-pointer text-label text-ink-subtle hover:text-ink disabled:opacity-100"
       >
         {isLive ? (
-          <span className="shimmer-text text-label">Thinking...</span>
+          <span className="shimmer-text">Thinking...</span>
         ) : (
           <>
-            <ChevronRight
-              className={`size-3 shrink-0 text-ink-subtle/65 transition-transform ${expanded ? "rotate-90" : ""}`}
-              aria-hidden
-            />
-            <span className="text-label text-ink-subtle">
-              {reasoningLabel(elapsedMs)}
-            </span>
+            <CollapsibleChevron />
+            {reasoningLabel(elapsedMs)}
           </>
         )}
-      </button>
-      {expanded && trimmed && (
-        <div className="ms-1 mt-1 border-s border-line/45 ps-3 text-label leading-5 break-words whitespace-pre-wrap text-ink-subtle">
-          {trimmed}
-        </div>
+      </CollapsibleTrigger>
+      {trimmed && (
+        <CollapsibleContent>
+          <Box className="mt-1 ml-1.5 border-l border-line pl-3 text-body wrap-anywhere whitespace-pre-wrap text-ink-subtle">
+            {trimmed}
+          </Box>
+        </CollapsibleContent>
       )}
-    </div>
+    </Collapsible>
   )
 }

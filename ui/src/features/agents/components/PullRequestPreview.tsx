@@ -6,7 +6,14 @@ import type {
   AgentPullRequest,
   AgentPullRequestHealth,
 } from "@/features/agents/lib/types"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@langchain/gtm-platform-design-system/ui/hover-card"
+
+/** Matches the transcript's tooltip delay, so a PR link previews as quickly as before. */
+const PREVIEW_DELAY_MS = 250
 
 interface PullRequestPreviewContextValue {
   pullRequests: Map<string, AgentPullRequest>
@@ -105,20 +112,16 @@ export function PreviewablePullRequestLink({
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <HoverCard>
+      <HoverCardTrigger
+        delay={PREVIEW_DELAY_MS}
         render={
           <a href={href} {...props}>
             {children}
           </a>
         }
       />
-      <TooltipContent
-        side="top"
-        align="start"
-        sideOffset={8}
-        className="rounded-control p-3 shadow-overlay"
-      >
+      <HoverCardContent side="top" align="start" sideOffset={8} className="w-auto">
         <PullRequestHoverCard
           pullRequest={pullRequest}
           health={previews.health.get(
@@ -126,7 +129,7 @@ export function PreviewablePullRequestLink({
           )}
           healthUnavailable={previews.healthUnavailable}
         />
-      </TooltipContent>
-    </Tooltip>
+      </HoverCardContent>
+    </HoverCard>
   )
 }

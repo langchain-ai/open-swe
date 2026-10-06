@@ -3,6 +3,12 @@ import type { ApprovalCallbacks } from "./types"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { ToolExecution } from "@/features/agents/components/chat/ToolExecution"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import { Box } from "@langchain/gtm-platform-design-system/ui/box"
+import { AlertTriangle } from "@/components/glyphs"
 import { MessageImage } from "./MessageImage"
 
 export function ChunkRenderer({
@@ -17,22 +23,27 @@ export function ChunkRenderer({
 } & ApprovalCallbacks) {
   switch (chunk.kind) {
     case "text":
-      return (
-        <div className="text-ink">
-          <Markdown content={chunk.text} isLive={isMarkdownLive} />
-        </div>
-      )
+      return <Markdown content={chunk.text} isLive={isMarkdownLive} />
     case "code":
       return <CodeBlock text={chunk.text} language={chunk.language} />
     case "error":
-      return <span className="text-risk">{chunk.text}</span>
+      return (
+        <Alert tone="risk" icon={AlertTriangle}>
+          <AlertDescription className="wrap-anywhere whitespace-pre-wrap">
+            {chunk.text}
+          </AlertDescription>
+        </Alert>
+      )
     case "list":
       return (
-        <div className="ml-2 text-ink-subtle">
+        <Box
+          render={<ul />}
+          className="list-disc pl-5 text-body text-ink-subtle marker:text-ink-subtle"
+        >
           {chunk.lines.map((line, i) => (
-            <div key={i}>- {line}</div>
+            <li key={i}>{line}</li>
           ))}
-        </div>
+        </Box>
       )
     case "tool-execution":
       return (
@@ -48,7 +59,7 @@ export function ChunkRenderer({
       return (
         <MessageImage
           chunk={chunk}
-          className="max-h-48 max-w-48 rounded-tick border border-line"
+          className="max-h-48 max-w-48 rounded-compact border border-line"
         />
       )
   }

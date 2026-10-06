@@ -1,5 +1,4 @@
 import { memo, useEffect, useMemo } from "react"
-import { ArrowUp, ChevronDown, Clock, X } from "lucide-react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
@@ -8,11 +7,23 @@ import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import type { MessagesProps } from "./types"
+import { AgentThread } from "@langchain/gtm-platform-design-system/patterns/agent-thread"
+import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { TooltipProvider } from "@langchain/gtm-platform-design-system/ui/tooltip"
+import { ArrowUp, ChevronDown, Clock, X } from "@/components/glyphs"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
+import { cn } from "@/lib/utils"
 
+const QUEUED_ACTION_CLASS = "text-ink-subtle hover:text-ink"
+
+/**
+ * Messages waiting for the run to end. They take the user turn's geometry on
+ * a dashed line, because they are the user's words that have not been sent.
+ */
 function QueuedMessages({
   queuedMessages,
   onSteer,
@@ -25,7 +36,7 @@ function QueuedMessages({
   if (queuedMessages.length === 0) return null
 
   return (
-    <div className="mb-3 space-y-2" data-testid="queued-messages">
+    <Stack gap="sm" align="end" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
         const imageCount = message.images?.length ?? 0
         const statusLabel =
@@ -33,38 +44,47 @@ function QueuedMessages({
             ? "Sends when the run ends. Send now, or Enter on an empty composer, steers the run with it instead."
             : "Waits for the message ahead of it."
         return (
-          <div
+          <Stack
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-panel border border-dashed border-line bg-hover/40 px-3 py-2 text-body text-ink shadow-control"
+            gap="xs"
+            className="max-w-lg min-w-0 rounded-panel rounded-br-none border border-dashed border-line-strong bg-muted px-3 py-2.5 text-body text-ink"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
           >
             {message.content && (
-              <div className="break-words whitespace-pre-wrap">
+              <Box className="break-words whitespace-pre-wrap">
                 <SkillPromptText text={message.content} />
-              </div>
+              </Box>
             )}
             {imageCount > 0 && (
-              <div className="mt-1 text-meta text-ink-subtle">
+              <Box render={<p />} className="text-meta text-ink-subtle">
                 {imageCount} image{imageCount === 1 ? "" : "s"} attached
-              </div>
+              </Box>
             )}
-            <div className="mt-2 flex items-center gap-3 text-meta text-ink-subtle">
-              <span
-                className="inline-flex h-6 items-center gap-1"
+            <Inline
+              gap="md"
+              align="center"
+              className="min-h-control-sm text-meta text-ink-subtle"
+            >
+              <Inline
+                render={<span />}
+                gap="xs"
+                align="center"
                 title={statusLabel}
                 aria-label={`Queued. ${statusLabel}`}
               >
-                <Clock className="size-3.5" aria-hidden />
+                <Icon icon={Clock} size="sm" />
                 Queued
-                <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-ink/60" />
-              </span>
+                <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-ink-subtle motion-reduce:animate-none" />
+              </Inline>
               {(onSteer || onRemove) && message.mine !== false && (
-                <div className="ml-auto flex items-center gap-0.5">
+                <Inline gap="none" align="center" className="ml-auto">
                   {onSteer && (
-                    <button
+                    <Button
                       type="button"
-                      className="flex size-6 items-center justify-center rounded-badge hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+                      variant="ghost"
+                      size="icon-sm"
+                      className={QUEUED_ACTION_CLASS}
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onSteer(message.id)}
                       disabled={message.pending}
@@ -72,13 +92,15 @@ function QueuedMessages({
                       aria-label="Send now"
                       data-testid="queued-message-send-now"
                     >
-                      <ArrowUp className="size-3.5" aria-hidden />
-                    </button>
+                      <Icon icon={ArrowUp} size="sm" />
+                    </Button>
                   )}
                   {onRemove && (
-                    <button
+                    <Button
                       type="button"
-                      className="flex size-6 items-center justify-center rounded-badge hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
+                      variant="ghost"
+                      size="icon-sm"
+                      className={QUEUED_ACTION_CLASS}
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onRemove(message.id)}
                       disabled={message.pending}
@@ -86,16 +108,16 @@ function QueuedMessages({
                       aria-label="Cancel and return to the composer"
                       data-testid="queued-message-cancel"
                     >
-                      <X className="size-3.5" aria-hidden />
-                    </button>
+                      <Icon icon={X} size="sm" />
+                    </Button>
                   )}
-                </div>
+                </Inline>
               )}
-            </div>
-          </div>
+            </Inline>
+          </Stack>
         )
       })}
-    </div>
+    </Stack>
   )
 }
 
@@ -117,7 +139,7 @@ export const Messages = memo(function MessagesComponent({
   isOffloading = false,
   reconnectLabel = null,
   localRepo,
-  contentWidthClass = "max-w-[42rem]",
+  contentWidthClass = "max-w-thread",
   contentPaddingClass = "px-6",
   bottomInset = 0,
   loadEarlier = null,
@@ -172,110 +194,122 @@ export const Messages = memo(function MessagesComponent({
 
   return (
     <TooltipProvider delay={250} closeDelay={0}>
-      <div className="relative min-h-0 min-w-0 flex-1">
-        <div
+      <Box className="relative min-h-0 min-w-0 flex-1">
+        <Box
           ref={scrollRef}
           // Gutter on both edges: the centered column keeps its position when the
           // scrollbar appears, so it stays aligned with the composer below it.
-          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-5 text-body leading-[1.6] antialiased"
+          style={{ scrollbarGutter: "stable both-edges" }}
+          className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto text-body"
         >
-          <div
+          <Box
             ref={contentRef}
-            className={`w-full ${contentWidthClass} mx-auto min-w-0 ${contentPaddingClass}`}
+            className="w-full min-w-0"
             style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
           >
-            {loadEarlier && (
-              <button
-                type="button"
-                disabled={loadEarlier.loading}
-                onClick={() => {
-                  capturePrependAnchor()
-                  loadEarlier.onLoadEarlier()
-                }}
-                className="mb-3 w-full py-1.5 text-center text-meta text-ink-subtle hover:text-ink disabled:cursor-default"
-              >
-                {loadEarlier.loading
-                  ? "Loading earlier turns…"
-                  : "Load earlier turns"}
-              </button>
-            )}
-            {visibleMessages.length === 0 && emptyState}
-            {visibleMessages.map((message, index) => {
-              const isLastMessage = index === visibleMessages.length - 1
-              const messageIsStreaming = isStreaming && isLastMessage
-              const messageIsMarkdownLive = message.id === liveMarkdownMessageId
+            <AgentThread
+              className={cn("min-w-0", contentWidthClass, contentPaddingClass)}
+            >
+              {loadEarlier && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="compact"
+                  disabled={loadEarlier.loading}
+                  onClick={() => {
+                    capturePrependAnchor()
+                    loadEarlier.onLoadEarlier()
+                  }}
+                  className="self-center text-ink-subtle hover:text-ink"
+                >
+                  {loadEarlier.loading
+                    ? "Loading earlier turns…"
+                    : "Load earlier turns"}
+                </Button>
+              )}
+              {visibleMessages.length === 0 && emptyState}
+              {visibleMessages.map((message, index) => {
+                const isLastMessage = index === visibleMessages.length - 1
+                const messageIsStreaming = isStreaming && isLastMessage
+                const messageIsMarkdownLive =
+                  message.id === liveMarkdownMessageId
 
-              if (
-                message.author === "user" ||
-                message.structuredSenderKind === "system"
-              ) {
-                return <UserMessage key={message.id} message={message} />
-              }
+                if (
+                  message.author === "user" ||
+                  message.structuredSenderKind === "system"
+                ) {
+                  return <UserMessage key={message.id} message={message} />
+                }
 
-              return (
-                <AgentTurn
-                  key={message.id}
-                  message={message}
-                  isStreaming={messageIsStreaming && !isOffloading}
-                  isMarkdownLive={messageIsMarkdownLive}
-                  repoPath={repoPath}
-                  activityLabel={messageIsStreaming ? activityLabel : undefined}
-                  onApprove={onApprove}
-                  onReject={onReject}
-                  onAutoApprove={onAutoApprove}
-                  onOpenFile={onOpenFile}
+                return (
+                  <AgentTurn
+                    key={message.id}
+                    message={message}
+                    isStreaming={messageIsStreaming && !isOffloading}
+                    isMarkdownLive={messageIsMarkdownLive}
+                    repoPath={repoPath}
+                    activityLabel={
+                      messageIsStreaming ? activityLabel : undefined
+                    }
+                    onApprove={onApprove}
+                    onReject={onReject}
+                    onAutoApprove={onAutoApprove}
+                    onOpenFile={onOpenFile}
+                  />
+                )
+              })}
+              {threadId && showPlanArtifact && (
+                <InlinePlanArtifact threadId={threadId} />
+              )}
+              {threadId && (
+                <WorkflowApprovalCard
+                  threadId={threadId}
+                  pollWhileActive={pollWorkflowApprovalsWhileActive}
                 />
-              )
-            })}
-            {threadId && showPlanArtifact && (
-              <InlinePlanArtifact threadId={threadId} />
-            )}
-            {threadId && (
-              <WorkflowApprovalCard
-                threadId={threadId}
-                pollWhileActive={pollWorkflowApprovalsWhileActive}
+              )}
+              <QueuedMessages
+                queuedMessages={queuedMessages}
+                onSteer={onSteerQueuedMessage}
+                onRemove={onRemoveQueuedMessage}
               />
-            )}
-            <QueuedMessages
-              queuedMessages={queuedMessages}
-              onSteer={onSteerQueuedMessage}
-              onRemove={onRemoveQueuedMessage}
-            />
-            {footer}
-            <ThinkingSpinner
-              isActive={
-                !!reconnectLabel ||
-                isOffloading ||
-                (!!(isThinking || streamIsLoading || isStreaming) &&
-                  !(
-                    isStreaming &&
-                    lastAgentIndex >= 0 &&
-                    lastAgentIndex === visibleMessages.length - 1
-                  ))
-              }
-              settingUpSandbox={
-                settingUpSandbox && !isOffloading && !reconnectLabel
-              }
-              label={
-                reconnectLabel ??
-                (isOffloading ? "Offloading conversation..." : activityLabel)
-              }
-            />
-          </div>
-        </div>
+              {footer}
+              <ThinkingSpinner
+                isActive={
+                  !!reconnectLabel ||
+                  isOffloading ||
+                  (!!(isThinking || streamIsLoading || isStreaming) &&
+                    !(
+                      isStreaming &&
+                      lastAgentIndex >= 0 &&
+                      lastAgentIndex === visibleMessages.length - 1
+                    ))
+                }
+                settingUpSandbox={
+                  settingUpSandbox && !isOffloading && !reconnectLabel
+                }
+                label={
+                  reconnectLabel ??
+                  (isOffloading ? "Offloading conversation..." : activityLabel)
+                }
+              />
+            </AgentThread>
+          </Box>
+        </Box>
 
         {scrollButtonSlot === "internal" && showScrollToBottom && (
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="icon"
             onClick={scrollToBottom}
             aria-label="Scroll to bottom"
-            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink"
+            className="absolute left-1/2 z-30 -translate-x-1/2 text-ink-subtle shadow-popup hover:text-ink"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
           >
-            <ChevronDown className="size-3.5" />
-          </button>
+            <Icon icon={ChevronDown} size="sm" />
+          </Button>
         )}
-      </div>
+      </Box>
     </TooltipProvider>
   )
 })

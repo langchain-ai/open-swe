@@ -9,7 +9,7 @@ export function ToolResultBody({ value }: { value: string }) {
   if (json !== null) return <CodeBlock text={json} language="json" />
 
   return (
-    <pre className="max-h-64 cursor-text overflow-auto font-mono text-meta leading-relaxed break-words whitespace-pre-wrap text-ink-subtle select-text">
+    <pre className="max-h-64 cursor-text overflow-auto rounded-compact border border-line bg-muted px-3 py-2.5 font-mono text-meta break-words whitespace-pre-wrap text-ink-muted select-text">
       {value}
     </pre>
   )
