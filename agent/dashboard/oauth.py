@@ -380,11 +380,11 @@ def desktop_handoff_from_state(state_payload: dict[str, Any]) -> tuple[str, int]
 
 
 # Dashboard route where users manage their GitHub↔Slack link.
-PROFILE_SETTINGS_PATH = "/my-settings"
+PROFILE_SETTINGS_PATH = "/my-settings/connections"
 
 
 def build_settings_url() -> str | None:
-    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
+    """Return the dashboard Connections settings URL, or ``None`` if not configured.
 
     This is a plain, token-free link: it carries no per-user identity, so it is
     safe to share in a public Slack thread. The user signs in with GitHub from
@@ -402,7 +402,23 @@ def require_session(
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(401, "not authenticated")
-    return decode_session(token)
+    session = decode_session(token)
+    bind_audit_session(request, session)
+    return session
+
+
+def bind_audit_session(request: HTTPConnection, session: dict[str, object]) -> None:
+    from agent.audit_logs.middleware import bind_actor
+    from agent.audit_logs.models import AuditLogEnrichments
+
+    login = session.get("sub")
+    bind_actor(
+        request,
+        user_id=session_user_id(session),
+        enrichments=AuditLogEnrichments(
+            actor_kind="person", actor_login=login if isinstance(login, str) else None
+        ),
+    )
 
 
 def optional_session(request: HTTPConnection) -> dict[str, Any] | None:

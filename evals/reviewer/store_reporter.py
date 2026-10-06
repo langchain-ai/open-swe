@@ -1,6 +1,6 @@
 """Publish reviewer-eval progress to the LangGraph store for the dashboard.
 
-When the eval runs in the ``Reviewer eval`` GitHub Action it writes the same
+When the eval runs in a LangSmith sandbox (``agent.review.eval_jobs``) it writes the same
 store record the dashboard reads (namespace ``["evals"]``, key ``"reviewer"``),
 so ``/admin/evals`` shows the run live. The dashboard reconciles a run whose
 heartbeat goes stale to ``failed`` (see ``agent.review.eval_jobs``), so the
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def is_enabled() -> bool:
-    """True when the eval should publish progress to the store (set by the Action)."""
+    """True when the eval should publish progress to the store (set by the launcher)."""
     return bool(os.environ.get("REVIEWER_EVAL_REPORT_STORE")) and bool(
         os.environ.get("LANGGRAPH_URL")
     )
@@ -34,15 +34,6 @@ def is_enabled() -> bool:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def github_run_url() -> str | None:
-    server = os.environ.get("GITHUB_SERVER_URL")
-    repo = os.environ.get("GITHUB_REPOSITORY")
-    run_id = os.environ.get("GITHUB_RUN_ID")
-    if server and repo and run_id:
-        return f"{server}/{repo}/actions/runs/{run_id}"
-    return None
 
 
 class StoreReporter:
@@ -62,12 +53,11 @@ class StoreReporter:
         self._config = config
         self._limit = limit
         self._total = total
-        self._created_by = created_by or os.environ.get("GITHUB_ACTOR")
+        self._created_by = created_by or os.environ.get("REVIEWER_EVAL_CREATED_BY")
         self._completed_getter = completed_getter
         self._tail_getter = tail_getter
         self._experiment_url_getter = experiment_url_getter
-        self._github_run_url = github_run_url()
-        self._worker_id = os.environ.get("GITHUB_RUN_ID")
+        self._worker_id = os.environ.get("LANGSMITH_SANDBOX_NAME")
         self._started_at = _now_iso()
         # get_client auto-loads the api key from LANGGRAPH/LANGSMITH/LANGCHAIN env.
         self._client = get_client(url=os.environ["LANGGRAPH_URL"])
@@ -91,8 +81,7 @@ class StoreReporter:
             "worker_id": self._worker_id,
             "heartbeat": _now_iso(),
             "progress": {"completed": self._completed_getter(), "total": self._total},
-            "github_run_url": self._github_run_url,
-            "trigger": "github_action",
+            "trigger": "sandbox",
             "updated_at": _now_iso(),
         }
         record.update(overrides)

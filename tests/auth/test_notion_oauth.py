@@ -122,7 +122,7 @@ async def test_store_and_pop_notion_oauth_flow(
             "https://dashboard.example/agents/thread-1?from=chat#latest",
         ),
         ("https://evil.example/steal", "https://dashboard.example"),
-        (None, "https://dashboard.example/my-settings"),
+        (None, "https://dashboard.example/my-settings/connections"),
     ],
 )
 def test_notion_browser_connection_returns_to_safe_target(

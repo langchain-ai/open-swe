@@ -1,7 +1,7 @@
 """Shared constants for the reviewer-eval status record.
 
 Kept deliberately light (no dashboard/server imports) so the eval harness in the
-GitHub Action can publish progress to the store without importing the FastAPI
+eval sandbox can publish progress to the store without importing the FastAPI
 dashboard. Both ``agent.review.eval_jobs`` (reader) and
 ``evals.reviewer.store_reporter`` (writer) import from here.
 """
@@ -15,8 +15,8 @@ DEFAULT_EVAL_PROJECT = "open-swe-evals"
 LOG_TAIL_CHARS = 12000
 EXPERIMENT_URL_RE = re.compile(r"https://\S*smith\.langchain\.com/\S+")
 
-# The running Action refreshes the heartbeat this often; a record is only
+# The running eval refreshes the heartbeat this often; a record is only
 # reconciled as failed once its heartbeat is older than the stale threshold, so
-# a brief dashboard/Action lag doesn't kill a live run.
+# a brief dashboard/eval lag doesn't kill a live run.
 HEARTBEAT_INTERVAL_SECONDS = 10
 HEARTBEAT_STALE_SECONDS = 60

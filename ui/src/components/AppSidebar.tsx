@@ -1,13 +1,24 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useRouterState } from "@tanstack/react-router"
 import {
   IoArrowBackOutline,
-  IoCloudOutline,
+  IoBarChartOutline,
+  IoBrushOutline,
   IoCubeOutline,
+  IoDocumentTextOutline,
+  IoExtensionPuzzleOutline,
   IoFlaskOutline,
+  IoGitBranchOutline,
   IoGitPullRequestOutline,
+  IoInformationCircleOutline,
+  IoLinkOutline,
   IoOptionsOutline,
+  IoPeopleOutline,
+  IoPulseOutline,
+  IoReaderOutline,
   IoSettingsOutline,
+  IoSparklesOutline,
   IoStatsChartOutline,
+  IoWarningOutline,
 } from "react-icons/io5"
 import { Fragment, type ComponentType, type SVGProps } from "react"
 
@@ -28,41 +39,91 @@ interface NavItem {
   to: string
   label: string
   icon: IconType
-  adminOnly?: boolean
+  /** Child pages that also highlight this item. */
+  childPrefix?: string
 }
 
-const NAV: Array<{ heading: string; items: Array<NavItem> }> = [
+interface NavGroup {
+  heading: string
+  adminOnly?: boolean
+  items: Array<NavItem>
+}
+
+const NAV: Array<NavGroup> = [
   {
-    heading: "User settings",
+    heading: "Personal",
     items: [
-      { to: "/my-settings", label: "Profile", icon: IoOptionsOutline },
-      { to: "/cloud-agents", label: "Open SWE Agent", icon: IoCloudOutline },
-      { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
+      { to: "/my-settings", label: "General", icon: IoSettingsOutline },
+      { to: "/my-settings/agent", label: "Agent", icon: IoSparklesOutline },
+      { to: "/my-settings/git", label: "Git", icon: IoGitBranchOutline },
       {
-        to: "/feature-flags",
-        label: "Feature Flags",
+        to: "/my-settings/instructions",
+        label: "Instructions",
+        icon: IoReaderOutline,
+      },
+      {
+        to: "/my-settings/connections",
+        label: "Connections",
+        icon: IoLinkOutline,
+      },
+      {
+        to: "/my-settings/experiments",
+        label: "Experiments",
         icon: IoFlaskOutline,
       },
     ],
   },
   {
-    heading: "Workspace settings",
+    heading: "Workspace",
     items: [
       {
         to: "/review",
-        label: "Open SWE Review",
+        label: "Code review",
         icon: IoGitPullRequestOutline,
+        childPrefix: "/review/repositories/",
+      },
+      { to: "/review/styles", label: "Review styles", icon: IoBrushOutline },
+      {
+        to: "/agents/instructions",
+        label: "Repository instructions",
+        icon: IoDocumentTextOutline,
       },
       { to: "/workspaces", label: "Workspaces", icon: IoCubeOutline },
+      { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
+    ],
+  },
+  {
+    heading: "Administration",
+    adminOnly: true,
+    items: [
+      { to: "/admin", label: "Defaults", icon: IoOptionsOutline },
       {
-        to: "/admin",
-        label: "Admin",
-        icon: IoSettingsOutline,
-        adminOnly: true,
+        to: "/admin/integrations",
+        label: "Integrations",
+        icon: IoExtensionPuzzleOutline,
+      },
+      { to: "/admin/incidents", label: "Incidents", icon: IoWarningOutline },
+      { to: "/admin/operations", label: "Operations", icon: IoPulseOutline },
+      { to: "/admin/users", label: "Users", icon: IoPeopleOutline },
+      { to: "/admin/evals", label: "Evals", icon: IoBarChartOutline },
+    ],
+  },
+  {
+    heading: "Help",
+    items: [
+      {
+        to: "/my-settings/about",
+        label: "About",
+        icon: IoInformationCircleOutline,
       },
     ],
   },
 ]
+
+function isActive(item: NavItem, pathname: string): boolean {
+  if (pathname === item.to) return true
+  return !!item.childPrefix && pathname.startsWith(item.childPrefix)
+}
 
 const LINK_CLASS =
   "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -96,6 +157,7 @@ function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
   const hrefLinkOptions = useHrefLinkOptions()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
 
@@ -121,32 +183,29 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 
-      <nav className="flex flex-1 flex-col gap-5 px-2">
-        {NAV.map((group) => {
-          const items = group.items.filter((i) => !i.adminOnly || user.is_admin)
-          if (items.length === 0) return null
-          return (
+      <nav className="flex flex-1 flex-col gap-5 overflow-y-auto px-2">
+        {NAV.filter((group) => !group.adminOnly || user.is_admin).map(
+          (group) => (
             <div key={group.heading} className="flex flex-col gap-0.5">
               <span className="px-2.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
                 {group.heading}
               </span>
-              {items.map((item) => {
+              {group.items.map((item) => {
                 const Icon = item.icon
-                const withWorkspaces =
-                  item.to === "/workspaces" && user.is_admin
                 return (
                   <Fragment key={item.to}>
                     <Link
                       to={item.to}
                       onClick={layout.closeOnMobile}
-                      className={LINK_CLASS}
-                      activeOptions={{ exact: withWorkspaces }}
-                      activeProps={ACTIVE_LINK_PROPS}
+                      className={cn(
+                        LINK_CLASS,
+                        isActive(item, pathname) && ACTIVE_LINK_PROPS.className
+                      )}
                     >
                       <Icon className="size-4" />
                       <span>{item.label}</span>
                     </Link>
-                    {withWorkspaces && (
+                    {item.to === "/workspaces" && user.is_admin && (
                       <WorkspaceNavItems onNavigate={layout.closeOnMobile} />
                     )}
                   </Fragment>
@@ -154,7 +213,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
               })}
             </div>
           )
-        })}
+        )}
       </nav>
 
       <div className="p-2">
