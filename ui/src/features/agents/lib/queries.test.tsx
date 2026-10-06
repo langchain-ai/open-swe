@@ -13,6 +13,7 @@ import {
   optimisticThread,
   setAgentThreadStatus,
   setAgentThreadResolved,
+  useAgentThread,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useRenameAgentThread,
@@ -468,6 +469,86 @@ describe("sidebar queries", () => {
         offset: 1,
       })
     )
+  })
+
+  it.each([true, false])(
+    "reactively uses onscreen detail while the sidebar request stalls (preloaded: %s)",
+    async (preloaded) => {
+      const opened = {
+        id: "opened-thread",
+        title: "Onscreen thread",
+        resolved: false,
+      } as AgentThread
+      const getThread = vi
+        .spyOn(agentsApi, "getThread")
+        .mockReturnValue(new Promise<AgentThread>(() => {}))
+      const client = testClient()
+      const key = agentThreadKeys.detail(opened.id)
+      if (preloaded) client.setQueryData(key, opened)
+      const { result } = renderHook(
+        () =>
+          useSidebarActiveThread({
+            activeThreadId: opened.id,
+            loadedThreads: [],
+          }),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={client}>
+              {children}
+            </QueryClientProvider>
+          ),
+        }
+      )
+
+      expect(getThread).toHaveBeenCalledTimes(preloaded ? 0 : 1)
+      if (!preloaded) act(() => client.setQueryData(key, opened))
+      await waitFor(() => expect(result.current).toEqual(opened))
+
+      const updated = { ...opened, title: "Updated onscreen title" }
+      act(() => client.setQueryData(key, updated))
+      await waitFor(() => expect(result.current).toEqual(updated))
+    }
+  )
+
+  it("refetches detail after sidebar rerenders and normalizes its hierarchy", async () => {
+    const worker = { id: "worker", status: "idle" } as AgentThread
+    const opened = {
+      id: "opened-thread",
+      status: "idle",
+      taskWorkers: [worker],
+      taskMembership: { role: "coordinator" },
+    } as AgentThread
+    const updated = { ...opened, title: "Refreshed title" }
+    vi.spyOn(agentsApi, "getThread")
+      .mockResolvedValueOnce(opened)
+      .mockResolvedValue(updated)
+    const client = testClient()
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    renderHook(() => useAgentThread(opened.id), { wrapper })
+    const { result, rerender } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: opened.id,
+          loadedThreads: [],
+        }),
+      { wrapper }
+    )
+    await waitFor(() => expect(result.current?.id).toBe(opened.id))
+    expect(result.current?.taskWorkers).toBeUndefined()
+    expect(result.current?.taskMembership).toBeUndefined()
+    rerender()
+    await act(() =>
+      client.invalidateQueries({ queryKey: agentThreadKeys.detail(opened.id) })
+    )
+    await waitFor(() => expect(result.current?.title).toBe(updated.title))
+    expect(
+      client.getQueryState(agentThreadKeys.detail(opened.id))?.status
+    ).toBe("success")
+    profile.data.experimental_task_coordination = true
+    rerender()
+    expect(result.current?.taskWorkers).toEqual([worker])
   })
 
   it("keeps the deep-linked active thread available as cached pages catch up", async () => {

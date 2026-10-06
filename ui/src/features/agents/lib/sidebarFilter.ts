@@ -40,11 +40,11 @@ export function filterThreads<T extends FilterableThread>(
 ): Array<T> {
   const matches = (thread: FilterableThread) =>
     (Boolean(activeThreadId) && thread.id === activeThreadId) ||
-    (filters.includeAutomations ||
+    ((filters.includeAutomations ||
       !isAutomationThread(thread) ||
       filters.sources.includes("schedule")) &&
-    (filters.sources.length === 0 ||
-      filters.sources.includes(threadSource(thread)))
+      (filters.sources.length === 0 ||
+        filters.sources.includes(threadSource(thread))))
   return threads.flatMap((thread) => {
     if (matches(thread)) return [thread]
     const taskWorkers = thread.taskWorkers?.filter(matches)
