@@ -49,11 +49,20 @@ class _GitHubRepository(BaseModel):
     full_name: str = ""
 
 
+class _GitHubApp(BaseModel):
+    id: int | None = None
+
+
 class _GitHubText(BaseModel):
     number: int | None = None
     body: str | None = None
     html_url: str = ""
     state: str = ""
+    performed_via_github_app: _GitHubApp | None = None
+
+    def authored_by_app(self, app_id: str) -> bool:
+        app = self.performed_via_github_app
+        return bool(app_id) and app is not None and str(app.id) == app_id
 
 
 class _GitHubPullRequestRef(BaseModel):
@@ -189,7 +198,10 @@ class EventSummary(BaseModel):
             status=status,
             body=body or "",
             trusted=event.user_id is not None or sender in _TRUSTED_GITHUB_BOTS,
-            from_open_swe=sender in OPEN_SWE_GITHUB_LOGINS
+            from_open_swe=(
+                sender in OPEN_SWE_GITHUB_LOGINS
+                or (commented is not None and commented.authored_by_app(ENV.GITHUB_APP_ID.get()))
+            )
             and event.base_event_type not in _CI_EVENT_TYPES,
             pull_request_numbers=sorted(
                 {
