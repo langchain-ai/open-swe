@@ -1343,6 +1343,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
+                slack_follow_up_suggestions=_slack_concierge_run(cfg)
+                or (await cached_workspace_settings(workspace_slug(cfg))).get(
+                    "slack_follow_up_suggestions"
+                )
+                is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
                 prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
