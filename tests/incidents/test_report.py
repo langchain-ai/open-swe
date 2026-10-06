@@ -12,6 +12,7 @@ def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations()
     collected.evidence = [Evidence(id="slack:1", source="slack", summary="Reported errors")]
     draft = ReportDraft.model_validate(
         {
+            "slack_message": "Invented cause explains the outage.",
             "summary": [
                 {"text": "Responders observed errors", "evidence_ids": ["slack:1", "slack:1"]},
                 {"text": "Invented cause", "evidence_ids": ["missing"]},
@@ -31,6 +32,7 @@ def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations()
 
     report = finalize_report(draft, collected)
 
+    assert report.slack_message == ""
     assert report.summary == "Responders observed errors [slack:1]"
     assert report.outcome == "findings"
     assert "Entire fleet" not in report.impact

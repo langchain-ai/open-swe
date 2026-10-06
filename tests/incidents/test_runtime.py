@@ -158,6 +158,7 @@ async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet
 
     await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
     first = await session._record_incident_report(
+        slack_message="**Finding**: Gateway internal errors began.",
         summary=[{"text": "Gateway internal errors began", "evidence_ids": ["slack:1.0"]}],
         problem=[{"text": "The gateway breached its 5xx SLO", "evidence_ids": ["slack:1.0"]}],
     )
@@ -168,9 +169,7 @@ async def test_the_channel_gets_one_automatic_investigation_and_then_stays_quiet
     assert (first["posted"], second["posted"]) == (True, False)
     runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
     posted = runtime.post_slack_thread_reply_with_ts.await_args.args[2]
-    # Nobody asked, so it must not present itself as answering anyone.
-    assert posted.startswith("*Investigation*")
-    assert "*Problem*" in posted
+    assert posted == "**Finding**: Gateway internal errors began."
     assert (await service.REPORTS.get("incident")).investigation_posted is True
 
     # A fresh conclusion much later is still not worth interrupting the channel for.
