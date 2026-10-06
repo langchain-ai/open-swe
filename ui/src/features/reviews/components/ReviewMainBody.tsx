@@ -1,8 +1,8 @@
 import {
+  type CommittedDiffSelection,
   readDiffSelection,
   useDiffLineSelection,
 } from "@/features/agents/utils/diffSelection"
-import type { CommittedDiffSelection } from "@/features/agents/utils/diffSelection"
 import { DiffSelectionPopover } from "@/features/agents/components/DiffSelectionPopover"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
@@ -1965,7 +1965,7 @@ const FileDiffCard = memo(function FileDiffCard({
   // Line-number drags and the gutter "+" comment; text highlights add to chat.
   const routeSelection = useCallback(
     ({ range, source }: CommittedDiffSelection) => {
-      if (source !== "text") onStartComment?.(file.path, range)
+      if (source === "lines") onStartComment?.(file.path, range)
     },
     [onStartComment, file.path]
   )

@@ -50,7 +50,7 @@ export function selectedRangeFromDiff(
   }
 }
 
-export type DiffSelectionSource = "lines" | "gutter" | "text"
+type DiffSelectionSource = "lines" | "text"
 
 export interface CommittedDiffSelection {
   range: SelectedLineRange
@@ -151,7 +151,7 @@ export function useDiffLineSelection({
             enableLineSelection: true,
             enableGutterUtility: true,
             onGutterUtilityClick: (range: SelectedLineRange) =>
-              commit("gutter", range),
+              commit("lines", range),
             onLineSelectionChange: setSelection,
             // A code text highlight is committed on mouseup instead.
             onLineSelectionEnd: (range: SelectedLineRange | null) => {
