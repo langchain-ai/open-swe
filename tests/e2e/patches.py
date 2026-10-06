@@ -158,15 +158,19 @@ def apply() -> None:
     _real_validate_upload = slack_client._validate_slack_upload_url
     _real_resolve = url_safety.resolve_and_validate
 
-    def _validate_upload_url(url: str) -> tuple[bool, str]:
+    def _validate_upload_url(url: str) -> None:
         if url.startswith(_harness_upload):
-            return True, ""
+            return
         return _real_validate_upload(url)
 
-    def _resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
+    def _resolve_and_validate(url: str) -> tuple[str, list[str]]:
         if url.startswith(_harness_upload):
             host = urlparse(url).hostname or "127.0.0.1"
-            return True, "", host, socket.getaddrinfo(host, urlparse(url).port or 80)
+            return host, list(
+                dict.fromkeys(
+                    info[4][0] for info in socket.getaddrinfo(host, urlparse(url).port or 80)
+                )
+            )
         return _real_resolve(url)
 
     slack_client._validate_slack_upload_url = _validate_upload_url
@@ -234,6 +238,7 @@ def apply() -> None:
 
     github_repos.github_sdk = _fake_github_sdk
     from agent.review import routes as review_routes
+    from agent.schedules import store as schedules_store
     from agent.webhooks import common as webhook_common
 
     for module in (
@@ -245,6 +250,7 @@ def apply() -> None:
         repo_access,
         github_repos,
         review_routes,
+        schedules_store,
     ):
         module.__dict__["get_valid_access_token"] = _dummy_user_token
     # Each of these imported GITHUB_API_BASE by name, so the module attribute is

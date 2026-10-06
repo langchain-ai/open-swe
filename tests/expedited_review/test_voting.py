@@ -12,6 +12,7 @@ from agent.human_review import lifecycle, people
 from agent.human_review.people import Outcome
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.slack import cards
+from agent.slack.http import SlackRequestError
 from agent.users import User
 from tests.expedited_review.conftest import OpenApproval
 
@@ -74,9 +75,9 @@ class _FakeSlack:
 
     async def post(
         self, channel_id: str, thread_ts: str, text: str, *, reply_broadcast: bool, **_: object
-    ) -> tuple[str, None]:
+    ) -> str:
         self.broadcasts.append(reply_broadcast)
-        return f"{2 + len(self.broadcasts)}.0", None
+        return f"{2 + len(self.broadcasts)}.0"
 
     async def delete(self, channel_id: str, message_ts: str) -> bool:
         self.deleted.append(message_ts)
@@ -257,20 +258,18 @@ async def test_draft_card_is_not_posted_until_ready(
     monkeypatch.setattr(lifecycle, "delete_slack_message", deleted)
     notes = AsyncMock()
     monkeypatch.setattr(lifecycle, "note_for_concierge", notes)
-    updated = AsyncMock(return_value=(True, None))
+    updated = AsyncMock()
     monkeypatch.setattr(lifecycle, "update_slack_message", updated)
     monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://origin"))
-    posted = AsyncMock(return_value=("3.0", None))
+    posted = AsyncMock(return_value="3.0")
     monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
 
-    assert await lifecycle.post_card(approval, title="Fix", files=[]) == (
-        None,
-        "draft card is author-only",
-    )
+    with pytest.raises(SlackRequestError, match="draft card is author-only"):
+        await lifecycle.post_card(approval, title="Fix", files=[])
     await lifecycle.refresh_card(approval)
     posted.assert_not_called()
     deleted.assert_not_awaited()
@@ -439,10 +438,8 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_is_approved(
 class _OtherChannel:
     id = "C_OTHER"
 
-    async def post(
-        self, text: str, *, blocks: object = None, login: str | None = None
-    ) -> tuple[str, None]:
-        return "9.0", None
+    async def post(self, text: str, *, blocks: object = None, login: str | None = None) -> str:
+        return "9.0"
 
 
 async def test_a_copied_card_leaves_the_other_channel_once_it_closes_and_is_offered_again(

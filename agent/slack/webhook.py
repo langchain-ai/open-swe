@@ -64,6 +64,7 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_wor
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
 _KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
+_NON_KITCHEN_CONTEXT = load_prompt("runs/slack-non-kitchen.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
 
 
@@ -75,9 +76,7 @@ def _is_explicit_slack_request(
     message_update: bool,
 ) -> bool:
     return not message_update and bool(
-        treat_all_messages_as_mentions
-        or (bot_user_id and f"<@{bot_user_id}>" in text)
-        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+        treat_all_messages_as_mentions or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
 
 
@@ -1108,7 +1107,7 @@ async def _process_slack_mention_impl(
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
-            _KITCHEN_CONTEXT if request.kitchen_channel else "",
+            _KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT,
         )
         if section
     )

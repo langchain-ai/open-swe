@@ -106,11 +106,11 @@ class BridgeSandboxBackend(BaseSandbox):
         self._thread_id = thread_id
 
     @classmethod
-    async def connect(cls, thread_id: str, bridge_id: str) -> Self:
+    async def connect(cls, thread_id: str | None, bridge_id: str) -> Self:
         """Bind to a live bridge, or refuse the run — never replace it."""
         backend = cls(bridge_id=bridge_id, thread_id=thread_id)
         if not await backend._is_alive():
-            raise SandboxUnreachableError(thread_id, backend.id, "bridge disconnected")
+            raise backend._unreachable("bridge disconnected")
         return backend
 
     @property

@@ -39,7 +39,7 @@ def _slack_link_hint() -> str:
     Signing in with GitHub creates the GitHub identity and no Slack one, so
     telling someone already signed in to do that again sends them in a circle.
     """
-    return settings_hint("Connect Slack under Personal connections")
+    return settings_hint("Connect Slack under Connections", "/my-settings/connections")
 
 
 def linked_participant(user: User | None) -> Participant | Outcome:

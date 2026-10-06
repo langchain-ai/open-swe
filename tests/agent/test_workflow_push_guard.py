@@ -246,13 +246,11 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         pending_kwargs.update(kwargs)
         return {"fingerprint": kwargs["fingerprint"], "status": "pending", "notified": False}, True
 
-    async def fake_post(
-        channel_id: str, thread_ts: str, message: str, **kwargs: Any
-    ) -> tuple[str, None]:
+    async def fake_post(channel_id: str, thread_ts: str, message: str, **kwargs: Any) -> str:
         posted.update(
             channel_id=channel_id, thread_ts=thread_ts, message=message, blocks=kwargs["blocks"]
         )
-        return "1700000000.000200", None
+        return "1700000000.000200"
 
     async def fake_notified(thread_id: str, fingerprint: str) -> None:
         posted["notified"] = fingerprint
