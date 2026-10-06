@@ -644,6 +644,15 @@
             ],
             "title": "Bridge Id"
           },
+          "client": {
+            "default": "cli",
+            "enum": [
+              "cli",
+              "desktop"
+            ],
+            "title": "Client",
+            "type": "string"
+          },
           "hostname": {
             "title": "Hostname",
             "type": "string"
@@ -1576,6 +1585,42 @@
         "title": "FunctionCallItem",
         "type": "object"
       },
+      "GitHubTrigger": {
+        "description": "Fires on events in one repository; its runs work in that repository.",
+        "properties": {
+          "events": {
+            "items": {
+              "enum": [
+                "issues.opened",
+                "pull_request.opened",
+                "pull_request.closed",
+                "pull_request.merged"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Events",
+            "type": "array"
+          },
+          "kind": {
+            "const": "github",
+            "default": "github",
+            "title": "Kind",
+            "type": "string"
+          },
+          "repo": {
+            "minLength": 3,
+            "title": "Repo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "events"
+        ],
+        "title": "GitHubTrigger",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1904,6 +1949,74 @@
           "body"
         ],
         "title": "LineComment",
+        "type": "object"
+      },
+      "LinearTrigger": {
+        "description": "Fires on issue events in one Linear team.",
+        "properties": {
+          "events": {
+            "items": {
+              "enum": [
+                "issue.created",
+                "issue.labeled"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Events",
+            "type": "array"
+          },
+          "kind": {
+            "const": "linear",
+            "default": "linear",
+            "title": "Kind",
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Labels",
+            "type": "array"
+          },
+          "max_runs_per_hour": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Runs Per Hour"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "team": {
+            "maxLength": 10,
+            "minLength": 1,
+            "title": "Team",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team",
+          "events"
+        ],
+        "title": "LinearTrigger",
         "type": "object"
       },
       "MCPConnectionPublic": {
@@ -2266,6 +2379,34 @@
           "merge_method"
         ],
         "title": "MergeAction",
+        "type": "object"
+      },
+      "MessageIntent": {
+        "properties": {
+          "intent": {
+            "const": "message",
+            "title": "Intent",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intent",
+          "title",
+          "message"
+        ],
+        "title": "MessageIntent",
         "type": "object"
       },
       "MessageItem": {
@@ -3442,6 +3583,17 @@
               }
             ],
             "title": "Model Routing Enabled"
+          },
+          "pr_failure_reactions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Failure Reactions"
           },
           "pr_review_links": {
             "anyOf": [
@@ -4941,58 +5093,35 @@
             "title": "Prompt",
             "type": "string"
           },
-          "repo": {
-            "anyOf": [
-              {
-                "type": "string"
+          "triggers": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "github": "#/components/schemas/GitHubTrigger",
+                  "linear": "#/components/schemas/LinearTrigger",
+                  "schedule": "#/components/schemas/ScheduleTrigger",
+                  "slack": "#/components/schemas/SlackTrigger"
+                },
+                "propertyName": "kind"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repo"
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule"
-          },
-          "slack_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Channel Id"
-          },
-          "slack_notification_mode": {
-            "default": "always",
-            "enum": [
-              "always",
-              "on_action"
-            ],
-            "title": "Slack Notification Mode",
-            "type": "string"
-          },
-          "trigger": {
-            "default": "schedule",
-            "enum": [
-              "schedule",
-              "github_issue_opened"
-            ],
-            "title": "Trigger",
-            "type": "string"
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ScheduleTrigger"
+                },
+                {
+                  "$ref": "#/components/schemas/GitHubTrigger"
+                },
+                {
+                  "$ref": "#/components/schemas/SlackTrigger"
+                },
+                {
+                  "$ref": "#/components/schemas/LinearTrigger"
+                }
+              ]
+            },
+            "minItems": 1,
+            "title": "Triggers",
+            "type": "array"
           },
           "workspace": {
             "maxLength": 120,
@@ -5003,9 +5132,31 @@
         },
         "required": [
           "prompt",
+          "triggers",
           "workspace"
         ],
         "title": "ScheduleCreateBody",
+        "type": "object"
+      },
+      "ScheduleTrigger": {
+        "properties": {
+          "cron": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Cron",
+            "type": "string"
+          },
+          "kind": {
+            "const": "schedule",
+            "default": "schedule",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cron"
+        ],
+        "title": "ScheduleTrigger",
         "type": "object"
       },
       "ScheduleUpdateBody": {
@@ -5079,70 +5230,42 @@
             ],
             "title": "Prompt"
           },
-          "repo": {
+          "triggers": {
             "anyOf": [
               {
-                "type": "string"
+                "items": {
+                  "discriminator": {
+                    "mapping": {
+                      "github": "#/components/schemas/GitHubTrigger",
+                      "linear": "#/components/schemas/LinearTrigger",
+                      "schedule": "#/components/schemas/ScheduleTrigger",
+                      "slack": "#/components/schemas/SlackTrigger"
+                    },
+                    "propertyName": "kind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ScheduleTrigger"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GitHubTrigger"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SlackTrigger"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LinearTrigger"
+                    }
+                  ]
+                },
+                "minItems": 1,
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Repo"
-          },
-          "schedule": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schedule"
-          },
-          "slack_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Channel Id"
-          },
-          "slack_notification_mode": {
-            "anyOf": [
-              {
-                "enum": [
-                  "always",
-                  "on_action"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Notification Mode"
-          },
-          "trigger": {
-            "anyOf": [
-              {
-                "enum": [
-                  "schedule",
-                  "github_issue_opened"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trigger"
+            "title": "Triggers"
           },
           "workspace": {
             "anyOf": [
@@ -5309,6 +5432,73 @@
           "is_ext_shared"
         ],
         "title": "SlackChannelOption",
+        "type": "object"
+      },
+      "SlackTrigger": {
+        "description": "Fires on messages in one Slack channel Open SWE is a member of.",
+        "properties": {
+          "channel": {
+            "maxLength": 40,
+            "minLength": 9,
+            "title": "Channel",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "const": "message.posted",
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Events",
+            "type": "array"
+          },
+          "kind": {
+            "const": "slack",
+            "default": "slack",
+            "title": "Kind",
+            "type": "string"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match"
+          },
+          "max_runs_per_hour": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Runs Per Hour"
+          },
+          "senders": {
+            "default": "anyone",
+            "enum": [
+              "anyone",
+              "people",
+              "bots"
+            ],
+            "title": "Senders",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel",
+          "events"
+        ],
+        "title": "SlackTrigger",
         "type": "object"
       },
       "SlashCommandResponse": {
@@ -6107,6 +6297,11 @@
             ],
             "title": "Fs Capacity Bytes"
           },
+          "inherit_default_sandbox": {
+            "default": false,
+            "title": "Inherit Default Sandbox",
+            "type": "boolean"
+          },
           "kitchen_channel_ids": {
             "items": {
               "type": "string"
@@ -6404,6 +6599,11 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "default": true,
+            "title": "Inherit Default Sandbox",
+            "type": "boolean"
           },
           "kitchen_channel_ids": {
             "items": {
@@ -6835,6 +7035,18 @@
             ],
             "title": "Gateway Enabled"
           },
+          "human_review_auto_assign_minutes": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Assign Minutes"
+          },
           "model_routing_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -6970,6 +7182,17 @@
               }
             ],
             "title": "Fs Capacity Bytes"
+          },
+          "inherit_default_sandbox": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inherit Default Sandbox"
           },
           "kitchen_channel_ids": {
             "anyOf": [
@@ -12087,6 +12310,7 @@
                     "address-comments": "#/components/schemas/AddressCommentsIntent",
                     "comments": "#/components/schemas/CommentBatchIntent",
                     "fix": "#/components/schemas/FixIntent",
+                    "message": "#/components/schemas/MessageIntent",
                     "open": "#/components/schemas/OpenThreadIntent"
                   },
                   "propertyName": "intent"
@@ -12094,6 +12318,9 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/OpenThreadIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MessageIntent"
                   },
                   {
                     "$ref": "#/components/schemas/FixIntent"
@@ -18439,6 +18666,63 @@
         "tags": [
           "dashboard",
           "threads"
+        ]
+      }
+    },
+    "/dashboard/api/ui-invalidations": {
+      "get": {
+        "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``.",
+        "operationId": "api_ui_invalidations_dashboard_api_ui_invalidations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "t",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "T"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Ui Invalidations",
+        "tags": [
+          "dashboard",
+          "ui-invalidations"
         ]
       }
     },

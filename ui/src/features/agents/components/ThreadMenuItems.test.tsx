@@ -4,7 +4,7 @@ import { Menu } from "@base-ui/react/menu"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { DesktopLocalThreadSummary } from "@/desktop"
+import type { DesktopLegacyLocalThread } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { ThreadMenuItems } from "./ThreadMenuItems"
 
@@ -22,7 +22,7 @@ const thread: AgentThread = {
   messages: [],
 }
 
-const localThread: DesktopLocalThreadSummary = {
+const localThread: DesktopLegacyLocalThread = {
   id: "local-thread-id",
   title: "Local thread",
   cwd: "/workspace/open-swe",

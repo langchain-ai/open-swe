@@ -2,7 +2,7 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { LocalAgentThreadView } from "@/features/agents/components/LocalAgentThreadView"
-import { useReadyDesktopLocalThread } from "@/features/agents/lib/desktopLocal"
+import { useReadyLegacyLocalThread } from "@/features/agents/lib/legacyLocal"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   ensureThreadLoad,
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/agents/local/$sessionId")({
 
 function LocalAgentThreadPage() {
   const { sessionId } = Route.useParams()
-  const threadQuery = useReadyDesktopLocalThread(sessionId)
+  const threadQuery = useReadyLegacyLocalThread(sessionId)
   const resolved = threadQuery.data !== undefined
   const failed = threadQuery.isError || threadQuery.data === null
   useEffect(() => {

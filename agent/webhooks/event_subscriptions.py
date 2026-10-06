@@ -26,7 +26,7 @@ from agent.config import ENV
 from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.github.comments import fence_github_comment_body
-from agent.github.org_membership import INTERNAL_BOT_LOGINS
+from agent.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOGINS
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
 from agent.prompts import prompt
@@ -36,7 +36,6 @@ from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
 
 logger = logging.getLogger(__name__)
 
-_OWN_GITHUB_LOGINS = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
 _TRUSTED_GITHUB_BOTS = frozenset(login.lower() for login in INTERNAL_BOT_LOGINS)
 # CI results describe a commit, so they matter even when Open SWE pushed it.
 _CI_EVENT_TYPES = frozenset({"check_run", "check_suite", "workflow_run"})
@@ -120,7 +119,6 @@ class _LinearData(BaseModel):
 
 
 class _LinearDelivery(BaseModel):
-    action: str = ""
     url: str = ""
     actor: _LinearActor | None = None
     data: _LinearData | None = None
@@ -131,7 +129,6 @@ class EventSummary(BaseModel):
 
     source: WebhookSource
     event_type: str
-    action: str = ""
     target: str = ""
     sender: str = ""
     link: str = ""
@@ -187,7 +184,6 @@ class EventSummary(BaseModel):
         return cls(
             source="github",
             event_type=event.event_type,
-            action=delivery.action,
             target=(opened.html_url if opened else "")
             or (delivery.repository.full_name if delivery.repository else ""),
             sender=f"@{sender}" if sender else "",
@@ -195,7 +191,8 @@ class EventSummary(BaseModel):
             status=status,
             body=body or "",
             trusted=event.user_id is not None or sender in _TRUSTED_GITHUB_BOTS,
-            from_open_swe=sender in _OWN_GITHUB_LOGINS and event.event_type not in _CI_EVENT_TYPES,
+            from_open_swe=sender in OPEN_SWE_GITHUB_LOGINS
+            and event.base_event_type not in _CI_EVENT_TYPES,
             pull_request_numbers=sorted(
                 {
                     number
@@ -233,7 +230,6 @@ class EventSummary(BaseModel):
         return cls(
             source="linear",
             event_type=event.event_type,
-            action=delivery.action,
             target=delivery.url,
             sender=delivery.actor.name if delivery.actor else "",
             status=data.title,
@@ -403,7 +399,7 @@ class EventSubscription(Base):
                     ),
                     or_(
                         func.cardinality(cls.event_types) == 0,
-                        cls.event_types.contains([event.event_type]),
+                        cls.event_types.overlap([event.event_type, event.base_event_type]),
                     ),
                     literal(event.payload, JSONB).contains(cls.payload_match),
                 )
@@ -452,7 +448,7 @@ class EventSubscription(Base):
                     raise _AlreadyOwedError
         except _AlreadyOwedError:
             return False
-        pull_request_closed = event.event_type == "pull_request" and summary.action == "closed"
+        pull_request_closed = event.event_type == "pull_request.closed"
         if self.one_shot or (self.pull_request_id is not None and pull_request_closed):
             await self.delete()
         return True

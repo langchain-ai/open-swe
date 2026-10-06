@@ -13,8 +13,10 @@ from agent.github.app import (
 
 logger = logging.getLogger(__name__)
 
+# The GitHub Apps Open SWE acts as; events they send are Open SWE's own.
+OPEN_SWE_GITHUB_LOGINS: frozenset[str] = frozenset({"open-swe[bot]", "openswe-dev[bot]"})
 INTERNAL_BOT_LOGINS: frozenset[str] = frozenset(
-    {"open-swe[bot]", "openswe-dev[bot]"}
+    OPEN_SWE_GITHUB_LOGINS
     | {login.strip() for login in ENV.EXTRA_INTERNAL_BOT_LOGINS.get().split(",") if login.strip()}
 )
 

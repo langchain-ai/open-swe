@@ -17,7 +17,7 @@ from langgraph_sdk.errors import NotFoundError
 from agent.dispatch import dispatch_agent_run
 from agent.input_messages import InputMessageContext, SystemIdentity
 from agent.prompts import prompt
-from agent.sandboxes.providers.registry import create_sandbox
+from agent.sandboxes.connect import connect_sandbox
 from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
 from agent.tools.background_execute import TASK_ROOT, control_script, encoded, execute
@@ -212,7 +212,7 @@ async def _reconcile(thread_id: str) -> _Reconciled:
             metadata = await update_background_task_state(client, thread_id, reset=True)
         await sync_slack_background_status(client, thread_id, metadata=metadata)
         return _Reconciled({"status": "missing_sandbox"}, None, tracked=True)
-    backend = await create_sandbox(sandbox_id)
+    backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
     tasks = await _list_tasks(backend)
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]
@@ -293,7 +293,7 @@ HeartbeatOutcome = Literal["running", "finished", "unknown"]
 
 async def keep_sandbox_alive(sandbox_id: str, task_id: str) -> HeartbeatOutcome:
     """Heartbeat for one command; the listing exec is the activity that holds off idle stop."""
-    backend = await create_sandbox(sandbox_id)
+    backend = await connect_sandbox(sandbox_id)
     for task in await _list_tasks(backend):
         if task.get("task_id") == task_id:
             return "running" if task.get("status") == "running" else "finished"
