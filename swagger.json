@@ -20595,7 +20595,7 @@
     },
     "/webhooks/rollout": {
       "post": {
-        "description": "Verify a deployment event and acknowledge it.",
+        "description": "Verify a deployment event, record it, and acknowledge it.",
         "operationId": "rollout_webhook_webhooks_rollout_post",
         "responses": {
           "200": {
