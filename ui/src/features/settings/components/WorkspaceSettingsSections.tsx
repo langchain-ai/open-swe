@@ -259,8 +259,8 @@ export function ModelDefaultsSection({
       title="Model defaults"
       description={
         scoped
-          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Per-user Cloud Agent selections override the agent defaults."
-          : "Models for runs in every workspace that does not override them. Per-user Cloud Agent selections override the agent defaults."
+          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
+          : "Models for runs in every workspace that does not override them. Each user's Agent settings override the agent defaults."
       }
     >
       <div className="divide-y divide-border">
@@ -379,7 +379,7 @@ interface ModelPairControlProps {
 const INHERIT_VALUE = "__inherit__"
 
 /** A model and reasoning-effort pair. */
-function ModelPairControl({
+export function ModelPairControl({
   models,
   model,
   effort,

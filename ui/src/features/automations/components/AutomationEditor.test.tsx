@@ -2,16 +2,14 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { useRecentRepos } from "@/lib/recentRepos"
 import { AutomationEditor } from "./AutomationEditor"
 import { useSession } from "@/lib/session"
 
 const mocks = vi.hoisted(() => ({
   createMutate: vi.fn(),
   updateMutate: vi.fn(),
-  unsavedWarning: vi.fn<(dirty: boolean) => () => void>(() => vi.fn()),
   workspaces: [
     { slug: "default", name: "Default", repos: [], is_default: true },
     { slug: "oss", name: "OSS", repos: ["acme/oss"], is_default: false },
@@ -47,11 +45,10 @@ vi.mock("@/features/agents/lib/provider/useModelOptions", () => ({
   useModelOptions: () => ({ models: [], defaultSelection: null }),
 }))
 vi.mock("@/features/automations/lib/useUnsavedChangesWarning", () => ({
-  useUnsavedChangesWarning: mocks.unsavedWarning,
+  useUnsavedChangesWarning: () => vi.fn(),
 }))
 vi.mock("@/lib/profile", () => ({
-  useRepos: () => ({ data: { repositories: [{ full_name: "acme/oss" }] } }),
-  useRefreshRepos: () => ({ mutate: vi.fn(), isPending: false }),
+  useRepos: () => ({ data: { repositories: [] } }),
 }))
 vi.mock("@/lib/session", () => ({
   useSession: vi.fn(),
@@ -64,11 +61,32 @@ vi.mock("@/lib/slack-channels", async (importOriginal) => ({
     isError: false,
   }),
 }))
+vi.mock("@/features/settings/components/RepoSelector", () => ({
+  RepoSelector: ({
+    onRepoChange,
+    placeholder,
+  }: {
+    onRepoChange: (repo: string | null) => void
+    placeholder: string
+  }) => <button onClick={() => onRepoChange("acme/oss")}>{placeholder}</button>,
+}))
 vi.mock("@/features/automations/components/AutomationRuns", () => ({
   AutomationRuns: () => <div />,
 }))
-vi.mock("@/features/automations/components/ScheduleTriggerPicker", () => ({
-  ScheduleTriggerPicker: () => <div />,
+vi.mock("@/features/automations/components/TriggerMenu", () => ({
+  TriggerMenu: ({
+    onGitHub,
+    onLinear,
+  }: {
+    onGitHub?: () => void
+    onLinear?: () => void
+  }) =>
+    onGitHub ? (
+      <>
+        <button onClick={onGitHub}>Add GitHub trigger</button>
+        <button onClick={onLinear}>Add Linear trigger</button>
+      </>
+    ) : null,
 }))
 vi.mock("@/features/agents/components/ModelPicker", () => ({
   ModelPicker: () => <div />,
@@ -92,8 +110,6 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => <div />,
 }))
 
-beforeEach(() => useRecentRepos.setState({ byAccount: {} }))
-
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -110,7 +126,7 @@ const TEMPLATE = {
 
 function signInAsAdmin() {
   vi.mocked(useSession).mockReturnValue({
-    data: { is_admin: true, login: "alice" },
+    data: { is_admin: true },
   } as unknown as ReturnType<typeof useSession>)
 }
 
@@ -150,11 +166,9 @@ describe("AutomationEditor", () => {
           name: "Nightly",
           prompt: "Check dependencies",
           schedule: "0 9 * * *",
-          trigger: "schedule",
+          triggers: [{ id: "trigger_1", kind: "schedule", cron: "0 9 * * *" }],
           scope: "workspace",
           workspace: "core",
-          repo: "acme/oss",
-          slackNotificationMode: "always",
           adminThread: false,
           model: "Default",
           enabled: true,
@@ -177,48 +191,6 @@ describe("AutomationEditor", () => {
 
     expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
       workspace: "default",
-    })
-  })
-
-  it("preserves an existing repository-free automation when saving another edit", () => {
-    signInAsAdmin()
-    useRecentRepos.setState({ byAccount: { "alice:github": ["acme/oss"] } })
-    render(
-      <AutomationEditor
-        mode="edit"
-        schedule={{
-          id: "sched_1",
-          name: "Nightly",
-          prompt: "Check dependencies",
-          schedule: "0 9 * * *",
-          trigger: "schedule",
-          scope: "workspace",
-          workspace: "core",
-          repo: null,
-          slackNotificationMode: "always",
-          adminThread: false,
-          model: "Default",
-          enabled: true,
-        }}
-      />
-    )
-    expect(mocks.unsavedWarning).toHaveBeenLastCalledWith(false)
-    fireEvent.change(screen.getByPlaceholderText("Untitled automation"), {
-      target: { value: "Updated nightly" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
-    expect(mocks.updateMutate.mock.calls[0]?.[0]).toMatchObject({
-      body: { name: "Updated nightly", repo: "" },
-    })
-  })
-
-  it("defaults only new automations to a recent repository", () => {
-    signInAsAdmin()
-    useRecentRepos.setState({ byAccount: { "alice:github": ["acme/oss"] } })
-    render(<AutomationEditor mode="create" template={TEMPLATE} />)
-    fireEvent.click(screen.getByRole("button", { name: "Create" }))
-    expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
-      repo: "acme/oss",
     })
   })
 
@@ -248,11 +220,11 @@ describe("AutomationEditor", () => {
             name: "Nightly",
             prompt: "Check dependencies",
             schedule: "0 9 * * *",
-            trigger: "schedule",
+            triggers: [
+              { id: "trigger_1", kind: "schedule", cron: "0 9 * * *" },
+            ],
             scope: "workspace",
             workspace: "gone",
-            repo: null,
-            slackNotificationMode: "always",
             adminThread: false,
             model: "Default",
             enabled: true,
@@ -266,5 +238,68 @@ describe("AutomationEditor", () => {
     } finally {
       mocks.workspaces = previous
     }
+  })
+
+  it("saves a GitHub trigger with its own repository beside the schedule", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          id: "sched_1",
+          name: "Nightly",
+          prompt: "Check dependencies",
+          schedule: "0 9 * * *",
+          triggers: [{ id: "trigger_1", kind: "schedule", cron: "0 9 * * *" }],
+          scope: "workspace",
+          workspace: "default",
+          adminThread: false,
+          model: "Default",
+          enabled: true,
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Add GitHub trigger" }))
+    fireEvent.click(screen.getByRole("button", { name: "Choose repository" }))
+    fireEvent.click(screen.getByRole("button", { name: "PR merged" }))
+    fireEvent.click(screen.getByRole("button", { name: "PR closed" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([
+      { kind: "schedule", cron: "0 9 * * *" },
+      {
+        kind: "github",
+        repo: "acme/oss",
+        events: ["pull_request.closed", "pull_request.merged"],
+      },
+    ])
+  })
+
+  it("saves a Linear trigger with its team and filters", () => {
+    signInAsAdmin()
+    render(<AutomationEditor mode="create" template={TEMPLATE} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Linear trigger" }))
+    fireEvent.change(screen.getByLabelText("Team key"), {
+      target: { value: "eng" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Label added" }))
+    fireEvent.change(screen.getByLabelText("Labels"), {
+      target: { value: "agent-fix, p1" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    expect(mocks.createMutate.mock.calls[0]?.[0].triggers).toEqual([
+      { kind: "schedule", cron: "0 9 * * *" },
+      {
+        kind: "linear",
+        team: "ENG",
+        events: ["issue.labeled"],
+        labels: ["agent-fix", "p1"],
+        project: null,
+        max_runs_per_hour: null,
+      },
+    ])
   })
 })

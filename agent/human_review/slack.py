@@ -1,4 +1,4 @@
-"""Slack interactivity for standard human review cards: I'll review and Dismiss."""
+"""Slack interactivity for standard human review cards: I'll review, Accept, and Dismiss."""
 
 import logging
 
@@ -10,6 +10,8 @@ from agent.human_review.lifecycle import dismiss_request
 from agent.human_review.people import Outcome
 from agent.human_review.requests import HumanReviewRequest
 from agent.human_review.standard import claim
+from agent.prompts import prompt
+from agent.slack.dm import note_for_concierge
 from agent.slack.payloads import SlackButtonValue, SlackInteraction
 from agent.slack.responses import WebhookResponse, accepted, ignored
 from agent.users import User
@@ -25,7 +27,18 @@ async def _process(
     async def handle(request: HumanReviewRequest) -> Outcome:
         if action == "dismiss":
             return await dismiss_request(request, slack_user_id)
-        return await claim(request, await User.for_person({"id": f"slack:{slack_user_id}"}))
+        outcome = await claim(request, await User.for_person({"id": f"slack:{slack_user_id}"}))
+        if channel_id.startswith("D"):
+            await note_for_concierge(
+                slack_user_id,
+                channel_id,
+                prompt(
+                    "slack/concierge-review-pick-clicked",
+                    pr_url=request.pull_request.url,
+                    outcome=outcome.message,
+                ),
+            )
+        return outcome
 
     await answer_click(
         request_id,

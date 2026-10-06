@@ -168,6 +168,25 @@ async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
     set_meta.assert_not_awaited()
 
 
+async def test_publish_review_refuses_when_called_alongside_other_tools() -> None:
+    from langchain_core.messages import AIMessage
+
+    from agent.tools.publish_review import publish_review
+
+    turn = AIMessage(
+        "",
+        tool_calls=[
+            {"name": "add_finding", "args": {}, "id": "call_add"},
+            {"name": "publish_review", "args": {"ranking": []}, "id": "call_publish"},
+        ],
+    )
+    with patch("agent.tools.publish_review._record_ranking", AsyncMock()) as record_ranking:
+        result = await publish_review(ranking=[], state={"messages": [turn]})
+
+    assert result["success"] is False
+    record_ranking.assert_not_awaited()
+
+
 async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() -> None:
     from agent.review.findings import (
         REVIEWER_EVAL_PUBLICATION_KEY,

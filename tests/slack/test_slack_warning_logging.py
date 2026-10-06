@@ -22,7 +22,7 @@ async def test_slack_warning_post_logs_error(
             thread_ts="1.0",
         )
 
-    assert result == ("2.0", None)
+    assert result == "2.0"
     assert "Sent automated warning message to Slack thread C1/1.0" in caplog.text
     assert "⚠️ Open SWE reached its maximum step limit." in caplog.text
 
@@ -43,5 +43,5 @@ async def test_plain_slack_post_does_not_log_warning_error(
             thread_ts="1.0",
         )
 
-    assert result == ("2.0", None)
+    assert result == "2.0"
     assert "Sent automated warning message to Slack" not in caplog.text

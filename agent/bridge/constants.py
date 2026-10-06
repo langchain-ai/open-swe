@@ -1,5 +1,10 @@
 """Timings and the notification channel shared by the bridge's store and listener."""
 
+from typing import Literal
+
+BridgeClient = Literal["cli", "desktop"]
+"""The app serving a bridge: the ``oswe`` CLI, or the desktop app's "This Mac" threads."""
+
 CHANNEL = "open_swe_bridge"
 """LISTEN/NOTIFY channel carrying ``<bridge_id>:<request_id>:<event>`` — ids only."""
 

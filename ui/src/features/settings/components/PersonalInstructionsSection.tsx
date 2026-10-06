@@ -55,10 +55,7 @@ export function PersonalInstructionsSection() {
   }
 
   return (
-    <SettingsSection
-      title="My instructions"
-      description="Standing instructions appended to the coding agent's system prompt for every run you trigger, on any surface. Repository instructions and AGENTS.md win when they conflict."
-    >
+    <SettingsSection title="Personal instructions">
       <SettingsPanel>
         {instructions.isLoading ? (
           <Skeleton className="h-40 w-full" />

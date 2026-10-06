@@ -19,6 +19,11 @@ import {
 import type { BaseMessage } from "@langchain/core/messages"
 
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import {
+  parseExcerpts,
+  serializeExcerpts,
+} from "@/features/agents/utils/codeExcerpt"
+import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { IconButton } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -50,13 +55,8 @@ import {
 // mounted when "add to chat" fires, so attachments are stashed until ChatBody
 // registers its sink.
 
-export interface ChatAttachment {
+export interface ChatAttachment extends CodeExcerpt {
   id: string
-  path: string
-  // e.g. "R35-37" / "L12" — the side+line range shown after the filename.
-  lineLabel: string
-  language: string
-  snippet: string
 }
 
 interface ReviewChatComposer {
@@ -115,49 +115,6 @@ function attachmentBasename(path: string): string {
 
 function attachmentPillLabel(attachment: ChatAttachment): string {
   return `${attachmentBasename(attachment.path)}:${attachment.lineLabel}`
-}
-
-// Serialize attachments as fenced code blocks ahead of the prose so the model
-// receives the code as context. The UI renders pills instead (see parse below).
-function serializeMessage(
-  text: string,
-  attachments: Array<ChatAttachment>
-): string {
-  const blocks = attachments.map(
-    (a) =>
-      `\`${a.path}:${a.lineLabel}\`\n\`\`\`${a.language}\n${a.snippet}\n\`\`\``
-  )
-  return [...blocks, text.trim()].filter(Boolean).join("\n\n")
-}
-
-interface ParsedAttachment {
-  label: string
-  language: string
-  code: string
-}
-
-// Pull the leading attachment blocks (which serializeMessage always writes
-// first) back out of a sent message so the bubble can render them as pills.
-function parseUserMessage(content: string): {
-  attachments: Array<ParsedAttachment>
-  text: string
-} {
-  const attachments: Array<ParsedAttachment> = []
-  let rest = content
-  const re = /^`([^`\n]+)`\n```([\w.-]*)\n([\s\S]*?)\n```\n*/
-  let match = re.exec(rest)
-  while (match && match.index === 0) {
-    const loc = match[1] ?? ""
-    const slash = loc.lastIndexOf("/")
-    attachments.push({
-      label: slash === -1 ? loc : loc.slice(slash + 1),
-      language: match[2] ?? "",
-      code: match[3] ?? "",
-    })
-    rest = rest.slice(match[0].length)
-    match = re.exec(rest)
-  }
-  return { attachments, text: rest.trim() }
 }
 
 function AttachmentPill({
@@ -346,7 +303,7 @@ function ChatBody({
       const trimmed = text.trim()
       const first = atts[0]
       if ((!trimmed && !first) || busy) return
-      const content = serializeMessage(trimmed, atts)
+      const content = serializeExcerpts(trimmed, atts)
       void stream.submit({ messages: [{ type: "human", content }] })
     },
     [busy, stream]
@@ -478,7 +435,7 @@ function ChatBody({
                 </div>
               )
             }
-            const parsed = parseUserMessage(content)
+            const parsed = parseExcerpts(content)
             const isSystem =
               structured?.type === "message" &&
               structured.senderKind === "system"
@@ -497,10 +454,13 @@ function ChatBody({
                     isSystem ? "items-start" : "items-end"
                   }`}
                 >
-                  {parsed.attachments.length > 0 && (
+                  {parsed.excerpts.length > 0 && (
                     <div className="flex flex-wrap justify-end gap-1">
-                      {parsed.attachments.map((attachment, i) => (
-                        <AttachmentPill key={i} label={attachment.label} />
+                      {parsed.excerpts.map((excerpt, i) => (
+                        <AttachmentPill
+                          key={i}
+                          label={attachmentBasename(excerpt.location)}
+                        />
                       ))}
                     </div>
                   )}
