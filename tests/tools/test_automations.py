@@ -30,7 +30,9 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
         "Check open pull requests",
         workspace="default",
         triggers=[
-            automations.schedules.ScheduleTrigger(cron="0 9 * * 1-5", repo="langchain-ai/open-swe")
+            automations.schedules.GitHubTrigger(
+                repo="langchain-ai/open-swe", events=["pull_request.closed"]
+            )
         ],
     )
 

@@ -52,8 +52,6 @@ async def create_automation(
     name: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
-    slack_channel_id: str | None = None,
-    slack_notification_mode: schedules.SlackNotificationMode = "always",
     admin_thread: bool = False,
 ) -> dict[str, Any]:
     """Implement the `create_automation` tool."""
@@ -70,8 +68,6 @@ async def create_automation(
                 name=name,
                 model_id=model_id,
                 effort=effort,
-                slack_channel_id=slack_channel_id,
-                slack_notification_mode=slack_notification_mode,
                 admin_thread=admin_thread,
                 workspace=workspace,
             ),
@@ -94,9 +90,6 @@ async def update_automation(
     model_id: str | None = None,
     effort: str | None = None,
     enabled: bool | None = None,
-    slack_channel_id: str | None = None,
-    clear_slack_channel: bool = False,
-    slack_notification_mode: schedules.SlackNotificationMode | None = None,
     admin_thread: bool | None = None,
     workspace: str | None = None,
 ) -> dict[str, Any]:
@@ -104,11 +97,6 @@ async def update_automation(
     identity = await _identity()
     if identity is None:
         return {"ok": False, "error": "No GitHub identity is available for this admin thread."}
-    if clear_slack_channel and slack_channel_id is not None:
-        return {
-            "ok": False,
-            "error": "clear_slack_channel cannot be combined with slack_channel_id",
-        }
     values: dict[str, Any] = {
         "prompt": prompt,
         "triggers": triggers,
@@ -116,13 +104,10 @@ async def update_automation(
         "model_id": model_id,
         "effort": effort,
         "enabled": enabled,
-        "slack_notification_mode": slack_notification_mode,
         "admin_thread": admin_thread,
         "workspace": workspace,
     }
     values = {key: value for key, value in values.items() if value is not None}
-    if slack_channel_id is not None or clear_slack_channel:
-        values["slack_channel_id"] = slack_channel_id
     try:
         record = await schedules.update_agent_schedule(
             automation_id,
