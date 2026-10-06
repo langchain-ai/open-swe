@@ -40,6 +40,7 @@ from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.user_messages import warning
+from agent.webhooks.event_matches import EVENT_MATCH_KIND
 from agent.webhooks.event_subscriptions import EventSubscription
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,9 @@ _FAILURE_REPLY_FLAG = "failure_reply_posted"
 _FAILURE_REPLY_RUN_ID = "failure_reply_posted_run_id"
 _FAILURE_REPLY_RUN_IDS = "failure_reply_posted_run_ids"
 _MAX_FAILURE_REPLY_RUN_IDS = 20
+_CONSECUTIVE_FAILURES = "consecutive_failed_runs"
+# A thread that keeps failing would otherwise post one notice per run, forever.
+_MAX_CONSECUTIVE_FAILURE_REPLIES = 3
 _SESSION_COST_REFRESH_RUN_ID = "session_cost_refresh_scheduled_run_id"
 _SESSION_COST_REFRESH_RUN_IDS = "session_cost_refresh_scheduled_run_ids"
 _MAX_SESSION_COST_REFRESH_RUN_IDS = 20
@@ -250,6 +254,11 @@ def _failure_reply_metadata(metadata: dict[str, Any], run_id: str | None) -> dic
     }
 
 
+def _consecutive_failures(metadata: dict[str, Any]) -> int:
+    count = metadata.get(_CONSECUTIVE_FAILURES)
+    return count if isinstance(count, int) else 0
+
+
 def _scheduled_cost_run_ids(metadata: dict[str, Any]) -> list[str]:
     raw = metadata.get(_SESSION_COST_REFRESH_RUN_IDS)
     ids = [item for item in raw if isinstance(item, str) and item] if isinstance(raw, list) else []
@@ -342,6 +351,15 @@ async def _handle_successful_run(
         return {"status": "error", "reason": "thread fetch failed"}
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
     metadata = metadata if isinstance(metadata, dict) else {}
+    if _consecutive_failures(metadata):
+        try:
+            await client.threads.update(thread_id=thread_id, metadata={_CONSECUTIVE_FAILURES: 0})
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not reset the consecutive failure count",
+                exc_info=True,
+                extra={"run_completion": {"thread_id": thread_id}},
+            )
     if metadata.get("source") == "incidents_agent":
         from agent.incidents import turns
 
@@ -537,6 +555,32 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
 
+    # Only event-woken runs count: a failure on a run a person started always replies
+    # and lets later event-woken failures report again.
+    event_woken = (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == EVENT_MATCH_KIND
+    )
+    failures = _consecutive_failures(metadata) + 1 if event_woken else 0
+    counter = (
+        {_CONSECUTIVE_FAILURES: failures} if failures or _consecutive_failures(metadata) else {}
+    )
+    if failures > _MAX_CONSECUTIVE_FAILURE_REPLIES:
+        try:
+            await client.threads.update(
+                thread_id=thread_id, metadata={_CONSECUTIVE_FAILURES: failures}
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not record the consecutive failure count",
+                exc_info=True,
+                extra={"run_completion": {"thread_id": thread_id}},
+            )
+        logger.warning(
+            "Suppressed failure reply after repeated failures",
+            extra={"failure_reply": {"thread_id": thread_id, "consecutive_failures": failures}},
+        )
+        return {"status": "ignored", "reason": "repeated failures"}
+
     reason_code = _failure_reason_code(error, metadata, run_id)
     posted = await _post_failure_reply(thread_id, metadata, status, reason_code)
     if not posted:
@@ -545,7 +589,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     try:
         await client.threads.update(
             thread_id=thread_id,
-            metadata=_failure_reply_metadata(metadata, run_id),
+            metadata=_failure_reply_metadata(metadata, run_id) | counter,
         )
     except Exception:  # noqa: BLE001
         logger.warning("run-complete: could not flag thread %s", thread_id, exc_info=True)

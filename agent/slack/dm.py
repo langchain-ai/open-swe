@@ -11,8 +11,7 @@ owner enabled ever reaches a run with it.
 import logging
 from typing import Any
 
-from langchain_core.messages import AIMessage
-
+from agent.prompts import prompt
 from agent.slack.client import lookup_slack_thread_id, post_slack_top_level_message_with_ts
 from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from agent.slack.payloads import SlackChannelContext
@@ -74,21 +73,14 @@ async def open_dm(slack_user_id: str) -> str | None:
 
 async def _record_in_concierge_thread(channel_id: str, text: str) -> None:
     """Add a message the bot sent to the person's concierge conversation, so a reply has context."""
-    client = langgraph_client()
-    thread_id = await lookup_slack_thread_id(client, channel_id, CONCIERGE_TS)
+    thread_id = await lookup_slack_thread_id(langgraph_client(), channel_id, CONCIERGE_TS)
     if thread_id is None:
         return
-    try:
-        thread = await client.threads.get(thread_id)
-        if thread.get("status") == "busy":
-            logger.info("Concierge thread is busy; DM not recorded", extra={"thread_id": thread_id})
-            return
-        await client.threads.update_state(thread_id, values={"messages": [AIMessage(content=text)]})
-    except Exception:
+    note = prompt("slack/concierge-dm-posted", text=text)
+    if not await queue_message_for_thread(thread_id, [{"type": "text", "text": note}]):
         logger.warning(
-            "Could not record a DM in the concierge thread",
+            "Could not queue a DM for the concierge thread",
             extra={"thread_id": thread_id},
-            exc_info=True,
         )
 
 

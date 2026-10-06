@@ -52,6 +52,12 @@ async def test_interaction_response_failure_does_not_log_capability_url(
     assert "test-response" not in caplog.text
 
 
+@pytest.mark.parametrize("status", ["Thinking…", ""])
+async def test_concierge_status_does_not_create_slack_threads(slack_api: SlackAPI, status: str):
+    assert await slack_utils.set_slack_thread_status("D1", "0", status)
+    assert slack_api.calls == []
+
+
 async def test_slack_stream_rate_limit_preserves_retry_after(slack_api):
     slack_api.respond({"ok": False}, status=429, headers={"Retry-After": "30"})
     with pytest.raises(slack_utils.SlackStreamError) as raised:

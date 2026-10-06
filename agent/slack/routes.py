@@ -686,6 +686,7 @@ async def slack_webhook(
                 or in_kitchen_channel
                 or solo_followup,
                 kitchen_channel=in_kitchen_channel,
+                explicit_mention=explicit_mention,
                 code_channel=in_code_channel,
                 concierge_mode=in_concierge_mode,
                 reply_thread_ts=reply_thread_ts if in_code_channel or in_concierge_mode else "",

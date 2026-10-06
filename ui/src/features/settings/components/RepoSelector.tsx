@@ -193,6 +193,7 @@ function RepoSelect(
               type="button"
               disabled={disabled}
               aria-label={label}
+              title={selected.length ? selected.join(", ") : undefined}
               className={cn(
                 "flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
                 triggerClassName
@@ -291,6 +292,7 @@ function RepoSelect(
                 return (
                   <button
                     key={repo.full_name}
+                    title={repo.full_name}
                     type="button"
                     aria-label={`${repo.label ?? repo.full_name}${repo.private === undefined ? "" : ` ${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`}`}
                     onClick={() => choose(repo.full_name)}
