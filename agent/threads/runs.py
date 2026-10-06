@@ -1379,16 +1379,25 @@ async def _notify_slack_web_handoff(
     if not isinstance(thread_ts, str) or not thread_ts:
         return
 
-    message_ts, error = await post_slack_thread_reply_with_ts(
-        channel_id,
-        thread_ts,
-        "This conversation has moved to Web; subsequent replies will appear in the dashboard.",
-        agent_thread_id=thread_id,
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if not message_ts:
-        logger.warning("Failed to post Web handoff notice", extra={"slack_error": error})
+    thread = await client.threads.get(thread_id)
+    current_metadata = thread.get("metadata") or {}
+    if not current_metadata.get("slack_web_handoff_notified"):
+        await client.threads.update(
+            thread_id=thread_id, metadata={"slack_web_handoff_notified": True}
+        )
+        message_ts, error = await post_slack_thread_reply_with_ts(
+            channel_id,
+            thread_ts,
+            "This conversation has moved to Web; subsequent replies will appear in the dashboard.",
+            agent_thread_id=thread_id,
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+        if not message_ts:
+            await client.threads.update(
+                thread_id=thread_id, metadata={"slack_web_handoff_notified": False}
+            )
+            logger.warning("Failed to post Web handoff notice", extra={"slack_error": error})
 
     trace_message_ts = slack_thread.get("trace_message_ts")
     if not isinstance(trace_message_ts, str) or not trace_message_ts:
