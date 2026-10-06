@@ -31,18 +31,13 @@ class RolloutAccepted(TypedDict):
 
 _AUDIENCE = "openswe-rollout"
 _DEPLOYED = "deployed"
-_DEPLOYED_DEV = "deployed.dev"
 _MAX_COMMITS = 5000
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 
 
-def parse_rollout_event(payload: object) -> tuple[str, list[str], str] | None:
-    """Return ``(target, commits, channel)`` or None when the body is not a rollout event.
-
-    ``channel`` is ``dev`` only when the sender says so. Anything else, including
-    a missing channel, is a release deploy.
-    """
+def parse_rollout_event(payload: object) -> tuple[str, list[str]] | None:
+    """Return ``(target, commits)`` or None when the body is not a rollout event."""
     if not isinstance(payload, dict):
         return None
     target = payload.get("target")
@@ -61,9 +56,7 @@ def parse_rollout_event(payload: object) -> tuple[str, list[str], str] | None:
                 kept.append(sha)
     if not kept:
         return None
-    channel = payload.get("channel")
-    kind = "dev" if isinstance(channel, str) and channel.strip().lower() == "dev" else "release"
-    return target.strip().lower(), kept, kind
+    return target.strip().lower(), kept
 
 
 def _bearer(header: str) -> str:
@@ -82,14 +75,10 @@ def _owner(repository: str) -> str:
     return repository.split("/", 1)[0].strip().lower()
 
 
-def _event_type(channel: str) -> str:
-    return _DEPLOYED_DEV if channel == "dev" else _DEPLOYED
-
-
-def _stored_body(target: str, commits: list[str], channel: str) -> bytes:
+def _stored_body(target: str, commits: list[str]) -> bytes:
     """The payload subscriptions match: lowercase full SHAs, capped and deduped."""
     return json.dumps(
-        {"target": target, "channel": channel, "commits": commits},
+        {"target": target, "commits": commits},
         separators=(",", ":"),
     ).encode()
 
@@ -152,12 +141,12 @@ async def rollout_webhook(request: Request) -> RolloutAccepted:
     parsed = parse_rollout_event(payload)
     if parsed is None:
         raise HTTPException(status_code=400, detail="Invalid rollout event")
-    target, commits, channel = parsed
+    target, commits = parsed
     stored = await EventLog.record(
         request,
-        _stored_body(target, commits, channel),
+        _stored_body(target, commits),
         "deployment",
-        event_type=_event_type(channel),
+        event_type=_DEPLOYED,
         delivery_id=_delivery_id(target, commits),
         refs=EventRefs(github_repository=claims.repository),
     )

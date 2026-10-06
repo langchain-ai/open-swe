@@ -79,7 +79,6 @@ async def test_rollout_webhook_acknowledges_a_github_actions_token(app: FastAPI)
     assert args.kwargs["refs"].github_repository == _REPO
     assert json.loads(args.args[1]) == {
         "target": "gcp-dev",
-        "channel": "release",
         "commits": ["a" * 40, "b" * 40],
     }
 
@@ -188,11 +187,13 @@ async def test_rollout_webhook_rejects_an_empty_commit_list(app: FastAPI) -> Non
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_records_a_development_deploy_separately(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-dev", "channel": "dev", "commits": ["a" * 40]}).encode()
+async def test_rollout_webhook_stores_target_and_commits_without_a_channel(app: FastAPI) -> None:
+    body = json.dumps({"target": "gcp-staging", "channel": "dev", "commits": ["a" * 40]}).encode()
     response = await _post(app, body, _token())
     assert response.status_code == 200
-    assert app.state.record.await_args.kwargs["event_type"] == "deployed.dev"
+    recorded = app.state.record.await_args
+    assert recorded.kwargs["event_type"] == "deployed"
+    assert json.loads(recorded.args[1]) == {"target": "gcp-staging", "commits": ["a" * 40]}
 
 
 @pytest.mark.asyncio
