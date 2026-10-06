@@ -276,7 +276,7 @@ ENV.var("SLACK_REPO_NAME", "Slack-specific default repository name.")
 ENV.var("SLACK_BOT_TOKEN", "Slack bot user OAuth token (xoxb-...).", secret=True)
 ENV.var("SLACK_SIGNING_SECRET", "HMAC secret for Slack webhook deliveries.", secret=True)
 ENV.var("SLACK_BOT_USER_ID", "Slack user id of the bot, for mention detection.")
-ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for plain-text mention detection.")
+ENV.var("SLACK_BOT_USERNAME", "Slack handle of the bot, for readable conversation context.")
 ENV.var("SLACK_CLIENT_ID", "Slack app client id for Sign in with Slack.")
 ENV.var("SLACK_CLIENT_SECRET", "Slack app client secret for Sign in with Slack.", secret=True)
 ENV.var("SLACK_TEAM_ID", "Restrict Sign in with Slack to one workspace.")
@@ -442,12 +442,6 @@ ENV.var(
     "WORKSPACE_UPDATE_TIMEOUT_SECONDS",
     "Deadline for a workspace's update script on a builder sandbox.",
     aliases=("ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",),
-)
-ENV.var(
-    "WORKSPACE_SANDBOX_UPDATE_TIMEOUT_SECONDS",
-    "Deadline for the update script when it runs in a run's own sandbox, before the first "
-    "model call. Tighter than the builder's on purpose.",
-    aliases=("ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",),
 )
 ENV.var(
     "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",

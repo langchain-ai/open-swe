@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { ensureDesktopModelCredential } from "./desktopLocal"
+import { ensureDesktopModelCredential } from "./legacyLocal"
 
 describe("ensureDesktopModelCredential", () => {
   const originalDesktop = window.openSweDesktop

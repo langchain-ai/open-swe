@@ -4,6 +4,18 @@ This guide deploys Open SWE for a team. To run it on your own machine while deve
 
 Open SWE is one deployment: a LangGraph server that runs the graphs declared in [`langgraph.json`](../langgraph.json), the FastAPI app (`agent.webapp:app`) that owns the webhooks and the dashboard API, and the web dashboard, served from the same origin at `/`. Webhooks, the dashboard, GitHub login, and the API all share the deployment's URL, so there is no second frontend deploy and no cross-origin cookie or CORS setup.
 
+## Repository trust model
+
+**Open SWE is intended for a team trusted with shared repository access, not for users who require repository-level isolation within one deployment.** Member-started coding sandboxes normally use the GitHub App's installation-wide credentials, not the initiating user's GitHub permissions. A user can therefore have the agent read or write an installed repository they cannot access personally, subject to the App's permissions and GitHub protections.
+
+Before admitting users, limit the App installation and sandbox images to repositories and source that every admitted user is trusted to access. Repository selection, workspace bindings, and private-thread visibility do not narrow sandbox GitHub access. Source preloaded into an image remains readable even if a later token is narrowed. Separate trust groups need separate deployments, App installations, and appropriately restricted images.
+
+Trusted users can still expose the agent to malicious instructions in repository content or other external input. Prompt instructions are not a repository authorization boundary. User-authorized PR creation does not constrain every shell or GitHub API operation in the sandbox.
+
+Some workflows, including reviewers and public-repository event threads, use narrower tokens; see [GitHub access and the sandbox image](reference/workspaces.md#github-access-and-the-sandbox-image). For the distinction between server-side user credentials and sandbox credentials, see [Thread credential scope](#thread-credential-scope).
+
+## Prerequisites
+
 What a deployment needs:
 
 | Value | How you get it |
@@ -369,7 +381,7 @@ A workflow that names no `repo` works in its own repository. A machine caller re
 
 Open SWE listens for Linear comments that mention `@openswe`.
 
-1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** only **Comments → Create**.
+1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** **Comments → Create**, plus **Issues** when workspace automations should run on Linear issue events.
 2. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use. Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
 3. Set a workspace default repository under **Open SWE Agent**. Add a `repo:owner/name` token or GitHub URL to a Linear comment when the issue belongs to another repository.
 
@@ -405,7 +417,7 @@ PUBLIC_REPO_ORG_GATE=""   # single org whose members may trigger runs on *public
 OPEN_SWE_UNASSIGNED_REPO_WORKSPACE="default"   # GitHub events for a repo no workspace owns: "default" (the default) routes to the default workspace, "ignore" drops them
 ```
 
-Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS`; an empty value in both stops the server. The desktop app's authenticated private local backend is exempt because it supports local mode without GitHub. When both are configured, they form a union: dashboard login accepts an explicitly listed user **or** an active member of a listed organization. Organization membership is verified server-side with the installation token and fails closed on any API error; install the App in every listed organization and grant **Organization → Members: Read-only**. A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`; both repository allowlists empty allows every installed repository. For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level guard: editing a repository outside those orgs requires the user to name it with its full `https://github.com/<owner>/<repo>` URL. When team LangSmith credentials are connected, every active member of a listed organization can use the read-only LangSmith trace tools, so only list organizations whose full membership may see team-level trace data.
+Backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS`; an empty value in both stops the server. The desktop app's authenticated private local backend, which still serves threads started before This Mac moved to the bridge, is exempt. When both are configured, they form a union: dashboard login accepts an explicitly listed user **or** an active member of a listed organization. Organization membership is verified server-side with the installation token and fails closed on any API error; install the App in every listed organization and grant **Organization → Members: Read-only**. A GitHub or Linear webhook is accepted if the repo's org is in `ALLOWED_GITHUB_ORGS` **or** the `owner/repo` is in `ALLOWED_GITHUB_REPOS`; both repository allowlists empty allows every installed repository. For Slack and dashboard requests, `ALLOWED_GITHUB_ORGS` also adds a prompt-level guard: editing a repository outside those orgs requires the user to name it with its full `https://github.com/<owner>/<repo>` URL. When team LangSmith credentials are connected, every active member of a listed organization can use the read-only LangSmith trace tools, so only list organizations whose full membership may see team-level trace data.
 
 **Users.** A person gets a `users` row on their first dashboard sign-in, with their GitHub account as its first identity; connecting Slack from **My settings** adds the Slack account to the same row, which is how a Slack sender resolves to a GitHub login. **Admin → Users** lists everyone Open SWE knows. An unlinked person who tags Open SWE in Slack gets a run with the GitHub App's installation permissions and a "link your GitHub account" prompt; signing in and connecting Slack completes it. Records from the older Store-backed user mapping are imported into `users` on the first startup that finds them, then deleted.
 
@@ -429,7 +441,7 @@ Shared backend startup requires at least one entry in `ALLOWED_GITHUB_ORGS` or `
 ### Webhook not receiving events
 
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab. A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create for Linear.
+- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create (and Issues, for automations) for Linear.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
 
 ### Thread credential scope

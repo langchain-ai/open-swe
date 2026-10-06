@@ -30,6 +30,8 @@ from agent.dashboard.options import (
 )
 from agent.run_config import RunConfig
 from agent.store import delete_value, get_value, now_iso, put_value
+from agent.ui_invalidations.outbox import invalidate_standalone
+from agent.ui_invalidations.topics import WORKSPACES as WORKSPACES_TOPIC
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
@@ -85,6 +87,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     sandbox_openai_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -321,6 +324,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -473,6 +477,7 @@ async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str,
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
+    await invalidate_standalone(WORKSPACES_TOPIC)
     return value
 
 
@@ -492,6 +497,7 @@ async def upsert_workspace_overrides(
     await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await invalidate_standalone(WORKSPACES_TOPIC)
     return await workspace_settings_view(slug)
 
 
@@ -500,6 +506,7 @@ async def delete_workspace_settings(slug: str) -> None:
     await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await invalidate_standalone(WORKSPACES_TOPIC)
 
 
 def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
@@ -684,6 +691,11 @@ class WorkspaceSettings(Mapping[str, Any]):
         """Whether the experimental expedited Slack review is switched on."""
         value = self.get("expedited_review_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def human_review_auto_assign_minutes(self) -> int:
+        value = self.get("human_review_auto_assign_minutes")
+        return value if type(value) is int and value > 0 else 120
 
     @property
     def sandbox_openai_enabled(self) -> bool:

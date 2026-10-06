@@ -232,21 +232,76 @@ export interface LocalRepo {
   gitBranch?: string
 }
 
-export type SlackNotificationMode = "always" | "on_action"
-export type AutomationTrigger = "schedule" | "github_issue_opened"
+export type GitHubTriggerEvent =
+  | "issues.opened"
+  | "pull_request.opened"
+  | "pull_request.closed"
+  | "pull_request.merged"
+
+export type SlackTriggerEvent = "message.posted"
+export type SlackTriggerSenders = "anyone" | "people" | "bots"
+export type LinearTriggerEvent = "issue.created" | "issue.labeled"
+
+/** One way an automation fires; `kind` names the provider, the rest are its filters. */
+export type AutomationTriggerConfig =
+  | { kind: "schedule"; cron: string }
+  | { kind: "github"; repo: string; events: Array<GitHubTriggerEvent> }
+  | {
+      kind: "slack"
+      channel: string
+      events: Array<SlackTriggerEvent>
+      senders?: SlackTriggerSenders
+      /** Case-insensitive regular expression the message text must match. */
+      match?: string | null
+      max_runs_per_hour?: number | null
+    }
+  | {
+      kind: "linear"
+      /** Team key, e.g. ENG. */
+      team: string
+      events: Array<LinearTriggerEvent>
+      labels?: Array<string>
+      project?: string | null
+      max_runs_per_hour?: number | null
+    }
+
+export type AutomationTriggerProvider = AutomationTriggerConfig["kind"]
+
+/** The event providers an automation can run on, each with its events' labels. */
+export const AUTOMATION_EVENT_PROVIDERS = {
+  github: {
+    label: "GitHub",
+    events: {
+      "issues.opened": "Issue opened",
+      "pull_request.opened": "PR opened",
+      "pull_request.closed": "PR closed",
+      "pull_request.merged": "PR merged",
+    } satisfies Record<GitHubTriggerEvent, string>,
+  },
+  slack: {
+    label: "Slack",
+    events: {
+      "message.posted": "Message posted",
+    } satisfies Record<SlackTriggerEvent, string>,
+  },
+  linear: {
+    label: "Linear",
+    events: {
+      "issue.created": "Issue created",
+      "issue.labeled": "Label added",
+    } satisfies Record<LinearTriggerEvent, string>,
+  },
+} as const
 
 export interface AgentSchedule {
   id: string
   name: string
   prompt: string
   schedule: string | null
-  trigger: AutomationTrigger
+  triggers: Array<AutomationTriggerConfig & { id: string }>
   scope: "workspace"
   /** Slug of the workspace every run launches in. */
   workspace: string
-  repo: string | null
-  slackChannelId?: string | null
-  slackNotificationMode: SlackNotificationMode
   adminThread: boolean
   model: string
   effort?: string | null
@@ -474,6 +529,8 @@ export interface AgentThread {
   sourceAppUrl?: string | null
   codeChannelUrl?: string | null
   sandboxId?: string | null
+  /** For a thread bridged to someone's machine: which app serves it. */
+  sandboxBridgeClient?: "cli" | "desktop" | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

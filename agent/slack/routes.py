@@ -285,6 +285,27 @@ async def _process_slack_message_update_impl(request: SlackRequest) -> None:
     )
 
 
+async def _slack_channel_watched(channel_id: str) -> bool:
+    from agent.schedules.store import slack_channel_watched
+
+    return await slack_channel_watched(channel_id)
+
+
+async def _launch_slack_automations(
+    envelope: SlackEventEnvelope, channel_context: SlackChannelContext
+) -> None:
+    from agent.schedules.store import launch_slack_automations
+
+    try:
+        await launch_slack_automations(
+            envelope, channel_context, envelope.bot_user_id(common.SLACK_BOT_USER_ID)
+        )
+    except Exception:
+        common.logger.exception(
+            "Slack automations failed for an event", extra={"slack_event_id": envelope.event_id}
+        )
+
+
 @router.post("/webhooks/slack")
 async def slack_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
@@ -365,6 +386,16 @@ async def slack_webhook(
                 channel_id,
             )
             return ignored("Slack channel is not eligible")
+
+    if (
+        event.type == "message"
+        and channel_id
+        and channel_context is not None
+        and await _slack_channel_watched(channel_id)
+    ):
+        # Independent of the handling below: a watched channel's messages fire
+        # automations whether or not they address Open SWE.
+        background_tasks.add_task(_launch_slack_automations, envelope, channel_context)
 
     if event.type == "code_channel_action":
         action = event.action
@@ -517,9 +548,7 @@ async def slack_webhook(
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     explicit_mention = bool(
-        event.type == "app_mention"
-        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
-        or (bot_user_id and f"<@{bot_user_id}>" in text)
+        event.type == "app_mention" or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
     leading_mention = re.match(r"\s*<@([^>]+)>", text)
     if (
