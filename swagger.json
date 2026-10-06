@@ -7047,6 +7047,18 @@
             ],
             "title": "Human Review Auto Assign Minutes"
           },
+          "mda_agent_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mda Agent Enabled"
+          },
           "model_routing_enabled": {
             "agent_feature_flag": true,
             "anyOf": [

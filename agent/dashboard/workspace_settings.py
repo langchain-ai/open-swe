@@ -90,6 +90,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     slack_follow_up_suggestions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    mda_agent_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -330,6 +333,7 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
+        "mda_agent_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -705,6 +709,11 @@ class WorkspaceSettings(Mapping[str, Any]):
     def sandbox_openai_enabled(self) -> bool:
         """Whether sandbox clients may use the experimental Responses API."""
         return self.get("sandbox_openai_enabled") is True
+
+    @property
+    def mda_agent_enabled(self) -> bool:
+        """Whether agent runs go to the Managed Deep Agents deployment."""
+        return self.get("mda_agent_enabled") is True
 
     @property
     def org_review_guidelines(self) -> str | None:

@@ -1,0 +1,9 @@
+[project]
+name = "open-swe-mda"
+version = "0.0.0"
+description = "Open SWE's core agent as a Managed Deep Agent."
+requires-python = ">=3.11"
+dependencies = ["managed-deepagents==0.9.0.dev2"]
+
+[tool.mda]
+python-version = "3.14"

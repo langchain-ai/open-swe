@@ -103,6 +103,7 @@ from agent.mcp import load_mcp_tools
 from agent.mcp.instance import instance_mcp_source
 from agent.mcp.user import user_mcp_source
 from agent.mcp.workspace import workspace_mcp_source
+from agent.mda import build_mda_agent, mda_agent_enabled
 from agent.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -1380,6 +1381,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             system_prompt="",
             tools=[],
         ).with_config(bindable_config(config))
+
+    if not is_desktop_run(cfg) and await mda_agent_enabled(workspace_slug(cfg)):
+        logger.info("Routing agent run to MDA deployment", extra={"thread_id": thread_id})
+        return build_mda_agent().with_config(bindable_config(config))
 
     from agent.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
 

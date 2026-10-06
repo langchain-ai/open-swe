@@ -230,6 +230,13 @@ ENV.var(
     deprecated="set LANGSMITH_TRACING=true instead; this legacy alias is ignored by Open SWE.",
     replaced_by="LANGSMITH_TRACING",
 )
+ENV.var("MDA_AGENT_URL", "Managed Deep Agents deployment that mda_agent_enabled routes runs to.")
+ENV.var(
+    "MDA_AGENT_API_KEY",
+    "LangSmith API key for MDA_AGENT_URL; defaults to LANGSMITH_API_KEY.",
+    secret=True,
+)
+
 # --- GitHub ------------------------------------------------------------------------------
 ENV.var("GITHUB_APP_ID", "Numeric GitHub App id used as the JWT issuer.")
 ENV.var("GITHUB_APP_CLIENT_ID", "GitHub App client id for the dashboard OAuth flow.")
