@@ -327,11 +327,17 @@ async def _summarize_threads(
             if not thread_is_readable(metadata, viewer_login, viewer_email):
                 continue
             child = await _summarize_thread(client, guest)
+            client_name = metadata.get("responses_client")
+            title = (
+                f"[{client_name}] {child['title']}"
+                if isinstance(client_name, str) and client_name
+                else child["title"]
+            )
             summary["subagents"].append(
                 {
                     "toolCallId": child["id"],
                     "threadId": child["id"],
-                    "title": child["title"],
+                    "title": title,
                     "subagentType": "Responses API",
                     "status": (
                         "in_progress"

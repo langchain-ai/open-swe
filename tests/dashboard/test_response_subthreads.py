@@ -11,7 +11,11 @@ async def test_response_guests_are_nested_and_private_guests_are_hidden(monkeypa
     parent = {"id": "host", "ownerLogin": "alice", "subagents": []}
     guest = {
         "thread_id": "guest",
-        "metadata": {"sandbox_host_thread_id": "host", "owner_login": "alice"},
+        "metadata": {
+            "sandbox_host_thread_id": "host",
+            "owner_login": "alice",
+            "responses_client": "codex_cli",
+        },
     }
     private = {
         "thread_id": "private",
@@ -31,4 +35,5 @@ async def test_response_guests_are_nested_and_private_guests_are_hidden(monkeypa
     monkeypatch.setattr(listing, "attach_subagents", AsyncMock())
     summaries = await listing._summarize_threads(client, [{}], viewer_login="alice")
     assert [item["threadId"] for item in summaries[0]["subagents"]] == ["guest"]
+    assert summaries[0]["subagents"][0]["title"] == "[codex_cli] Review"
     assert thread_is_unlisted(guest["metadata"])

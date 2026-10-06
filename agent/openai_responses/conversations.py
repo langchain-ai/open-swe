@@ -116,7 +116,9 @@ class SandboxCaller:
                 raise HTTPException(429, f"At most {MAX_ACTIVE_GUESTS} responses may run at once")
             yield
 
-    async def create_guest_thread(self, prompt: str, model: tuple[str, str] | None) -> str:
+    async def create_guest_thread(
+        self, prompt: str, model: tuple[str, str] | None, client_name: str = ""
+    ) -> str:
         thread_id = str(uuid.uuid4())
         visibility: Literal["public", "private"] = (
             "private" if self.host_metadata.get("visibility") == "private" else "public"
@@ -135,6 +137,7 @@ class SandboxCaller:
             workspace=workspace if isinstance(workspace, str) else None,
             extra_metadata={
                 SANDBOX_HOST_THREAD_KEY: self.host_thread_id,
+                "responses_client": client_name.strip()[:80],
                 "sandbox_id": self.sandbox_id,
                 SANDBOX_PROXY_CONFIG_METADATA_KEY: self.host_metadata.get(
                     SANDBOX_PROXY_CONFIG_METADATA_KEY
