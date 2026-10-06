@@ -92,11 +92,13 @@ class CodeOwners:
         return True
 
     @classmethod
-    async def fetch(cls, owner: str, repo: str, ref: str | None, *, token: str) -> Self | None:
+    async def fetch(
+        cls, owner: str, repo: str, ref: str | None, *, token: str, strict: bool = False
+    ) -> Self | None:
         """The first CODEOWNERS file GitHub would read at ``ref``; ``None`` when there is none."""
         for path in CODEOWNERS_PATHS:
             content = await fetch_repo_file(
-                owner, repo, path, ref, token=token, max_chars=CODEOWNERS_MAX_CHARS
+                owner, repo, path, ref, token=token, max_chars=CODEOWNERS_MAX_CHARS, strict=strict
             )
             if content is not None:
                 return cls.parse(content)

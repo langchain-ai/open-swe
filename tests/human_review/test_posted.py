@@ -112,10 +112,18 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is not None
-    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
+    monkeypatch.setattr(
+        CodeOwners, "fetch", AsyncMock(side_effect=standard.RepoFileUnreadableError("unreadable"))
+    )
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is None
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=None))
+    await settle_with_reactions(set())
+    stored = await HumanReviewRequest.get(request.id)
+    assert stored is not None and stored.approved_at is not None
+    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
+    await settle_with_reactions(set())
 
     preferences = UserPreferences()
 

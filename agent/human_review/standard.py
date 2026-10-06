@@ -36,7 +36,7 @@ from agent.github.ci import fetch_pr
 from agent.github.codeowners import CodeOwners
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
-from agent.github.repo_files import RepoSettings
+from agent.github.repo_files import RepoFileUnreadableError, RepoSettings
 from agent.human_review.card import accept_button, mention
 from agent.human_review.lifecycle import (
     drop_picks,
@@ -612,7 +612,18 @@ async def _settle_posted(
     approved = bool(approvers)
     if approved:
         pr = request.pull_request
-        codeowners = await CodeOwners.fetch(pr.owner, pr.repo, pr.base_ref or None, token=token)
+        try:
+            codeowners = await CodeOwners.fetch(
+                pr.owner, pr.repo, pr.base_ref or None, token=token, strict=True
+            )
+        except RepoFileUnreadableError:
+            logger.warning(
+                "Cannot confirm codeowner approvals",
+                extra={"request_id": str(request.id)},
+                exc_info=True,
+            )
+            approved = False
+            codeowners = None
         if codeowners is not None:
             files = await fetch_changed_files(
                 owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
