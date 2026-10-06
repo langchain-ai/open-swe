@@ -1,0 +1,18 @@
+/* Library boundary: keep Sonner's positioning and swipe state, not its slow layout transitions. */
+.group[data-sonner-toaster] {
+  transition: transform 160ms var(--ease-out-quint);
+}
+
+.group[data-sonner-toaster] [data-sonner-toast]:not([data-swiping="true"]),
+.group[data-sonner-toaster] [data-sonner-toast][data-removed="true"][data-front="false"][data-swipe-out="false"][data-expanded="false"]:not([data-swiping="true"]) {
+  transition:
+    transform 160ms var(--ease-out-quint),
+    opacity 160ms var(--ease-out-quint);
+}
+
+/* Sonner's direct-drag transition:none and reduced-motion overrides remain authoritative. */
+@media (prefers-reduced-motion: reduce) {
+  .group[data-sonner-toaster] {
+    transition: none;
+  }
+}

@@ -8,6 +8,8 @@ Each thread uses an isolated sandbox. A separate read-only reviewer graph review
 
 `ui`, `desktop`, and `tests/e2e` form a pnpm/turbo workspace (`pnpm-workspace.yaml`). Use pnpm for them.
 
+UI work uses the GTM Platform design system vendored at `gtm-platform-design-system/` (`@langchain/gtm-platform-design-system`). Read [its AGENTS.md](gtm-platform-design-system/AGENTS.md) before writing any component: tokens are the only colours, import primitives and patterns instead of rebuilding them, and every icon goes through `Icon` with a glyph from `ui/src/components/glyphs`. Run `pnpm --dir ui exec design doctor <files>` before calling a UI change done.
+
 ## Local Development
 
 Follow [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local startup, tunnel configuration, and preserving LangGraph state across worktrees.

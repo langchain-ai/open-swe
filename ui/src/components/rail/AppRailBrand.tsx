@@ -76,7 +76,6 @@ export function AppRailBrand({ collapsed, onToggleCollapsed }: AppRailBrandProps
                 size="icon-sm"
                 aria-label={toggleLabel}
                 aria-expanded={!collapsed}
-                data-sidebar-collapse=""
                 onClick={onToggleCollapsed}
                 className={cn("absolute right-2.5", COLLAPSE_BUTTON_CLASS)}
               >
@@ -124,7 +123,6 @@ export function AppRailSettingsBrand({
             size="icon-sm"
             aria-label={toggleLabel}
             aria-expanded={!collapsed}
-            data-sidebar-collapse=""
             onClick={onToggleCollapsed}
             className={COLLAPSE_BUTTON_CLASS}
           >

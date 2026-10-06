@@ -24,7 +24,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 
-const TYPE_SCALE = ["meta", "label", "body", "title", "page"];
+const TYPE_SCALE = ["meta", "label", "body", "title", "page", "display"];
 
 const SPACING_SCALE = [
   "control-sm",

@@ -129,7 +129,7 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await expect(
       page.getByRole("button", { name: /This Mac threads, \d+/ }),
     ).toHaveCount(0);
-    const sidebar = page.locator("[data-sidebar-frame]");
+    const sidebar = page.locator("aside[data-slot=app-shell-rail]");
     const composer = page.getByTestId("composer-editor").locator("../../..");
     await expect(
       composer.getByRole("button", { name: "This Mac", exact: true }),

@@ -48,7 +48,7 @@ async function startSlackThread(page: Page, prompt: string) {
 
 async function switchThread(page: Page, id: string) {
   await page
-    .locator(`[data-sidebar-frame] a[href="/assistant/${id}"]`)
+    .locator(`aside[data-slot=app-shell-rail] a[href="/assistant/${id}"]`)
     .first()
     .click();
   await expect(page).toHaveURL(new RegExp(`/assistant/${id}$`));
@@ -153,7 +153,7 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
   const id = await startSlackThread(page, "Add a greet() helper and open a PR");
   await waitForThreadIdle(page, id);
   await page.goto(`/assistant/${id}`);
-  const sidebar = page.locator("[data-sidebar-frame]");
+  const sidebar = page.locator("aside[data-slot=app-shell-rail]");
   for (const path of ["skills", "automations", "reviews"]) {
     await expect(
       sidebar.locator(`nav a[href^="/agents/${path}"]`),

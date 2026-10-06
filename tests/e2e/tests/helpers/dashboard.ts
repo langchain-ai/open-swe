@@ -384,6 +384,6 @@ export async function latestPrBody(page: Page): Promise<string> {
 export async function openThreadActionsMenu(page: Page) {
   const threadId = threadIdFromUrl(page);
   await page
-    .locator(`[data-sidebar-frame] a[href="/agents/${threadId}"]`)
+    .locator(`aside[data-slot=app-shell-rail] a[href="/agents/${threadId}"]`)
     .click({ button: "right" });
 }

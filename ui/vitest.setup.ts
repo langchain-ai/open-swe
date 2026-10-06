@@ -6,7 +6,8 @@ import { JSDOM } from "jsdom"
 // undefined without `--localstorage-file`, so jsdom's never lands. Node 22 has
 // no such global, hence CI never sees this.
 // cmdk (ui/command) measures its list and scrolls the active item into view;
-// jsdom implements neither.
+// jsdom implements neither. Base UI's ScrollArea (inside the design system's
+// Select and menus) waits on `getAnimations`, which jsdom also lacks.
 if (typeof window !== "undefined") {
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -14,6 +15,7 @@ if (typeof window !== "undefined") {
     disconnect() {}
   }
   Element.prototype.scrollIntoView ??= () => {}
+  Element.prototype.getAnimations ??= () => []
 }
 
 if (!(globalThis as { localStorage?: Storage }).localStorage) {

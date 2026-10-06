@@ -248,7 +248,7 @@ test.describe("Workspaces", () => {
     await page
       .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
       .click();
-    const confirmation = page.getByRole("alertdialog");
+    const confirmation = page.getByRole("dialog");
     await expect(confirmation).toContainText(`Delete ${DRAFT_NAME}?`);
     await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect(await findWorkspace(page, DRAFT_SLUG)).toBeDefined();

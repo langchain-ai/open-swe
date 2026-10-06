@@ -1,18 +1,6 @@
-import { clsx } from "clsx"
-import { twMerge } from "tailwind-merge"
-import type { ClassValue } from "clsx"
-
-/**
- * Merge class names into a single string.
- * @param inputs - The class names to merge.
- * @returns The merged class name string.
- * @example
- * cn("text-risk", "bg-info") // "text-risk bg-info"
- * cn("text-risk", "bg-info", "text-page") // "text-risk bg-info text-page"
- */
-export function cn(...inputs: Array<ClassValue>) {
-  return twMerge(clsx(inputs))
-}
+// The design system's merge knows its type rungs and geometry ladders; stock
+// tailwind-merge reads `text-label` as a colour and drops it beside `text-ink`.
+export { cn } from "@langchain/gtm-platform-design-system/ui/cn"
 
 /**
  * Format an elapsed duration in milliseconds as a compact string (e.g. "5s", "3m 20s").

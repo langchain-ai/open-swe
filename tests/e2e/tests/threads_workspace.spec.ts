@@ -530,7 +530,7 @@ test.describe("threads workspace", () => {
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
 
-    const sidebar = page.locator("[data-sidebar-frame]");
+    const sidebar = page.locator("aside[data-slot=app-shell-rail]");
     await sidebar.getByRole("button", { name: "Repositories options" }).click();
     await page
       .getByRole("menuitemradio", { name: "Last updated", exact: true })
@@ -641,7 +641,7 @@ test.describe("threads workspace", () => {
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
 
-    const sidebar = page.locator("[data-sidebar-frame]");
+    const sidebar = page.locator("aside[data-slot=app-shell-rail]");
     const noRepo = sidebar.getByRole("button", {
       name: "No repository",
       exact: true,
@@ -764,9 +764,7 @@ test.describe("automation run history", () => {
     });
 
     await page.goto("/agents/automations?tab=runs");
-    const automations = page
-      .getByRole("heading", { name: "Automations", level: 1 })
-      .locator("..");
+    const automations = page.getByRole("main");
     await expect(
       automations.getByText("Automation runs could not be loaded."),
     ).toBeVisible({ timeout: 20_000 });
