@@ -130,7 +130,11 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     monkeypatch.setattr(prs, "_fetch_pull_request", AsyncMock(return_value=pull))
     monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=runs))
     monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
+    monkeypatch.setattr(
+        prs,
+        "_fetch_reviewers",
+        AsyncMock(return_value=[prs.PullRequestReviewer(login="reviewer", state="approved")]),
+    )
     monkeypatch.setattr(
         prs, "_fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
@@ -148,7 +152,7 @@ async def test_mergeability_is_not_awaited_forever(monkeypatch):
         return_value={"state": "open", "mergeable": None, "mergeable_state": "unknown"}
     )
     monkeypatch.setattr(prs, "_fetch_pull_request", fetches)
-    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="none"))
+    monkeypatch.setattr(prs, "_fetch_reviewers", AsyncMock(return_value=[]))
     result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
     assert fetches.await_count == prs._MERGEABILITY_ATTEMPTS
     assert result is not None
@@ -181,6 +185,12 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     assert listing.await_count == 1
 
 
+async def _decision() -> prs.ReviewDecision:
+    reviewers = await prs._fetch_reviewers(object(), "acme", "app", 1)
+    assert reviewers is not None
+    return prs.PullRequestReviewer.decision(reviewers)
+
+
 async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypatch):
     monkeypatch.setattr(
         prs,
@@ -196,7 +206,11 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
             )
         ),
     )
-    assert await prs._fetch_review_decision(object(), "acme", "app", 1) == "approved"
+    assert [
+        (reviewer.login, reviewer.state)
+        for reviewer in await prs._fetch_reviewers(object(), "acme", "app", 1) or []
+    ] == [("reviewer", "approved"), ("other", "dismissed")]
+    assert await _decision() == "approved"
     monkeypatch.setattr(
         prs,
         "github_request",
@@ -209,7 +223,7 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
             )
         ),
     )
-    assert await prs._fetch_review_decision(object(), "acme", "app", 1) == "none"
+    assert await _decision() == "none"
     monkeypatch.setattr(
         prs,
         "github_request",
@@ -222,7 +236,7 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
             )
         ),
     )
-    assert await prs._fetch_review_decision(object(), "acme", "app", 1) == "changes_requested"
+    assert await _decision() == "changes_requested"
 
 
 async def test_review_indicators_require_repo_access_before_reading(monkeypatch):

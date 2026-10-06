@@ -22,7 +22,7 @@ from agent.github.pull_request_status import (
     OpenPullRequest,
     OpenPullRequests,
     list_open_pull_requests,
-    load_open_pull_request,
+    load_pull_request,
     pull_request_identity,
 )
 from agent.github.pull_requests import PullRequest
@@ -113,7 +113,7 @@ async def api_pull_request_details(
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     async with github_client(token=token) as client:
-        return await load_open_pull_request(
+        return await load_pull_request(
             client, {"repo_full_name": f"{owner}/{repo}", "number": number}
         )
 

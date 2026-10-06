@@ -15,7 +15,13 @@ import {
 import { PullRequestDetail } from "./components/PullRequestDetail"
 import { PullRequestList } from "./components/PullRequestList"
 import { PullRequestReview } from "./components/PullRequestReview"
-import { pullRequestPreviewQuery, refreshPullRequest } from "./lib/cache"
+import {
+  leftOpenList,
+  PULL_REQUEST_STATUS,
+  pullRequestPreviewQuery,
+  pullRequestStatusQuery,
+  refreshPullRequest,
+} from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { control } from "./lib/styles"
@@ -108,12 +114,9 @@ export function MyPullRequests({
   const matchingRows = rows
     .filter(
       (pr) =>
-        queryClient.getQueryData([
-          "my-pr-details",
-          login,
-          pr.repo,
-          pr.number,
-        ]) !== null
+        !leftOpenList(
+          queryClient.getQueryData(pullRequestStatusQuery(login, pr).queryKey)
+        )
     )
     .filter(
       (pr) =>
@@ -307,16 +310,18 @@ export function MyPullRequests({
               disabled={query.isFetching}
               onClick={() => {
                 setSettled({})
-                queryClient.removeQueries({
-                  queryKey: ["my-pr-details", login],
-                  predicate: (cached) => cached.state.data === null,
-                })
+                for (const [queryKey, status] of queryClient.getQueriesData<
+                  OpenPullRequest | null
+                >({ queryKey: [PULL_REQUEST_STATUS, login] })) {
+                  if (leftOpenList(status))
+                    queryClient.removeQueries({ queryKey, exact: true })
+                }
                 void query.refetch()
                 void queryClient.invalidateQueries({
                   queryKey: ["pull-request-search", login],
                 })
                 void queryClient.invalidateQueries({
-                  queryKey: ["my-pr-details", login],
+                  queryKey: [PULL_REQUEST_STATUS, login],
                 })
                 void queryClient.invalidateQueries({
                   queryKey: ["pr-thread-status", login],

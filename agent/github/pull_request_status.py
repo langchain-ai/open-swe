@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from pydantic.alias_generators import to_camel
 
 from agent.github.ci import read_required_checks, unreported_required_checks
@@ -87,6 +87,67 @@ query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cu
 
 CheckState = Literal["passing", "failing", "pending", "unknown", "none"]
 ReviewDecision = Literal["approved", "changes_requested", "none"]
+ReviewerState = Literal["approved", "changes_requested", "dismissed", "commented"]
+PullRequestState = Literal["open", "closed", "merged"]
+
+_REVIEWER_STATES: dict[str, ReviewerState] = {
+    "APPROVED": "approved",
+    "CHANGES_REQUESTED": "changes_requested",
+    "DISMISSED": "dismissed",
+    "COMMENTED": "commented",
+}
+
+
+class _GithubReviewUser(BaseModel):
+    login: str
+    avatar_url: str | None = None
+
+
+class _GithubReview(BaseModel):
+    id: int
+    state: str
+    user: _GithubReviewUser | None = None
+
+
+class PullRequestReviewer(BaseModel):
+    """Someone who reviewed the pull request, and where their review stands.
+
+    A comment never overrides an earlier approval or change request, as on GitHub.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    login: str
+    avatar_url: str | None = None
+    state: ReviewerState
+
+    @classmethod
+    def latest(cls, reviews: Sequence[_GithubReview]) -> list[PullRequestReviewer]:
+        latest: dict[str, tuple[_GithubReview, ReviewerState]] = {}
+        for review in sorted(reviews, key=lambda review: review.id):
+            state = _REVIEWER_STATES.get(review.state)
+            if review.user is None or state is None:
+                continue
+            key = review.user.login.lower()
+            previous = latest.get(key)
+            if state == "commented" and previous is not None and previous[1] != "commented":
+                continue
+            latest[key] = (review, state)
+        return [
+            cls(login=review.user.login, avatar_url=review.user.avatar_url, state=state)
+            for review, state in latest.values()
+            if review.user is not None
+        ]
+
+    @staticmethod
+    def decision(reviewers: Sequence[PullRequestReviewer]) -> ReviewDecision:
+        states = {reviewer.state for reviewer in reviewers}
+        if "changes_requested" in states:
+            return "changes_requested"
+        return "approved" if "approved" in states else "none"
+
+
+_GITHUB_REVIEWS = TypeAdapter(list[_GithubReview])
 
 
 class OpenPullRequest(BaseModel):
@@ -95,6 +156,7 @@ class OpenPullRequest(BaseModel):
     repo: str
     number: int
     title: str
+    state: PullRequestState = "open"
     created_at: str | None = None
     updated_at: str | None = None
     draft: bool | None = None
@@ -108,6 +170,7 @@ class OpenPullRequest(BaseModel):
     status_available: bool = False
     ci: CheckState = "unknown"
     review_decision: ReviewDecision | None = None
+    reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
     unresolved_threads: int | None = None
     failing_checks: list[str] = Field(default_factory=list)
@@ -190,11 +253,16 @@ def _merge_conflict_state(pull: Mapping[str, Any]) -> str:
     return "unknown"
 
 
-def _live_state(pull: Mapping[str, Any]) -> str | None:
+def _live_state(pull: Mapping[str, Any]) -> PullRequestState | None:
     if pull.get("merged") is True or isinstance(pull.get("merged_at"), str):
         return "merged"
-    state = pull.get("state")
-    return state if state in {"open", "closed"} else None
+    match pull.get("state"):
+        case "open":
+            return "open"
+        case "closed":
+            return "closed"
+        case _:
+            return None
 
 
 async def _fetch_pull_request(
@@ -627,10 +695,11 @@ async def get_pull_request_statuses(records: Sequence[object], token: str) -> li
         return [await _pull_request_status(client, record) for record in records]
 
 
-async def _fetch_review_decision(
+async def _fetch_reviewers(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> ReviewDecision | None:
-    latest: dict[str, tuple[int, str]] = {}
+) -> list[PullRequestReviewer] | None:
+    """Each reviewer's standing review, or ``None`` when the reviews could not be read."""
+    reviews: list[_GithubReview] = []
     page = 1
     try:
         while True:
@@ -641,31 +710,14 @@ async def _fetch_review_decision(
                 params={"per_page": "100", "page": str(page)},
             )
             response.raise_for_status()
-            reviews = response.json()
-            if not isinstance(reviews, list):
-                return None
-            for review in reviews:
-                if not isinstance(review, dict):
-                    continue
-                state = review.get("state")
-                user = review.get("user")
-                login = user.get("login") if isinstance(user, dict) else None
-                review_id = review.get("id")
-                if state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
-                    continue
-                if isinstance(login, str) and isinstance(review_id, int):
-                    key = login.lower()
-                    if review_id > latest.get(key, (-1, ""))[0]:
-                        latest[key] = (review_id, state)
-            if len(reviews) < 100:
+            batch = _GITHUB_REVIEWS.validate_python(response.json())
+            reviews.extend(batch)
+            if len(batch) < 100:
                 break
             page += 1
     except httpx2.HTTPError, ValueError:
         return None
-    decisions = {state for _, state in latest.values()}
-    if "CHANGES_REQUESTED" in decisions:
-        return "changes_requested"
-    return "approved" if "APPROVED" in decisions else "none"
+    return PullRequestReviewer.latest(reviews)
 
 
 async def list_open_pull_requests(
@@ -745,6 +797,14 @@ async def list_open_pull_requests(
 async def load_open_pull_request(
     client: httpx2.AsyncClient, item: object, details: bool = True
 ) -> OpenPullRequest | None:
+    result = await load_pull_request(client, item, details)
+    return result if result is not None and result.state == "open" else None
+
+
+async def load_pull_request(
+    client: httpx2.AsyncClient, item: object, details: bool = True
+) -> OpenPullRequest | None:
+    """A pull request's live status in any state; ``None`` for an unreadable identity."""
     if not isinstance(item, dict):
         return None
     repository_url = item.get("repository_url")
@@ -761,13 +821,15 @@ async def load_open_pull_request(
         return None
     owner, name, number = identity
     pull = await _fetch_mergeable_pull_request(client, owner, name, number) if details else None
-    if pull is not None and _live_state(pull) != "open":
+    state = _live_state(pull) if pull is not None else "open"
+    if state is None:
         return None
     source: Mapping[str, Any] = pull if pull is not None else item
     result = OpenPullRequest(
         repo=full_name,
         number=number,
         title=_as_str(source.get("title"), ""),
+        state=state,
         created_at=_as_optional_str(source.get("created_at")),
         updated_at=_as_optional_str(source.get("updated_at")),
         draft=_as_optional_bool(source.get("draft")),
@@ -788,13 +850,14 @@ async def load_open_pull_request(
     if sha is None or not _SHA_PATTERN.fullmatch(sha):
         return result
     result.head_sha = sha
-    runs, statuses, decision, review_state = await asyncio.gather(
+    runs, statuses, reviewers, review_state = await asyncio.gather(
         _fetch_check_runs(client, owner, name, sha),
         _fetch_commit_statuses(client, owner, name, sha),
-        _fetch_review_decision(client, owner, name, number),
+        _fetch_reviewers(client, owner, name, number),
         _fetch_review_state(client, owner, name, number),
     )
-    result.review_decision = decision
+    result.reviewers = reviewers
+    result.review_decision = None if reviewers is None else PullRequestReviewer.decision(reviewers)
     result.review_required = review_state.review_required
     result.unresolved_threads = review_state.unresolved_threads
     if runs is None or statuses is None:

@@ -1,14 +1,16 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import {
   PullRequestActions,
   type PullRequestOutcome,
 } from "@/features/reviews/components/PullRequestActions"
-import { api } from "@/lib/api"
+import { StatusPill } from "@/features/reviews/components/StatusPill"
+import { statusLabels } from "@/features/reviews/lib/status"
+import { usePullRequestStatus } from "@/features/reviews/lib/usePullRequestStatus"
 import { useSession } from "@/lib/session"
 
-/** The PR list's action row (mark ready, update branch, merge, close…) on the review page. */
+/** The PR list's status pills and action row (mark ready, update branch, merge, close…) on the review page. */
 export function ReviewPageActions({
   owner,
   repo,
@@ -20,14 +22,8 @@ export function ReviewPageActions({
 }) {
   const session = useSession()
   const queryClient = useQueryClient()
-  const fullName = `${owner}/${repo}`
   const [outcome, setOutcome] = useState<PullRequestOutcome>()
-  const pr = useQuery({
-    queryKey: ["review-page-pr", fullName, number],
-    queryFn: () => api.myPullRequestDetails(fullName, number),
-    enabled: !!session.data,
-    refetchOnWindowFocus: false,
-  })
+  const pr = usePullRequestStatus(`${owner}/${repo}`, number)
   const refreshPage = () => {
     void queryClient.invalidateQueries({
       queryKey: ["review", owner, repo, number],
@@ -36,7 +32,12 @@ export function ReviewPageActions({
   }
   if (!session.data || !pr.data) return null
   return (
-    <div className="mt-3">
+    <div className="mt-3 space-y-2">
+      <div className="flex flex-wrap gap-1">
+        {statusLabels(pr.data).map((status) => (
+          <StatusPill key={status} status={status} />
+        ))}
+      </div>
       <PullRequestActions
         pr={pr.data}
         login={session.data.login}
