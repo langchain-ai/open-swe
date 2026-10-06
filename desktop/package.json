@@ -90,6 +90,10 @@
       "entitlements": "entitlements.mac.plist",
       "extendInfo": { "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"] },
       "entitlementsInherit": "entitlements.mac.inherit.plist",
+      "signIgnore": [
+        "\\.pyc$",
+        "/share/terminfo/"
+      ],
       "target": [
         "dmg",
         "zip"
