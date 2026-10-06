@@ -43,6 +43,8 @@ class SlackChannel(Base):
 
     @classmethod
     async def memory_file(cls, channel_id: str) -> tuple[str, int]:
+        if not postgres.configured():
+            return "", 0
         async with postgres.session() as session:
             row = await session.get(cls, channel_id)
             return (row.memory, row.memory_revision) if row else ("", 0)
