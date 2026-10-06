@@ -751,7 +751,7 @@ async def _unrequest_github_review(request: HumanReviewRequest, login: str, toke
 
 async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReviewRequest:
     """Take reviewers Open SWE picked who have not reviewed off the pull request, and tell them."""
-    if not any(reviewer.assigned_by_agent for reviewer in request.reviewers):
+    if not any(reviewer.assigned_by_agent for reviewer in request.reviewers + request.picks):
         return request
     pr = request.pull_request
     token = await repo_token(pr.owner, pr.repo)
@@ -772,7 +772,7 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None:
             return request
-        released = idle_picks(row.reviewers, reviewed)
+        released = idle_picks(row.reviewers + row.picks, reviewed)
         for reviewer in released:
             row.participants.remove(reviewer)
     if not released:
@@ -798,6 +798,54 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
                 blocks=block_payload([section(text), *await origin_footer(request.thread_id)]),
             )
     return await HumanReviewRequest.get(request.id) or current
+
+
+async def drop_picks(
+    request: HumanReviewRequest, user_ids: set[UUID], message: str, *, expired: bool = False
+) -> list[HumanReviewParticipant]:
+    """Withdraw pending picks of ``user_ids`` from the card and GitHub, and DM each ``message``.
+
+    An ``expired`` pick stays on the request so it is never picked for it again.
+    """
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None:
+            return []
+        dropped = [pick for pick in row.picks if pick.user_id in user_ids]
+        for pick in dropped:
+            if expired:
+                pick.decision = "expired"
+            else:
+                row.participants.remove(pick)
+    if not dropped:
+        return []
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    for pick in dropped:
+        logger.info(
+            "Withdrew a pending reviewer pick",
+            extra={
+                "request_id": str(request.id),
+                "github_login": pick.github_login,
+                "expired": expired,
+            },
+        )
+        if token is not None:
+            await _unrequest_github_review(request, pick.github_login, token)
+        if pick.user.slack_user_id:
+            await send_dm(
+                pick.user.slack_user_id,
+                message,
+                blocks=block_payload([section(message), *await origin_footer(request.thread_id)]),
+            )
+    if token is None:
+        logger.warning(
+            "No GitHub App token to withdraw review requests for dropped picks",
+            extra={"request_id": str(request.id)},
+        )
+    current = await HumanReviewRequest.get(request.id)
+    if current is not None and current.state == "open":
+        await refresh_card(current)
+    return dropped
 
 
 async def withdraw_reviews(approval: HumanReviewRequest) -> None:

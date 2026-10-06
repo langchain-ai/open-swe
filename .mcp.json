@@ -2,7 +2,7 @@
   "mcpServers": {
     "oswe": {
       "command": "sh",
-      "args": ["-c", "make -s cli/dist/oswe >&2 && exec ./cli/dist/oswe mcp"]
+      "args": ["-c", "CI=true make -s cli/dist/oswe >&2 && exec ./cli/dist/oswe mcp"]
     }
   }
 }
