@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
+from agent.human_review.requests import HumanReviewRequest
 from agent.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -63,6 +64,7 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_wor
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
 _KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
+_NON_KITCHEN_CONTEXT = load_prompt("runs/slack-non-kitchen.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
 
 
@@ -74,9 +76,7 @@ def _is_explicit_slack_request(
     message_update: bool,
 ) -> bool:
     return not message_update and bool(
-        treat_all_messages_as_mentions
-        or (bot_user_id and f"<@{bot_user_id}>" in text)
-        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+        treat_all_messages_as_mentions or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
 
 
@@ -596,7 +596,10 @@ async def _clear_early_status_if_idle(request: SlackRequest, status_ts: str) -> 
 
 
 async def process_slack_mention(
-    request: SlackRequest, repo: common.SlackRepoResolution | None
+    request: SlackRequest,
+    repo: common.SlackRepoResolution | None,
+    *,
+    inherited_workspace: str | None = None,
 ) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
     status_ts = request.thread_ts
@@ -610,7 +613,9 @@ async def process_slack_mention(
     if show_status:
         await restore_slack_thinking_status(request.channel_id, status_ts)
     try:
-        status_handed_off = await _process_slack_mention_impl(request, repo)
+        status_handed_off = await _process_slack_mention_impl(
+            request, repo, inherited_workspace=inherited_workspace
+        )
         if show_status and not status_handed_off:
             await _clear_early_status_if_idle(request, status_ts)
     except Exception as exc:  # noqa: BLE001
@@ -653,7 +658,7 @@ async def workspace_scoped_default_repo(candidate: Repo, workspace: str | None) 
     return Repo.model_validate(scoped) if scoped else candidate
 
 
-async def _slack_login(user_id: str, user_email: str | None = None) -> str | None:
+async def slack_login(user_id: str, user_email: str | None = None) -> str | None:
     """GitHub login for a Slack user: by Slack id first, then by profile email."""
     if login := await User.login_for_slack(user_id):
         return login
@@ -680,7 +685,7 @@ async def _mark_slack_thread_errored(
     thread_id: str, request: SlackRequest, repo: Repo | None
 ) -> None:
     try:
-        owner_login = await _slack_login(request.user_id)
+        owner_login = await slack_login(request.user_id)
         visibility = _slack_thread_visibility(request.channel_context)
         concierge_mode = request.concierge_mode or is_concierge_thread(
             request.channel_context, request.thread_ts
@@ -731,7 +736,10 @@ async def _mark_slack_thread_errored(
 
 
 async def _process_slack_mention_impl(
-    request: SlackRequest, repo_resolution: common.SlackRepoResolution | None
+    request: SlackRequest,
+    repo_resolution: common.SlackRepoResolution | None,
+    *,
+    inherited_workspace: str | None = None,
 ) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
@@ -821,7 +829,7 @@ async def _process_slack_mention_impl(
         await persist_display_name(user_id, user_name)
 
     thread_metadata = await common.authorize_github_thread(
-        thread_id, (await _slack_login(user_id, user_email) or "") if allowed_bot is None else ""
+        thread_id, (await slack_login(user_id, user_email) or "") if allowed_bot is None else ""
     )
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
     thread_messages = (
@@ -952,7 +960,7 @@ async def _process_slack_mention_impl(
         + image_urls_from_links
     )
 
-    mapped_login = await _slack_login(user_id, user_email) if allowed_bot is None else None
+    mapped_login = await slack_login(user_id, user_email) if allowed_bot is None else None
     # A DM always answers on the person's own default model: a per-thread model
     # choice is never routed into it.
     thread_model_choice = (
@@ -976,6 +984,7 @@ async def _process_slack_mention_impl(
             if concierge_mode and not tagged_slug
             else (
                 await resolve_workspace(
+                    thread_workspace=inherited_workspace,
                     tag=tagged_slug,
                     repo=resolution.routing_repo,
                     slack_channel_id=channel_id,
@@ -1073,6 +1082,8 @@ async def _process_slack_mention_impl(
         "triggering_user_email": user_email or "",
         "triggering_event_ts": event_ts,
     }
+    if request.breakout_root_suffix is not None:
+        slack_thread_context["breakout_root_suffix"] = request.breakout_root_suffix
     if user_timezone:
         slack_thread_context["triggering_user_timezone"] = user_timezone
     if allowed_bot is not None:
@@ -1096,7 +1107,7 @@ async def _process_slack_mention_impl(
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
-            _KITCHEN_CONTEXT if request.kitchen_channel else "",
+            _KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT,
         )
         if section
     )
@@ -1104,6 +1115,19 @@ async def _process_slack_mention_impl(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
+            load_prompt("runs/slack-review-request.md")
+            if event_ts != thread_ts
+            and context_thread_ts == thread_ts
+            and any(
+                slack_utils.is_own_slack_message(message, bot_user_id)
+                and isinstance(message.get("text"), str)
+                and message["text"].startswith(
+                    ("Review requested for ", "Expedited review requested for ")
+                )
+                for message in thread_messages
+            )
+            and await HumanReviewRequest.is_card_thread(channel_id, thread_ts)
+            else "",
             resolved_links_section,
         )
         if section
@@ -1114,6 +1138,7 @@ async def _process_slack_mention_impl(
         "slack_thread": slack_thread_context,
         "user_email": user_email,
         "source": "slack",
+        "slack_kickoff_eligible": False,
     }
     if mapped_login:
         configurable["github_login"] = mapped_login
@@ -1138,6 +1163,12 @@ async def _process_slack_mention_impl(
         configurable["model_selection"] = "explicit"
 
     is_first_mention = not await common.thread_exists(thread_id)
+    configurable["slack_kickoff_eligible"] = (
+        is_first_mention
+        and not code_channel
+        and not concierge_mode
+        and not request.context_thread_ts
+    )
     langgraph_client = get_langgraph_client()
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without

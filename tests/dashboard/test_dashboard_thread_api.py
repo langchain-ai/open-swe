@@ -22,6 +22,7 @@ from agent.threads import listing as thread_listing
 from agent.threads import proxy as thread_proxy
 from agent.threads import runs as thread_runs
 from agent.transcript.engine import AppendResult
+from agent.users import User
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
@@ -230,6 +231,44 @@ async def test_private_threads_created_by_admins_get_admin_permissions(
     assert (configurable.get("admin_thread") is True) is expected_admin
 
 
+async def test_dashboard_run_stamps_sender_not_original_slack_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = uuid7()
+    second = uuid7()
+
+    async def by_login(provider: str, login: str) -> SimpleNamespace | None:
+        return SimpleNamespace(id=second) if (provider, login) == ("github", "second-gh") else None
+
+    async def canonical(person: dict[str, str]) -> dict[str, str]:
+        return person
+
+    monkeypatch.setattr(User, "for_login", by_login)
+    monkeypatch.setattr(User, "canonical_person", canonical)
+    created: dict[str, object] = {"metadata": {"source": "slack"}}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "follow up"}]},
+            "metadata": {"user_id": str(first)},
+            "config": {"metadata": {"user_id": str(first)}},
+        },
+    }
+    enriched = await thread_runs._enrich_run_start_command(
+        "existing-tid",
+        "second-gh",
+        command,
+        metadata={
+            "source": "slack",
+            "source_context": {"slack_thread": {"triggering_user_id": "U123"}},
+        },
+    )
+    assert enriched["params"]["metadata"]["user_id"] == str(second)
+    assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
+
+
 @pytest.mark.parametrize("selection_changed", [False, True])
 async def test_enrich_run_start_command_preserves_explicit_auto_intent(
     monkeypatch: pytest.MonkeyPatch, selection_changed: bool
@@ -341,7 +380,7 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
             )
 
     patch_thread_module(monkeypatch, "_authorized_thread", fake_authorized_thread)
-    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
+    patch_thread_module(monkeypatch, "connect_sandbox", AsyncMock(return_value=FakeSandbox()))
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_diffs.get_dashboard_thread_recovery_patch("tid", "octocat")

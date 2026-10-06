@@ -40,22 +40,33 @@ def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> 
 
 
 def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Block]:
-    reviewers = request.reviewers
-    if not reviewers:
-        return []
-    lines = "\n".join(_reviewer_line(reviewer, states) for reviewer in reviewers)
-    return [section(f"*Reviewers*\n{lines}")]
+    blocks: list[Block] = []
+    if reviewers := request.reviewers:
+        lines = "\n".join(_reviewer_line(reviewer, states) for reviewer in reviewers)
+        blocks.append(section(f"*Reviewers*\n{lines}"))
+    if picks := request.picks:
+        lines = "\n".join(
+            f"• {pick.slack_mention} — :hourglass_flowing_sand: waiting for them to accept"
+            for pick in picks
+        )
+        blocks.append(section(f"*Picked by Open SWE*\n{lines}"))
+    return blocks
 
 
 def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
     link = f"<{request.pull_request.url}|{_label(request)}>"
     if "CHANGES_REQUESTED" in states.values() or "APPROVED" not in states.values():
         return f":mag: *Review requested*  {link}"
-    mentions = {r.github_login: r.slack_mention for r in request.reviewers}
-    approvers = [
-        mentions.get(login, f"@{login}") for login, state in states.items() if state == "APPROVED"
-    ]
-    return f":white_check_mark: *Approved by {', '.join(approvers)}*  {link}"
+    return f":white_check_mark: *Approved by {_approvers(request, states)}*  {link}"
+
+
+def _approvers(request: HumanReviewRequest, states: dict[str, str]) -> str:
+    mentions = {r.github_login.lower(): r.slack_mention for r in request.reviewers}
+    return ", ".join(
+        mentions.get(login.lower(), f"@{login}")
+        for login, state in states.items()
+        if state == "APPROVED"
+    )
 
 
 def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> str:
@@ -69,6 +80,17 @@ def _stats(request: HumanReviewRequest, author: str, requester: str | None) -> s
     if requester is not None and requester != author:
         parts.append(f"Requested by {requester}")
     return "  ·  ".join(parts)
+
+
+def accept_button(request: HumanReviewRequest) -> ButtonElement:
+    """What a picked reviewer clicks to take the review; anyone else clicking signs up instead."""
+    return button(
+        "Accept",
+        action_id="open_swe_option_select_accept",
+        value=_button_value("review", request),
+        url=request.pull_request.url,
+        style="primary",
+    )
 
 
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
@@ -114,10 +136,12 @@ def open_card(
 
 
 def closed_card(
-    request: HumanReviewRequest, *, title: str, outcome: str
+    request: HumanReviewRequest, *, title: str, outcome: str, review_states: dict[str, str]
 ) -> tuple[str, list[Block]]:
     """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
     pr = request.pull_request
+    if outcome == "merged" and (approvers := _approvers(request, review_states)):
+        outcome = f"merged — approved by {approvers}"
     return f"Review request: {outcome} — {pr.url}", [
         section(f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)}")
     ]

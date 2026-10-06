@@ -24,6 +24,7 @@ from agent.dashboard.oauth import (
     refresh_user_access_token,
     require_session,
 )
+from agent.dashboard.oauth_refresh import refresh_guard
 from agent.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
@@ -37,8 +38,6 @@ from agent.store import (
     get_value,
     now_iso,
     put_value,
-    search_all_values,
-    search_values,
 )
 from agent.users import User, UserPreferences, UserPreferencesPatch
 
@@ -61,8 +60,9 @@ class ProfileUpdate(BaseModel):
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     preserve_sandbox_memory: bool | None = None
-    human_review_requests: bool | None = None
-    review_channel_watch: bool | None = None
+    pr_review_links: bool | None = None
+    pr_failure_reactions: bool | None = None
+    prefer_tools_in_sandbox: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = Field(
@@ -155,18 +155,6 @@ async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
     return await get_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
-async def resolve_oauth_login(login: str) -> str | None:
-    """Recover the stored OAuth key when older thread metadata lost its casing."""
-    if await get_oauth_token_record(login):
-        return login
-    matches = {
-        candidate
-        for record in await search_all_values(OAUTH_TOKENS_NAMESPACE)
-        if isinstance(candidate := record.get("login"), str) and candidate.lower() == login.lower()
-    }
-    return next(iter(matches)) if len(matches) == 1 else None
-
-
 async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
     """Write the user's editable settings.
 
@@ -229,17 +217,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         value.pop(stale_field, None)
     await put_value(PROFILES_NAMESPACE, login, value)
     return value
-
-
-_refresh_locks: dict[str, asyncio.Lock] = {}
-
-
-def _refresh_lock(login: str) -> asyncio.Lock:
-    lock = _refresh_locks.get(login)
-    if lock is None:
-        lock = asyncio.Lock()
-        _refresh_locks[login] = lock
-    return lock
 
 
 def _token_expired(expires_at: str | None, *, skew_seconds: int = 300) -> bool:
@@ -317,6 +294,13 @@ async def delete_access_token(login: str) -> None:
     await delete_value(OAUTH_TOKENS_NAMESPACE, login)
 
 
+async def mark_access_token_revoked(login: str, token: str) -> None:
+    """Flag a stored token GitHub rejected so callers prompt a re-login."""
+    record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
+    if record and _decrypt_access_token(record) == token:
+        await put_value(OAUTH_TOKENS_NAMESPACE, login, {**record, "revoked": True})
+
+
 def _decrypt_access_token(record: dict[str, Any]) -> str | None:
     encrypted = record.get("encrypted_gh_token")
     if not encrypted:
@@ -356,7 +340,7 @@ async def _refresh_stored_token(login: str, record: dict[str, Any]) -> tuple[str
 async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> str | None:
     """Return a GitHub access token, refreshing proactively when near expiry."""
     record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
-    if not record:
+    if not record or record.get("revoked"):
         return None
 
     access_token = _decrypt_access_token(record)
@@ -369,7 +353,7 @@ async def get_valid_access_token(login: str, *, force_refresh: bool = False) -> 
     if not _decrypt_refresh_token(record):
         return access_token
 
-    async with _refresh_lock(login):
+    async with refresh_guard("github", login):
         record = await get_value(OAUTH_TOKENS_NAMESPACE, login)
         if not record:
             return None
@@ -411,10 +395,6 @@ async def has_access_token_record(login: str) -> bool:
     but won't decrypt / was revoked), so callers can prompt accurately.
     """
     return bool(await get_value(OAUTH_TOKENS_NAMESPACE, login))
-
-
-async def list_profiles() -> list[dict[str, Any]]:
-    return await search_values(PROFILES_NAMESPACE, limit=1000)
 
 
 router = APIRouter(tags=["profiles"])
@@ -460,8 +440,9 @@ async def put_my_profile(
         UserPreferencesPatch(
             concierge_mode=update.concierge_mode,
             preserve_sandbox_memory=update.preserve_sandbox_memory,
-            human_review_requests=update.human_review_requests,
-            review_channel_watch=update.review_channel_watch,
+            pr_review_links=update.pr_review_links,
+            pr_failure_reactions=update.pr_failure_reactions,
+            prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
             act_as_always_allowed=(
@@ -472,8 +453,9 @@ async def put_my_profile(
     if preferences is None and (
         update.concierge_mode
         or update.preserve_sandbox_memory
-        or update.human_review_requests
-        or update.review_channel_watch
+        or update.pr_review_links
+        or update.pr_failure_reactions
+        or update.prefer_tools_in_sandbox
         or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")

@@ -14,7 +14,7 @@ from typing import Any
 from langchain_core.messages import AIMessage
 
 from agent.slack.client import lookup_slack_thread_id, post_slack_top_level_message_with_ts
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from agent.slack.payloads import SlackChannelContext
 from agent.users import User
 from agent.utils.thread_ops import langgraph_client, queue_message_for_thread
@@ -92,22 +92,30 @@ async def _record_in_concierge_thread(channel_id: str, text: str) -> None:
         )
 
 
-async def send_dm(
+async def send_dm_with_location(
     slack_user_id: str, text: str, *, blocks: list[dict[str, Any]] | None = None
-) -> bool:
+) -> tuple[str, str] | None:
     """DM a person as the bot; in concierge mode the message joins their one DM conversation."""
     channel_id = await open_dm(slack_user_id)
     if channel_id is None:
-        return False
-    message_ts, error = await post_slack_top_level_message_with_ts(
-        channel_id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
-    )
-    if message_ts is None:
+        return None
+    try:
+        message_ts = await post_slack_top_level_message_with_ts(
+            channel_id, text, unfurl_links=False, unfurl_media=False, blocks=blocks
+        )
+    except SlackRequestError as exc:
         logger.warning(
             "Slack DM could not be posted",
-            extra={"slack_user": slack_user_id, "slack_error": error},
+            extra={"slack_user": slack_user_id, "slack_error": exc.code},
         )
-        return False
+        return None
     if await User.concierge_mode_for_slack(slack_user_id):
         await _record_in_concierge_thread(channel_id, text)
-    return True
+    return channel_id, message_ts
+
+
+async def send_dm(
+    slack_user_id: str, text: str, *, blocks: list[dict[str, Any]] | None = None
+) -> bool:
+    """Send a DM and record it in the concierge conversation."""
+    return await send_dm_with_location(slack_user_id, text, blocks=blocks) is not None

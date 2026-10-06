@@ -8,6 +8,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+body:has(.version-mismatch-banner) {
+    .h-svh { height: calc(100svh - 2.5rem); }
+    .min-h-svh { min-height: calc(100svh - 2.5rem); }
+    .fixed.top-2 { top: 3rem; }
+    @media (width < 48rem) {
+        [data-sidebar-frame] { top: 2.5rem; }
+    }
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Inter Variable', sans-serif;

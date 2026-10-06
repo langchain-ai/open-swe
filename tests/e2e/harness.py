@@ -111,8 +111,24 @@ async def control_reset() -> JSONResponse:
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
+    await _cancel_inflight_runs()
     await _reset_durable_pr_state()
+    from langgraph_api.cache import cache_set
+
+    for owner, repo in ((OWNER, REPO), (SECOND_OWNER, SECOND_REPO)):
+        await cache_set(f"__lg_swr__:repo-settings:{owner}/{repo}".lower(), None)
     return JSONResponse({"ok": True})
+
+
+async def _cancel_inflight_runs() -> None:
+    """Stop runs an earlier spec left going; the single dev worker would queue the next spec's run behind them."""
+    client = get_client(url=BASE_URL)
+    # Per run, not cancel_many(status=...): the inmem runtime never delivers a status-only interrupt to a running run.
+    for thread in await client.threads.search(status="busy", limit=1000):
+        thread_id = thread["thread_id"]
+        for status in ("pending", "running"):
+            for run in await client.runs.list(thread_id, status=status, limit=100):
+                await client.runs.cancel(thread_id, run["run_id"], wait=True)
 
 
 @app.post("/control/reset-default-workspace")
@@ -463,6 +479,7 @@ async def control_human_review_requests(owner: str = OWNER, repo: str = REPO) ->
                     {"github_login": r.github_login, "assigned_by_agent": r.assigned_by_agent}
                     for r in request.reviewers
                 ],
+                "picks": [p.github_login for p in request.picks],
             }
             for request in await HumanReviewRequest.all_for_repo(owner, repo)
             if request.kind == "standard"
@@ -520,6 +537,9 @@ async def control_repo_file(request: Request) -> JSONResponse:
     if not isinstance(files, dict) or not files:
         raise HTTPException(400, "files must map paths to contents")
     fakes.commit_to_base(owner, name, {str(path): str(text) for path, text in files.items()})
+    from langgraph_api.cache import cache_set
+
+    await cache_set(f"__lg_swr__:repo-settings:{owner}/{name}".lower(), None)
     return JSONResponse({"ok": True})
 
 
@@ -557,6 +577,7 @@ async def _seed_test_user_mappings() -> None:
         return
     from agent.users import User
 
+    await User.sign_in("github", "1003", login="octocat", display_name="PR Author")
     for user in TEST_USERS:
         signed_in = await User.sign_in(
             "github",
@@ -1034,6 +1055,31 @@ async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  #
 
 
 # --- fake GitHub REST API (open_pull_request hits this) --------------------
+@app.get("/fake-gh/user/installations")
+async def gh_user_installations() -> JSONResponse:
+    return JSONResponse(
+        {
+            "total_count": 1,
+            "installations": [{"id": 42, "account": {"login": "fakeorg", "type": "Organization"}}],
+        }
+    )
+
+
+@app.get("/fake-gh/user/installations/{installation_id}/repositories")
+async def gh_user_installation_repositories(installation_id: int) -> JSONResponse:
+    if installation_id != 42:
+        raise HTTPException(404, "No such installation")
+    return JSONResponse(
+        {
+            "total_count": 2,
+            "repositories": [
+                {"full_name": "fakeorg/demo", "private": False, "archived": False},
+                {"full_name": "anotherorg/companion", "private": False, "archived": False},
+            ],
+        }
+    )
+
+
 @app.get("/fake-gh/installation/repositories")
 async def gh_installation_repositories() -> JSONResponse:
     return JSONResponse(
@@ -1292,6 +1338,20 @@ async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
             "merge_base_commit": {"sha": merge_base},
             "files": fakes.compare_files(owner, repo, base, head),
         }
+    )
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/commits")
+async def gh_list_commits(
+    owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH
+) -> JSONResponse:
+    """Commits touching ``path``; an author is a GitHub user only when a test user owns the email."""
+    logins = {user["email"]: user["login"] for user in TEST_USERS}
+    return JSONResponse(
+        [
+            {"author": {"login": logins[email], "type": "User"} if email in logins else None}
+            for email in fakes.commit_author_emails(owner, repo, path, sha)
+        ]
     )
 
 
@@ -1691,6 +1751,7 @@ async def slack_conversations_replies(channel: str = "", ts: str = "") -> JSONRe
                     "text": m["text"],
                     "ts": m["ts"],
                     "thread_ts": m["thread_ts"],
+                    **({"bot_id": m["bot_id"], "subtype": "bot_message"} if m["is_bot"] else {}),
                 }
                 for m in msgs
             ]
@@ -1708,6 +1769,11 @@ async def slack_conversations_history(channel: str = "") -> JSONResponse:
                     "user": message["user"],
                     "text": message["text"],
                     "ts": message["ts"],
+                    **(
+                        {"bot_id": message["bot_id"], "subtype": "bot_message"}
+                        if message["is_bot"]
+                        else {}
+                    ),
                 }
                 for message in reversed(fakes.slack_messages(channel))
             ]

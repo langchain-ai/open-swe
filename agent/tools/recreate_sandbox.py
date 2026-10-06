@@ -2,13 +2,22 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import NotRequired, TypedDict
 
 from agent.run_config import RunConfig
-from agent.sandboxes.lifecycle import SandboxSource
+from agent.sandboxes.lifecycle import SandboxRecreationStopError, SandboxSource
 from agent.tools.access import Policy, access
 
 logger = logging.getLogger(__name__)
+
+
+class SandboxRecreationResult(TypedDict):
+    success: bool
+    error: NotRequired[str]
+    old_sandbox_id: NotRequired[str]
+    new_sandbox_id: NotRequired[str]
+    old_sandbox_stopped: NotRequired[bool]
+    old_sandbox_stop_error: NotRequired[str | None]
 
 
 def _switches_workspace(args: Mapping[str, object]) -> Policy | None:
@@ -22,7 +31,7 @@ def _switches_workspace(args: Mapping[str, object]) -> Policy | None:
 async def recreate_sandbox(
     source: SandboxSource = "workspace",
     workspace: str | None = None,
-) -> dict[str, Any]:
+) -> SandboxRecreationResult:
     """Implement the `recreate_sandbox` tool."""
     cfg = RunConfig.from_runtime()
     thread_id = cfg.thread_id
@@ -40,12 +49,23 @@ async def recreate_sandbox(
             workspace_slug=workspace or thread_workspace,
             source=source,
         )
+    except SandboxRecreationStopError as exc:
+        logger.warning("Sandbox recreated but old sandbox did not stop", exc_info=True)
+        return {
+            "success": True,
+            "old_sandbox_id": exc.old_sandbox_id,
+            "new_sandbox_id": exc.new_sandbox_id,
+            "old_sandbox_stopped": False,
+            "old_sandbox_stop_error": str(exc),
+        }
     except Exception as exc:
-        logger.exception("Failed to recreate sandbox for thread %s", thread_id)
+        logger.exception("Failed to recreate sandbox", extra={"thread_id": thread_id})
         return {"success": False, "error": str(exc)}
 
     return {
         "success": True,
         "old_sandbox_id": old_sandbox_id,
         "new_sandbox_id": new_sandbox_id,
+        "old_sandbox_stopped": True,
+        "old_sandbox_stop_error": None,
     }

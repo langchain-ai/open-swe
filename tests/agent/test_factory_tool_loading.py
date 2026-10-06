@@ -162,3 +162,23 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         assert captured == expected
 
     SANDBOX_BACKENDS.pop(thread_id, None)
+
+
+@pytest.mark.asyncio
+async def test_notion_connection_changes_are_visible_without_waiting_for_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent import server
+
+    status = AsyncMock(return_value={"notion": {"connected": False}})
+    load = AsyncMock(return_value=["first-tool"])
+    monkeypatch.setattr(server, "get_notion_status", status)
+    monkeypatch.setattr(server, "load_notion_tools", load)
+    assert await server._notion_tools_for("alice") == []
+    status.return_value = {"notion": {"connected": True, "updated_at": "first"}}
+    assert await server._notion_tools_for("alice") == ["first-tool"]
+    load.return_value = ["reconnected-tool"]
+    status.return_value = {"notion": {"connected": True, "updated_at": "second"}}
+    assert await server._notion_tools_for("alice") == ["reconnected-tool"]
+    status.return_value = {"notion": {"connected": False}}
+    assert await server._notion_tools_for("alice") == []

@@ -17,7 +17,7 @@ from typing import Any
 import httpx2
 from fastapi import HTTPException
 
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from agent.github.app import get_github_app_installation_token
 from agent.review.diff import fetch_pr_diff
 from agent.review.findings import (
@@ -262,9 +262,6 @@ def _normalize_chat_model(configurable: dict[str, Any]) -> tuple[str | None, str
         and model_supports_effort(model_id, effort)
     ):
         return model_id, effort
-    canonical = canonical_model_pair(model_id, effort)
-    if canonical is not None:
-        return canonical
     return None, None
 
 

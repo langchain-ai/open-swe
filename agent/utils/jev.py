@@ -32,15 +32,32 @@ async def select_jev_choice[ChoiceT: str](
     criteria: Mapping[ChoiceT, str],
     decision: JevDecision | None = None,
 ) -> ChoiceT | None:
-    decision = decision if decision is not None else JevDecision()
-    decision.outcome = "classifier_failure"
-    decision.reason = "missing_credentials"
+    choices = await select_jev_choices(
+        task,
+        questions={question: Choice(instructions=instructions, criteria=dict(criteria.items()))},
+        decisions={question: decision},
+    )
+    return next((choice for choice in criteria if choice == choices[question]), None)
+
+
+async def select_jev_choices(
+    task: str,
+    *,
+    questions: Mapping[str, Choice],
+    decisions: Mapping[str, JevDecision | None] | None = None,
+) -> dict[str, str | None]:
+    results: dict[str, str | None] = dict.fromkeys(questions)
+    tracked = {question: (decisions or {}).get(question) or JevDecision() for question in questions}
+    for decision in tracked.values():
+        decision.outcome = "classifier_failure"
+        decision.reason = "missing_credentials"
     typesafe_key = ENV.TYPESAFE_API_KEY.optional()
     gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
     if not typesafe_key and not gateway_key:
-        logger.warning("Jev classification has no API key", extra={"question": question})
-        return None
-    decision.reason = "classifier_error"
+        logger.warning("Jev classification has no API key", extra={"questions": list(questions)})
+        return results
+    for decision in tracked.values():
+        decision.reason = "classifier_error"
     try:
         async with (
             asyncio.timeout(JEV_TIMEOUT_SECONDS),
@@ -53,32 +70,32 @@ async def select_jev_choice[ChoiceT: str](
                 async_client=client,
             )
             response = await classifier.ainvoke(
-                {
-                    "state": task,
-                    "questions": {
-                        question: Choice(instructions=instructions, criteria=dict(criteria.items()))
-                    },
-                },
+                {"state": task, "questions": dict(questions)},
                 config={"tags": ["nostream"]},
             )
+    except Exception:
+        logger.exception("Jev classification failed", extra={"questions": list(questions)})
+        return results
+    for question, spec in questions.items():
+        decision = tracked[question]
+        try:
             answer = response.choices[question]
-        decision.choice = answer.choice if answer.choice in criteria else None
-        decision.confidence = answer.confidence if isfinite(answer.confidence) else None
-        if not 0.6 <= answer.confidence <= 1.0:
-            logger.info(
-                "Jev classification confidence below threshold or invalid",
-                extra={"question": question, "confidence": answer.confidence},
-            )
-            decision.outcome = "low_confidence"
-            decision.reason = "confidence_below_threshold_or_invalid"
-            return None
-        for choice in criteria:
-            if answer.choice == choice:
+            decision.choice = answer.choice if answer.choice in spec.criteria else None
+            decision.confidence = answer.confidence if isfinite(answer.confidence) else None
+            if not 0.6 <= answer.confidence <= 1.0:
+                logger.info(
+                    "Jev classification confidence below threshold or invalid",
+                    extra={"question": question, "confidence": answer.confidence},
+                )
+                decision.outcome = "low_confidence"
+                decision.reason = "confidence_below_threshold_or_invalid"
+            elif answer.choice in spec.criteria:
                 decision.outcome = "accepted"
                 decision.reason = "confident_choice"
-                return choice
-        decision.reason = "invalid_choice"
-        raise ValueError("Jev returned a choice outside the supplied criteria")
-    except Exception:
-        logger.exception("Jev classification failed", extra={"question": question})
-        return None
+                results[question] = answer.choice
+            else:
+                decision.reason = "invalid_choice"
+                raise ValueError("Jev returned a choice outside the supplied criteria")
+        except Exception:
+            logger.exception("Jev classification failed", extra={"question": question})
+    return results

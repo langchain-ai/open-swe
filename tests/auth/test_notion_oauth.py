@@ -4,9 +4,13 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from cryptography.fernet import Fernet
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from agent import store as agent_store
 from agent.dashboard import notion_oauth as no
+from agent.dashboard import notion_routes
+from agent.dashboard.oauth import COOKIE_NAME, issue_session
 
 
 class _FakeStore:
@@ -108,3 +112,76 @@ async def test_store_and_pop_notion_oauth_flow(
     assert flow["code_verifier"] == "verifier"
     assert flow["client_secret"] == "secret"
     assert await no.pop_notion_oauth_flow("alice", "nonce-hash") is None
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        (
+            "/agents/thread-1?from=chat#latest",
+            "https://dashboard.example/agents/thread-1?from=chat#latest",
+        ),
+        ("https://evil.example/steal", "https://dashboard.example"),
+        (None, "https://dashboard.example/my-settings/connections"),
+    ],
+)
+def test_notion_browser_connection_returns_to_safe_target(
+    fake_store: _FakeStore,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str | None,
+    expected: str,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+    monkeypatch.setattr(
+        no,
+        "discover_notion_oauth_metadata",
+        AsyncMock(
+            return_value={
+                "authorization_endpoint": "https://mcp.notion.com/authorize",
+                "token_endpoint": "https://mcp.notion.com/token",
+                "registration_endpoint": "https://mcp.notion.com/register",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        no, "register_notion_oauth_client", AsyncMock(return_value={"client_id": "cid"})
+    )
+    exchange = AsyncMock(return_value={"access_token": "notion-token"})
+    monkeypatch.setattr(notion_routes, "exchange_notion_code", exchange)
+    app = FastAPI()
+    app.include_router(notion_routes.router, prefix="/dashboard/api")
+    with TestClient(app, base_url="https://dashboard.example") as client:
+
+        def sign_in(login: str) -> None:
+            client.cookies.set(
+                COOKIE_NAME,
+                issue_session(login=login, email=None, avatar_url=None, user_id="test-user-id"),
+            )
+
+        sign_in("alice")
+        start = client.get(
+            "/dashboard/api/notion/login",
+            params={"redirect_to": target} if target else {},
+            follow_redirects=False,
+        )
+        assert start.status_code == 302
+        state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+        nonce = client.cookies[no.NOTION_STATE_COOKIE_NAME]
+        client.cookies.delete(no.NOTION_STATE_COOKIE_NAME)
+        callback = {"code": "notion-code", "state": state}
+        assert client.get("/dashboard/api/notion/callback", params=callback).status_code == 400
+        client.cookies.set(no.NOTION_STATE_COOKIE_NAME, nonce)
+        sign_in("bob")
+        assert client.get("/dashboard/api/notion/callback", params=callback).status_code == 400
+        exchange.assert_not_awaited()
+        sign_in("alice")
+        response = client.get(
+            "/dashboard/api/notion/callback", params=callback, follow_redirects=False
+        )
+        assert response.status_code == 302
+        assert response.headers["location"] == expected
+        assert client.get("/dashboard/api/my-credentials/notion").json()["connected"] is True
+        sign_in("bob")
+        assert client.get("/dashboard/api/my-credentials/notion").json() == {"connected": False}

@@ -29,6 +29,7 @@ class PersonIdentity(TypedDict):
     id: str
     display_name: NotRequired[str]
     github_login: NotRequired[str]
+    slack_user_id: NotRequired[str]
     commit_name: NotRequired[str]
     commit_email: NotRequired[str]
     email: NotRequired[str]
@@ -93,6 +94,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
     "person": (
         "display_name",
         "github_login",
+        "slack_user_id",
         "commit_name",
         "commit_email",
         "email",
@@ -343,35 +345,6 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
 _ENVELOPE_CLOSE = "</input-message>"
 
 
-def _splice_envelope_data(text: str, element: str) -> str | None:
-    if "<input-message " not in text:
-        return None
-    close = text.rfind(_ENVELOPE_CLOSE)
-    if close == -1:
-        return None
-    return f"{text[:close]}{element}\n{text[close:]}"
-
-
-def append_message_data(
-    content: str | list[Any], name: str, value: object
-) -> str | list[Any] | None:
-    """Add a data field to an already-serialized envelope, or None when there is none."""
-    element = _data_element(name, value)
-    if isinstance(content, str):
-        return _splice_envelope_data(content, element)
-    for index in range(len(content) - 1, -1, -1):
-        block = content[index]
-        if not isinstance(block, dict) or block.get("type") != "text":
-            continue
-        if not isinstance(block.get("text"), str):
-            continue
-        spliced = _splice_envelope_data(block["text"], element)
-        if spliced is None:
-            continue
-        return [*content[:index], {**block, "text": spliced}, *content[index + 1 :]]
-    return None
-
-
 def _structured_content(
     content: str | list[dict[str, Any]], context: InputMessageContext
 ) -> str | list[dict[str, Any]]:
@@ -396,26 +369,6 @@ def system_input(content: str | list[dict[str, Any]], context: InputMessageConte
     if context["kind"] != "system":
         raise ValueError("system_input requires kind='system'")
     return {"role": "user", "content": _structured_content(content, context)}
-
-
-def filter_new_dynamic_contexts(
-    messages: list[RunMessage], injected_dynamic_context_hashes: set[str]
-) -> tuple[list[RunMessage], set[str]]:
-    filtered: list[RunMessage] = []
-    newly_injected: set[str] = set()
-    for message in messages:
-        content = message.get("content")
-        if not isinstance(content, str) or "<dynamic-context" not in content:
-            filtered.append(message)
-            continue
-        context_hash = dynamic_context_hash(content)
-        if context_hash is None:
-            filtered.append(message)
-            continue
-        if context_hash not in injected_dynamic_context_hashes:
-            filtered.append(message)
-            newly_injected.add(context_hash)
-    return filtered, newly_injected
 
 
 def build_input_messages(

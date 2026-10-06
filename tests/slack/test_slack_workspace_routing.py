@@ -98,8 +98,11 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
 
 
 @_needs_workspace_rows
+@pytest.mark.parametrize("inherited_workspace", [None, "oss"])
 async def test_a_bound_channel_outranks_a_named_repository(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    inherited_workspace: str | None,
 ) -> None:
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -120,7 +123,7 @@ async def test_a_bound_channel_outranks_a_named_repository(
             "thread_ts": "1700000000.000100",
             "event_ts": "1700000000.000200",
             "user_id": "U123",
-            "text": "<@UBOT> hello",
+            "text": "<@UBOT> workspace:internal hello" if inherited_workspace else "<@UBOT> hello",
             "bot_user_id": "UBOT",
         }
     )
@@ -128,6 +131,7 @@ async def test_a_bound_channel_outranks_a_named_repository(
     await slack_webhooks._process_slack_mention_impl(
         request,
         webhook_common.SlackRepoResolution(Repo(owner="acme", name="internal"), explicit=True),
+        inherited_workspace=inherited_workspace,
     )
 
     # The message came from `oss`'s channel, and `oss` can work in a repository

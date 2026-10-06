@@ -224,10 +224,11 @@ async def test_requested_model_wins_and_emits_actual_model(
         "messages": [HumanMessage(content="hello")],
         "model_route": "fast",
         "requested_model": "anthropic:claude-opus-5-5",
+        "requested_effort": "max",
     }
-    state.update(await middleware.abefore_model(state, MagicMock()))
+    state["model_route"] = (await middleware.abefore_model(state, MagicMock()))["model_route"]
     assert (await _invoke(middleware, dict(state))).model is chosen
-    factory.assert_called_with("anthropic:claude-opus-5-5")
+    factory.assert_called_with("anthropic:claude-opus-5-5", "max")
     jev.assert_not_awaited()
     assert events[-1] == {
         "type": "model_routed",
@@ -246,7 +247,7 @@ async def test_handoff_without_routing_keeps_default_model(monkeypatch: pytest.M
         "messages": [HumanMessage(content="Fix this")],
         "model_route": "fast",
     }
-    state.update(await middleware.abefore_model(state, MagicMock()))
+    state["model_route"] = (await middleware.abefore_model(state, MagicMock()))["model_route"]
     assert state["model_route"] == "default"
     assert (await _invoke(middleware, dict(state))).model is default
     jev.assert_not_awaited()

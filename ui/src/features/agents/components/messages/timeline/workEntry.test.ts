@@ -128,6 +128,73 @@ describe("describeWorkEntry", () => {
     expect(entry.expandedText).toBe("ls\n\na.ts\nb.ts")
   })
 
+  it("shows important tool text in the preview and keeps every argument expandable", () => {
+    const reason =
+      "This is a conversation between people, not a request.".repeat(100)
+    const entry = describeWorkEntry(
+      chunk({
+        title: "slack_no_reply_needed",
+        toolKind: "other",
+        input: { reason, confirmation: "Internal confirmation" },
+        output: '{"ok":true}',
+      })
+    )
+
+    expect(entry.preview).toBe(`${reason.slice(0, 80)}...`)
+    expect(entry.previewTooltip).toBe(reason)
+    expect(entry.expandedText).toContain(`reason:\n${reason}`)
+    expect(entry.expandedText).not.toContain("Internal confirmation")
+
+    const report = describeWorkEntry(
+      chunk({
+        title: "report_platform_issue",
+        toolKind: "other",
+        input: {
+          problem_description: "Sandbox disconnected",
+          keywords: ["sandbox"],
+        },
+      })
+    )
+    expect(report.preview).toBe("Sandbox disconnected")
+    expect(report.expandedText).toBe(
+      "problem description:\nSandbox disconnected"
+    )
+
+    const task = describeWorkEntry(
+      chunk({
+        title: "task",
+        toolKind: "task",
+        input: {
+          description: "Investigate the failure",
+          instructions: "Keep the report concise",
+        },
+      })
+    )
+    expect(task.preview).toBe("Investigate the failure")
+    expect(task.expandedText).toBe(
+      "description:\nInvestigate the failure\n\ninstructions:\nKeep the report concise"
+    )
+  })
+
+  it("preserves arguments when lazy output replaces the preview", async () => {
+    const output = "Full output\n".repeat(500)
+    const entry = describeWorkEntry(
+      chunk({
+        title: "report_platform_issue",
+        toolKind: "other",
+        input: { problem_description: "Sandbox disconnected" },
+        output: "Partial output",
+        loadOutput: async () => output,
+      })
+    )
+
+    const loaded = await entry.loadExpandedText?.()
+    expect(loaded).toBe(
+      `problem description:\nSandbox disconnected\n\n${output.trim()}`
+    )
+    expect(loaded).not.toContain("Partial output")
+  })
+
   it("keeps complete JSON tool output available for highlighted rendering", () => {
     const output = JSON.stringify({ value: "x".repeat(5000) })
     const entry = describeWorkEntry(chunk({ output }), repoPath)

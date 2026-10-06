@@ -79,7 +79,7 @@ async def test_artifact_routes_stay_out_of_the_project(
 
     with detect_blocking_calls():
         routes = await desktop_artifact_routes("thread-1")
-    assert set(routes) == {"/large_tool_results/", "/conversation_history/"}
+    assert set(routes) == {"/large_tool_results/", "/conversation_history/", "/blobs/"}
     for prefix, backend in routes.items():
         root = Path(str(backend.cwd)).resolve()
         assert root.is_dir()

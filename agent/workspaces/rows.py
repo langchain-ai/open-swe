@@ -33,10 +33,12 @@ class WorkspaceRow(Base):
     slug: Mapped[str] = mapped_column(unique=True)
     name: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    inherit_default_sandbox: Mapped[bool] = mapped_column(server_default="false", default=False)
     prompt: Mapped[str] = mapped_column(server_default="", default="")
     setup_script: Mapped[str] = mapped_column(server_default="", default="")
     update_script: Mapped[str] = mapped_column(server_default="", default="")
     base_snapshot_id: Mapped[str | None] = mapped_column(default=None)
+    breakout_channel_id: Mapped[str | None] = mapped_column(default=None)
     mem_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
     vcpus: Mapped[int | None] = mapped_column(default=None)
     fs_capacity_bytes: Mapped[int | None] = mapped_column(BigInteger, default=None)
@@ -106,6 +108,7 @@ def to_workspace(
     return Workspace.model_validate(
         {
             "slug": row.slug,
+            "inherit_default_sandbox": row.inherit_default_sandbox,
             "name": row.name,
             "prompt": row.prompt,
             "setup_script": row.setup_script,
@@ -168,6 +171,7 @@ def apply_definition(row: WorkspaceRow, record: Workspace) -> None:
     same workspace; each side writing only its own columns is what keeps one
     from reverting the other, such as a refresh restoring revoked access.
     """
+    row.inherit_default_sandbox = record.inherit_default_sandbox
     row.name = record.name
     row.prompt = record.prompt
     row.setup_script = record.setup_script

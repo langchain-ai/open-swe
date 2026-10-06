@@ -193,7 +193,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             }
         ),
     )
-    update = AsyncMock(return_value=(True, None))
+    update = AsyncMock(return_value=None)
     monkeypatch.setattr(session_cost, "update_slack_message", update)
 
     status, reason = await session_cost._refresh_once(_state(0), client)
@@ -207,8 +207,8 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
     args = update.await_args
     assert args is not None
     assert args.args[:2] == ("C1", "1.1")
-    assert args.args[2].endswith("model-a • $12.50 • +$3.25")
-    assert args.kwargs["blocks"][-1]["elements"][0]["text"].endswith("$12.50 • +$3.25")
+    assert args.args[2].endswith("model-a • $12.50 ($3.25)")
+    assert args.kwargs["blocks"][-1]["elements"][0]["text"].endswith("$12.50 ($3.25)")
     assert "main-agent tokens" not in args.args[2]
     assert args.kwargs["blocks"][1] == blocks[1]
 

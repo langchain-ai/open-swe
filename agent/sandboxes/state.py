@@ -25,7 +25,6 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph_sdk import get_client
 
 from agent.github.token_scope import token_repositories_from_metadata
-from agent.sandboxes.providers.registry import create_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +89,6 @@ class SandboxBackendProxy(BaseSandbox):
     @property
     def has_backend(self) -> bool:
         return self._backend is not None
-
-    def cancel_startup(self) -> None:
-        if self._startup_task is not None:
-            self._startup_task.cancel()
 
     def set_reconnect(
         self,
@@ -162,7 +157,12 @@ class SandboxBackendProxy(BaseSandbox):
                     logger.info(
                         "Reconnecting sandbox backend for thread %s from metadata", self._thread_id
                     )
-                    self._startup_task = asyncio.create_task(create_sandbox(sandbox_id))
+                    # deferred: the bridge backend imports this module
+                    from agent.sandboxes.connect import connect_sandbox
+
+                    self._startup_task = asyncio.create_task(
+                        connect_sandbox(sandbox_id, thread_id=self._thread_id)
+                    )
                     self._startup_task.add_done_callback(self._startup_completed)
             startup_task = self._startup_task
             if startup_task is None:

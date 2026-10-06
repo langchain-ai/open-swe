@@ -38,6 +38,8 @@ class SchedulerState(BaseModel):
 
     login: str | None = None
     schedule_id: str | None = None
+    # The schedule trigger an automation cron belongs to.
+    trigger_id: str | None = None
     task: str | None = None
     workspace_slug: str | None = None
     # Crons created before the rename still send this key.
@@ -100,7 +102,7 @@ async def _launch(state: SchedulerState, config: RunnableConfig) -> dict[str, An
         if not schedule_id:
             logger.warning("Scheduled agent tick missing schedule_id")
             return {"result": {"status": "missing_schedule_id"}}
-        return {"result": await launch_scheduled_agent_run(schedule_id)}
+        return {"result": await launch_scheduled_agent_run(schedule_id, state.trigger_id)}
 
     try:
         return await retry_transient_sandbox_errors(

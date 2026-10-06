@@ -15,7 +15,7 @@ from langgraph.prebuilt import InjectedState
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.oauth import enforce_github_login_gate
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair, model_supports_effort
+from agent.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from agent.input_messages import input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
 from agent.prompts import prompt
@@ -39,6 +39,7 @@ from agent.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from agent.tools.sandbox_preference import sandbox_only
 from agent.users import User
 from agent.utils.dashboard_links import (
     dashboard_plan_url,
@@ -167,6 +168,7 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     result = dict(item)
     result.pop("messages", None)
     result.pop("sandboxId", None)
+    result.pop("sandboxBridgeClient", None)
     result["webUrl"] = _web_link(item)
     langsmith = _langsmith_identifiers(item.get("traceUrl"), locator)
     if any(value is not None for value in langsmith.values()):
@@ -210,6 +212,7 @@ def _exact_locator_filters(
     return filters
 
 
+@sandbox_only
 async def list_threads(
     participant: str | None = None,
     all_users: bool = False,
@@ -719,6 +722,7 @@ def _available_actions(
     return actions
 
 
+@sandbox_only
 async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
@@ -827,14 +831,9 @@ def _message_args(
     if bool(model_id) != bool(effort):
         return _failure("model_id and effort must be provided together")
     if model_id and effort:
-        normalized = (
-            (model_id, effort)
-            if model_id in SUPPORTED_MODEL_IDS and model_supports_effort(model_id, effort)
-            else canonical_model_pair(model_id, effort)
-        )
-        if normalized is None:
-            return _failure("model_id and effort are not a supported combination")
-        return normalized
+        if model_id in SUPPORTED_MODEL_IDS and model_supports_effort(model_id, effort):
+            return model_id, effort
+        return _failure("model_id and effort are not a supported combination")
     return model_id, effort
 
 

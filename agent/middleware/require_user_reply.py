@@ -121,7 +121,9 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
 
     def _discharges_turn(self, call: Mapping[str, Any]) -> bool:
         name = call.get("name")
-        if name == self._no_reply_tool_name:
+        if name == self._no_reply_tool_name or (
+            self._tool_name == "slack_reply" and name == "request_service_connection"
+        ):
             return True
         # An acknowledgement is not an answer, and the Slack prompt orders one
         # before any investigation — counting it would leave every turn "replied".

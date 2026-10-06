@@ -4,12 +4,6 @@ import { useMutation } from "@tanstack/react-query"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  Popover,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { api, type WorkspaceRecord } from "@/lib/api"
 
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
@@ -22,22 +16,6 @@ const SNAPSHOT_LABEL: Record<
   capturing: "Capturing…",
   ready: "Image ready",
   failed: "Capture failed",
-}
-
-function WorkspaceReposPopover({ repos }: { repos: string[] }) {
-  return (
-    <Popover>
-      <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
-        OPENSWE_WORKSPACE_REPOS
-      </PopoverTrigger>
-      <PopoverPopup align="start" className="w-96 max-w-[calc(100vw-2rem)]">
-        <PopoverTitle>Expanded value</PopoverTitle>
-        <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap">
-          <code>{`OPENSWE_WORKSPACE_REPOS="${repos.join(" ")}"`}</code>
-        </pre>
-      </PopoverPopup>
-    </Popover>
-  )
 }
 
 function resourceValue(value: number | null | undefined, divisor = 1) {
@@ -64,6 +42,9 @@ export function WorkspaceSandboxSection({
   onSaved: (saved: WorkspaceRecord) => void
   onRebuildStarted: () => void
 }) {
+  const [inheritDefault, setInheritDefault] = useState(
+    record.inherit_default_sandbox ?? false
+  )
   const buildAction = record.snapshot_id ? "Rebuild" : "Build"
   const [setupScript, setSetupScript] = useState(record.setup_script ?? "")
   const [updateScript, setUpdateScript] = useState(record.update_script ?? "")
@@ -75,6 +56,7 @@ export function WorkspaceSandboxSection({
     resourceValue(record.fs_capacity_bytes, 1024 ** 3)
   )
   const configurationDirty =
+    inheritDefault !== (record.inherit_default_sandbox ?? false) ||
     vcpus !== resourceValue(record.vcpus) ||
     memory !== resourceValue(record.mem_bytes, 1024 ** 3) ||
     disk !== resourceValue(record.fs_capacity_bytes, 1024 ** 3)
@@ -86,6 +68,9 @@ export function WorkspaceSandboxSection({
     meta: { silent: true },
     mutationFn: async () => {
       return api.updateWorkspace(record.slug, {
+        ...(inheritDefault !== (record.inherit_default_sandbox ?? false)
+          ? { inherit_default_sandbox: inheritDefault }
+          : {}),
         vcpus: resourceBytes(vcpus),
         mem_bytes: resourceBytes(memory, 1024 ** 3),
         fs_capacity_bytes: resourceBytes(disk, 1024 ** 3),
@@ -118,12 +103,28 @@ export function WorkspaceSandboxSection({
       title="Sandbox image"
       description="Every run in this workspace boots from this image. The setup script builds it nightly from the base snapshot; the update script refreshes it while it is in use."
     >
+      {record.slug !== "default" && (
+        <SettingsRow
+          label="Inherit sandbox from default"
+          description="Use the default workspace’s latest image, sizing, creation settings, and update script. Workspace instructions and integrations remain independent. Ensure you’re comfortable sharing all contents of the inherited sandbox image with members of this workspace."
+          control={
+            <input
+              type="checkbox"
+              aria-label="Inherit sandbox from default"
+              checked={inheritDefault}
+              onChange={(event) => setInheritDefault(event.target.checked)}
+            />
+          }
+        />
+      )}
       <SettingsRow
         label="Image"
         description={record.status_message ?? record.snapshot_name ?? undefined}
         control={
           <span className="text-xs text-muted-foreground">
-            {SNAPSHOT_LABEL[status]}
+            {record.inherit_default_sandbox
+              ? "Inherited from default"
+              : SNAPSHOT_LABEL[status]}
           </span>
         }
       />
@@ -179,6 +180,7 @@ export function WorkspaceSandboxSection({
               variant="ghost"
               disabled={configuration.isPending}
               onClick={() => {
+                setInheritDefault(record.inherit_default_sandbox ?? false)
                 setVcpus(resourceValue(record.vcpus))
                 setMemory(resourceValue(record.mem_bytes, 1024 ** 3))
                 setDisk(resourceValue(record.fs_capacity_bytes, 1024 ** 3))
@@ -200,12 +202,11 @@ export function WorkspaceSandboxSection({
         <div className="text-sm">
           <div>Setup script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the base snapshot to build the image. Bound repositories are
-            available in <WorkspaceReposPopover repos={record.repos} /> to
-            preload; runs clone any other repository on demand.
+            Runs on the base snapshot to build the image.
           </span>
           <WorkspaceScriptEditor
             label="Setup script"
+            repos={record.repos}
             value={setupScript}
             onChange={setSetupScript}
           />
@@ -213,11 +214,11 @@ export function WorkspaceSandboxSection({
         <div className="text-sm">
           <div>Update script</div>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Runs on the current image to bring it up to date, with the same{" "}
-            <WorkspaceReposPopover repos={record.repos} /> value.
+            Runs on the current image to bring it up to date.
           </span>
           <WorkspaceScriptEditor
             label="Update script"
+            repos={record.repos}
             value={updateScript}
             onChange={setUpdateScript}
           />
@@ -237,7 +238,10 @@ export function WorkspaceSandboxSection({
             size="sm"
             variant="outline"
             disabled={
-              rebuild.isPending || refreshing || !(record.setup_script ?? "")
+              rebuild.isPending ||
+              refreshing ||
+              record.inherit_default_sandbox ||
+              !(record.setup_script ?? "")
             }
             onClick={() => rebuild.mutate()}
           >

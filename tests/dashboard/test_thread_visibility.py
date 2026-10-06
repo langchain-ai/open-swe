@@ -4,7 +4,15 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.threads import access, handlers, listing, plan_api, summary, workflow_approval_api
+from agent.threads import (
+    access,
+    blobs,
+    handlers,
+    listing,
+    plan_api,
+    summary,
+    workflow_approval_api,
+)
 from agent.tools import threads as tools
 
 _ADMINS = {"admin", "admin@example.com"}
@@ -219,6 +227,44 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
         m["additional_kwargs"]["collaborative_origin_thread_id"] == "private-thread" for m in copied
     )
     assert copied[0]["additional_kwargs"]["x"] == 1
+
+
+async def test_continue_privately_copies_referenced_blobs(private_thread, fake_store):
+    thread, client = private_thread
+    thread["metadata"]["visibility"] = "public"
+    kept, gone, unreferenced = "a" * 64, "b" * 64, "c" * 64
+    for digest in (kept, unreferenced):
+        fake_store.seed(blobs.blob_namespace("private-thread"), f"/{digest}", {"digest": digest})
+    image = {"type": "image", "mime_type": "image/png"}
+    client.threads.get_state.return_value = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": [{**image, "deepagents_blob": kept}]},
+                {"type": "tool", "content": [{**image, "deepagents_blob": gone}]},
+                {"type": "human", "content": [{**image, "deepagents_blob": "../escape"}]},
+            ]
+        }
+    }
+    await handlers.continue_thread_privately("private-thread", "bob")
+
+    new_thread_id = client.threads.create.call_args.kwargs["thread_id"]
+    assert fake_store.values(blobs.blob_namespace(new_thread_id)) == {f"/{kept}": {"digest": kept}}
+
+
+async def test_continue_privately_rolls_back_when_blob_copy_fails(private_thread, monkeypatch):
+    thread, client = private_thread
+    thread["metadata"]["visibility"] = "public"
+    image = {"type": "image", "mime_type": "image/png", "deepagents_blob": "a" * 64}
+    client.threads.get_state.return_value = {
+        "values": {"messages": [{"type": "human", "content": [image]}]}
+    }
+    client.threads.delete = AsyncMock()
+    monkeypatch.setattr(blobs, "get_value", AsyncMock(side_effect=RuntimeError("store down")))
+    with pytest.raises(HTTPException) as exc:
+        await handlers.continue_thread_privately("private-thread", "bob")
+    assert exc.value.status_code == 502
+    client.threads.update_state.assert_not_awaited()
+    client.threads.delete.assert_awaited_once()
 
 
 async def test_continue_privately_carries_new_workspace_key(private_thread):

@@ -21,6 +21,7 @@ from langsmith.sandbox import (
 from pydantic import BaseModel
 
 from agent.config import ENV
+from agent.sandboxes.paths import WORKSPACE_DIR
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.retry import retry_transient_sandbox_errors
 from agent.utils.startup_trace import asubphase
@@ -589,6 +590,8 @@ async def create_langsmith_sandbox(
         create_params=create_params,
     )
 
+    if sandbox_id is None:
+        await backend.aexecute(f"mkdir -p {WORKSPACE_DIR}")
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
@@ -626,6 +629,10 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     @property
     def sandbox(self) -> Any:
         return self._sandbox
+
+    def get_work_dir(self) -> str:
+        """Repositories live in ``/workspace/<repo>``, where workspace images preload them."""
+        return WORKSPACE_DIR
 
     _WS_FALLBACK_ERRORS = (
         SandboxConnectionError,

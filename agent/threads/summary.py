@@ -9,8 +9,13 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from agent.dashboard.admin import is_admin
-from agent.dashboard.options import SUPPORTED_MODEL_IDS, canonical_model_pair
+from agent.dashboard.options import SUPPORTED_MODEL_IDS
 from agent.github.pull_requests import PullRequest
+from agent.review.findings import (
+    REVIEWER_THREAD_KIND,
+    REVIEWER_UNTITLED,
+    reviewer_thread_title,
+)
 from agent.review.session import ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.slack.code_channels import CODE_CHANNEL_SESSION_TS
@@ -45,6 +50,12 @@ _PR_STATES: frozenset[str] = frozenset({"draft", "open", "merged", "closed"})
 _SANDBOX_CREATING_SENTINEL = "__creating__"
 
 _ThreadSortBy = Literal["created_at", "updated_at"]
+
+SLACK_BOT_TRIGGER_KIND = "slack_bot"
+"""``trigger_kind`` of a thread an allowlisted Slack bot started."""
+TRIGGERING_BOT_KEY = "triggering_bot"
+"""Metadata key holding the starting bot's ``{team_id}:{bot_id}`` allowlist key."""
+BOT_THREAD_READ_ONLY = "This thread was started by a Slack bot. Reply in Slack to steer it."
 
 
 def _now_ms() -> int:
@@ -86,9 +97,6 @@ def _metadata_model_id(metadata: Mapping[str, Any]) -> str | None:
         model = metadata.get(key)
         if isinstance(model, str) and model in SUPPORTED_MODEL_IDS:
             return model
-        canonical = canonical_model_pair(model)
-        if canonical is not None:
-            return canonical[0]
     return None
 
 
@@ -135,6 +143,10 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     )
 
 
+def thread_is_bot_triggered(metadata: Mapping[str, Any]) -> bool:
+    return metadata.get("trigger_kind") == SLACK_BOT_TRIGGER_KIND
+
+
 def assert_thread_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> None:
@@ -143,8 +155,15 @@ def assert_thread_readable(
 
 
 def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
+    """Dashboard actions on a thread: prompting, approvals, plan edits, shell and files.
+
+    A thread a Slack bot started is steered from its Slack thread only, so the
+    dashboard keeps it read-only for everyone, admins included.
+    """
     if not thread_is_promptable(metadata, login):
         raise HTTPException(404, "thread not found")
+    if thread_is_bot_triggered(metadata):
+        raise HTTPException(403, BOT_THREAD_READ_ONLY)
 
 
 def _assert_thread_postable(
@@ -252,12 +271,39 @@ def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def metadata_title(metadata: Mapping[str, Any]) -> str:
+    """The thread's sidebar title, naming reviewer threads that were never titled.
+
+    A reviewer thread's PR identity lives in ``pr`` metadata, which
+    ``set_reviewer_thread_metadata`` mirrors into ``title``; older threads
+    predate that mirror and get ``Review: #nn <PR title>`` derived here.
+    """
+    raw_title = metadata.get("title")
+    if isinstance(raw_title, str) and raw_title.strip():
+        return raw_title
+    if metadata.get("kind") == REVIEWER_THREAD_KIND:
+        pr = metadata.get("pr")
+        if isinstance(pr, Mapping) and (pr.get("number") is not None or pr.get("title")):
+            return reviewer_thread_title(pr)
+        return REVIEWER_UNTITLED
+    return "Untitled agent"
+
+
 def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
     return (
         _metadata_string(metadata, "thread_category") == "automation"
         or thread_source(metadata) == "schedule"
         or _metadata_string(metadata, "schedule_id") is not None
     )
+
+
+def _triggering_bot(metadata: Mapping[str, Any]) -> dict[str, str] | None:
+    key = _metadata_string(metadata, TRIGGERING_BOT_KEY)
+    if not thread_is_bot_triggered(metadata) or key is None:
+        return None
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    name = slack_thread.triggering_user_name if slack_thread else ""
+    return {"key": key, "name": name or key.partition(":")[2]}
 
 
 def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -372,7 +418,9 @@ async def _thread_summary(
     if not isinstance(updated_at, (int, float)):
         updated_at = _thread_timestamp_ms(thread, "updated_at")
     raw_title = metadata.get("title")
-    title: str = raw_title if isinstance(raw_title, str) else "Untitled agent"
+    title: str = (
+        raw_title if isinstance(raw_title, str) and raw_title.strip() else metadata_title(metadata)
+    )
     model = metadata.get("model") if isinstance(metadata.get("model"), str) else "Default"
     effort = metadata.get("effort") if isinstance(metadata.get("effort"), str) else None
     thread_status = thread.get("status") if isinstance(thread.get("status"), str) else "idle"
@@ -427,6 +475,7 @@ async def _thread_summary(
         "origin": origin,
         "threadCategory": thread_category,
         "triggerKind": trigger_kind,
+        "triggeringBot": _triggering_bot(metadata),
         "automationId": _metadata_string(metadata, "schedule_id"),
         "automationName": _metadata_string(metadata, "schedule_name"),
         "automationActionPosted": (
@@ -454,6 +503,13 @@ async def _thread_summary(
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),
         "sandboxId": sandbox_id,
+        # Which app serves a bridged thread's machine, so a client can tell
+        # whether it is the one that can run the thread.
+        "sandboxBridgeClient": (
+            (metadata.get("sandbox_bridge_client") or "cli")
+            if metadata.get("sandbox_kind") == "bridge"
+            else None
+        ),
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

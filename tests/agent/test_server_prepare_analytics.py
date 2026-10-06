@@ -114,7 +114,6 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(server, "_resolve_prompt_default_repo", _async_none)
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
     monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
-    monkeypatch.setattr(server, "_workspace_admin", _async_false)
     monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
 
     class _Threads:
@@ -134,10 +133,6 @@ async def _async_none(*args: Any, **kwargs: Any) -> None:
 
 async def _async_list(*args: Any, **kwargs: Any) -> list[Any]:
     return []
-
-
-async def _async_false(*args: Any, **kwargs: Any) -> bool:
-    return False
 
 
 def _slack_config(**extra: Any) -> dict[str, Any]:

@@ -168,6 +168,22 @@ async def _fetch_reviews(
         return None
 
 
+async def review_authors(
+    client: httpx2.AsyncClient, owner: str, repo: str, number: int
+) -> set[str] | None:
+    """Lowercased logins of everyone who submitted a review, comment-only ones included."""
+    reviews = await _fetch_reviews(client, owner, repo, number)
+    if reviews is None:
+        return None
+    authors: set[str] = set()
+    for review in reviews:
+        user = review.get("user")
+        login = user.get("login") if isinstance(user, Mapping) else None
+        if isinstance(login, str) and review.get("state") != "PENDING":
+            authors.add(login.lower())
+    return authors
+
+
 async def latest_review_states(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int, author: str
 ) -> dict[str, str] | None:

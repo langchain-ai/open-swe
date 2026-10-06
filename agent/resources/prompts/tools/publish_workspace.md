@@ -34,11 +34,11 @@ Args:
         scratch, and it must never write a secret or a proxy credential to
         disk. A full replacement, not a delta; empty string clears it.
     update_script: Optional bash script for what goes stale in an image — a
-        ``git pull``, a dependency sync. Keep it to seconds: a run whose
-        sandbox boots from a snapshot older than an hour runs this script in
-        that sandbox before the first model call, and the same creation
-        refreshes the snapshot on a throwaway builder in the background so
-        later runs skip it. It also runs at the end of every full rebuild,
+        ``git pull``, a dependency sync. When a run's sandbox boots from a
+        snapshot older than an hour, the run starts on that snapshot as-is,
+        warns its requester that checkouts may be behind, and refreshes the
+        snapshot on a throwaway builder in the background so later runs
+        start fresh. It also runs at the end of every full rebuild,
         which is where a broken one is caught. Output is traced to
         ``/open-swe/environment/logs/update.log``. A full replacement; empty string
         clears it.
