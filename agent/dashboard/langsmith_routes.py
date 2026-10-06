@@ -58,7 +58,7 @@ async def langsmith_login(
     nonce = new_state_nonce()
     nonce_hash = hash_state_nonce(nonce)
     state = issue_state(
-        redirect_to=sanitize_redirect_to(redirect_to or f"{frontend_base_url()}/my-settings"),
+        redirect_to=sanitize_redirect_to(redirect_to or f"{frontend_base_url()}/my-settings/connections"),
         nonce_hash=nonce_hash,
     )
     try:

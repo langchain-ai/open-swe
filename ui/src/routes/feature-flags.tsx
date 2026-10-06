@@ -1,48 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router"
-
-import { AppShell, SettingsSection } from "@/components/AppShell"
-import { Skeleton } from "@/components/ui/skeleton"
-import { ActAsApprovalPreference } from "@/features/settings/components/ActAsApprovalPreference"
-import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
-import { BackgroundCallbacksPreference } from "@/features/settings/components/BackgroundCallbacksPreference"
-import { HumanReviewPreference } from "@/features/settings/components/HumanReviewPreference"
-import { PreferToolsInSandboxPreference } from "@/features/settings/components/PreferToolsInSandboxPreference"
-import { SandboxMemoryPreference } from "@/features/settings/components/SandboxMemoryPreference"
-import { RequireLogin } from "@/lib/auth-redirect"
-import { pageTitle } from "@/lib/pageTitle"
-import { useSession } from "@/lib/session"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/feature-flags")({
-  component: FeatureFlagsPage,
-  head: () => ({ meta: [{ title: pageTitle("Feature Flags") }] }),
+  component: () => <Navigate to="/my-settings/experiments" replace />,
 })
-
-function FeatureFlagsPage() {
-  const session = useSession()
-
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-40 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-
-  return (
-    <AppShell
-      user={session.data}
-      title="Feature Flags"
-      description="Experimental features under test."
-    >
-      <SettingsSection title="Experiments">
-        <AssistantUiPreference />
-        <BackgroundCallbacksPreference />
-        <SandboxMemoryPreference />
-        <PreferToolsInSandboxPreference />
-        <HumanReviewPreference />
-        <ActAsApprovalPreference />
-      </SettingsSection>
-    </AppShell>
-  )
-}

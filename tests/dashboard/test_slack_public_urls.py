@@ -71,7 +71,7 @@ def test_slack_public_url_applies_to_manifest_and_oauth_without_changing_local_c
             follow_redirects=False,
         )
         assert callback.status_code == 302, callback.text
-        assert callback.headers["location"] == f"{local_url}/my-settings"
+        assert callback.headers["location"] == f"{local_url}/my-settings/connections"
     exchange.assert_awaited_once_with("code", expected_callback)
     link.assert_awaited_once_with("slack", "U123", email="alice@example.com", team_id="T123")
 
