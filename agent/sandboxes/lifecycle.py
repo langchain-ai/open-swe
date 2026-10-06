@@ -416,7 +416,7 @@ async def _attach_task_worker_sandbox(
             SANDBOX_PROXY_CONFIG_METADATA_KEY: current_host.get(SANDBOX_PROXY_CONFIG_METADATA_KEY),
         },
     )
-    return set_sandbox_backend(thread_id, backend)
+    return set_sandbox_backend(thread_id, unwrap_sandbox_backend(backend))
 
 
 async def ensure_sandbox_for_thread(

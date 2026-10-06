@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -81,6 +82,33 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     assert shared_sandbox["worker"]["sandbox_id"] == host_sandbox_id
     connect.assert_awaited_once_with(host_sandbox_id)
     assert refresh.await_args.kwargs["thread_id"] == "coordinator"
+
+
+async def test_worker_refreshes_binding_during_concurrent_host_reconnect(
+    shared_sandbox: dict[str, dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        lifecycle,
+        "create_sandbox",
+        AsyncMock(side_effect=lambda sandbox_id: MagicMock(id=sandbox_id)),
+    )
+    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
+    await lifecycle.ensure_sandbox_for_thread("worker")
+
+    shared_sandbox["coordinator"]["sandbox_id"] = "sb-replacement"
+    host = lifecycle.get_cached_sandbox_backend(
+        "coordinator", reconnect=lambda: lifecycle.ensure_sandbox_for_thread("coordinator")
+    )
+    host.start()
+    worker = lifecycle.get_cached_sandbox_backend(
+        "worker", reconnect=lambda: lifecycle.ensure_sandbox_for_thread("worker")
+    )
+    worker.start()
+    await asyncio.gather(host.ready(), worker.ready())
+
+    assert shared_sandbox["worker"]["sandbox_id"] == "sb-replacement"
+    assert worker.id == host.id == "sb-replacement"
+    assert worker is not host
 
 
 async def test_worker_does_not_replace_a_deleted_host_sandbox(
