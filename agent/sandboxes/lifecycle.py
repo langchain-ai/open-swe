@@ -42,8 +42,6 @@ from agent.workspaces.store import (
     SandboxResources,
     Workspace,
     load_workspace,
-    sandbox_update_timeout,
-    script_command,
 )
 
 logger = logging.getLogger(__name__)
@@ -118,52 +116,6 @@ class SandboxCreateConfig:
     def proxy_config(self) -> dict[str, Any] | None:
         return get_sandbox_proxy_config(self.create_params)
 
-    async def run_update_script(
-        self, sandbox_backend: SandboxBackendProtocol, thread_id: str | None
-    ) -> None:
-        """Freshen this box's checkouts when the snapshot it booted from has aged out.
-
-        Awaited before the first model call, on purpose: refreshing only the
-        snapshot in the background never helps the run that triggered it, and
-        with sparse traffic every run is a triggering run — so the first run
-        after a quiet spell would otherwise work against a checkout as old as
-        the last nightly rebuild. Bounded by a short timeout, and never fatal:
-        the image is already usable, so a failed pull costs freshness, not the
-        run.
-        """
-        workspace = self.workspace
-        if workspace is None or not is_snapshot_stale(workspace):
-            return
-        try:
-            async with aphase(thread_id, "sandbox.update_script"):
-                result = await sandbox_backend.aexecute(
-                    script_command(workspace.update_script, "update", workspace.repos),
-                    timeout=sandbox_update_timeout(),
-                )
-        except Exception:
-            # "Never fatal" has to cover the execute itself: it can raise past
-            # its own retries when a freshly booted box is briefly unreachable,
-            # and losing the whole sandbox over a skipped `git pull` is worse
-            # than starting from the snapshot as captured.
-            logger.warning(
-                "Workspace update script could not run in sandbox %s",
-                sandbox_backend.id,
-                exc_info=True,
-                extra={"workspace": workspace.slug},
-            )
-            return
-        if result.exit_code != 0:
-            logger.warning(
-                "Workspace update script exited %s in sandbox %s",
-                result.exit_code,
-                sandbox_backend.id,
-                extra={
-                    "workspace": workspace.slug,
-                    "exit_code": result.exit_code,
-                    "log_tail": (result.output or "")[-2000:],
-                },
-            )
-
     async def boot(self) -> SandboxBackendProtocol:
         if self.create_params:
             return await create_sandbox(
@@ -181,6 +133,7 @@ async def _create_sandbox_with_proxy(
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
     owner_login: str | None = None,
+    record_stale_boot: bool = False,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
@@ -212,11 +165,23 @@ async def _create_sandbox_with_proxy(
                 base_proxy_config=proxy_config,
             )
 
-    # This run gets fresh checkouts now; the background capture makes the *next*
-    # creation skip the step entirely.
-    await config.run_update_script(sandbox_backend, thread_id)
+    if (
+        record_stale_boot
+        and thread_id
+        and config.workspace is not None
+        and is_snapshot_stale(config.workspace)
+    ):
+        _STALE_BOOTS[thread_id] = config.workspace
     _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
     return sandbox_backend
+
+
+_STALE_BOOTS: dict[str, Workspace] = {}
+
+
+def take_stale_boot(thread_id: str) -> Workspace | None:
+    """The workspace whose stale snapshot this thread's new sandbox booted from, once."""
+    return _STALE_BOOTS.pop(thread_id, None)
 
 
 def _fire_and_forget(coro: Coroutine[Any, Any, Any], what: str) -> None:
@@ -387,6 +352,7 @@ async def ensure_sandbox_for_thread(
     github_proxy_repositories: Sequence[str] | None = None,
     workspace_slug: str | None = None,
     allow_replacement: bool = False,
+    record_stale_boot: bool = False,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -408,6 +374,8 @@ async def ensure_sandbox_for_thread(
     ``allow_replacement`` extends replacement to merely unreachable sandboxes,
     for callers whose sandbox holds nothing but a re-derivable checkout — the
     read-only reviewer, which re-preps the repo every run.
+
+    ``record_stale_boot`` is for callers that collect ``take_stale_boot``.
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. Newly
     created sandboxes boot from the workspace's snapshot when one is ready,
@@ -450,6 +418,7 @@ async def ensure_sandbox_for_thread(
             github_proxy_repositories=github_proxy_repositories,
             workspace_slug=workspace_slug,
             owner_login=owner_login,
+            record_stale_boot=record_stale_boot,
         )
         created = True
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
@@ -480,6 +449,7 @@ async def ensure_sandbox_for_thread(
                     github_proxy_repositories=github_proxy_repositories,
                     workspace_slug=workspace_slug,
                     owner_login=owner_login,
+                    record_stale_boot=record_stale_boot,
                 )
                 created = True
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
@@ -524,13 +494,20 @@ async def ensure_sandbox_for_thread(
     return published
 
 
+class SandboxRecreationStopError(RuntimeError):
+    def __init__(self, old_sandbox_id: str, new_sandbox_id: str, reason: str) -> None:
+        super().__init__(reason)
+        self.old_sandbox_id = old_sandbox_id
+        self.new_sandbox_id = new_sandbox_id
+
+
 async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
-) -> tuple[str, str, str | None]:
-    """Best-effort stop the old sandbox and bind the thread to a fresh one."""
+) -> tuple[str, str]:
+    """Bind a fresh sandbox, then raise with its IDs if stopping the old one failed."""
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata = await get_sandbox_metadata(thread_id)
     raw_sandbox_id = metadata.get("sandbox_id")
@@ -601,7 +578,9 @@ async def recreate_sandbox_for_thread(
         old_sandbox_id,
         new_sandbox.id,
     )
-    return old_sandbox_id, new_sandbox.id, stop_error
+    if stop_error is not None:
+        raise SandboxRecreationStopError(old_sandbox_id, new_sandbox.id, stop_error)
+    return old_sandbox_id, new_sandbox.id
 
 
 def get_cached_sandbox_backend(

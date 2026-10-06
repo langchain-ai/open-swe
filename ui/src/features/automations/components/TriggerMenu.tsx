@@ -4,6 +4,8 @@ import {
   CaretRightIcon,
   ClockIcon,
   GithubLogoIcon,
+  KanbanIcon,
+  SlackLogoIcon,
 } from "@phosphor-icons/react"
 
 import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
@@ -15,6 +17,10 @@ interface TriggerMenuProps {
   onSchedule?: (cron: string | null) => void
   /** Lists the GitHub provider. */
   onGitHub?: () => void
+  /** Lists the Slack provider. */
+  onSlack?: () => void
+  /** Lists the Linear provider. */
+  onLinear?: () => void
   children: ReactNode
   className?: string
   "aria-label"?: string
@@ -47,6 +53,8 @@ function GroupLabel({ children }: { children: ReactNode }) {
 export function TriggerMenu({
   onSchedule,
   onGitHub,
+  onSlack,
+  onLinear,
   children,
   className,
   "aria-label": ariaLabel,
@@ -95,6 +103,38 @@ export function TriggerMenu({
                 className={ITEM}
               >
                 <span className="flex-1">Issue and pull request events</span>
+                <CaretRightIcon className="size-3.5 opacity-50" />
+              </button>
+            </>
+          )}
+          {onSlack && (
+            <>
+              <GroupLabel>
+                <SlackLogoIcon className="size-3.5" />
+                {AUTOMATION_EVENT_PROVIDERS.slack.label}
+              </GroupLabel>
+              <button
+                type="button"
+                onClick={() => choose(onSlack)}
+                className={ITEM}
+              >
+                <span className="flex-1">Channel messages</span>
+                <CaretRightIcon className="size-3.5 opacity-50" />
+              </button>
+            </>
+          )}
+          {onLinear && (
+            <>
+              <GroupLabel>
+                <KanbanIcon className="size-3.5" />
+                {AUTOMATION_EVENT_PROVIDERS.linear.label}
+              </GroupLabel>
+              <button
+                type="button"
+                onClick={() => choose(onLinear)}
+                className={ITEM}
+              >
+                <span className="flex-1">Issue events</span>
                 <CaretRightIcon className="size-3.5 opacity-50" />
               </button>
             </>

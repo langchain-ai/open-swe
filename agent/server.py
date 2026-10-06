@@ -143,6 +143,7 @@ from agent.middleware.require_user_reply import (
     ReplySurface,
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.stale_workspace import warn_stale_workspace
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
@@ -161,6 +162,7 @@ from agent.runtime.execution import bindable_config, graph_loaded_for_execution
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
+    take_stale_boot,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
@@ -209,7 +211,6 @@ from agent.tools import (
     manage_incident,
     manage_thread,
     merge_expedited_pr,
-    notify_automation_channel,
     open_pull_request,
     output_iframe,
     publish_workspace,
@@ -241,6 +242,7 @@ from agent.tools import (
     slack_start_new_thread,
     start_thread,
     submit_thread_feedback,
+    suggest_task,
     trigger_automation,
     update_automation,
     web_search,
@@ -607,7 +609,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "list_threads",
         "listen_events",
         "manage_thread",
-        "notify_automation_channel",
         "read_incident",
         "read_only_sql",
         "read_user_settings",
@@ -1185,6 +1186,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             raise
         del github_token
+        if stale_workspace := take_stale_boot(self._thread_id):
+            await warn_stale_workspace(self._config or {}, self._thread_id, stale_workspace)
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
@@ -1399,6 +1402,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         return await ensure_sandbox_for_thread(
             _thread_id,
             workspace_slug=workspace_slug(_cfg),
+            record_stale_boot=True,
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -1729,7 +1733,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         assign_human_reviewer,
         auto_assign_human_reviewer,
         dismiss_human_review_request,
-        notify_automation_channel,
         open_pull_request,
         link_pull_request,
         *(
@@ -1759,6 +1762,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_reply,
         slack_start_new_thread,
         submit_thread_feedback,
+        suggest_task,
         submit_review_assessment_feedback,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
@@ -1768,7 +1772,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     ]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
-        static_tools = [tool for tool in static_tools if tool not in slack_tools]
+        # An automation run has no Slack thread, but its prompt may ask it to
+        # report to a channel.
+        kept = (slack_list_channels, slack_post_message) if cfg.source == "schedule" else ()
+        static_tools = [tool for tool in static_tools if tool not in slack_tools or tool in kept]
     elif _slack_concierge_run(cfg):
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS

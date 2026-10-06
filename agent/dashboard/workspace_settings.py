@@ -87,6 +87,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     sandbox_openai_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -323,6 +324,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -689,6 +691,11 @@ class WorkspaceSettings(Mapping[str, Any]):
         """Whether the experimental expedited Slack review is switched on."""
         value = self.get("expedited_review_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def human_review_auto_assign_minutes(self) -> int:
+        value = self.get("human_review_auto_assign_minutes")
+        return value if type(value) is int and value > 0 else 120
 
     @property
     def sandbox_openai_enabled(self) -> bool:

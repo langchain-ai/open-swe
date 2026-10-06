@@ -179,7 +179,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
         source="incidents_agent", owner_type="system", visibility="public", incident_id="incident"
     )
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
-    posted = AsyncMock(return_value=("9.0", None))
+    posted = AsyncMock(return_value="9.0")
     monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", posted)
     # The scripted model ends its turn in plain text, so the reply requirement
     # posts on its behalf; that path is covered in its own suite.

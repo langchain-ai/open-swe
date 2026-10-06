@@ -160,7 +160,6 @@ SNAPSHOT_TAG = "latest"
 # produced it — readable in place, without the dashboard.
 DEFAULT_SCRIPT_ROOT = "/open-swe/environment"
 WORKSPACE_REPOS_ENV_VAR = "OPENSWE_WORKSPACE_REPOS"
-DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS = 120
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _SENSITIVE_CREATE_PARAM_KEYS = frozenset(
@@ -290,18 +289,6 @@ def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
         f"bash -x {shlex.quote(path)} > {shlex.quote(log_path)} 2>&1; }}; "
         f"rc=$?; cat {shlex.quote(log_path)} 2>/dev/null; exit $rc"
     )
-
-
-def sandbox_update_timeout() -> int:
-    """Deadline for the update script when it runs in a run's own sandbox.
-
-    Tighter than the builder's: this one is on the critical path before the first
-    model call, and a ``git pull`` that takes minutes is broken rather than slow.
-    """
-    seconds = ENV.WORKSPACE_SANDBOX_UPDATE_TIMEOUT_SECONDS.get_int(
-        DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
-    )
-    return seconds if seconds > 0 else DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
 
 
 def log_excerpt(log: str | None, *, lines: int = LOG_EXCERPT_LINES) -> str | None:

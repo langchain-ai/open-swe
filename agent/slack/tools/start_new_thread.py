@@ -23,6 +23,7 @@ from agent.slack.client import (
     post_slack_top_level_message_with_ts,
     store_slack_run_mapping,
 )
+from agent.slack.http import SlackRequestError
 from agent.source_context import SourceContext
 from agent.threads.creation import create_thread
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -297,52 +298,50 @@ async def slack_start_new_thread(
         source_line,
         f"<@{requester}>" if requester else "",
     )
-    message_ts, slack_error = await post_slack_top_level_message_with_ts(
-        clean_channel_id,
-        append_slack_web_link_footer(
-            " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
-        ),
-        blocks=block_payload(
-            [
-                section(" · ".join(part for part in root_parts if part)),
-                *await origin_footer(cfg.thread_id),
-            ]
-        ),
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if message_ts is None:
-        return {
-            "success": False,
-            "error": slack_error or "post failed",
-            "slack_error": slack_error,
-            "hint": _failure_hint(slack_error),
-        }
-
-    details_ts: str | None = None
-    details_error: str | None = None
-    for attempt in range(2):
-        details_ts, details_error = await post_slack_thread_reply_with_ts(
+    try:
+        message_ts = await post_slack_top_level_message_with_ts(
             clean_channel_id,
-            message_ts,
-            _thread_details(clean_instructions, repo),
-            agent_thread_id=thread_id,
+            append_slack_web_link_footer(
+                " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
+            ),
+            blocks=block_payload(
+                [
+                    section(" · ".join(part for part in root_parts if part)),
+                    *await origin_footer(cfg.thread_id),
+                ]
+            ),
             unfurl_links=False,
             unfurl_media=False,
         )
-        if details_ts is not None:
-            break
-        delay = _rate_limit_delay(details_error)
-        if attempt or delay is None:
-            break
-        await asyncio.sleep(delay)
-    if details_ts is None:
+    except SlackRequestError as exc:
         return {
             "success": False,
-            "error": details_error or "thread details post failed",
-            "slack_error": details_error,
-            "hint": _failure_hint(details_error),
+            "error": exc.code or "post failed",
+            "slack_error": exc.code,
+            "hint": _failure_hint(exc.code),
         }
+
+    for attempt in range(2):
+        try:
+            await post_slack_thread_reply_with_ts(
+                clean_channel_id,
+                message_ts,
+                _thread_details(clean_instructions, repo),
+                agent_thread_id=thread_id,
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+            break
+        except SlackRequestError as exc:
+            delay = _rate_limit_delay(exc.code)
+            if attempt or delay is None:
+                return {
+                    "success": False,
+                    "error": exc.code,
+                    "slack_error": exc.code,
+                    "hint": _failure_hint(exc.code),
+                }
+            await asyncio.sleep(delay)
 
     await bind_slack_thread_id(client, clean_channel_id, message_ts, thread_id)
     new_slack_thread = _new_slack_thread_context(

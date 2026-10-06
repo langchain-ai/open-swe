@@ -25,6 +25,7 @@ from agent.config import ENV
 from agent.slack.http import (
     SLACK_REQUEST_ERRORS,
     SlackClient,
+    SlackRequestError,
     slack_error,
     slack_error_details,
     slack_retry_after,
@@ -37,7 +38,7 @@ from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.http import DEFAULT_HTTP_TIMEOUT
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.run_usage import RunUsageSummary
-from agent.utils.url_safety import request_with_safe_redirects
+from agent.utils.url_safety import UnsafeUrlError, request_with_safe_redirects
 from agent.utils.user_messages import WARNING_ICON
 
 logger = logging.getLogger(__name__)
@@ -521,9 +522,9 @@ async def _post_slack_message_with_ts(
     blocks: list[dict[str, Any]] | None = None,
     reply_broadcast: bool = False,
     login: str | None = None,
-) -> tuple[str | None, str | None]:
+) -> str:
     if not SLACK_BOT_TOKEN:
-        return None, "missing_slack_bot_token"
+        raise SlackRequestError("missing_slack_bot_token")
 
     from agent.slack.code_channels import is_code_channel_session
 
@@ -558,17 +559,17 @@ async def _post_slack_message_with_ts(
                     "Slack reply landed outside its thread",
                     extra={"slack_channel": channel_id, "slack_thread_ts": reply_ts},
                 )
-                return None, "thread_not_found"
+                raise SlackRequestError("thread_not_found")
             _log_automated_warning_sent_to_slack(channel_id, thread_ts, text)
-            return message_ts, None
-        return None, None
+            return message_ts
+        raise SlackRequestError("missing_message_ts")
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
         logger.warning(
             "Slack message request failed",
             extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
         )
-        return None, error
+        raise SlackRequestError(error) from exc
 
 
 def _slack_thread_dashboard_url(
@@ -836,8 +837,8 @@ async def post_slack_thread_reply_with_ts(
     agent_thread_id: str | None = None,
     reply_broadcast: bool = False,
     login: str | None = None,
-) -> tuple[str | None, str | None]:
-    """Post a reply in a Slack thread and return its Slack timestamp and error."""
+) -> str:
+    """Post a reply in a Slack thread and return its timestamp."""
     from agent.slack.code_channels import is_code_channel_session
 
     if is_code_channel_session(thread_ts):
@@ -885,8 +886,8 @@ async def post_slack_top_level_message_with_ts(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     login: str | None = None,
-) -> tuple[str | None, str | None]:
-    """Post a top-level Slack message and return its timestamp and error."""
+) -> str:
+    """Post a top-level Slack message and return its timestamp."""
     return await _post_slack_message_with_ts(
         channel_id,
         text,
@@ -1006,10 +1007,10 @@ async def update_slack_message(
     unfurl_media: bool = True,
     blocks: list[dict[str, Any]] | None = None,
     login: str | None = None,
-) -> tuple[bool, str | None]:
-    """Update a Slack message and return success plus any Slack error."""
+) -> None:
+    """Update a Slack message."""
     if not SLACK_BOT_TOKEN:
-        return False, "missing_slack_bot_token"
+        raise SlackRequestError("missing_slack_bot_token")
 
     text, blocks = await pr_review_links(text, blocks, login=login)
     try:
@@ -1022,14 +1023,13 @@ async def update_slack_message(
                 unfurl_media=unfurl_media,
                 blocks=blocks,
             )
-        return True, None
     except SLACK_REQUEST_ERRORS as exc:
         error = slack_error(exc)
         logger.warning(
             "Slack message request failed",
             extra={"slack_error": error, "slack_error_details": slack_error_details(exc)},
         )
-        return False, error
+        raise SlackRequestError(error) from exc
 
 
 async def upload_slack_thread_file(
@@ -1040,18 +1040,18 @@ async def upload_slack_thread_file(
     *,
     title: str | None = None,
     initial_comment: str | None = None,
-) -> tuple[str | None, str | None]:
-    """Upload one file and return its file ID and any error.
+) -> str:
+    """Upload one file and return its file ID.
 
     Without a channel the file is hosted but never posted, which is what a block
     that renders the file itself needs.
     """
     if not SLACK_BOT_TOKEN:
-        return None, "missing_slack_bot_token"
+        raise SlackRequestError("missing_slack_bot_token")
     if not content:
-        return None, "empty_file"
+        raise SlackRequestError("empty_file")
     if len(content) > SLACK_FILE_UPLOAD_MAX_BYTES:
-        return None, "file_too_large"
+        raise SlackRequestError("file_too_large")
 
     try:
         async with SlackClient.bot() as client:
@@ -1059,10 +1059,10 @@ async def upload_slack_thread_file(
             upload_url = ticket.get("upload_url")
             file_id = ticket.get("file_id")
             if not isinstance(upload_url, str) or not isinstance(file_id, str):
-                return None, "invalid_upload_ticket"
+                raise SlackRequestError("invalid_upload_ticket")
             # Keep our host and redirect validation for the external byte transfer.
             async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-                uploaded, blocked = await request_with_safe_redirects(
+                uploaded = await request_with_safe_redirects(
                     http_client,
                     "POST",
                     upload_url,
@@ -1070,10 +1070,6 @@ async def upload_slack_thread_file(
                     headers={"Content-Type": "application/octet-stream"},
                     validate_url=_validate_slack_upload_url,
                 )
-                if blocked:
-                    return None, "unsafe_upload_url"
-                if uploaded is None:
-                    return None, "upload_failed"
                 uploaded.raise_for_status()
             await client.files_completeUploadExternal(
                 files=[{"id": file_id, "title": title or filename}],
@@ -1081,11 +1077,13 @@ async def upload_slack_thread_file(
                 thread_ts=thread_ts,
                 initial_comment=initial_comment,
             )
-            return file_id, None
+            return file_id
+    except UnsafeUrlError as exc:
+        raise SlackRequestError("unsafe_upload_url") from exc
     except (*SLACK_REQUEST_ERRORS, httpx2.HTTPError) as exc:
         error = slack_error(exc)
         logger.warning("Slack file upload failed", extra={"slack_error": error})
-        return None, error
+        raise SlackRequestError(error) from exc
 
 
 class _SlackFileInfo(BaseModel):
@@ -1152,17 +1150,13 @@ async def download_slack_file(url: str) -> bytes:
 
     try:
         async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as http_client:
-            response, blocked = await request_with_safe_redirects(
+            response = await request_with_safe_redirects(
                 http_client,
                 "GET",
                 url,
                 headers_for_url=auth_headers,
                 stream=True,
             )
-            if blocked:
-                raise SlackFileDownloadError("unsafe_download_url")
-            if response is None:
-                raise SlackFileDownloadError("download_failed")
             try:
                 response.raise_for_status()
                 try:
@@ -1179,12 +1173,14 @@ async def download_slack_file(url: str) -> bytes:
                 return bytes(content)
             finally:
                 await response.aclose()
+    except UnsafeUrlError as exc:
+        raise SlackFileDownloadError("unsafe_download_url") from exc
     except (*SLACK_REQUEST_ERRORS, httpx2.HTTPError) as exc:
         logger.warning("Slack file download failed", extra={"slack_error": slack_error(exc)})
         raise SlackFileDownloadError("download_failed") from exc
 
 
-def _validate_slack_upload_url(url: str) -> tuple[bool, str]:
+def _validate_slack_upload_url(url: str) -> None:
     parsed = urlparse(url)
     if (
         parsed.scheme != "https"
@@ -1193,8 +1189,7 @@ def _validate_slack_upload_url(url: str) -> tuple[bool, str]:
         or parsed.password is not None
         or parsed.port not in (None, 443)
     ):
-        return False, "Slack returned an invalid upload URL"
-    return True, ""
+        raise UnsafeUrlError(url, "Slack returned an invalid upload URL")
 
 
 async def post_slack_thread_reply(
@@ -1209,8 +1204,12 @@ async def post_slack_thread_reply(
     kwargs: dict[str, Any] = {"blocks": blocks}
     if agent_thread_id is not None:
         kwargs["agent_thread_id"] = agent_thread_id
-    message_ts, _ = await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)
-    return message_ts is not None
+    try:
+        await post_slack_thread_reply_with_ts(channel_id, thread_ts, text, **kwargs)
+    except SlackRequestError as exc:
+        logger.warning("Slack reply failed", extra={"slack_error": exc.code})
+        return False
+    return True
 
 
 async def post_slack_ephemeral_message(
@@ -1256,21 +1255,15 @@ def slack_user_ids(values: Iterable[str]) -> list[str]:
     return ids
 
 
-async def invite_to_slack_channel(
-    channel_id: str, user_ids: Iterable[str]
-) -> tuple[list[str], str]:
-    """Invite people to a channel, returning who is in and why anyone is not.
-
-    `force` matters: without it Slack refuses the whole batch when any single
-    user fails, so one stale id would cost everyone else their invitation. With
-    it, failures come back per user in `errors`.
-
-    A refusal is not fatal — a public channel is still reachable by its link —
-    so the caller decides what to do with the error.
-    """
+async def invite_to_slack_channel(channel_id: str, user_ids: Iterable[str]) -> list[str]:
+    """Invite people, preserving successful invitees on partial failures."""
     users = slack_user_ids(user_ids)
-    if not SLACK_BOT_TOKEN or not channel_id or not users:
-        return [], "" if users else "no_users"
+    if not users:
+        raise SlackRequestError("no_users")
+    if not SLACK_BOT_TOKEN:
+        raise SlackRequestError("missing_slack_bot_token")
+    if not channel_id:
+        raise SlackRequestError("missing_channel_id")
     try:
         async with SlackClient.bot() as client:
             response = await client.conversations_invite(
@@ -1283,11 +1276,11 @@ async def invite_to_slack_channel(
         ):
             data = exc.response.data
         else:
-            return [], f"{', '.join(users)}: {slack_error(exc)}"
+            raise SlackRequestError(f"{', '.join(users)}: {slack_error(exc)}") from exc
     except SLACK_REQUEST_ERRORS as exc:
-        return [], f"{', '.join(users)}: {slack_error(exc)}"
+        raise SlackRequestError(f"{', '.join(users)}: {slack_error(exc)}") from exc
     if not isinstance(data, dict):
-        return [], f"{', '.join(users)}: invalid_response"
+        raise SlackRequestError(f"{', '.join(users)}: invalid_response")
 
     # Someone already in the channel is in the channel, which is what was asked.
     failures = {
@@ -1300,14 +1293,17 @@ async def invite_to_slack_channel(
     }
     top_error = str(data.get("error") or "")
     if not data.get("ok") and top_error and top_error != "already_in_channel":
-        logger.info("Could not invite %s to %s: %s", users, channel_id, top_error)
-        return [], f"{', '.join(users)}: {top_error}"
+        logger.info(
+            "Could not invite users to Slack channel",
+            extra={"slack_users": users, "slack_channel": channel_id, "slack_error": top_error},
+        )
+        raise SlackRequestError(f"{', '.join(users)}: {top_error}")
+    invited = [user for user in users if user not in failures]
     if failures:
-        logger.info("Could not invite %s to %s", failures, channel_id)
-    return (
-        [user for user in users if user not in failures],
-        ", ".join(f"{user} ({reason})" for user, reason in failures.items()),
-    )
+        raise SlackRequestError(
+            ", ".join(f"{user} ({reason})" for user, reason in failures.items()), invited=invited
+        )
+    return invited
 
 
 async def _post_slack_callback(
@@ -1812,7 +1808,7 @@ async def post_slack_trace_reply(
     """Post a trace URL reply in a Slack thread and return its Slack timestamp."""
     trace_url = await get_langsmith_trace_url(thread_id)
     dashboard_url = dashboard_thread_url(thread_id) if include_dashboard_link else None
-    message_ts, _ = await post_slack_thread_reply_with_ts(
+    message_ts = await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
         _format_trace_reply(trace_url, dashboard_url),
@@ -1829,21 +1825,25 @@ async def update_slack_trace_reply_for_web_handoff(
     """Update the initial Slack trace reply after a dashboard handoff."""
     trace_url = await get_langsmith_trace_url(thread_id)
     dashboard_url = dashboard_thread_url(thread_id)
-    ok, error = await update_slack_message(
-        channel_id,
-        message_ts,
-        _format_trace_reply(trace_url, dashboard_url, moved_to_web=True),
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if not ok:
-        logger.warning(
-            "Failed to update Slack trace reply for web handoff: channel=%s ts=%s error=%s",
+    try:
+        await update_slack_message(
             channel_id,
             message_ts,
-            error,
+            _format_trace_reply(trace_url, dashboard_url, moved_to_web=True),
+            unfurl_links=False,
+            unfurl_media=False,
         )
-    return ok
+    except SlackRequestError as exc:
+        logger.warning(
+            "Failed to update Slack trace reply for web handoff",
+            extra={
+                "slack_channel": channel_id,
+                "slack_message_ts": message_ts,
+                "slack_error": exc.code,
+            },
+        )
+        return False
+    return True
 
 
 SLACK_DETACHED_AT_KEY = "slack_thread_detached_at"

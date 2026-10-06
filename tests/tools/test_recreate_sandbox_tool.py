@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.sandboxes.lifecycle import SandboxRecreationStopError
 from agent.tools.recreate_sandbox import recreate_sandbox
 
 
@@ -19,7 +20,12 @@ async def test_recreate_sandbox_workspace_overrides_thread_workspace_for_private
         patch(
             "agent.sandboxes.lifecycle.recreate_sandbox_for_thread",
             new_callable=AsyncMock,
-            return_value=("sandbox-old", "sandbox-new", stop_error),
+            return_value=("sandbox-old", "sandbox-new"),
+            side_effect=(
+                SandboxRecreationStopError("sandbox-old", "sandbox-new", stop_error)
+                if stop_error is not None
+                else None
+            ),
         ) as recreate,
     ):
         result = await recreate_sandbox(workspace="langchainplus")

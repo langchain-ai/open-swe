@@ -354,7 +354,8 @@ ENV.var(
 )
 ENV.var(
     "OPENSWE_ENV",
-    "Deployment environment; `preview` lets startup drop superseded migration revisions.",
+    "Deployment environment; `preview` lets startup drop superseded migration revisions and "
+    "turns off reviewer auto-assignment.",
 )
 ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
 ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
@@ -442,12 +443,6 @@ ENV.var(
     "WORKSPACE_UPDATE_TIMEOUT_SECONDS",
     "Deadline for a workspace's update script on a builder sandbox.",
     aliases=("ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",),
-)
-ENV.var(
-    "WORKSPACE_SANDBOX_UPDATE_TIMEOUT_SECONDS",
-    "Deadline for the update script when it runs in a run's own sandbox, before the first "
-    "model call. Tighter than the builder's on purpose.",
-    aliases=("ENVIRONMENT_SANDBOX_UPDATE_TIMEOUT_SECONDS",),
 )
 ENV.var(
     "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",
