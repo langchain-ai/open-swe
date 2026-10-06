@@ -108,6 +108,7 @@ class RequestResult(BaseModel):
     permalink: str = ""
     reused: bool = False
     summary_updated: bool = False
+    claimed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +126,11 @@ class Origin:
         if self.thread_id and request.thread_id == self.thread_id:
             return True
         return self.requester is not None and request.requested_by_user_id == self.requester.id
+
+
+@dataclass(frozen=True, slots=True)
+class AlreadyClaimed(Outcome):
+    pass
 
 
 def _failure(error: str) -> RequestResult:
@@ -444,7 +450,7 @@ async def _add_reviewer(
         if row is None or row.state != "open":
             return Outcome("This review request closed before you signed up.")
         if picked and (row.reviewers or row.picks):
-            return Outcome(
+            return AlreadyClaimed(
                 "This pull request already has a reviewer or pending pick. Stop assigning reviewers."
             )
         existing = row.participant(reviewer.user.id)
@@ -567,7 +573,9 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     notice = await _pick_notice(request, who, label)
     added = await _add_reviewer(request, reviewer, picked=True)
     if isinstance(added, Outcome):
-        return _failure(added.message)
+        return RequestResult(
+            success=False, error=added.message, claimed=isinstance(added, AlreadyClaimed)
+        )
     await _request_github_review(added, github_login)
     minutes = await _assignment_minutes(added)
     if not await _schedule(added, "pick_expiry", timedelta(minutes=minutes)):
@@ -817,7 +825,7 @@ async def settle_repository(owner: str, repo: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class AutoAssignResult:
-    status: Literal["picked", "waiting", "woken", "failed", "disabled"]
+    status: Literal["picked", "waiting", "woken", "failed", "disabled", "claimed"]
     reviewer: str = ""
     at: datetime | None = None
 
@@ -848,6 +856,9 @@ async def start_auto_assign(
 
 
 async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssignResult:
+    request = await HumanReviewRequest.get(request.id) or request
+    if request.reviewers or request.picks:
+        return AutoAssignResult("claimed")
     if await User.for_login("github", request.pull_request.author) is None:
         await retire(request, "cancelled", "PR author has no Open SWE account")
         return AutoAssignResult("disabled")
@@ -860,6 +871,8 @@ async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssig
         result = await assign(request, choice.login, choice.reason)
         if result.success:
             return AutoAssignResult("picked", choice.login)
+        if result.claimed:
+            return AutoAssignResult("claimed")
         logger.warning(
             "Open SWE's reviewer pick was refused; waking an agent to pick",
             extra={
@@ -1085,6 +1098,8 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         await _schedule(current, "unclaimed", choice.until - datetime.now(UTC))
         return "rotating"
     result = await assign(current, choice.login, choice.reason)
+    if result.claimed:
+        return "claimed"
     if not result.success:
         logger.warning(
             "Open SWE's next reviewer pick was refused",

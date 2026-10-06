@@ -66,6 +66,30 @@ async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -
     )
 
 
+async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
+    from agent.human_review.picking import Pick
+    from agent.human_review.standard import RequestResult, _auto_assign
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(User, "for_login", AsyncMock(return_value=User())),
+        patch(
+            "agent.human_review.standard.choose_reviewer",
+            AsyncMock(return_value=Pick("grace", "owner")),
+        ),
+        patch(
+            "agent.human_review.standard.assign",
+            AsyncMock(return_value=RequestResult(success=False, claimed=True)),
+        ),
+        patch("agent.human_review.standard._wake_picker", AsyncMock()) as wake,
+    ):
+        assert (await _auto_assign(request, asked=True)).status == "claimed"
+    wake.assert_not_awaited()
+
+
 @pytest.mark.parametrize("status", [200, 503])
 async def test_reviewer_removal_sends_delete_body_without_aborting(status: int) -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
