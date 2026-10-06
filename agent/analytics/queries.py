@@ -32,6 +32,7 @@ UsageSort = Literal[
     "merged_prs_per_thread",
     "agent_loc",
     "feedback_given",
+    "prs_reviewed",
 ]
 SortDirection = Literal["asc", "desc"]
 
@@ -465,9 +466,18 @@ WITH runs AS (
       AND f.submitted_at >= :start AND f.submitted_at <= :as_of
       AND (f.withdrawn_at IS NULL OR f.withdrawn_at > :as_of)
     GROUP BY COALESCE(a.person_id, f.user_id)
+), review_totals AS (
+    SELECT d.person_id, count(*) AS prs_reviewed
+    FROM completed_review c
+    JOIN user_identity i ON i.user_id = c.user_id AND i.provider = 'github'
+    JOIN identity_directory d ON lower(d.github_login) = lower(i.login)
+      AND d.workspace_id = :workspace_id
+    WHERE c.reviewed_at >= :start AND c.reviewed_at <= :as_of
+    GROUP BY d.person_id
 ), members AS (
     SELECT person_id FROM run_totals UNION SELECT person_id FROM pr_totals
     UNION SELECT person_id FROM feedback_totals
+    UNION SELECT person_id FROM review_totals
 ), metrics AS (
     SELECT p.person_id, d.github_login, d.email,
         COALESCE(NULLIF(d.display_name, ''), NULLIF(d.github_login, ''),
@@ -495,13 +505,15 @@ WITH runs AS (
         COALESCE(pr.additions, 0) AS additions,
         COALESCE(pr.deletions, 0) AS deletions,
         COALESCE(pr.agent_loc, 0) AS agent_loc,
-        COALESCE(f.feedback_given, 0) AS feedback_given
+        COALESCE(f.feedback_given, 0) AS feedback_given,
+        COALESCE(reviews.prs_reviewed, 0) AS prs_reviewed
     FROM members p
     LEFT JOIN identity_directory d
       ON d.workspace_id = :workspace_id AND d.person_id = p.person_id
     LEFT JOIN run_totals r ON r.person_id = p.person_id
     LEFT JOIN pr_totals pr ON pr.person_id = p.person_id
     LEFT JOIN feedback_totals f ON f.person_id = p.person_id
+    LEFT JOIN review_totals reviews ON reviews.person_id = p.person_id
     LEFT JOIN models m ON m.person_id = p.person_id
     LEFT JOIN efforts e
       ON e.person_id = p.person_id AND e.provider_model_id = m.provider_model_id
@@ -549,6 +561,7 @@ WITH runs AS (
             WHEN 'merged_prs_per_thread' THEN merged_prs_per_thread
             WHEN 'agent_loc' THEN agent_loc::numeric
             WHEN 'feedback_given' THEN feedback_given::numeric
+            WHEN 'prs_reviewed' THEN prs_reviewed::numeric
         END AS numeric_key
     FROM ranked
 ), ordered AS (
@@ -584,6 +597,7 @@ WITH runs AS (
             'avg_invocations_per_thread', avg_invocations_per_thread,
             'prs_opened', prs_opened, 'merged_prs', merged_prs,
             'feedback_given', feedback_given,
+            'prs_reviewed', prs_reviewed,
             'is_top_feedback_contributor', is_top_feedback_contributor,
             'merged_prs_per_thread', merged_prs_per_thread,
             'agent_loc', agent_loc, 'additions', additions, 'deletions', deletions,

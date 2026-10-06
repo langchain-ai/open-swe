@@ -11,6 +11,7 @@ from agent.github.pull_request_status import pull_request_identity
 from agent.github.sandbox_access import workspace_token
 from agent.run_config import RunConfig
 from agent.sandboxes.state import thread_token_repositories
+from agent.tools.sandbox_preference import sandbox_only
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class _SearchResult(BaseModel):
     items: list[_PullRequest]
 
 
+@sandbox_only
 async def search_pull_requests(
     query: str,
     repo: str | None = None,

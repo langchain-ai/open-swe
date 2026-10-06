@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.sandboxes.lifecycle import recreate_sandbox_for_thread
+from agent.sandboxes.lifecycle import SandboxRecreationStopError, recreate_sandbox_for_thread
 from agent.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
 
 
@@ -62,18 +62,19 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists(
             side_effect=persist_metadata,
         ) as update,
     ):
-        result = await recreate_sandbox_for_thread(
-            thread_id,
-        )
-
-    expected_error = (
-        "Stopping the old sandbox timed out after 10 seconds"
-        if isinstance(stop_failure, TimeoutError)
-        else str(stop_failure)
-        if stop_failure is not None
-        else None
-    )
-    assert result == ("sandbox-old", "sandbox-new", expected_error)
+        if stop_failure is None:
+            result = await recreate_sandbox_for_thread(thread_id)
+            assert result == ("sandbox-old", "sandbox-new")
+        else:
+            with pytest.raises(SandboxRecreationStopError) as raised:
+                await recreate_sandbox_for_thread(thread_id)
+            assert raised.value.old_sandbox_id == "sandbox-old"
+            assert raised.value.new_sandbox_id == "sandbox-new"
+            assert str(raised.value) == (
+                "Stopping the old sandbox timed out after 10 seconds"
+                if isinstance(stop_failure, TimeoutError)
+                else str(stop_failure)
+            )
     sandbox_client.stop_sandbox.assert_awaited_once_with("sandbox-old")
     create.assert_awaited_once_with(
         thread_id=thread_id,
@@ -116,7 +117,7 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
             thread_id, workspace_slug="langchainplus", source="base"
         )
 
-    assert result == ("sandbox-old", "sandbox-new", None)
+    assert result == ("sandbox-old", "sandbox-new")
     create.assert_awaited_once_with(
         thread_id=thread_id,
         github_proxy_repositories=None,

@@ -1317,6 +1317,7 @@ export class GhosttyTerminalSurface {
     if (this.selectionScrollTimer !== null) return
     // Dragging past the edge scrolls the viewport and keeps extending the
     // selection into the newly revealed rows, like xterm's drag scroller.
+    // oxlint-disable-next-line invalidations/no-polling -- a scroll timer, not a fetch
     this.selectionScrollTimer = window.setInterval(() => {
       if (this.disposed || this.selectionScrollDelta === 0) return
       this.scrollViewport(this.selectionScrollDelta)

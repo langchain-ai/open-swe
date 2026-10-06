@@ -109,7 +109,7 @@ export function ReviewSettings({
             settings={settings}
             fields={["review_draft_prs"]}
             label="Review Draft PRs"
-            description="Whether Open SWE Review runs on draft PRs. Each user can override it in Profile Settings."
+            description="Whether Open SWE Review runs on draft PRs. Each user can override it in their Git settings."
             control={toggle("review_draft_prs")}
           />
           <TierRow

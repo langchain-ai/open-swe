@@ -186,6 +186,28 @@ def test_format_slack_messages_for_prompt_caps_forwarded_attachment_depth() -> N
     assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 1}" not in formatted
 
 
+def test_format_slack_messages_for_prompt_renders_app_card_attachments() -> None:
+    alert = {
+        "ts": "1.0",
+        "text": "",
+        "bot_id": "B1",
+        "attachments": [
+            {
+                "title": "Triggered: Webhook delivery failures",
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": "6 deliveries failed"}},
+                    {"type": "actions", "elements": [{"type": "button", "text": {"text": "Mute"}}]},
+                ],
+            }
+        ],
+    }
+
+    formatted = format_slack_messages_for_prompt([alert])
+
+    assert "Triggered: Webhook delivery failures\n6 deliveries failed" in formatted
+    assert "Mute" not in formatted
+
+
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:
@@ -683,6 +705,18 @@ async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id
         request.model_copy(update={"event_ts": "1700000000.000300"}), None
     )
     assert not captured["run_create"]["kwargs"]["config"]["configurable"].get("github_login")
+
+
+async def test_bot_started_thread_stays_marked_after_a_person_replies(bot_run):
+    request, threads, _ = bot_run
+    await slack_webhooks._process_slack_mention_impl(request, None)
+    assert threads.metadata["trigger_kind"] == "slack_bot"
+    assert threads.metadata["triggering_bot"] == "T123:B123"
+    assert await webhook_common.upsert_agent_thread_metadata(
+        "mapped-thread", source="slack", user_email="alice@example.com", title=""
+    )
+    assert threads.metadata["trigger_kind"] == "slack_bot"
+    assert threads.metadata["triggering_bot"] == "T123:B123"
 
 
 @pytest.mark.parametrize("block", ["removed", "other-owner", "private", "other-bot", "store-error"])

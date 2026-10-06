@@ -491,3 +491,38 @@ async def test_reused_handles_do_not_transfer_an_immutable_owners_usage(usage_db
             == original
         )
     assert await directory.resolve_person(immutable_person_key=123) == original
+
+
+async def test_review_only_members_are_included_and_sortable(usage_db):
+    await person("reviewer")
+    other = await person("other")
+    await run(other)
+    user_id = uuid4()
+    async with postgres.transaction() as conn:
+        await conn.execute(text("INSERT INTO users (id) VALUES (:id)"), {"id": user_id})
+        await conn.execute(
+            text(
+                "INSERT INTO user_identity (provider, external_id, user_id, login) "
+                "VALUES ('github', '123', :id, 'reviewer')"
+            ),
+            {"id": user_id},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO completed_review (id, user_id, repository_key, pr_number, reviewed_at) "
+                "VALUES (:id, :user_id, 'org/repo', 1, :now), "
+                "(:old_id, :user_id, 'org/repo', 2, :old)"
+            ),
+            {
+                "id": uuid4(),
+                "old_id": uuid4(),
+                "user_id": user_id,
+                "now": NOW,
+                "old": NOW - timedelta(days=8),
+            },
+        )
+    result = await report(sort="prs_reviewed", direction="desc", current_login="reviewer")
+    assert result["total_members"] == 2
+    assert result["rows"][0]["user"]["github_login"] == "reviewer"
+    assert result["rows"][0]["prs_reviewed"] == 1
+    assert result["rows"][1]["prs_reviewed"] == 0
