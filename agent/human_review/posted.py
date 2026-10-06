@@ -55,6 +55,8 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
         logger.warning("Could not read a pull request posted for review", extra=extra)
         return
     pull_request, details = recorded
+    if await User.for_login("github", details.author) is None:
+        return
     if details.state != "open":
         return
     try:
