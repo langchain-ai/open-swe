@@ -26,10 +26,11 @@ from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Self
 
 from langgraph.config import get_config
-from pydantic import BaseModel, BeforeValidator, ConfigDict, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from agent.invocation import resolve_invocation_id
+from agent.openai_responses.client_tools import ClientToolSpec
 from agent.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
@@ -83,15 +84,6 @@ class GitHubPROrIssueRef(BaseModel):
     repo: Repo | None = None
 
 
-class AutomationSlackNotification(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    channel_id: str = ""
-    mode: str = ""
-    schedule_id: str = ""
-    schedule_name: str | None = None
-
-
 class RunConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -102,6 +94,7 @@ class RunConfig(BaseModel):
     prepare_run_id: str | None = None
     invocation_started_at: str | None = None
     offload_conversation: bool = False
+    client_tools: list[ClientToolSpec] = Field(default_factory=list)
     source: str | None = None
     task: str | None = None
     environment: str | None = None
@@ -162,10 +155,14 @@ class RunConfig(BaseModel):
     admin_thread: bool | None = None
     stop_summary: bool | None = None
     slack_ask: bool | None = None
+    slack_kickoff_eligible: bool | None = None
     # First run of a thread broken out from another Slack thread.
     slack_breakout: bool | None = None
     # Slash command callback the `/oswe` acknowledgement is replaced through.
     slack_ask_response_url: str | None = None
+    # `@Open SWE /btw`: the Slack thread the one public answer is posted in.
+    slack_by_the_way_thread_ts: str | None = None
+    slack_by_the_way_message_ts: str | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 
@@ -190,14 +187,12 @@ class RunConfig(BaseModel):
     # Eval harness
     eval: bool | None = None
     reviewer_eval: bool | None = None
-    reviewer_eval_cap: Int | None = None
     reviewer_eval_severity_threshold: str | None = None
 
     # Background jobs
     watch_key: str | None = None
     schedule_id: str | None = None
     background_task_completion: bool | None = None
-    automation_slack_notification: AutomationSlackNotification | None = None
 
     @classmethod
     def parse(cls, raw: Any) -> Self:

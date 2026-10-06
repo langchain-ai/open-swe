@@ -157,7 +157,7 @@ async function reportCheck(
 function card(page: Page) {
   return page
     .locator(".msg.bot")
-    .filter({ hasText: /Expedited review/i })
+    .filter({ hasText: /Expedited review requested|Expedited review:/i })
     .last();
 }
 
@@ -248,6 +248,26 @@ test.describe("Expedited Slack review", () => {
     // appears when rendering or upload failed, so asserting the image keeps this
     // test on the real path.
     await page.goto("/mock/slack");
+    await expect(card(page)).toHaveCount(0);
+    const ephemeralResponse = await request.get("/mock/slack/ephemerals");
+    const ephemerals = (await ephemeralResponse.json()) as Array<{
+      user: string;
+      text: string;
+    }>;
+    expect(
+      ephemerals.some(
+        (message) =>
+          message.user === author!.slack_id &&
+          message.text.includes("ready for review"),
+      ),
+    ).toBe(false);
+    expect(
+      ephemerals.some((message) => message.user === reviewer.slack_id),
+    ).toBe(false);
+    await page.locator("#user").selectOption(author!.slack_id);
+    await page
+      .locator(`[data-channel-id="D_${author!.slack_id.replace(/^U_/, "")}"]`)
+      .click();
     await expect(card(page)).toContainText(/Draft\./);
     await expect(
       card(page).getByRole("button", { name: "Approve" }),
@@ -263,7 +283,10 @@ test.describe("Expedited Slack review", () => {
 
     // 3. Only the author can mark it ready. Their click undrafts the PR and
     //    opens the card for approval; it is not an approval.
-    await clickAs(page, author!.slack_id, "Mark ready for review");
+    await expect(
+      card(page).getByRole("button", { name: "Mark ready for review" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Mark ready for review" }).click();
     await expect
       .poll(async () => (await latest(request)).awaiting_ready, {
         timeout: 60_000,
@@ -271,6 +294,23 @@ test.describe("Expedited Slack review", () => {
       .toBe(false);
     expect((await pull(request)).draft).toBe(false);
     expect((await latest(request)).approvers).toEqual([]);
+    await expect(card(page)).toHaveCount(0);
+    await page.goto("/mock/slack");
+    await card(page)
+      .getByRole("button", { name: /Broadcast in #/ })
+      .click();
+    await expect
+      .poll(
+        async () => {
+          const response = await request.get("/mock/slack/messages");
+          const messages = (await response.json()) as Array<{
+            reply_broadcast?: boolean;
+          }>;
+          return messages.some((message) => message.reply_broadcast);
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
     await page.goto("/mock/slack");
     await expect(
       card(page).getByRole("button", { name: "Approve" }),
@@ -356,5 +396,14 @@ test.describe("Expedited Slack review", () => {
     await expect(card(page)).toContainText("Expedited review: merged");
     await expect(card(page)).not.toContainText("Approved by");
     await shootCard(page, "merged");
+    await page.locator("#user").selectOption(author!.slack_id);
+    await page
+      .locator(`[data-channel-id="D_${author!.slack_id.replace(/^U_/, "")}"]`)
+      .click();
+    await expect(
+      page
+        .locator(".msg.bot")
+        .filter({ hasText: /Expedited review requested|Expedited review:/i }),
+    ).toHaveCount(0);
   });
 });

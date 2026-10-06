@@ -22,6 +22,7 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
 from agent.sandboxes.tool_data import ToolContext
 from agent.sandboxes.tool_runtime import ToolSurface
+from tests.conftest import FakeStore
 
 TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
 
@@ -67,6 +68,9 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
+    monkeypatch.setattr(tool_access, "get_client", lambda: client)
     issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
     assert issued is not None
     url, token = issued
@@ -76,9 +80,18 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     )
     assert claims["thread_id"] == "thread-a"
     assert claims["sandbox_id"] == "sandbox-a"
-    client = MagicMock()
-    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
-    monkeypatch.setattr(tool_access, "get_client", lambda: client)
+    client.threads.get.return_value = {
+        "metadata": {"sandbox_id": "sandbox-a", tool_access.SANDBOX_HOST_THREAD_KEY: "thread-a"}
+    }
+    guest = await tool_access.issue_tool_access("thread-guest", "sandbox-a")
+    assert guest is not None
+    assert (
+        jwt.decode(
+            guest[1], TEST_SIGNING_KEY, algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
+        )["thread_id"]
+        == "thread-a"
+    )
+    client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-a"}}
     assert (await tool_access.authenticate_tool_access(token)).thread_id == "thread-a"
     client.threads.get.return_value = {"metadata": {"sandbox_id": "sandbox-b"}}
     with pytest.raises(HTTPException, match="Invalid sandbox capability"):
@@ -87,15 +100,24 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
         await tool_access.authenticate_tool_access("x" * 64)
 
 
+@pytest.mark.parametrize("enabled", [False, True])
 async def test_proxy_refresh_preserves_tools_and_custom_rules(
     capability_settings: None,
     monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    enabled: bool,
 ) -> None:
+    from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
     from agent.sandboxes.providers import langsmith
+
+    await upsert_instance_settings(WorkspaceSettingsUpdate(sandbox_openai_enabled=enabled))
 
     monkeypatch.setenv("LANGSMITH_API_KEY", "test-sandbox-api-key")
     patch_proxy = AsyncMock()
     monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
+    monkeypatch.setattr(tool_access, "get_client", lambda: client)
     custom = {"name": "custom", "match_hosts": ["custom.example.test"]}
     await langsmith.configure_sandbox_proxy(
         "sandbox-a",
@@ -108,9 +130,15 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     rule = next(rule for rule in rules if rule["name"] == tool_access.TOOLS_RULE)
     assert rule["match_hosts"] == ["agent.example.test"]
     assert rule["headers"][0]["type"] == "opaque"
-    assert rule["env_vars"] == {
-        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools"
+    expected_env = {
+        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools",
     }
+    if enabled:
+        expected_env.update(
+            OPENAI_BASE_URL="https://agent.example.test/dashboard/api/sandbox-openai/v1",
+            OPENAI_API_KEY=tool_access.OPENAI_API_KEY_PLACEHOLDER,
+        )
+    assert rule["env_vars"] == expected_env
     assert "thread-a" not in str(rule) and "sandbox-a" not in str(rule)
     first_token = rule["headers"][0]["value"]
     await langsmith.configure_sandbox_proxy(

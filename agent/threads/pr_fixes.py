@@ -18,7 +18,7 @@ from agent.prompts import prompt
 from agent.threads.access import _ensure_dashboard_github_token
 from agent.threads.runs import (
     _build_dashboard_configurable,
-    _create_dashboard_thread_record,
+    create_dashboard_thread_record,
 )
 from agent.threads.summary import _assert_thread_postable
 from agent.utils.json_types import thread_metadata
@@ -59,6 +59,8 @@ class PullRequestThreadRun(BaseModel):
 
 class _PullRequestIntentBase(BaseModel):
     dispatches_run: ClassVar[bool]
+    # Distinct content per request, so a busy thread gets it queued instead of dropped.
+    queues_behind_running: ClassVar[bool] = False
 
     def prompt(self, url: str) -> str:
         raise NotImplementedError
@@ -80,24 +82,50 @@ class OpenThreadIntent(_PullRequestIntentBase):
         return self.title
 
 
+class MessageIntent(_PullRequestIntentBase):
+    intent: Literal["message"]
+    title: str = Field(min_length=1, max_length=1000)
+    message: str = Field(min_length=1, max_length=10_000)
+
+    dispatches_run: ClassVar[bool] = True
+    queues_behind_running: ClassVar[bool] = True
+
+    def prompt(self, url: str) -> str:
+        return prompt("runs/pull-request-message", url=url, message=self.message)
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return self.title
+
+
+FixScope = Literal["conflicts", "checks"]
+
+# The snapshot carries only the fields its scope concerns, so a conflict fix is
+# never handed failing checks to chase, nor a check fix the merge state.
+_SNAPSHOT_EXCLUDES: dict[FixScope, set[str]] = {
+    "conflicts": {"ci", "failing_checks", "pending_checks", "review_decision"},
+    "checks": {"mergeable", "merge_state", "review_decision"},
+}
+
+
 class FixIntent(_PullRequestIntentBase):
     intent: Literal["fix"]
+    scope: FixScope
     context: PullRequestFixContext | None = None
 
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        text = prompt("runs/pull-request-fix", url=url)
+        text = prompt("runs/pull-request-fix", url=url, scope=self.scope)
         if self.context is None:
             return text
         snapshot = prompt(
             "runs/pull-request-fix-context",
-            snapshot=self.context.model_dump_json(indent=2),
+            snapshot=self.context.model_dump_json(indent=2, exclude=_SNAPSHOT_EXCLUDES[self.scope]),
         )
         return f"{text}\n\n{snapshot}"
 
     def thread_title(self, full_name: str, number: int) -> str:
-        return f"Fix {full_name}#{number}"
+        return f"Fix {self.scope} on {full_name}#{number}"
 
 
 class AddressCommentsIntent(_PullRequestIntentBase):
@@ -133,8 +161,66 @@ class AddressCommentIntent(_PullRequestIntentBase):
         return f"Address comment on {full_name}#{number}"
 
 
+class LineComment(BaseModel):
+    """A comment on diff lines that lives only in the agent's prompt, not on GitHub."""
+
+    kind: Literal["line"]
+    path: str = Field(min_length=1, max_length=1000)
+    line: int = Field(ge=1)
+    side: Literal["LEFT", "RIGHT"] = "RIGHT"
+    start_line: int | None = Field(default=None, ge=1)
+    body: str = Field(min_length=1, max_length=10_000)
+
+    def prompt_values(self) -> dict[str, str]:
+        low = min(self.start_line or self.line, self.line)
+        return {
+            "path": self.path,
+            "lines": f"line {self.line}" if low == self.line else f"lines {low}-{self.line}",
+            "side": "old" if self.side == "LEFT" else "new",
+            "body": self.body.strip(),
+        }
+
+
+class ThreadComment(BaseModel):
+    kind: Literal["thread"]
+    comment_url: str = Field(min_length=1, max_length=1000)
+    instructions: str = Field(default="", max_length=10_000)
+
+
+class CommentBatchIntent(_PullRequestIntentBase):
+    intent: Literal["comments"]
+    comments: list[Annotated[LineComment | ThreadComment, Field(discriminator="kind")]] = Field(
+        min_length=1, max_length=100
+    )
+
+    dispatches_run: ClassVar[bool] = True
+    queues_behind_running: ClassVar[bool] = True
+
+    def prompt(self, url: str) -> str:
+        threads = [c for c in self.comments if isinstance(c, ThreadComment)]
+        if any(not thread.comment_url.startswith(f"{url}#") for thread in threads):
+            raise HTTPException(422, "comment does not belong to this pull request")
+        return prompt(
+            "runs/pull-request-comment-batch",
+            url=url,
+            threads=[
+                {"comment_url": t.comment_url, "instructions": t.instructions.strip()}
+                for t in threads
+            ],
+            lines=[c.prompt_values() for c in self.comments if isinstance(c, LineComment)],
+        )
+
+    def thread_title(self, full_name: str, number: int) -> str:
+        return f"Address comments on {full_name}#{number}"
+
+
 PullRequestThreadIntent = Annotated[
-    OpenThreadIntent | FixIntent | AddressCommentsIntent | AddressCommentIntent,
+    OpenThreadIntent
+    | MessageIntent
+    | FixIntent
+    | AddressCommentsIntent
+    | AddressCommentIntent
+    | CommentBatchIntent,
     Field(discriminator="intent"),
 ]
 
@@ -210,7 +296,7 @@ async def _find_or_create_pr_thread(
     candidates = await _find_pr_threads(owner, repo, number, login, email)
     if candidates:
         return candidates[0]["thread_id"]
-    thread = await _create_dashboard_thread_record(
+    thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
         login=login,
         email=email,
@@ -284,7 +370,8 @@ async def start_pull_request_thread(
         _assert_thread_postable(thread_metadata(current), login, email)
         if not intent.dispatches_run:
             return PullRequestThreadRun(thread_id=thread_id)
-        if current.get("status") == "busy":
+        busy = current.get("status") == "busy"
+        if busy and not intent.queues_behind_running:
             return PullRequestThreadRun(thread_id=thread_id, already_running=True)
         async with agent_thread_pr_state_lock(client, thread_id):
             await client.threads.update(
@@ -305,7 +392,7 @@ async def start_pull_request_thread(
             client=client,
             multitask_strategy="enqueue",
         )
-        return PullRequestThreadRun(thread_id=thread_id)
+        return PullRequestThreadRun(thread_id=thread_id, already_running=busy)
 
 
 async def dispatch_pull_request_prompt(

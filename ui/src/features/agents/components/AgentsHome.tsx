@@ -2,11 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 
-import type {
-  DesktopLocalThreadSummary,
-  DesktopProjectRef,
-  DesktopWorkspaceMode,
-} from "@/desktop"
+import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
 import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
 import type { CreateAgentThreadVariables } from "@/features/agents/lib/queries"
 import {
@@ -35,10 +31,7 @@ import {
   useModelOptions,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import {
-  ensureDesktopModelCredential,
-  localThreadKeys,
-} from "@/features/agents/lib/desktopLocal"
+import { localThreadKeys } from "@/features/agents/lib/desktopLocal"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
 import { agentsApi } from "@/features/agents/lib/api"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -357,6 +350,10 @@ export function AgentsHome({
   }
 
   const handleSelectLocalRepo = (cwd: string) => {
+    if (cwd !== localRepoPath) {
+      setLocalRepoBranch(null)
+      setLocalRepoBranches([])
+    }
     setLocalRepoPath(cwd)
     setRunTargetOverride("local")
     window.localStorage.setItem(LAST_LOCAL_REPO_KEY, cwd)
@@ -428,114 +425,53 @@ export function AgentsHome({
     void requestNotificationPermission().then((perm) => {
       if (perm === "granted") setNotificationsPref(true)
     })
-    if (runTarget === "local") {
-      const desktop = window.openSweDesktop
-      const checkout = localRepos.find(
-        (candidate) => candidate.cwd === localRepoPath
-      )
-      if (!desktop || !checkout) {
-        setLocalError(
-          "Choose or add a repository from This Mac before sending."
-        )
-        return
-      }
-      const cwd = checkout.cwd
-      const draft = {
-        prompt,
-        images,
-        model_id: activeSelection?.modelId ?? null,
-        effort: activeSelection?.effort ?? null,
-      }
-      setSubmittedDraft(draft)
-      setLocalError(null)
-      window.localStorage.setItem(LAST_LOCAL_REPO_KEY, cwd)
-      void (async () => {
-        try {
-          await refreshLocalRepoBranch()
-          const credentialError = await ensureDesktopModelCredential(
-            activeSelection?.modelId
-          )
-          if (credentialError) {
-            resetPendingSubmit()
-            setLocalError(credentialError)
-            return
-          }
-          const managedSkills = cloudEnabled
-            ? await skills.refetch()
-            : { personal: [], organization: [] }
-          const localSession = await desktop.startLocalThread({
-            cwd,
-            workspaceMode: localWorkspaceMode,
-            baseBranch: localRepoBranch,
-            prompt,
-            images,
-            skills: [
-              ...new Map(
-                [...managedSkills.personal, ...managedSkills.organization].map(
-                  (skill) => [skill.name, skill]
-                )
-              ).values(),
-            ],
-            modelId: activeSelection?.modelId,
-            effort: activeSelection?.effort,
-          })
-          queryClient.setQueryData(
-            localThreadKeys.detail(localSession.id),
-            localSession
-          )
-          queryClient.setQueryData<Array<DesktopLocalThreadSummary>>(
-            localThreadKeys.all,
-            (current = []) => [
-              localSession,
-              ...current.filter((thread) => thread.id !== localSession.id),
-            ]
-          )
-          await navigate({
-            to: "/agents/local/$sessionId",
-            params: { sessionId: localSession.id },
-          })
-        } catch (error) {
-          resetPendingSubmit()
-          setLocalError(
-            error instanceof Error
-              ? error.message
-              : "Could not start the local Open SWE agent"
-          )
-        }
-      })()
+    const desktop = window.openSweDesktop
+    const localCheckout =
+      runTarget === "local"
+        ? localRepos.find((candidate) => candidate.cwd === localRepoPath)
+        : undefined
+    if (runTarget === "local" && (!desktop || !localCheckout)) {
+      setLocalError("Choose or add a repository from This Mac before sending.")
       return
     }
     // Minted here so the seeded thread, the graph's HumanMessage and the
     // transcript row all carry the same message id.
     const messageId = crypto.randomUUID()
-    const draft = {
-      prompt,
-      images,
-      client_message_id: messageId,
-      repo,
-      visibility,
-      repo_explicitly_none: repoOverride === null,
-      model_id: activeSelection?.modelId ?? null,
-      effort: activeSelection?.effort ?? null,
-    }
+    // A "This Mac" thread's repo is its checkout's, named once it is prepared,
+    // and its transcript is its owner's: nobody else can run it.
+    const draft = localCheckout
+      ? {
+          prompt,
+          images,
+          client_message_id: messageId,
+          visibility: "private" as const,
+          model_id: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+        }
+      : {
+          prompt,
+          images,
+          client_message_id: messageId,
+          repo,
+          visibility,
+          repo_explicitly_none: repoOverride === null,
+          model_id: activeSelection?.modelId ?? null,
+          effort: activeSelection?.effort ?? null,
+        }
     setSubmittedDraft(draft)
     setLocalError(null)
 
     const configurable: Record<string, unknown> =
       modelConfigurable(activeSelection)
-    if (repo) configurable.repo = repo
-    if (repoOverride === null) configurable.repo_explicitly_none = true
-    configurable.thread_type =
-      visibility === "private" ? "private" : "workspace"
-    if (selectedWorkspace) configurable.workspace = selectedWorkspace
-
-    const handleCloudSubmitError = (error: unknown) => {
-      resetPendingSubmit()
-      setLocalError(
-        error instanceof Error
-          ? error.message
-          : "Could not start the cloud Open SWE agent"
-      )
+    if (localCheckout) {
+      window.localStorage.setItem(LAST_LOCAL_REPO_KEY, localCheckout.cwd)
+      configurable.thread_type = "private"
+    } else {
+      if (repo) configurable.repo = repo
+      if (repoOverride === null) configurable.repo_explicitly_none = true
+      configurable.thread_type =
+        visibility === "private" ? "private" : "workspace"
+      if (selectedWorkspace) configurable.workspace = selectedWorkspace
     }
 
     const threadId = crypto.randomUUID()
@@ -543,7 +479,23 @@ export function AgentsHome({
     pendingRun.current = pending
     setPendingThreadId(threadId)
     void (async () => {
+      let prepared = false
       try {
+        if (localCheckout && desktop) {
+          await refreshLocalRepoBranch()
+          const local = await desktop.prepareLocalThread({
+            threadId,
+            cwd: localCheckout.cwd,
+            workspaceMode: localWorkspaceMode,
+            baseBranch: localRepoBranch,
+          })
+          prepared = true
+          // Awaited so the thread route already knows it is This Mac's.
+          await queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+          configurable.sandbox_bridge_id = local.bridgeId
+          if (local.repo) configurable.repo = local.repo
+          else configurable.repo_explicitly_none = true
+        }
         await startRun(
           threadId,
           runStartCommand({
@@ -553,16 +505,35 @@ export function AgentsHome({
           })
         )
       } catch (error) {
+        // Nothing in the cloud refers to the checkout this prepared.
+        if (prepared)
+          void desktop
+            ?.discardLocalThread(threadId)
+            .catch((cause: unknown) =>
+              console.warn("Could not discard an unstarted local thread", cause)
+            )
         // A run that never started has nothing left to cancel, and the page
         // already went back to the empty composer when Stop was pressed.
-        if (!pending.stopRequested) handleCloudSubmitError(error)
+        if (!pending.stopRequested) {
+          resetPendingSubmit()
+          setLocalError(
+            error instanceof Error
+              ? error.message
+              : "Could not start the Open SWE agent"
+          )
+        }
         return
       }
       // Seeded so the thread route renders the prompt immediately; the real
       // record lands with the next detail fetch.
-      const thread: AgentThread = optimisticThread(threadId, draft, {
-        recorded: session.data?.transcript_recording === true,
-      })
+      const thread: AgentThread = {
+        ...optimisticThread(threadId, draft, {
+          recorded: session.data?.transcript_recording === true,
+        }),
+        // So the seeded thread already reads as This Mac, not Cloud, until
+        // the server's record replaces it.
+        ...(localCheckout ? { sandboxBridgeClient: "desktop" as const } : {}),
+      }
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
       seedAgentThreadLists(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
@@ -632,7 +603,7 @@ export function AgentsHome({
           )}
           <AgentPromptBar
             activeRun={
-              optimisticDraftThread && runTarget === "cloud"
+              optimisticDraftThread
                 ? { threadId: pendingThreadId ?? "", running: true }
                 : undefined
             }
@@ -640,11 +611,7 @@ export function AgentsHome({
             compact
             placeholder="Do anything"
             onSubmit={handleSubmit}
-            onStop={
-              optimisticDraftThread && runTarget === "cloud"
-                ? stopPendingSubmit
-                : undefined
-            }
+            onStop={optimisticDraftThread ? stopPendingSubmit : undefined}
             disabled={Boolean(submittedDraft)}
             busy={Boolean(optimisticDraftThread)}
             models={models}

@@ -34,7 +34,6 @@ from langchain_core.language_models import BaseChatModel
 
 from agent.dashboard.options import (
     SUPPORTED_MODEL_IDS,
-    canonical_model_pair,
     gate_fable_model,
     model_supports_effort,
 )
@@ -47,7 +46,6 @@ from agent.middleware import (
     SanitizeFireworksMessagesMiddleware,
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
-    SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
 )
 from agent.middleware.prepare_run import PrepareRunState
@@ -151,9 +149,6 @@ async def _resolve_chat_model(cfg: RunConfig) -> tuple[str, str]:
         and model_supports_effort(model_id, effort)
     ):
         return model_id, effort
-    canonical = canonical_model_pair(model_id, effort)
-    if canonical is not None:
-        return canonical
     # Workspace review-chat default, which itself inherits the Agent default if unset.
     return (await cached_workspace_settings(cfg.workspace_slug)).default_model("chat")
 
@@ -199,7 +194,6 @@ async def get_chat_agent(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 PrepareChatRunMiddleware(config=config),
-                SanitizeToolInputsMiddleware(),
                 ModelCallLimitMiddleware(run_limit=CHAT_MODEL_CALL_LIMIT, exit_behavior="end"),
                 ToolErrorMiddleware(),
                 ExcludeToolsMiddleware(excluded=_EXCLUDED_TOOLS),

@@ -1,7 +1,8 @@
-"""Read or set a repository's approval mode on private admin surfaces."""
+"""Read approval modes privately or change them through authorized admin writes."""
 
 from typing import Literal
 
+from agent.audit_logs.tools import audit_tool
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.review.approvals import fetch_approvals_md
 from agent.review.styles import (
@@ -18,6 +19,7 @@ _READ = Policy(trusted="admin_surface", actor="admin")
 _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "mode"))
 
 
+@audit_tool(skip_read=True)
 @access(_WRITE, per_call=lambda args: _WRITE if args.get("action") == "set" else _READ)
 async def manage_review_approval_mode(
     action: Literal["read", "set"],

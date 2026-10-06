@@ -23,7 +23,6 @@ from uuid import UUID
 from langchain_core.language_models import BaseChatModel
 from langsmith.schemas import Example, Run
 
-from agent.review.findings import REVIEW_FINDING_CAP
 from agent.utils.gateway import gateway_overrides
 from agent.utils.model import make_model
 
@@ -298,14 +297,6 @@ def _is_medium_plus(comment: ReviewComment) -> bool:
     return comment.get("severity", "").casefold() in {"medium", "high", "critical"}
 
 
-def _recall_at_cap(tp: int, golden_count: int, cap: int) -> tuple[float, float]:
-    if golden_count == 0:
-        return 0.0, 0.0
-    reachable_goldens = min(cap, golden_count)
-    recall_at_cap = min(tp, reachable_goldens) / reachable_goldens if reachable_goldens else 0.0
-    return recall_at_cap, reachable_goldens / golden_count
-
-
 def judge_match(run: Run, example: Example) -> dict[str, Any]:
     """Judge every pair, then choose the strongest maximum-cardinality matching."""
     raw_candidates = _coerce_comments((run.outputs or {}).get("comments"))
@@ -385,7 +376,6 @@ def judge_match(run: Run, example: Example) -> dict[str, Any]:
             if not any(pair[0] == index for pair in selected)
         ],
     }
-    recall_at_cap, recall_ceiling_at_cap = _recall_at_cap(tp, len(goldens), REVIEW_FINDING_CAP)
     profile_results: list[dict[str, Any]] = []
     for name, counts in profiles.items():
         profile_precision, profile_recall = _precision_recall(counts)
@@ -409,8 +399,6 @@ def judge_match(run: Run, example: Example) -> dict[str, Any]:
             {"key": "n_candidates_raw", "score": len(raw_candidates)},
             {"key": "n_duplicates", "score": duplicate_count},
             {"key": "n_goldens", "score": len(goldens)},
-            {"key": "recall_at_cap", "score": recall_at_cap},
-            {"key": "recall_ceiling_at_cap", "score": recall_ceiling_at_cap},
             {"key": "medium_plus_f1", "score": medium_f1},
             {"key": "medium_plus_precision", "score": medium_precision},
             {"key": "medium_plus_recall", "score": medium_recall},

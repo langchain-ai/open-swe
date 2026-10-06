@@ -5,19 +5,26 @@ import re
 from dataclasses import dataclass
 
 from agent.slack import webhook as service
+from agent.slack.blocks import block_payload, section
+from agent.slack.breakout_destination import resolve_breakout_destination
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
+from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
 from agent.slack.client import (
+    append_slack_web_link_footer,
     get_active_slack_thread,
     post_slack_ephemeral_message,
     post_slack_top_level_message_with_ts,
-    strip_bot_mention,
+    update_slack_message,
 )
+from agent.slack.http import SlackRequestError
 from agent.slack.move import move_slack_thread
 from agent.slack.request import SlackRequest
+from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks import common
+from agent.workspaces.store import parse_workspace_tag
 
 logger = logging.getLogger(__name__)
 
@@ -32,27 +39,39 @@ class BreakoutCommand:
     instruction: str
     channel: str = ""
     channel_id: str = ""
+    prior_text: str = ""
 
     @classmethod
     def parse(cls, text: str, bot_user_id: str) -> BreakoutCommand | None:
-        """None when the message is not `/breakout`; a leading `#word` names the destination."""
-        clean = strip_bot_mention(text, bot_user_id, bot_username=common.SLACK_BOT_USERNAME)
-        match = _COMMAND_RE.fullmatch(clean)
+        """Parse a command immediately after the bot mention, or a bare command."""
+        mentions = [f"<@{bot_user_id}>"] if bot_user_id else []
+        if common.SLACK_BOT_USERNAME:
+            mentions.append(f"@{common.SLACK_BOT_USERNAME}")
+        match = None
+        prior_text = ""
+        if mentions:
+            mention_re = re.compile("|".join(re.escape(mention) for mention in mentions))
+            for mention in mention_re.finditer(text):
+                candidate = _COMMAND_RE.fullmatch(text[mention.end() :].strip())
+                if candidate is not None:
+                    match = candidate
+                    prior_text = text[: mention.start()].strip()
+                    break
+        if match is None:
+            match = _COMMAND_RE.fullmatch(text.strip())
         if match is None:
             return None
         rest = (match.group("instruction") or "").strip()
         parts = rest.split(maxsplit=1)
         if not parts or not parts[0].startswith(("#", "<#")):
-            return cls(instruction=rest)
-        mention = _CHANNEL_MENTION_RE.fullmatch(parts[0])
+            return cls(instruction=rest, prior_text=prior_text)
+        channel = _CHANNEL_MENTION_RE.fullmatch(parts[0])
         return cls(
             instruction=parts[1] if len(parts) > 1 else "",
             channel=parts[0],
-            channel_id=mention["channel_id"] if mention else "",
+            channel_id=channel["channel_id"] if channel else "",
+            prior_text=prior_text,
         )
-
-    def target_channel(self, request: SlackRequest) -> str:
-        return self.channel_id or request.channel_id
 
 
 def _title(instruction: str) -> str:
@@ -142,23 +161,67 @@ async def _start(
     instruction: str,
     target: str,
     repo: common.SlackRepoResolution | None,
+    prior_text: str = "",
+    *,
+    inherited_workspace: str | None = None,
 ) -> None:
+    if (
+        target != request.channel_id
+        and request.thread_id
+        and await common.thread_exists(request.thread_id)
+    ):
+        metadata = thread_metadata(await langgraph_client().threads.get(request.thread_id))
+        if common.thread_is_private(metadata):
+            await _tell_sender(request, "Private threads cannot be broken out to another channel.")
+            return
     heading = f"`/breakout`: {_title(instruction)}"
-    new_ts, slack_error = await post_slack_top_level_message_with_ts(
-        target,
-        await _root_text(request, heading),
-        unfurl_links=False,
-        unfurl_media=False,
-    )
-    if not new_ts:
-        logger.warning("Slack breakout root post failed", extra={"slack_error": slack_error})
+    root_text = await _root_text(request, heading)
+    try:
+        new_ts = await post_slack_top_level_message_with_ts(
+            target,
+            root_text,
+            blocks=block_payload(
+                [
+                    section(root_text),
+                    *await origin_footer(
+                        request.thread_id or "", (request.channel_id, request.thread_ts)
+                    ),
+                ]
+            ),
+            unfurl_links=False,
+            unfurl_media=False,
+        )
+    except SlackRequestError as exc:
+        logger.warning("Slack breakout root post failed", extra={"error": exc.code})
         await _tell_sender(
             request,
-            _post_failure(slack_error, target, "Could not start a breakout thread; try again."),
+            _post_failure(exc.code, target, "Could not start a breakout thread; try again."),
         )
         return
     await _mark_done(request, target, new_ts)
     thread_id = await common.resolve_slack_thread_id(langgraph_client(), target, new_ts)
+    web_url = dashboard_thread_url(thread_id)
+    if web_url:
+        try:
+            await update_slack_message(
+                target,
+                new_ts,
+                append_slack_web_link_footer(root_text, web_url),
+                blocks=block_payload(
+                    [
+                        section(append_slack_web_link_footer(root_text, web_url)),
+                        *await origin_footer(
+                            request.thread_id or "", (request.channel_id, request.thread_ts)
+                        ),
+                    ]
+                ),
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+        except SlackRequestError as exc:
+            logger.warning(
+                "Slack breakout header web link update failed", extra={"slack_error": exc.code}
+            )
     moved_channel = target != request.channel_id
     if moved_channel:
         repo = await common.get_slack_repo_config(
@@ -176,6 +239,8 @@ async def _start(
                 "text": instruction,
                 "context_channel_id": request.channel_id,
                 "context_thread_ts": request.thread_ts,
+                "breakout_root_suffix": root_text[len(heading) :],
+                "prior_message_text": prior_text,
                 **(
                     {"channel_context": None, "concierge_mode": False, "reply_thread_ts": ""}
                     if moved_channel
@@ -184,6 +249,7 @@ async def _start(
             }
         ),
         repo,
+        inherited_workspace=inherited_workspace,
     )
 
 
@@ -199,7 +265,18 @@ async def process_slack_breakout(
                 "autocomplete: `/breakout #channel`.",
             )
             return
-        target = command.target_channel(request)
+        workspace = (
+            await common.get_thread_workspace(request.thread_id) if request.thread_id else None
+        )
+        destination = await resolve_breakout_destination(
+            request.channel_id,
+            command.channel_id,
+            workspace=workspace,
+            repo=repo.routing_repo if repo else None,
+            tag=parse_workspace_tag(command.instruction)[0],
+            login=await service.slack_login(request.user_id) if request.user_id else None,
+        )
+        target = destination.channel_id
         for channel_id in dict.fromkeys((request.channel_id, target)):
             channel = await SlackChannel.load(channel_id, use_cache=False)
             if channel is None or not channel.public:
@@ -210,7 +287,14 @@ async def process_slack_breakout(
                 )
                 return
         if command.instruction:
-            await _start(request, command.instruction, target, repo)
+            await _start(
+                request,
+                command.instruction,
+                target,
+                repo,
+                command.prior_text,
+                inherited_workspace=destination.workspace if not command.channel_id else None,
+            )
         else:
             await _move(request, target)
     except Exception:

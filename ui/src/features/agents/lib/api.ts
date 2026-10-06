@@ -1,11 +1,11 @@
 import type {
   AgentPullRequestContextResponse,
+  ThreadFixScope,
   AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentThread,
   Message,
-  SlackNotificationMode,
-  AutomationTrigger,
+  AutomationTriggerConfig,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import type { WorkspaceFileIndex, WorkspacePath } from "./workspaceFiles"
@@ -20,7 +20,7 @@ import {
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
-export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
+export type { AgentSchedule, AgentThread, Message }
 
 export class AgentsApiError extends DashboardRequestError {
   constructor(status: number, message: string, requestId?: string) {
@@ -31,12 +31,9 @@ export class AgentsApiError extends DashboardRequestError {
 
 export interface ScheduleCreateRequest {
   prompt: string
-  schedule?: string | null
-  trigger?: AutomationTrigger
+  /** Every trigger, any of which fires the automation; replaces them all on update. */
+  triggers?: Array<AutomationTriggerConfig>
   name?: string | null
-  repo?: string | null
-  slack_channel_id?: string | null
-  slack_notification_mode?: SlackNotificationMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
@@ -46,12 +43,9 @@ export interface ScheduleCreateRequest {
 
 export interface ScheduleUpdateRequest {
   prompt?: string | null
-  schedule?: string | null
-  trigger?: AutomationTrigger
+  /** Every trigger, any of which fires the automation; replaces them all on update. */
+  triggers?: Array<AutomationTriggerConfig>
   name?: string | null
-  repo?: string | null
-  slack_channel_id?: string | null
-  slack_notification_mode?: SlackNotificationMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
@@ -111,7 +105,7 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
-export type ThreadScope = "all" | "interactive" | "automation"
+export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
@@ -125,6 +119,8 @@ export interface ThreadsPageParams {
   q?: string
   scope?: ThreadScope
   automationId?: string
+  /** An allowed Slack bot's `team_id:bot_id`, with `scope: "bot"`. */
+  bot?: string
   repo?: string
   ownerless?: boolean
   sortBy?: ThreadSortBy
@@ -241,6 +237,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.q) search.set("q", params.q)
   if (params.scope) search.set("scope", params.scope)
   if (params.automationId) search.set("automation_id", params.automationId)
+  if (params.bot) search.set("bot", params.bot)
   if (params.repo) search.set("repo", params.repo)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
@@ -316,6 +313,11 @@ export const agentsApi = {
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>
     agentsRequest<ThreadsPage>(`/threads/page${buildThreadsPageQuery(params)}`),
+  shareThreadWithWorkspace: (threadId: string) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/share-to-workspace`,
+      { method: "POST" }
+    ),
   continueThreadPrivately: (threadId: string) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/continue-private`,
@@ -385,11 +387,13 @@ export const agentsApi = {
   getThreadPullRequestContext: (
     threadId: string,
     repoFullName: string,
-    number: number
+    number: number,
+    scope: ThreadFixScope
   ) => {
     const query = new URLSearchParams({
       repo_full_name: repoFullName,
       number: String(number),
+      scope,
     })
     return agentsRequest<AgentPullRequestContextResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-context?${query}`
@@ -457,40 +461,4 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
     ),
-}
-
-export type ThreadGroup = "today" | "last7" | "last30" | "older"
-
-export function groupThreads(
-  threads: Array<AgentThread>,
-  timestampField: "createdAt" | "updatedAt" = "updatedAt"
-): Record<ThreadGroup, Array<AgentThread>> {
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
-
-  const groups: Record<ThreadGroup, Array<AgentThread>> = {
-    today: [],
-    last7: [],
-    last30: [],
-    older: [],
-  }
-
-  for (const thread of [...threads].sort(
-    (a, b) => b[timestampField] - a[timestampField]
-  )) {
-    const timestamp = thread[timestampField]
-    if (timestamp >= todayStart.getTime()) {
-      groups.today.push(thread)
-    } else if (timestamp >= sevenDaysAgo) {
-      groups.last7.push(thread)
-    } else if (timestamp >= thirtyDaysAgo) {
-      groups.last30.push(thread)
-    } else {
-      groups.older.push(thread)
-    }
-  }
-
-  return groups
 }

@@ -8,6 +8,7 @@ import { GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { ReviewSummary } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
+import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
@@ -62,6 +63,7 @@ function ReviewsPage() {
         )
           ? { page: undefined }
           : {}),
+        ...("pr" in changes ? { files: undefined, at: undefined } : {}),
       }),
       replace,
     })
@@ -71,7 +73,7 @@ function ReviewsPage() {
     queryFn: () => api.listReviews(page, mine),
     enabled: !!session.data && !mine,
     placeholderData: keepPreviousData,
-    staleTime: Infinity,
+    ...expiresInBrowser,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   })
@@ -81,7 +83,7 @@ function ReviewsPage() {
     void queryClient.prefetchQuery({
       queryKey: ["reviews", nextMine, nextPage],
       queryFn: () => api.listReviews(nextPage, nextMine),
-      staleTime: Infinity,
+      staleTime: BROWSER_CACHE_MAX_AGE_MS,
     })
   }
 

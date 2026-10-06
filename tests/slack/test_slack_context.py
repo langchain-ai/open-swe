@@ -9,6 +9,7 @@ from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
+from agent.slack.channels import SlackChannel
 from agent.slack.client import (
     format_slack_messages_for_prompt,
 )
@@ -171,6 +172,28 @@ def test_format_slack_messages_for_prompt_caps_forwarded_attachment_depth() -> N
 
     assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH}" in formatted
     assert f"level {slack_utils.SLACK_FORWARDED_ATTACHMENT_MAX_DEPTH + 1}" not in formatted
+
+
+def test_format_slack_messages_for_prompt_renders_app_card_attachments() -> None:
+    alert = {
+        "ts": "1.0",
+        "text": "",
+        "bot_id": "B1",
+        "attachments": [
+            {
+                "title": "Triggered: Webhook delivery failures",
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": "6 deliveries failed"}},
+                    {"type": "actions", "elements": [{"type": "button", "text": {"text": "Mute"}}]},
+                ],
+            }
+        ],
+    }
+
+    formatted = format_slack_messages_for_prompt([alert])
+
+    assert "Triggered: Webhook delivery failures\n6 deliveries failed" in formatted
+    assert "Mute" not in formatted
 
 
 def _setup_slack_mention_fakes(
@@ -482,6 +505,12 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
     assert kwargs["multitask_strategy"] == ("interrupt" if explicitly_tagged else "enqueue")
+    trigger = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
+    assert trigger.get("explicit_bot_mention") == str(explicitly_tagged).lower()
+    assert "<@UBOT>" not in (trigger.text or "")
+    assert (
+        f"@{webhook_common.SLACK_BOT_USERNAME} create the PR" in str(kwargs["input"])
+    ) == explicitly_tagged
     run_config = kwargs["config"]
     run_config["configurable"]["thread_id"] = run_create["thread_id"]
     monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
@@ -662,11 +691,23 @@ async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id
     message = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert message.attrib["sender"] == "system:slack-bot-B123"
     assert message.attrib["kind"] == "system"
-    assert (message.text or "").strip() == "Open a PR"
+    assert (message.text or "").strip() == f"@{webhook_common.SLACK_BOT_USERNAME} Open a PR"
     await slack_webhooks._process_slack_mention_impl(
         request.model_copy(update={"event_ts": "1700000000.000300"}), None
     )
     assert not captured["run_create"]["kwargs"]["config"]["configurable"].get("github_login")
+
+
+async def test_bot_started_thread_stays_marked_after_a_person_replies(bot_run):
+    request, threads, _ = bot_run
+    await slack_webhooks._process_slack_mention_impl(request, None)
+    assert threads.metadata["trigger_kind"] == "slack_bot"
+    assert threads.metadata["triggering_bot"] == "T123:B123"
+    assert await webhook_common.upsert_agent_thread_metadata(
+        "mapped-thread", source="slack", user_email="alice@example.com", title=""
+    )
+    assert threads.metadata["trigger_kind"] == "slack_bot"
+    assert threads.metadata["triggering_bot"] == "T123:B123"
 
 
 @pytest.mark.parametrize("block", ["removed", "other-owner", "private", "other-bot", "store-error"])
@@ -721,6 +762,7 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         cast(dict, kwargs.get("user_names_by_id", {"U123": "Alice", "UBOT": "Open SWE"})),
         cast(dict, kwargs.get("logins_by_user_id", {})),
         person_ids_by_user_id=cast(dict, kwargs.get("person_ids_by_user_id", {})),
+        channel_names_by_id=cast(dict, kwargs.get("channel_names_by_id", {})),
         channel={"id": "slack:C123", "platform": "slack"},
         bot_user_id="UBOT",
         event_ts="9.0",
@@ -728,8 +770,107 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         request_blocks=[{"type": "text", "text": "do the thing"}],
         dispatched_timestamps=cast(set, kwargs.get("dispatched_timestamps", set())),
         run_described_person_ids=cast(set, kwargs.get("run_described_person_ids", set())),
+        explicit_mention=bool(kwargs.get("explicit_mention", False)),
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+@pytest.mark.parametrize("explicit_mention", [True, False])
+def test_current_slack_message_preserves_ingress_mention(explicit_mention: bool) -> None:
+    contents = _context_input([], explicit_mention=explicit_mention)
+    trigger_blocks = contents[-1]
+    assert isinstance(trigger_blocks, list)
+    trigger = ElementTree.fromstring(trigger_blocks[0]["text"])
+    assert trigger.get("explicit_bot_mention") == str(explicit_mention).lower()
+    assert (trigger.text or "").strip() == "do the thing"
+
+
+def test_replayed_slack_mentions_ignore_forwarded_tags() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "user": "U123", "text": "<@UBOT> could this stack?"},
+            {
+                "ts": "2.0",
+                "user": "U123",
+                "text": "interesting",
+                "attachments": [{"is_share": True, "text": "<@UBOT> fix this"}],
+            },
+        ]
+    )
+    replayed = [
+        ElementTree.fromstring(content)
+        for content in contents
+        if isinstance(content, str) and content.startswith("<input-message")
+    ]
+    assert [message.get("explicit_bot_mention") for message in replayed] == ["true", "false"]
+    assert "could this stack?" in (replayed[0].text or "")
+
+
+def test_slack_context_labels_mentioned_people_with_their_names() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "cc <@U456> and <@U000> for viz", "user": "U123"},
+            {"ts": "9.0", "text": "<@UBOT> go", "user": "U123"},
+        ],
+        user_names_by_id={"U123": "Alice", "U456": "Bob <B>"},
+    )
+
+    assert "cc &lt;@U456|Bob &amp;lt;B&amp;gt;&gt; and &lt;@U000&gt; for viz" in str(contents)
+
+
+def test_slack_context_names_unnamed_channel_mentions() -> None:
+    contents = _context_input(
+        [
+            {"ts": "1.0", "text": "see <#C456|>, <#C789|old-name>, <#C000>", "user": "U123"},
+            {"ts": "9.0", "text": "<@UBOT> go", "user": "U123"},
+        ],
+        channel_names_by_id={"C456": "eng", "C789": "new-name"},
+    )
+
+    assert "see &lt;#C456|eng&gt;, &lt;#C789|old-name&gt;, &lt;#C000&gt;" in str(contents)
+
+
+def test_breakout_preceding_text_is_prior_message_not_part_of_request() -> None:
+    run_input = slack_webhooks._slack_context_input(
+        [
+            {
+                "ts": "9.0",
+                "text": "Context for this task.\nMore details <@UBOT> /breakout fix it",
+                "user": "U123",
+                "attachments": [
+                    {
+                        "is_share": True,
+                        "author_name": "Bob",
+                        "text": "Forwarded details",
+                    }
+                ],
+            }
+        ],
+        {"U123": "Alice"},
+        {},
+        channel={"id": "slack:C123", "platform": "slack"},
+        bot_user_id="UBOT",
+        event_ts="9.0",
+        trigger_user_id="U123",
+        request_text="fix it",
+        request_blocks=[{"type": "text", "text": "fix it"}],
+        prior_message_text="Context for this task.\nMore details",
+        is_breakout=True,
+    )
+    inputs = [
+        message["content"]
+        for message in run_input["messages"]
+        if message["role"] == "user" and 'kind="human"' in str(message["content"])
+    ]
+
+    assert len(inputs) == 2
+    assert "Context for this task.\nMore details" in inputs[0]
+    assert "/breakout" not in inputs[0]
+    assert "fix it" in inputs[1][0]["text"]
+    assert "[Forwarded Slack message from Bob]" in inputs[1][0]["text"]
+    assert "Forwarded details" in inputs[1][0]["text"]
+    assert "More details" not in inputs[1][0]["text"]
+    assert "/breakout" not in inputs[1][0]["text"]
 
 
 def test_slack_context_never_replays_open_swes_own_replies(
@@ -781,6 +922,74 @@ def test_slack_context_does_not_treat_a_lookalike_bot_as_open_swe(
     assert "sender_type: bot" in intro
 
 
+def test_queued_slack_edit_names_people_and_public_channels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    channels = {
+        "C9": SlackChannel(
+            id="C9",
+            name="eng",
+            payload={
+                "id": "C9",
+                "name": "eng",
+                "is_channel": True,
+                "is_private": False,
+                "is_ext_shared": False,
+                "is_pending_ext_shared": False,
+            },
+        ),
+        "C8": SlackChannel(
+            id="C8",
+            name="secret",
+            payload={"id": "C8", "name": "secret", "is_channel": True, "is_private": True},
+        ),
+    }
+
+    async def fake_thread_exists(thread_id: str) -> bool:
+        return True
+
+    async def fake_queue_message_for_thread(thread_id: str, content: object) -> bool:
+        captured["queued"] = content
+        return True
+
+    async def fake_load(channel_id: str) -> SlackChannel | None:
+        return channels.get(channel_id)
+
+    monkeypatch.setattr(webhook_common, "thread_exists", fake_thread_exists)
+    monkeypatch.setattr(slack_webhooks, "queue_message_for_thread", fake_queue_message_for_thread)
+    monkeypatch.setattr(slack_webhooks.SlackChannel, "load", fake_load)
+
+    asyncio.run(
+        slack_webhooks.process_slack_mention(
+            SlackRequest.model_validate(
+                {
+                    "channel_id": "C123",
+                    "thread_ts": "1700000000.000100",
+                    "event_ts": "1700000000.000300",
+                    "user_id": "U123",
+                    "text": "<@UBOT> ask <@U456> in <#C9|> not <#C8|>",
+                    "bot_user_id": "UBOT",
+                    "message_update": True,
+                    "attachments": [{"is_share": True, "text": "cc <@U777> in <#C9>"}],
+                }
+            ),
+            webhook_common.SlackRepoResolution(
+                Repo(owner="langchain-ai", name="open-swe"), explicit=True
+            ),
+        )
+    )
+
+    text = "\n".join(
+        block["text"]
+        for block in cast(list, captured["queued"])
+        if isinstance(block, dict) and block.get("text")
+    )
+    assert "ask <@U456|Teammate> in <#C9|eng> not <#C8|>" in text
+    assert "U777" in cast(list, captured["user_ids"])
+
+
 def test_process_slack_mention_runs_an_edit_when_queueing_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -821,7 +1030,13 @@ def test_process_slack_mention_runs_an_edit_when_queueing_fails(
     assert run_create["kwargs"]["multitask_strategy"] == "enqueue"
 
 
-def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
+@pytest.mark.parametrize(
+    ("run_cost", "expected_cost"),
+    [(0.42, "$0.42"), (0.001, "$0.42 (<$0.01)")],
+)
+def test_pending_cost_marks_latest_reply_until_cost_arrives(
+    run_cost: float, expected_cost: str
+) -> None:
     url = "https://app.example/agents/t1"
     usage = RunUsageSummary(models=("model-a",), total_tokens=123)
     blocks = slack_utils._with_slack_web_link_context_block(
@@ -841,12 +1056,14 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives() -> None:
         pending_blocks,
     )
     final_text, final_blocks = slack_utils.with_slack_session_cost(
-        pending_text, pending_blocks, 0.42, run_cost=0.001
+        pending_text, pending_blocks, 0.42, run_cost=run_cost
     )
-    assert final_text.endswith("model-a • $0.42 (<$0.01)")
+    assert final_text.endswith(f"model-a • {expected_cost}")
     assert final_blocks is not None
-    assert final_blocks[-1]["elements"][0]["text"].endswith("model-a • $0.42 (<$0.01)")
-    assert slack_utils.with_slack_session_cost(final_text, final_blocks, 0.42, run_cost=0.001) == (
+    assert final_blocks[-1]["elements"][0]["text"].endswith(f"model-a • {expected_cost}")
+    assert slack_utils.with_slack_session_cost(
+        final_text, final_blocks, 0.42, run_cost=run_cost
+    ) == (
         final_text,
         final_blocks,
     )

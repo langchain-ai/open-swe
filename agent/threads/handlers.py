@@ -12,8 +12,9 @@ from langgraph_sdk.errors import NotFoundError
 
 from agent.dashboard.options import normalize_model_choice
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
-from agent.github.pull_request_context import get_pull_request_context
+from agent.github.pull_request_context import PullRequestFixScope, get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
+from agent.github.thread_token import invalidate_cached_github_token
 from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
 from agent.threads.access import (
@@ -21,7 +22,8 @@ from agent.threads.access import (
     _github_token_for_login,
     _readable_thread_metadata,
 )
-from agent.threads.creation import create_thread
+from agent.threads.blobs import copy_thread_blobs, referenced_blob_digests
+from agent.threads.creation import TITLE_LOCKED_KEY, create_thread
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
@@ -47,6 +49,7 @@ from agent.threads.summary import (
     _thread_summary,
     assert_thread_readable,
     run_status_to_agent_status,
+    thread_is_owner,
     thread_source,
 )
 from agent.transcript.engine import delete_transcript
@@ -478,7 +481,7 @@ async def rename_dashboard_thread(
 ) -> dict[str, Any]:
     client = langgraph_client()
     thread = await _authorized_thread(thread_id, login, email=email)
-    metadata_update = {"title": title, "title_seed": None}
+    metadata_update = {"title": title, "title_seed": None, TITLE_LOCKED_KEY: True}
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:  # noqa: BLE001
@@ -516,6 +519,42 @@ def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+async def share_thread_with_workspace(
+    thread_id: str, requester_login: str, *, email: str | None = None
+) -> dict[str, object]:
+    """Publish a private thread only at its owner's explicit request."""
+    client = langgraph_client()
+    thread = await _authorized_thread(thread_id, requester_login, email=email)
+    metadata = thread_metadata(thread)
+    if not thread_is_owner(metadata, requester_login):
+        raise HTTPException(403, "only the thread owner can share it")
+    if metadata.get("visibility") != "private":
+        raise HTTPException(409, "thread is not private")
+    if metadata.get("sandbox_bridge_client") == "desktop":
+        raise HTTPException(409, "a thread running on the owner's Mac cannot be shared")
+    if _thread_is_busy(thread):
+        raise HTTPException(409, "stop the run before sharing this thread")
+    for status in ("pending", "running"):
+        if await client.runs.list(thread_id, status=status, limit=1):
+            raise HTTPException(409, "stop the run before sharing this thread")
+    metadata_update = {
+        "visibility": "public",
+        "admin_thread": False,
+        "unlisted": False,
+        "updated_at_ms": _now_ms(),
+    }
+    try:
+        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+    except Exception as exc:
+        logger.warning("Could not share thread", extra={"thread_id": thread_id}, exc_info=True)
+        raise HTTPException(502, "failed to share thread") from exc
+    await invalidate_cached_github_token(thread_id)
+    await mirror_thread_metadata(thread_id, metadata_update)
+    return await _thread_summary(
+        {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
+    )
 
 
 async def continue_thread_privately(
@@ -581,6 +620,7 @@ async def continue_thread_privately(
     )
     if copied:
         try:
+            await copy_thread_blobs(thread_id, new_thread_id, referenced_blob_digests(copied))
             await client.threads.update_state(new_thread_id, values={"messages": copied})
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -693,6 +733,7 @@ async def get_dashboard_thread_pull_request_context(
     *,
     repo_full_name: str,
     number: int,
+    scope: PullRequestFixScope,
     email: str | None = None,
 ) -> dict[str, Any]:
     """Return fresh model context for one PR already tracked by the thread."""
@@ -710,7 +751,7 @@ async def get_dashboard_thread_pull_request_context(
     if record is None:
         raise HTTPException(404, "pull request is not tracked by this thread")
     token = await _github_token_for_login(login)
-    result = await get_pull_request_context(record, token)
+    result = await get_pull_request_context(record, token, scope)
     if result is None:
         raise HTTPException(502, "could not scan pull request")
     return result

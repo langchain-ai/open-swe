@@ -267,6 +267,12 @@ describe("WorkspacesSection", () => {
 
     renderSection(true)
 
+    const channel = await screen.findByRole("link", { name: "#commits" })
+    expect(channel.getAttribute("href")).toBe(
+      "https://slack.com/app_redirect?channel=C0000000001"
+    )
+    expect(channel.getAttribute("target")).toBe("_blank")
+
     fireEvent.click(
       await screen.findByRole("button", { name: "Add workspace" })
     )

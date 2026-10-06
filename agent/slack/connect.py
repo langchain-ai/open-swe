@@ -75,7 +75,7 @@ async def slack_login(
     redirect_uri = f"{slack_base_url()}/dashboard/api/slack/callback"
     nonce = new_state_nonce()
     state = issue_state(
-        redirect_to=f"{frontend_base_url()}/my-settings",
+        redirect_to=f"{frontend_base_url()}/my-settings/connections",
         nonce_hash=hash_state_nonce(nonce),
         handoff_challenge=valid_handoff_challenge(desktop_handoff),
         handoff_port=desktop_port,

@@ -29,6 +29,7 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply_with_ts
+from agent.slack.http import SlackRequestError
 from agent.source_context import SlackThreadRef
 from agent.store import now_iso
 from agent.utils.dashboard_links import dashboard_incident_url
@@ -157,27 +158,30 @@ class IncidentSession:
                 dashboard_incident_url(record.id),
                 reason="answer" if explicit else "findings",
             )
-            ts, error = await post_slack_thread_reply_with_ts(
-                record.channel_id,
-                self.reply_thread_ts or SESSION_TS,
-                text,
-                blocks=blocks,
-                unfurl_links=False,
-                unfurl_media=False,
-            )
-            posted = ts is not None
-            if posted:
+            try:
+                await post_slack_thread_reply_with_ts(
+                    record.channel_id,
+                    self.reply_thread_ts or SESSION_TS,
+                    text,
+                    blocks=blocks,
+                    unfurl_links=False,
+                    unfurl_media=False,
+                )
+            except SlackRequestError as exc:
+                posted = False
+                logger.warning(
+                    "Incident report not delivered to Slack",
+                    extra={"incident_id": record.id, "slack_error": exc.code},
+                )
+            else:
+                posted = True
                 # Only a confirmed delivery suppresses the next post of the same digest, or
                 # spends the incident's one automatic message.
                 latest.posted_digest, latest.posted_run_id = digest, run_id
                 latest.posted_at = now_iso()
                 latest.investigation_posted = latest.investigation_posted or not explicit
                 await service.REPORTS.put(record.id, latest)
-            elif error:
-                logger.warning(
-                    "Incident report not delivered to Slack",
-                    extra={"incident_id": record.id, "slack_error": error},
-                )
+
         return {
             "recorded": True,
             "posted": posted,

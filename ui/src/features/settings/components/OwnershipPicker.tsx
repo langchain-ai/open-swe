@@ -30,6 +30,7 @@ export interface PickerItem {
   owner?: PickerOwner | null
   /** Shown under the row; a selected item with a warning still saves. */
   warning?: string
+  disabled?: boolean
 }
 
 export interface PickerFilter {
@@ -179,7 +180,7 @@ export function OwnershipPicker({
     const elsewhere = ownedElsewhere(item)
     const checked = draftSet.has(item.id)
     // A conflicting row that is somehow already selected stays removable.
-    const locked = elsewhere && !checked
+    const locked = (elsewhere || item.disabled) && !checked
     return (
       <label
         key={item.id}
@@ -203,7 +204,9 @@ export function OwnershipPicker({
         )}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex items-center gap-2">
-            <span className="truncate">{item.label}</span>
+            <span className="truncate" title={item.label}>
+              {item.label}
+            </span>
             {item.meta && (
               <span className="shrink-0 text-xs text-muted-foreground">
                 {item.meta}
@@ -258,14 +261,16 @@ export function OwnershipPicker({
         {triggerLabel}
       </DialogTrigger>
       <DialogPopup className="w-full max-w-[520px]">
-        <DialogTitle className="px-3 pt-3">{title}</DialogTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-3">
+          <DialogTitle>{title}</DialogTitle>
+          {actions}
+        </div>
         {description && (
           <DialogDescription className="px-3 pt-1">
             {description}
           </DialogDescription>
         )}
         <div className="flex items-center gap-3 px-3 pt-3 pb-2">
-          {actions}
           <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon
               className="pointer-events-none absolute top-1.5 left-2 text-muted-foreground"

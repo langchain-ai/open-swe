@@ -22,7 +22,6 @@ from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
 from agent.review.eval_store import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
-from agent.review.findings import REVIEW_FINDING_CAP
 from evals.reviewer.costs import print_summary, record_experiment_costs
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.store_reporter import StoreReporter, is_enabled
@@ -54,7 +53,6 @@ _ENV_MAPPING: dict[str, str] = {
     "reasoning_effort": "REVIEWER_EVAL_REASONING_EFFORT",
     "score_mode": "REVIEWER_EVAL_SCORE_MODE",
     "severity_threshold": "REVIEWER_EVAL_SEVERITY_THRESHOLD",
-    "cap": "REVIEWER_EVAL_CAP",
 }
 
 
@@ -70,7 +68,6 @@ class ReviewerEvalConfig(TypedDict, total=False):
     reasoning_effort: str
     score_mode: ScoreMode
     severity_threshold: Severity
-    cap: int
 
 
 DEFAULT_CONFIG: ReviewerEvalConfig = {
@@ -84,7 +81,6 @@ DEFAULT_CONFIG: ReviewerEvalConfig = {
     "reasoning_effort": "high",
     "score_mode": "surfaced_findings",
     "severity_threshold": "low",
-    "cap": REVIEW_FINDING_CAP,
 }
 
 
@@ -148,10 +144,6 @@ def _coerce_config(raw: dict[str, Any]) -> ReviewerEvalConfig:
     severity_threshold = raw.get("severity_threshold")
     if severity_threshold in _VALID_SEVERITIES:
         config["severity_threshold"] = severity_threshold
-
-    cap = raw.get("cap")
-    if isinstance(cap, int) and cap >= 0:
-        config["cap"] = cap
     return config
 
 
@@ -161,7 +153,7 @@ def _load_env_config(env: Mapping[str, str] = os.environ) -> ReviewerEvalConfig:
         value = env.get(env_key)
         if value is None or value == "":
             continue
-        if config_key in {"max_concurrency", "cap"}:
+        if config_key == "max_concurrency":
             parsed = _parse_int(value)
             if parsed is not None:
                 raw[config_key] = parsed
@@ -338,7 +330,6 @@ async def main() -> None:
         dest="severity_threshold",
         choices=sorted(_VALID_SEVERITIES),
     )
-    ap.add_argument("--cap", type=int)
     ap.add_argument(
         "--no-cleanup",
         action="store_true",
@@ -358,7 +349,7 @@ async def main() -> None:
     max_concurrency = config["max_concurrency"]
     logger.info(
         "Starting reviewer eval: dataset=%s experiment_prefix=%s max_concurrency=%s "
-        "model=%s effort=%s score_mode=%s severity_threshold=%s cap=%s project=%s "
+        "model=%s effort=%s score_mode=%s severity_threshold=%s project=%s "
         "assistant_id=%s langgraph_url=%s limit=%s",
         dataset_name,
         experiment_prefix,
@@ -367,7 +358,6 @@ async def main() -> None:
         config["reasoning_effort"],
         config["score_mode"],
         config["severity_threshold"],
-        config["cap"],
         config["langsmith_project"],
         config["assistant_id"],
         config["langgraph_url"] or "(default)",

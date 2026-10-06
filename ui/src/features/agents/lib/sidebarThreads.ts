@@ -1,6 +1,6 @@
 import type {
-  DesktopLocalActivity,
-  DesktopLocalThreadSummary,
+  DesktopLegacyLocalActivity,
+  DesktopLegacyLocalThread,
   DesktopProject,
 } from "@/desktop"
 import type {
@@ -44,7 +44,7 @@ export interface CloudSidebarThreadItem extends SidebarThreadItemBase {
 
 export interface LocalSidebarThreadItem extends SidebarThreadItemBase {
   location: "local"
-  thread: DesktopLocalThreadSummary
+  thread: DesktopLegacyLocalThread
 }
 
 export type SidebarThreadItem = CloudSidebarThreadItem | LocalSidebarThreadItem
@@ -125,9 +125,9 @@ export function cloudSidebarThread(
 }
 
 export function localSidebarThread(
-  thread: DesktopLocalThreadSummary,
+  thread: DesktopLegacyLocalThread,
   repo: DesktopProject | undefined,
-  activity: DesktopLocalActivity[string] | undefined
+  activity: DesktopLegacyLocalActivity[string] | undefined
 ): LocalSidebarThreadItem {
   const repoLabel = repo?.name.trim() || localRepoName(thread.cwd)
   return {
@@ -223,7 +223,8 @@ export function applyRepoKeyAliases(
 export function groupSidebarThreadsByRepo(
   threads: ReadonlyArray<SidebarThreadItem>,
   repos: ReadonlyArray<SidebarRepoOption>,
-  mode: SidebarSort = "updated"
+  mode: SidebarSort = "updated",
+  retainEmpty = false
 ): { repos: Array<SidebarRepoGroup>; recents: Array<SidebarThreadItem> } {
   const buckets = new Map<string, SidebarRepoGroup>(
     repos.map((repo) => [repo.key, { ...repo, threads: [] }])
@@ -236,7 +237,7 @@ export function groupSidebarThreadsByRepo(
   }
   return {
     repos: [...buckets.values()]
-      .filter((group) => group.threads.length > 0)
+      .filter((group) => retainEmpty || group.threads.length > 0)
       .sort(
         (left, right) =>
           (right.threads[0]?.updatedAt ?? 0) - (left.threads[0]?.updatedAt ?? 0)

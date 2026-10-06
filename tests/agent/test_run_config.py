@@ -16,11 +16,16 @@ def test_invocation_id_rejects_conflicting_fields():
 def test_bools_are_not_accepted_as_integers():
     """Pydantic treats bool as int, which would make ``pr_number=True`` mean PR 1."""
     cfg = RunConfig.parse(
-        {"pr_number": True, "chat_pr_number": False, "reviewer_eval_cap": True, "thread_id": "t1"}
+        {
+            "pr_number": True,
+            "chat_pr_number": False,
+            "review_style_prs_sampled": True,
+            "thread_id": "t1",
+        }
     )
     assert cfg.pr_number is None
     assert cfg.chat_pr_number is None
-    assert cfg.reviewer_eval_cap is None
+    assert cfg.review_style_prs_sampled is None
     assert cfg.thread_id == "t1"
 
 

@@ -78,16 +78,17 @@ def _artifacts_root() -> Path:
 async def desktop_artifact_routes(thread_id: str) -> dict[str, FilesystemBackend]:
     """Backends for the agent's own scratch files on a desktop run.
 
-    Offloaded tool results and evicted history default to the artifacts root,
-    which for a desktop run is the user's project: the dumps would show up as
-    changes and be swept into the next `git add -A`. Route them out of the
-    repository while leaving the virtual paths the model sees unchanged.
+    Offloaded tool results, evicted history, and binary blobs default to the
+    artifacts root, which for a desktop run is the user's project: the dumps
+    would show up as changes and be swept into the next `git add -A`. Route
+    them out of the repository while leaving the virtual paths the model sees
+    unchanged.
     """
     # The thread id becomes a path segment, so it may only be a plain name.
     safe_id = re.sub(r"[^A-Za-z0-9._-]", "-", thread_id or "thread").lstrip(".") or "thread"
     root = _artifacts_root() / safe_id
     routes = {}
-    for name in ("large_tool_results", "conversation_history"):
+    for name in ("large_tool_results", "conversation_history", "blobs"):
         directory = root / name
         await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
         routes[f"/{name}/"] = await asyncio.to_thread(

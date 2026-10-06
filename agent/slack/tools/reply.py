@@ -1,13 +1,18 @@
 import json
 import logging
+import uuid
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Annotated, Any, Literal
 
+from langchain_core.messages import BaseMessage, ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
+from langgraph_sdk.errors import ConflictError
 
+from agent.input_messages import input_message_timestamps
+from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.blocks import (
     MARKDOWN_TEXT_MAX_CHARS,
@@ -20,11 +25,13 @@ from agent.slack.client import (
     get_active_slack_thread,
     post_slack_ephemeral_reply,
     post_slack_thread_reply_with_ts,
+    remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
     store_slack_message_run_mapping,
 )
 from agent.slack.events import claim_slack_event
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.orphan import (
     dashboard_handoff_message,
@@ -32,7 +39,9 @@ from agent.slack.orphan import (
     slack_thread_detached,
 )
 from agent.slack.run_feedback import feedback_block
-from agent.slack.thinking import restore_slack_thinking_status
+from agent.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
+from agent.slack.tools.read_thread_messages import fetch_and_format_thread
+from agent.threads.creation import create_lock_thread
 from agent.utils.json_types import thread_metadata
 from agent.utils.run_usage import RunUsageSummary, summarize_run_usage
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -40,6 +49,7 @@ from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 logger = logging.getLogger(__name__)
 
 _NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
+_BY_THE_WAY_ANSWER_TTL_MINUTES = 7 * 24 * 60
 # The posting helpers append a dashboard-link context block.
 _WEB_LINK_BLOCKS = 1
 
@@ -72,6 +82,10 @@ async def slack_reply(
     run_id = _current_run_id(config)
     slack_thread = cfg.slack_thread.dump() if cfg.slack_thread else {}
     thread_id = cfg.thread_id
+    if cfg.slack_ask is True and cfg.slack_by_the_way_thread_ts:
+        return await _by_the_way_reply(
+            cfg, cfg.slack_by_the_way_thread_ts, message, response_type, blocks, options
+        )
     if cfg.slack_ask is True:
         return await _ephemeral_reply(cfg, message, blocks, options, state)
     client = get_langgraph_client()
@@ -112,6 +126,10 @@ async def slack_reply(
     )
 
     async with slack_thread_mutation_lock(client, channel_id, thread_ts):
+        if state and run_id:
+            conflict = await _stale_reply_guard(state, channel_id, post_thread_ts, run_id)
+            if conflict is not None:
+                return conflict
         if options and len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             return _oversized_options_error(message)
         feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
@@ -130,37 +148,224 @@ async def slack_reply(
                 )
             slack_blocks = [*slack_blocks, *block_payload([feedback_block(run_id)])]
         usage = _usage_with_effort(summarize_run_usage(state), state, cfg)
-        message_ts, slack_error = await _post_and_store_mapping(
-            channel_id,
-            thread_ts,
-            message,
-            blocks=slack_blocks,
-            usage=usage,
-            post_thread_ts=post_thread_ts,
-            agent_thread_id=(
-                None if is_code_channel_session(str(thread_ts)) else str(thread_id or "") or None
-            ),
-            langgraph_client=client,
-            run_id=run_id,
-            triggering_user_id=_triggering_user_id(cfg),
-        )
-    if message_ts is None:
-        if slack_error == "thread_not_found":
-            moved = bool(thread_id) and await move_thread_to_dashboard(
-                client, str(thread_id), str(channel_id), str(thread_ts)
+        try:
+            message_ts = await _post_and_store_mapping(
+                channel_id,
+                thread_ts,
+                message,
+                blocks=slack_blocks,
+                usage=usage,
+                post_thread_ts=post_thread_ts,
+                agent_thread_id=(
+                    None
+                    if is_code_channel_session(str(thread_ts))
+                    else str(thread_id or "") or None
+                ),
+                langgraph_client=client,
+                run_id=run_id,
+                triggering_user_id=_triggering_user_id(cfg),
             )
-            return _dashboard_handoff(thread_id) if moved else _dashboard_handoff_failed()
-        return {
-            "success": False,
-            "error": slack_error or "post failed",
-            "slack_error": slack_error,
-            "message_chars": len(message),
-            "hint": _slack_reply_failure_hint(slack_error),
-        }
+        except SlackRequestError as exc:
+            if exc.code == "thread_not_found":
+                moved = bool(thread_id) and await move_thread_to_dashboard(
+                    client, str(thread_id), str(channel_id), str(thread_ts)
+                )
+                return _dashboard_handoff(thread_id) if moved else _dashboard_handoff_failed()
+            return {
+                "success": False,
+                "error": exc.code,
+                "slack_error": exc.code,
+                "message_chars": len(message),
+                "hint": _slack_reply_failure_hint(exc.code),
+            }
+        if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
+            try:
+                await _handle_kickoff(
+                    client,
+                    str(channel_id),
+                    str(thread_ts),
+                    message_ts,
+                    response_type=response_type,
+                    eligible=cfg.slack_kickoff_eligible is True and not cfg.slack_breakout,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not update Slack investigation kickoff state",
+                    extra={"slack_channel": channel_id, "slack_thread_ts": thread_ts},
+                )
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {"success": True}
+
+
+async def _stale_reply_guard(
+    state: Mapping[str, object], channel_id: str, thread_ts: str, run_id: str
+) -> dict[str, object] | None:
+    messages = state.get("messages")
+    if not isinstance(messages, list):
+        return None
+    client = get_langgraph_client()
+    namespace = ("slack_reply_freshness", run_id)
+    item = await client.store.get_item(namespace, "progress")
+    progress = item.get("value", {}) if item else {}
+    stored_seen = progress.get("seen", [])
+    seen = (
+        {ts for ts in stored_seen if isinstance(ts, str)}
+        if isinstance(stored_seen, list)
+        else set()
+    )
+    stored_conflicts = progress.get("conflicts", 0)
+    conflicts = stored_conflicts if isinstance(stored_conflicts, int) else 0
+    for message in messages:
+        if not isinstance(message, BaseMessage):
+            continue
+        seen.update(input_message_timestamps(message.content))
+        if isinstance(message, ToolMessage):
+            try:
+                payload = json.loads(message.content) if isinstance(message.content, str) else None
+            except ValueError:
+                continue
+            if isinstance(payload, dict):
+                timestamps = payload.get("human_timestamps")
+                if isinstance(timestamps, list):
+                    seen.update(ts for ts in timestamps if isinstance(ts, str))
+    if conflicts >= 2 or not seen:
+        return None
+    try:
+        latest = await fetch_and_format_thread(channel_id, thread_ts)
+    except Exception:
+        logger.warning("Could not check Slack reply freshness", exc_info=True)
+        return None
+    timestamps = latest.get("human_timestamps")
+    if not isinstance(timestamps, list) or not any(
+        isinstance(ts, str) and ts not in seen and ts > max(seen) for ts in timestamps
+    ):
+        return None
+    await client.store.put_item(
+        namespace,
+        "progress",
+        {
+            "seen": sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
+            "conflicts": conflicts + 1,
+        },
+    )
+    return {
+        "success": False,
+        "error": "new_slack_messages",
+        "run_id": run_id,
+        "hint": prompt("tools/slack-reply-conflict"),
+        "formatted": latest.get("formatted"),
+        "human_timestamps": timestamps,
+    }
+
+
+async def _handle_kickoff(
+    client: LangGraphClient,
+    channel_id: str,
+    thread_ts: str,
+    update_ts: str,
+    *,
+    response_type: Literal["progress", "final"],
+    eligible: bool,
+) -> None:
+    namespace = ("slack_kickoff", channel_id)
+    item = await client.store.get_item(namespace, thread_ts)
+    value = item.get("value") if isinstance(item, dict) else None
+    if isinstance(value, dict) and value.get("removed") is True:
+        return
+    kickoff_ts = value.get("kickoff_ts") if isinstance(value, dict) else None
+    if not kickoff_ts and eligible and response_type == "progress" and update_ts != thread_ts:
+        await client.store.put_item(namespace, thread_ts, {"kickoff_ts": update_ts})
+        return
+    if not isinstance(kickoff_ts, str) or not kickoff_ts or kickoff_ts == update_ts:
+        return
+    try:
+        async with SlackClient.bot() as slack:
+            await slack.chat_delete(channel=channel_id, ts=kickoff_ts)
+    except SLACK_REQUEST_ERRORS as exc:
+        logger.warning(
+            "Could not remove Slack investigation kickoff",
+            extra={
+                "slack_channel": channel_id,
+                "slack_thread_ts": thread_ts,
+                "slack_error": slack_error(exc),
+            },
+        )
+        return
+    await client.store.put_item(namespace, thread_ts, {"removed": True})
+
+
+async def _by_the_way_reply(
+    cfg: RunConfig,
+    thread_ts: str,
+    message: str,
+    response_type: Literal["progress", "final"],
+    blocks: list[dict[str, Any]] | None,
+    options: list[str] | None,
+) -> dict[str, Any]:
+    """Post the one public `/btw` answer, with no link back to the asker's private thread."""
+    if options or response_type != "final":
+        return {
+            "success": False,
+            "error": "only one final answer is posted for /btw",
+            "retry": True,
+            "hint": (
+                "Nothing was posted. Everyone in the Slack thread reads this reply and this run "
+                "ends with it, so send a single `final` reply without `options`."
+            ),
+        }
+    channel_id = cfg.slack_thread.channel_id if cfg.slack_thread else ""
+    if not channel_id:
+        return {"success": False, "error": "Missing the Slack channel to answer in"}
+    if not message.strip():
+        return {"success": False, "error": "Message cannot be empty"}
+    if blocks is None:
+        blocks = _reply_blocks(message, None, reserve=0)
+        if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
+            message = markdown_to_mrkdwn(message)
+    client = get_langgraph_client()
+    reservation = _by_the_way_answer_id(cfg.thread_id or "")
+    try:
+        await create_lock_thread(client, reservation, ttl_minutes=_BY_THE_WAY_ANSWER_TTL_MINUTES)
+    except ConflictError:
+        return {
+            "success": False,
+            "error": "the /btw answer was already posted",
+            "hint": "Do not post again; end the run.",
+        }
+    except Exception:
+        logger.exception(
+            "Could not reserve the /btw answer", extra={"agent_thread_id": cfg.thread_id}
+        )
+        return {"success": False, "error": "could not reserve the answer", "retry": True}
+    try:
+        await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
+    except SlackRequestError as exc:
+        try:
+            await client.threads.delete(reservation)
+        except Exception:
+            logger.exception(
+                "Could not release the /btw answer reservation",
+                extra={"agent_thread_id": cfg.thread_id},
+            )
+        return {
+            "success": False,
+            "error": exc.code or "post failed",
+            "slack_error": exc.code,
+            "hint": _slack_reply_failure_hint(exc.code),
+        }
+    if cfg.slack_by_the_way_message_ts:
+        await remove_slack_reaction(
+            channel_id, cfg.slack_by_the_way_message_ts, "hourglass_flowing_sand"
+        )
+    # Slack drops a thread's status on any bot post, including a conversation's already there.
+    await settle_slack_thread_status(channel_id, thread_ts)
+    return {"success": True}
+
+
+def _by_the_way_answer_id(thread_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-by-the-way-answer:{thread_id}"))
 
 
 async def _ephemeral_reply(
@@ -381,8 +586,8 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
-) -> tuple[str | None, str | None]:
-    message_ts, slack_error = await post_slack_thread_reply_with_ts(
+) -> str:
+    message_ts = await post_slack_thread_reply_with_ts(
         channel_id,
         post_thread_ts or thread_ts,
         message,
@@ -400,4 +605,4 @@ async def _post_and_store_mapping(
             run_id=run_id,
             triggering_user_id=triggering_user_id,
         )
-    return message_ts, slack_error
+    return message_ts

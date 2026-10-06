@@ -14,7 +14,7 @@ const PAGE_LOAD = { timeout: 10_000 };
 const FAILURE_DETAIL = "E2E forced save failure";
 
 type InstanceSettings = Record<string, unknown> & {
-  fable_enabled?: boolean | null;
+  review_draft_prs?: boolean | null;
   pr_summaries?: boolean | null;
 };
 
@@ -97,7 +97,7 @@ test.describe("optimistic settings saves", () => {
     original = await readInstanceSettings(page.request);
     await writeInstanceSettings(page.request, {
       ...original,
-      fable_enabled: false,
+      review_draft_prs: false,
       pr_summaries: false,
     });
   });
@@ -107,7 +107,7 @@ test.describe("optimistic settings saves", () => {
     original = null;
   });
 
-  test("two sections saved back to back both land", async ({ page }) => {
+  test("two settings saved back to back both land", async ({ page }) => {
     const firstPutGate = deferred();
     const puts: Array<InstanceSettings> = [];
     await page.route("**/dashboard/api/settings", async (route) => {
@@ -118,34 +118,37 @@ test.describe("optimistic settings saves", () => {
     });
 
     await page.goto("/admin");
-    const fable = settingSwitch(page, "Allow Fable models");
+    const drafts = settingSwitch(page, "Review Draft PRs");
     const summaries = settingSwitch(page, "PR Summaries");
-    await expect(fable).not.toBeChecked();
+    await expect(drafts).not.toBeChecked();
     await expect(summaries).not.toBeChecked();
 
-    await fable.click();
-    await expect(fable).toBeChecked(QUICK);
+    await drafts.click();
+    await expect(drafts).toBeChecked(QUICK);
     await expect.poll(() => puts.length, QUICK).toBe(1);
 
     await summaries.click();
     await expect(summaries).toBeChecked(QUICK);
-    await expect(fable).toBeChecked(QUICK);
-    await expect(fable).toBeEnabled(QUICK);
+    await expect(drafts).toBeChecked(QUICK);
+    await expect(drafts).toBeEnabled(QUICK);
     await expect(summaries).toBeEnabled(QUICK);
     expect(puts).toHaveLength(1);
 
     firstPutGate.resolve();
     await expect.poll(() => puts.length, QUICK).toBe(2);
-    expect(puts[1]).toMatchObject({ fable_enabled: true, pr_summaries: true });
+    expect(puts[1]).toMatchObject({
+      review_draft_prs: true,
+      pr_summaries: true,
+    });
 
     await expect
       .poll(async () => {
         const saved = await readInstanceSettings(page.request);
-        return [saved.fable_enabled, saved.pr_summaries];
+        return [saved.review_draft_prs, saved.pr_summaries];
       }, QUICK)
       .toEqual([true, true]);
     await page.reload();
-    await expect(settingSwitch(page, "Allow Fable models")).toBeChecked(
+    await expect(settingSwitch(page, "Review Draft PRs")).toBeChecked(
       PAGE_LOAD,
     );
     await expect(settingSwitch(page, "PR Summaries")).toBeChecked(QUICK);
@@ -165,38 +168,38 @@ test.describe("optimistic settings saves", () => {
     });
 
     await page.goto("/admin");
-    const fable = settingSwitch(page, "Allow Fable models");
+    const drafts = settingSwitch(page, "Review Draft PRs");
     const summaries = settingSwitch(page, "PR Summaries");
-    await expect(fable).not.toBeChecked();
+    await expect(drafts).not.toBeChecked();
 
-    await fable.click();
-    await expect(fable).toBeChecked(QUICK);
+    await drafts.click();
+    await expect(drafts).toBeChecked(QUICK);
     await expect.poll(() => puts.length, QUICK).toBe(1);
     await summaries.click();
     await expect(summaries).toBeChecked(QUICK);
 
     const report = watchErrorReport(page);
     firstPutGate.resolve();
-    await expect(fable).not.toBeChecked(QUICK);
+    await expect(drafts).not.toBeChecked(QUICK);
     await expectReportedFailure(page, "Couldn't save settings", report);
     await expect(summaries).toBeChecked(QUICK);
     await expect.poll(() => puts.length, QUICK).toBe(2);
     expect(puts[1]).toMatchObject({
-      fable_enabled: false,
+      review_draft_prs: false,
       pr_summaries: true,
     });
 
     await expect
       .poll(async () => {
         const saved = await readInstanceSettings(page.request);
-        return [saved.fable_enabled, saved.pr_summaries];
+        return [saved.review_draft_prs, saved.pr_summaries];
       }, QUICK)
       .toEqual([false, true]);
     await page.reload();
-    await expect(settingSwitch(page, "Allow Fable models")).toBeEnabled(
+    await expect(settingSwitch(page, "Review Draft PRs")).toBeEnabled(
       PAGE_LOAD,
     );
-    await expect(settingSwitch(page, "Allow Fable models")).not.toBeChecked(
+    await expect(settingSwitch(page, "Review Draft PRs")).not.toBeChecked(
       QUICK,
     );
     await expect(settingSwitch(page, "PR Summaries")).toBeChecked(QUICK);

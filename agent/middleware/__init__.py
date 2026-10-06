@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
     "check_message_queue_before_model": ".check_message_queue",
+    "deliver_event_matches_before_model": ".deliver_event_matches",
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
@@ -22,13 +23,11 @@ _MIDDLEWARE_MODULES = {
     "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
     "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
-    "SanitizeToolInputsMiddleware": ".sanitize_tool_inputs",
     "StableToolResultOrderMiddleware": ".stable_tool_order",
     "settle_review_check_on_exit": ".settle_review_check",
     "SubdirAgentsReadMiddleware": ".subdir_agents",
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
-    "TimeoutWrapupMiddleware": ".timeout_wrapup",
     "ToolErrorMiddleware": ".tool_error_handler",
     "ValidateImageReadsMiddleware": ".validate_image_reads",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
@@ -51,15 +50,14 @@ __all__ = [
     "SanitizeFireworksMessagesMiddleware",
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
-    "SanitizeToolInputsMiddleware",
     "StableToolResultOrderMiddleware",
     "SubdirAgentsReadMiddleware",
     "ToolErrorMiddleware",
-    "TimeoutWrapupMiddleware",
     "ValidateImageReadsMiddleware",
     "WorkflowPushGuardMiddleware",
     "WorkspaceSkillsMiddleware",
     "check_message_queue_before_model",
+    "deliver_event_matches_before_model",
     "notify_step_limit_reached",
     "record_run_usage",
     "refresh_github_proxy_before_model",
@@ -70,6 +68,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from agent.middleware.check_message_queue import check_message_queue_before_model
+    from agent.middleware.deliver_event_matches import deliver_event_matches_before_model
     from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from agent.middleware.exclude_tools import ExcludeToolsMiddleware
     from agent.middleware.model_call_timeout import ModelCallTimeoutMiddleware
@@ -86,12 +85,10 @@ if TYPE_CHECKING:
     from agent.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
     from agent.middleware.sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
     from agent.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
-    from agent.middleware.sanitize_tool_inputs import SanitizeToolInputsMiddleware
     from agent.middleware.settle_review_check import settle_review_check_on_exit
     from agent.middleware.stable_tool_order import StableToolResultOrderMiddleware
     from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
     from agent.middleware.task_retry import task_on_failure, task_retry_on
-    from agent.middleware.timeout_wrapup import TimeoutWrapupMiddleware
     from agent.middleware.tool_error_handler import ToolErrorMiddleware
     from agent.middleware.validate_image_reads import ValidateImageReadsMiddleware
     from agent.middleware.workflow_push_guard import WorkflowPushGuardMiddleware

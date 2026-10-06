@@ -3,6 +3,7 @@
 from functools import partial
 from typing import Any
 
+from agent.credential_scope import private_credential_login
 from agent.mcp import (
     MCPConnection,
     MCPConnectionUpdate,
@@ -65,8 +66,15 @@ async def discover_user_mcp(
 
 def user_mcp_source(login: str) -> MCPSource:
     login = login.strip().lower()
+
+    async def authorize() -> None:
+        owner = await private_credential_login()
+        if owner is None or owner.strip().lower() != login:
+            raise RuntimeError("Personal MCP tools require the private thread owner")
+
     return MCPSource(
         namespace=(*USER_MCPS_NAMESPACE, login),
         list_connections=partial(list_user_mcp_records, login),
         get_connection=partial(get_user_mcp, login),
+        authorize=authorize,
     )

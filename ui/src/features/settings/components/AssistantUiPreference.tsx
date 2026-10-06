@@ -7,16 +7,34 @@ import {
   useProfile,
 } from "@/lib/profile"
 
+import {
+  setUseStreamPreference,
+  useStreamPreference,
+} from "@/lib/streamPreference"
+
 export function AssistantUiPreference() {
   const profile = useProfile()
   const options = useOptions()
   const save = usePatchProfile()
   const enabled = useExperimentalAssistantUi()
+  const preferStream = useStreamPreference()
   const defaults = options.data
   const disabled = !profile.isSuccess || !defaults
 
   return (
     <>
+      <SettingsRow
+        label="SDK useStream (experimental)"
+        htmlFor="sdk-use-stream"
+        description="Use SDK streaming instead of the transcript with the same conversation UI. Applies only to this browser; legacy threads always use SDK streaming."
+        control={
+          <Switch
+            id="sdk-use-stream"
+            checked={preferStream}
+            onCheckedChange={setUseStreamPreference}
+          />
+        }
+      />
       <SettingsRow
         label="Assistant UI (experimental)"
         htmlFor="experimental-assistant-ui"

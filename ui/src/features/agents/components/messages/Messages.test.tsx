@@ -129,28 +129,6 @@ describe("Messages", () => {
     expect(screen.getByText("subagent")).toBeTruthy()
   })
 
-  it("hides user names when disabled", () => {
-    render(
-      <Messages
-        messages={[
-          {
-            id: "user-turn",
-            author: "user",
-            timestamp: "2026-09-03T10:30:00.000Z",
-            structuredSenderName: "Mason Daugherty",
-            structuredSenderKind: "person",
-            chunks: [{ kind: "text", text: "Ship it" }],
-          },
-        ]}
-        isStreaming={false}
-        showUserNames={false}
-      />
-    )
-
-    expect(screen.queryByText("Mason Daugherty")).toBeNull()
-    expect(screen.getByText("Ship it")).toBeTruthy()
-  })
-
   it("keeps workflow approval available alongside an empty-state error", () => {
     render(
       <Messages

@@ -7,7 +7,8 @@ page content and omit ``<html>``/``<head>``/``<body>`` — they are added
 here, along with a minimal CSS reset — and include a ``<title>``. The
 artifact is rendered in an opaque-origin sandboxed iframe under a strict CSP:
 inline CSS and JavaScript, Canvas, WebGL, and Google Fonts work; network
-access and web storage do not.
+access and web storage do not. Honor system light/dark mode with
+`prefers-color-scheme`; ensure readable colors in both modes rather than hard-coding a theme.
 
 Args:
     plan_file_path: Path to the HTML artifact in the sandbox.

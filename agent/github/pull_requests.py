@@ -34,7 +34,9 @@ from uuid import UUID, uuid7
 from pydantic import AliasPath, BaseModel, Field, ValidationError
 from sqlalchemy import (
     BigInteger,
+    Computed,
     ForeignKey,
+    Index,
     Text,
     UniqueConstraint,
     desc,
@@ -44,7 +46,7 @@ from sqlalchemy import (
     select,
     tuple_,
 )
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import TSVECTOR, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -64,7 +66,7 @@ ThreadRole = Literal["primary", "secondary"]
 AGENT_OPENED_LINK_SOURCE = "open_pull_request"
 
 _SEARCH_PAGE_SIZE = 50
-_GITHUB_COLUMNS = ("state", "title", "head_ref", "base_ref", "author")
+_GITHUB_COLUMNS = ("state", "title", "body", "head_ref", "base_ref", "author")
 _DIFF_COLUMNS = ("additions", "deletions", "changed_files")
 _WRITE_ONCE_COLUMNS = (
     "opening_base_sha",
@@ -123,7 +125,10 @@ class ReviewLink(Base):
 
 class PullRequest(Base):
     __tablename__ = "pull_request"
-    __table_args__ = (UniqueConstraint("repository_id", "number"),)
+    __table_args__ = (
+        UniqueConstraint("repository_id", "number"),
+        Index("pull_request_search_idx", "search_vector", postgresql_using="gin"),
+    )
 
     owner: Mapped[str]
     repo: Mapped[str]
@@ -132,6 +137,17 @@ class PullRequest(Base):
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("repository.id"), init=False)
     state: Mapped[PrState] = mapped_column(Text, default="open")
     title: Mapped[str] = mapped_column(server_default="", default="")
+    body: Mapped[str] = mapped_column(server_default="", default="")
+    search_vector: Mapped[str] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', title), 'A') || "
+            "setweight(to_tsvector('english', body), 'B')",
+            persisted=True,
+        ),
+        init=False,
+        repr=False,
+    )
     head_ref: Mapped[str] = mapped_column(server_default="", default="")
     base_ref: Mapped[str] = mapped_column(server_default="", default="")
     opening_base_sha: Mapped[str] = mapped_column(server_default="", default="")
@@ -190,6 +206,32 @@ class PullRequest(Base):
                 .join(cls.repository)
                 .where(Repository.key == f"{owner}/{repo}".lower())
                 .order_by(cls.number)
+            )
+            return list(rows)
+
+    @classmethod
+    async def search(
+        cls, query: str, *, repositories: Sequence[str], limit: int = 50, offset: int = 0
+    ) -> list[Self]:
+        """Rank title/body matches within the caller's authorized repositories."""
+        if not query.strip() or not repositories:
+            return []
+        tsquery = func.websearch_to_tsquery("english", query)
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._with_links(select(cls))
+                .join(cls.repository)
+                .where(
+                    Repository.key.in_([repository.lower() for repository in repositories]),
+                    cls.search_vector.bool_op("@@")(tsquery),
+                )
+                .order_by(
+                    func.ts_rank_cd(cls.search_vector, tsquery).desc(),
+                    cls.updated_at.desc(),
+                    cls.id.desc(),
+                )
+                .limit(limit)
+                .offset(offset)
             )
             return list(rows)
 
@@ -327,10 +369,6 @@ class PullRequest(Base):
             if all(link.thread_id != thread_id for link in self.threads):
                 self.threads.append(ThreadLink(thread_id=thread_id, source="backfill"))
         return (await self._write(overwrite=False, legacy_discovered=True)).thread_ids
-
-    async def primary_thread(self, *, backfill: bool = True) -> str | None:
-        threads = await self.linked_threads(backfill=backfill)
-        return threads[0] if threads else None
 
     async def discover_threads(self) -> Sequence[str] | None:
         """Agent threads whose metadata still points at this PR, oldest first.
@@ -568,6 +606,7 @@ class PullRequestEvent(BaseModel):
             number=number,
             state=self.state,
             title=self.pull_request.title,
+            body=self.pull_request.body or "",
             head_ref=self.pull_request.head_ref,
             base_ref=self.pull_request.base_ref,
             author=self.pull_request.author,

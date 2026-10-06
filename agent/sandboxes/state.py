@@ -22,11 +22,9 @@ from deepagents.backends.protocol import (
     execute_accepts_timeout,
 )
 from deepagents.backends.sandbox import BaseSandbox
-from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from agent.github.token_scope import token_repositories_from_metadata
-from agent.sandboxes.providers.registry import create_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -91,10 +89,6 @@ class SandboxBackendProxy(BaseSandbox):
     @property
     def has_backend(self) -> bool:
         return self._backend is not None
-
-    def cancel_startup(self) -> None:
-        if self._startup_task is not None:
-            self._startup_task.cancel()
 
     def set_reconnect(
         self,
@@ -163,7 +157,12 @@ class SandboxBackendProxy(BaseSandbox):
                     logger.info(
                         "Reconnecting sandbox backend for thread %s from metadata", self._thread_id
                     )
-                    self._startup_task = asyncio.create_task(create_sandbox(sandbox_id))
+                    # deferred: the bridge backend imports this module
+                    from agent.sandboxes.connect import connect_sandbox
+
+                    self._startup_task = asyncio.create_task(
+                        connect_sandbox(sandbox_id, thread_id=self._thread_id)
+                    )
                     self._startup_task.add_done_callback(self._startup_completed)
             startup_task = self._startup_task
             if startup_task is None:
@@ -382,18 +381,11 @@ def get_or_create_sandbox_backend_proxy(
 
 
 async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
-    """Fetch sandbox metadata from the run config or live thread."""
-    try:
-        config = get_config()
-        metadata = config.get("metadata", {})
-        if isinstance(metadata, dict) and isinstance(metadata.get("sandbox_id"), str):
-            return metadata
-    except Exception:
-        logger.debug(
-            "Failed to read inline thread metadata for sandbox; falling back to live lookup",
-            exc_info=True,
-        )
+    """Fetch sandbox metadata from the live thread.
 
+    Never from the run config: a run queued before ``recreate_sandbox`` carries
+    the sandbox the thread has since left.
+    """
     # A failed lookup must not read as "unbound": the caller would create a
     # replacement and bind it over the thread's real sandbox.
     thread = await get_client().threads.get(thread_id)

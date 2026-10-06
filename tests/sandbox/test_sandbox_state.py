@@ -8,11 +8,13 @@ from deepagents.backends.protocol import (
     ExecuteResponse,
     SandboxBackendProtocol,
 )
+from langchain_core.runnables.config import var_child_runnable_config
 
 from agent.sandboxes.state import (
     SANDBOX_BACKENDS,
     SandboxBackendProxy,
     get_or_create_sandbox_backend_proxy,
+    get_sandbox_id_from_metadata,
 )
 
 
@@ -39,7 +41,7 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         assert requested_thread_id == thread_id
         return "sandbox-1"
 
-    async def create_sandbox(sandbox_id: str):
+    async def connect_sandbox(sandbox_id: str, *, thread_id: str | None = None):
         created.append(sandbox_id)
         await asyncio.sleep(0)
         return _FakeSandboxBackend()
@@ -48,7 +50,7 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         "agent.sandboxes.state.get_sandbox_id_from_metadata",
         get_sandbox_id_from_metadata,
     )
-    monkeypatch.setattr("agent.sandboxes.state.create_sandbox", create_sandbox)
+    monkeypatch.setattr("agent.sandboxes.connect.connect_sandbox", connect_sandbox)
 
     proxy = get_or_create_sandbox_backend_proxy(thread_id)
     assert SANDBOX_BACKENDS[thread_id] is proxy
@@ -65,6 +67,25 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
     ]
     assert proxy.current.id == "sandbox-1"
     SANDBOX_BACKENDS.pop(thread_id, None)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_metadata_ignores_run_config_from_before_rebind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Threads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "metadata": {"sandbox_id": "sandbox-new"}}
+
+    class _Client:
+        threads = _Threads()
+
+    monkeypatch.setattr("agent.sandboxes.state.get_client", lambda: _Client())
+    token = var_child_runnable_config.set({"metadata": {"sandbox_id": "sandbox-old"}})
+    try:
+        assert await get_sandbox_id_from_metadata("thread-1") == "sandbox-new"
+    finally:
+        var_child_runnable_config.reset(token)
 
 
 @pytest.mark.asyncio

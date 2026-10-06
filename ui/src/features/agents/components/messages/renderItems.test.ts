@@ -28,6 +28,30 @@ function iframeChunk(): ToolExecutionChunk {
 }
 
 describe("buildRenderItems", () => {
+  it("keeps a connection card visible outside folded work", () => {
+    const card: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "connect-1",
+      title: "Request service connection",
+      toolKind: "service-connection",
+      input: { service: "notion" },
+      status: "completed",
+    }
+    const items = buildRenderItems([
+      card,
+      {
+        kind: "tool-execution",
+        toolCallId: "read-1",
+        title: "Read file",
+        toolKind: "read",
+        status: "completed",
+      },
+    ])
+    expect(selectCollapsedTurnItems(items)).toEqual([
+      { type: "connection-item", key: "tool-connect-1", chunk: card },
+    ])
+  })
+
   it("keeps iframe output as a dedicated inline item", () => {
     expect(buildRenderItems([iframeChunk()])).toEqual([
       {

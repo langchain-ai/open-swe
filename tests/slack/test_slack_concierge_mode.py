@@ -3,6 +3,7 @@ to the same agent thread. Off by default, where a DM keeps a thread per message.
 """
 
 import json
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -126,3 +127,52 @@ async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
     assert request.thread_ts == "1786573369.551099"
     assert request.concierge_mode is False
     assert request.treat_all_messages_as_mentions is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["busy", "idle"])
+async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    from agent.slack import dm
+
+    threads = AsyncMock()
+    threads.get.return_value = {"status": status}
+    client = SimpleNamespace(threads=threads)
+    monkeypatch.setattr(dm, "langgraph_client", lambda: client)
+    monkeypatch.setattr(dm, "lookup_slack_thread_id", AsyncMock(return_value="concierge-thread"))
+    queue = AsyncMock(return_value=True)
+    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+
+    await dm._record_in_concierge_thread("D1", "Mark the PR ready for review")
+
+    queue.assert_awaited_once()
+    assert queue.await_args.args[0] == "concierge-thread"
+    note = queue.await_args.args[1][0]["text"]
+    assert "Mark the PR ready for review" in note
+    assert "not written by this person" in note
+    assert "already sent" in note
+    threads.update_state.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("concierge_on", [True, False])
+async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
+    monkeypatch: pytest.MonkeyPatch, concierge_on: bool
+) -> None:
+    from agent.slack import dm
+
+    monkeypatch.setattr(dm.User, "concierge_mode_for_slack", AsyncMock(return_value=concierge_on))
+    lookup = AsyncMock(return_value="concierge-thread")
+    monkeypatch.setattr(dm, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(dm, "langgraph_client", lambda: object())
+    queue = AsyncMock(return_value=True)
+    monkeypatch.setattr(dm, "queue_message_for_thread", queue)
+
+    await dm.note_for_concierge("U1", "D1", "a note")
+
+    if concierge_on:
+        assert lookup.await_args.args[1:] == ("D1", CONCIERGE_TS)
+        queue.assert_awaited_once_with("concierge-thread", [{"type": "text", "text": "a note"}])
+    else:
+        queue.assert_not_awaited()

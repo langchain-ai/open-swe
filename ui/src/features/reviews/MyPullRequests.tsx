@@ -6,6 +6,7 @@ import { MultiSelect } from "@/components/ui/multi-select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
+import { expiresInBrowser } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import {
   PullRequestCard,
@@ -14,12 +15,13 @@ import {
 import { PullRequestDetail } from "./components/PullRequestDetail"
 import { PullRequestList } from "./components/PullRequestList"
 import { PullRequestReview } from "./components/PullRequestReview"
-import { refreshPullRequest } from "./lib/cache"
+import { pullRequestPreviewQuery, refreshPullRequest } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { control } from "./lib/styles"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
+import { usePullRequestSearch } from "./lib/usePullRequestSearch"
 import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
 
 const chunkSize = 10
@@ -61,12 +63,28 @@ export function MyPullRequests({
   const queryClient = useQueryClient()
   const query = useOpenPullRequests(login, repo, sort, direction)
   const knownRepos = useRepos()
+  const descriptionSearch = usePullRequestSearch(search)
+  const descriptionMatches = new Set(
+    descriptionSearch.data?.pages.flatMap((page) =>
+      page.pull_requests.map((pr) => pullRequestKey(pr).toLowerCase())
+    ) ?? []
+  )
+  const {
+    hasNextPage: hasMoreMatches,
+    isFetching: fetchingMatches,
+    fetchNextPage: fetchMoreMatches,
+  } = descriptionSearch
+  useEffect(() => {
+    if (hasMoreMatches && !fetchingMatches) void fetchMoreMatches()
+  }, [hasMoreMatches, fetchingMatches, fetchMoreMatches])
   // Rows whose details have been asked for. Tied to the filter set that grew
   // it, so changing a filter starts the list over without an extra render.
   const [growth, setGrowth] = useState({ key: "", rows: chunkSize })
   // A merged or closed PR keeps its row until the next refresh: dropping it
   // immediately would pull every card below it up under the pointer.
-  const [settled, setSettled] = useState<Record<string, PullRequestOutcome>>({})
+  const [settled, setSettled] = useState<
+    Partial<Record<string, PullRequestOutcome>>
+  >({})
   const pages = query.data?.pages ?? []
   const latest = pages.at(-1)
   const rows = pages.flatMap((loaded) => loaded.pullRequests)
@@ -97,10 +115,12 @@ export function MyPullRequests({
           pr.number,
         ]) !== null
     )
-    .filter((pr) =>
-      `${pr.repo} #${pr.number} ${pr.title}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
+    .filter(
+      (pr) =>
+        `${pr.repo} #${pr.number} ${pr.title}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()) ||
+        descriptionMatches.has(pullRequestKey(pr).toLowerCase())
     )
   // A status filter can only be applied to rows whose details have arrived, so
   // it costs a detail read for every row rather than only the ones on screen.
@@ -127,7 +147,7 @@ export function MyPullRequests({
     queries: reviewChunks.map((refs) => ({
       queryKey: ["my-pr-review-summaries", login, refs],
       queryFn: () => api.reviewSummaries(refs),
-      staleTime: Infinity,
+      ...expiresInBrowser,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       retry: false,
@@ -158,6 +178,14 @@ export function MyPullRequests({
     ? all.find((row) => pullRequestKey(row) === selected)
     : undefined
   const railed = Boolean(selectedRow)
+  const selectedIndex = visible.findIndex(
+    (row) => pullRequestKey(row) === selected
+  )
+  const nextRow = selectedIndex >= 0 ? visible[selectedIndex + 1] : undefined
+  useEffect(() => {
+    if (nextRow)
+      void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
+  }, [queryClient, nextRow])
 
   const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
@@ -168,7 +196,10 @@ export function MyPullRequests({
         outcome={settled[key]}
         compact={railed}
         selected={selected === key}
-        onSelect={() => onFiltersChange({ pr: key })}
+        onSelect={() => {
+          refreshPullRequest(queryClient, login, pr)
+          onFiltersChange({ pr: key })
+        }}
         review={
           summariesUnavailable ? null : (
             <PullRequestReview
@@ -219,7 +250,7 @@ export function MyPullRequests({
             <input
               className={cn(control, "min-w-40 flex-1")}
               aria-label="Search pull requests"
-              placeholder="Search title or PR number…"
+              placeholder="Search title, description, or PR number…"
               value={search}
               onChange={(event) =>
                 onFiltersChange({ q: event.target.value || undefined }, true)
@@ -282,6 +313,9 @@ export function MyPullRequests({
                 })
                 void query.refetch()
                 void queryClient.invalidateQueries({
+                  queryKey: ["pull-request-search", login],
+                })
+                void queryClient.invalidateQueries({
                   queryKey: ["my-pr-details", login],
                 })
                 void queryClient.invalidateQueries({
@@ -309,6 +343,12 @@ export function MyPullRequests({
               {query.error.message}
             </p>
           )}
+          {search.trim() && descriptionSearch.isError && (
+            <p role="alert" className="text-sm text-destructive">
+              Title and description search is unavailable; showing repository,
+              title, and PR number matches only.
+            </p>
+          )}
           {query.isLoading ? (
             <Skeleton className="h-56 w-full" />
           ) : incomplete ? (
@@ -325,7 +365,9 @@ export function MyPullRequests({
               <>
                 {visible.length === 0 ? (
                   <p className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
-                    {detailsLoading || query.isFetchingNextPage
+                    {detailsLoading ||
+                    query.isFetchingNextPage ||
+                    descriptionSearch.isSearching
                       ? "Loading matching PRs…"
                       : all.length
                         ? "No PRs match these filters."
@@ -379,6 +421,9 @@ export function MyPullRequests({
               login={login}
               outcome={settled[pullRequestKey(selectedRow)]}
               onClose={() => onFiltersChange({ pr: undefined })}
+              expandedFiles={filters.files}
+              scrollAnchor={filters.at}
+              onPositionChange={(changes) => onFiltersChange(changes, true)}
               onSettled={(outcome) =>
                 setSettled((previous) => ({
                   ...previous,

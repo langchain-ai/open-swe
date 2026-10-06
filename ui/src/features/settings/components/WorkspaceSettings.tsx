@@ -15,6 +15,7 @@ import {
 
 import { SettingsSection } from "@/components/AppShell"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
+import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -40,13 +41,14 @@ import {
   type WorkspaceDraft,
 } from "./WorkspaceEditor"
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
+import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
-  FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
+import { INVALIDATION_TOPICS } from "@/lib/invalidations/topics"
 import { useOptions, useRepos } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
@@ -176,14 +178,7 @@ export function WorkspaceSettingsPanel({
   const record = useQuery({
     queryKey: workspaceRecordKey(slug),
     queryFn: () => api.getWorkspace(slug),
-    // A rebuild runs in the background; keep the image state and the rebuild
-    // button following it until it settles.
-    refetchInterval: (query) =>
-      query.state.data?.refresh_status === "refreshing" ||
-      (!repositoryRebuildTimedOut &&
-        awaitingRepositoryRebuild(query.state.data))
-        ? 5000
-        : false,
+    meta: { invalidatedBy: [INVALIDATION_TOPICS.workspaces] },
   })
   const options = useWorkspaceOptions(true)
   const repositories = useRepos()
@@ -294,6 +289,12 @@ export function WorkspaceSettingsPanel({
         onSaved={onSaved}
         onRebuildStarted={onRebuildStarted}
       />
+      <WorkspaceProxySection
+        key={`proxy:${slug}:${JSON.stringify(record.data.create_params)}`}
+        record={record.data}
+        canEdit={canEdit}
+        onSaved={onSaved}
+      />
       <ModelDefaultsSection
         scope={scope}
         models={(modelOptions.data?.models ?? []).filter(
@@ -305,8 +306,10 @@ export function WorkspaceSettingsPanel({
         repositories={repositories.data?.repositories ?? []}
       />
       <WorkspaceRepositoriesSection slug={slug} canEdit={canEdit} />
+      {canEdit && (
+        <WorkspaceApiKeysSection key={`api-keys:${slug}`} slug={slug} />
+      )}
       <LLMGatewaySection scope={scope} />
-      <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />

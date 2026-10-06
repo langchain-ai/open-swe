@@ -7,12 +7,15 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Self
 from urllib.parse import parse_qs
+from uuid import UUID
 
 from fastapi import Request
 from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
 from agent.database import configured, transaction
+from agent.slack.payloads import SlackEventEnvelope
+from agent.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ _ROTATE_INTERVAL_SECONDS = 3600
 
 _ROTATED_AT: float | None = None
 _ROTATION_LOCK = asyncio.Lock()
+_SEGMENT_TASKS: set[asyncio.Task[None]] = set()
 
 _INSERT = text(
     f"""
@@ -52,8 +56,62 @@ _INSERT = text(
     FROM (SELECT 1) AS delivery
     LEFT JOIN repository ON repository.key = lower(CAST(:github_repository AS text))
     LEFT JOIN workspace_repository ON workspace_repository.repository_id = repository.id
+    RETURNING source, event_type, delivery_id, received_at,
+        user_id, workspace_id, repository_id, pull_request_id
     """
 )
+
+_EVENT_KINDS = text(
+    f"""
+    SELECT source, event_type, count(*) AS count, max(received_at) AS last_received_at
+    FROM {_TABLE}
+    WHERE received_at >= :since
+      AND (CAST(:source AS text) IS NULL OR source = :source)
+      AND (CAST(:event_type AS text) = ''
+           OR event_type = :event_type
+           OR starts_with(event_type, :event_type || '.'))
+    GROUP BY 1, 2
+    ORDER BY 1, 2
+    """
+)
+
+_LATEST_PAYLOAD = text(
+    f"""
+    SELECT payload
+    FROM {_TABLE}
+    WHERE source = :source AND event_type = :event_type AND received_at >= :since
+    ORDER BY received_at DESC
+    LIMIT 1
+    """
+)
+_SHAPE_DEPTH = 6
+
+
+class LoggedEvent(BaseModel):
+    """A row as written, with the links resolved on insert."""
+
+    source: WebhookSource
+    event_type: str
+    delivery_id: str
+    received_at: datetime
+    user_id: UUID | None
+    workspace_id: UUID | None
+    repository_id: UUID | None
+    pull_request_id: UUID | None
+    payload: JsonValue
+
+    @property
+    def base_event_type(self) -> str:
+        """``event_type`` without its ``.<action>`` suffix, e.g. ``pull_request``."""
+        return self.event_type.partition(".")[0]
+
+
+class EventKind(BaseModel):
+    source: WebhookSource
+    event_type: str
+    count: int
+    last_received_at: datetime
+    payload_shape: JsonValue = None
 
 
 class EventRefs(BaseModel):
@@ -76,12 +134,38 @@ class EventRefs(BaseModel):
         number = delivery.pull_request.number if delivery.pull_request else None
         if number is None and delivery.issue and delivery.issue.pull_request:
             number = delivery.issue.number
+        if number is None:
+            number = next(
+                (
+                    check.pull_requests[0].number
+                    for check in (delivery.check_run, delivery.check_suite, delivery.workflow_run)
+                    if check and check.pull_requests
+                ),
+                None,
+            )
         return cls(
             github_repository=delivery.repository.full_name if delivery.repository else "",
             github_user_id=str(delivery.sender.id)
             if delivery.sender and delivery.sender.id
             else "",
             pull_request_number=number,
+        )
+
+    @classmethod
+    def slack(cls, envelope: SlackEventEnvelope) -> Self:
+        event = envelope.event
+        if event is None:
+            return cls()
+        message = event.message if event.subtype == "message_changed" else event
+        refs = event_pull_requests(envelope)
+        ref = refs[0] if len(refs) == 1 else None
+        return cls(
+            github_repository=f"{ref.owner}/{ref.repo}" if ref else "",
+            pull_request_number=ref.number if ref else None,
+            slack_user_id=message.user
+            if message and isinstance(message.user, str)
+            else event.resolve_user_id(),
+            slack_channel_id=event.resolve_channel_id(),
         )
 
     @classmethod
@@ -114,11 +198,18 @@ class _GitHubIssue(BaseModel):
     pull_request: JsonValue = None
 
 
+class _GitHubCheck(BaseModel):
+    pull_requests: list[_GitHubPullRequest] = []
+
+
 class _GitHubDelivery(BaseModel):
     repository: _GitHubRepository | None = None
     sender: _GitHubAccount | None = None
     pull_request: _GitHubPullRequest | None = None
     issue: _GitHubIssue | None = None
+    check_run: _GitHubCheck | None = None
+    check_suite: _GitHubCheck | None = None
+    workflow_run: _GitHubCheck | None = None
 
 
 class _LinearUser(BaseModel):
@@ -146,32 +237,100 @@ class EventLog:
         delivery_id: str = "",
         refs: EventRefs | None = None,
     ) -> None:
-        """Never raises: a delivery that cannot be logged is still handled."""
+        """Log, then wake subscribed threads. Never raises: the delivery is still handled."""
+        from agent.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
+
         if not configured():
             return
+        if source == "slack":
+            from agent.slack.channels import SlackChannel
+
+            channel_id = refs.slack_channel_id if refs else ""
+            try:
+                channel = await SlackChannel.load(channel_id)
+            except Exception:
+                logger.warning("Checking event log Slack channel failed", exc_info=True)
+                return
+            if channel is None or not channel.details.publishes_events:
+                return
         try:
             await cls.ensure_partitions()
         except Exception:  # noqa: BLE001
             logger.warning("Rotating event log partitions failed", exc_info=True)
+        payload = cls._decode(request, body)
+        action = payload.get("action") if isinstance(payload, dict) else None
+        if event_type and isinstance(action, str) and action:
+            event_type = f"{event_type}.{action}"
         try:
             async with transaction() as conn:
-                await conn.execute(
+                result = await conn.execute(
                     _INSERT,
                     {
                         "source": source,
                         "endpoint": request.url.path,
                         "event_type": event_type,
                         "delivery_id": delivery_id,
-                        "payload": json.dumps(cls._decode(request, body)),
+                        "payload": json.dumps(payload),
                         **(refs or EventRefs()).model_dump(),
                     },
                 )
+                row = result.mappings().one()
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Recording a webhook in the event log failed",
                 extra={"webhook_source": source, "webhook_endpoint": request.url.path},
                 exc_info=True,
             )
+            return
+        from agent.analytics.segment import record_webhook
+
+        event = LoggedEvent.model_validate({**row, "payload": payload})
+        task = asyncio.create_task(record_webhook(event))
+        _SEGMENT_TASKS.add(task)
+        task.add_done_callback(_SEGMENT_TASKS.discard)
+        await EventSubscription.deliver(event)
+
+    @classmethod
+    async def kinds(
+        cls, since: datetime, *, source: WebhookSource | None = None, event_type: str = ""
+    ) -> list[EventKind]:
+        """Every distinct source and event type received since ``since``.
+
+        ``event_type`` narrows to that type and its ``.<action>`` variants. With
+        ``source``, an exact match also gets the newest payload's shape: keys and value
+        types, never values.
+        """
+        await cls.ensure_partitions()
+        params = {"since": since, "source": source, "event_type": event_type}
+        async with transaction() as conn:
+            rows = await conn.execute(_EVENT_KINDS, params)
+            kinds = [EventKind.model_validate(dict(row)) for row in rows.mappings()]
+            if source is None or not any(kind.event_type == event_type for kind in kinds):
+                return kinds
+            payload = await conn.scalar(_LATEST_PAYLOAD, params)
+        return [
+            kind.model_copy(update={"payload_shape": cls.shape(payload)})
+            if kind.event_type == event_type
+            else kind
+            for kind in kinds
+        ]
+
+    @classmethod
+    def shape(cls, value: JsonValue, depth: int = 0) -> JsonValue:
+        """``value`` with every leaf replaced by its JSON type name."""
+        if isinstance(value, dict):
+            if depth >= _SHAPE_DEPTH:
+                return "object"
+            return {key: cls.shape(item, depth + 1) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls.shape(value[0], depth + 1)] if value else []
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, (int, float)):
+            return "number"
+        if value is None:
+            return "null"
+        return "string"
 
     @classmethod
     async def ensure_partitions(cls) -> None:

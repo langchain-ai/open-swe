@@ -3,7 +3,7 @@ import { dismissOnboardingIfShown } from "./helpers/dashboard";
 
 const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 
-test("private threads are owner-only and visibility is fixed at creation", async ({
+test("private threads require owner confirmation to expose the entire thread", async ({
   page,
   playwright,
 }) => {
@@ -64,12 +64,23 @@ test("private threads are owner-only and visibility is fixed at creation", async
     await expect(
       page.getByRole("menuitemradio", { name: "Private" }),
     ).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("menuitemradio", { name: "Workspace" }).click();
+    await expect(page.getByRole("dialog")).toContainText(
+      "Expose this entire thread to the workspace?",
+    );
     await expect(
-      page.getByRole("menuitemradio", { name: "Workspace" }),
+      page.getByRole("button", { name: "Share entire thread" }),
     ).toBeDisabled();
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Keep private" }).click();
+    expect(
+      (
+        await (
+          await page.request.get(`/dashboard/api/threads/${createdId}`)
+        ).json()
+      ).visibility,
+    ).toBe("private");
 
-    // Visibility cannot be changed in place; the PATCH only knows titles.
+    // The title PATCH cannot bypass the explicit sharing endpoint.
     const flip = await page.request.patch(
       `/dashboard/api/threads/${createdId}`,
       {
@@ -120,6 +131,51 @@ test("private threads are owner-only and visibility is fixed at creation", async
       );
       expect(denied.status()).toBe(404);
     }
+    const forbidden = await page.request.post(
+      `/dashboard/api/threads/${createdId}/share-to-workspace`,
+      { headers: { origin: new URL(page.url()).origin } },
+    );
+    expect(forbidden.status()).toBe(404);
+
+    await page.request.post("/control/login", { data: { login: "alice" } });
+    await page.goto(`/agents/${createdId}`);
+    await expect(
+      page.getByRole("button", { name: "Thread visibility" }),
+    ).toHaveText(/Private/);
+    await expect
+      .poll(
+        async () =>
+          (await (await api.get(`/threads/${createdId}`)).json()).status,
+      )
+      .not.toBe("busy");
+    if (process.env.SHARING_BEFORE_SCREENSHOT) {
+      await page.screenshot({ path: process.env.SHARING_BEFORE_SCREENSHOT });
+    }
+    await page.getByRole("button", { name: "Thread visibility" }).click();
+    await page.getByRole("menuitemradio", { name: "Workspace" }).click();
+    await page.getByRole("checkbox").check();
+    if (process.env.SHARING_SCREENSHOT) {
+      await page.screenshot({ path: process.env.SHARING_SCREENSHOT });
+    }
+    await page.getByRole("button", { name: "Share entire thread" }).click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Thread visibility" }),
+    ).toHaveText(/Workspace/);
+    await expect(page).toHaveURL(new RegExp(`/agents/${createdId}$`));
+    const shared = await (
+      await page.request.get(`/dashboard/api/threads/${createdId}`)
+    ).json();
+    expect(shared.visibility).toBe("public");
+    expect(shared.adminThread).toBe(false);
+    await page.request.post("/control/login", { data: { login: "bob" } });
+    await page.goto(`/agents/${createdId}`);
+    await expect(
+      page.getByText("Private planning notes", { exact: true }).first(),
+    ).toBeVisible();
+    expect(
+      (await page.request.get(`/dashboard/api/threads/${createdId}`)).ok(),
+    ).toBeTruthy();
   } finally {
     for (const threadId of [createdId, continuedId, sharedId]) {
       if (threadId) await api.delete(`/threads/${threadId}`);

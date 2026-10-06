@@ -26,7 +26,7 @@ async def test_slack_request_never_falls_back_to_unrelated_human(
             )
         )
     classify = AsyncMock()
-    monkeypatch.setattr("agent.model_request.select_jev_choice", classify)
+    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
     intent = await infer_requested_model(
         messages=messages,
         requested_models=available_requested_models(fable_enabled=False),
@@ -42,14 +42,14 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
     stream = contextvars.ContextVar("run_stream", default="none")
     observed: list[str] = []
 
-    async def classify(task: str, **kwargs: object) -> str:
+    async def classify(task: str, **kwargs: object) -> dict[str, str | None]:
         assert stream.get() == "none"
         assert get_current_run_tree() is None
         assert var_child_runnable_config.get() is None
         observed.append(task)
-        return "anthropic:claude-opus-5-5"
+        return {"runtime_model": "anthropic:claude-opus-5-5", "runtime_effort": "max"}
 
-    monkeypatch.setattr("agent.model_request.select_jev_choice", classify)
+    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
     token = stream.set("agent-stream")
     config_token = var_child_runnable_config.set({"configurable": {"secret": "not-for-classifier"}})
     try:
@@ -76,4 +76,51 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
         stream.reset(token)
         var_child_runnable_config.reset(config_token)
     assert observed == ["Use Oppus for this"]
-    assert intent is not None and intent.requested_model == "anthropic:claude-opus-5-5"
+    assert intent == ModelRequestIntent(
+        requested_model="anthropic:claude-opus-5-5", requested_effort="max"
+    )
+
+
+@pytest.mark.parametrize(
+    ("model_choice", "effort_choice", "expected"),
+    [
+        (
+            "anthropic:claude-opus-5-5",
+            "max",
+            ModelRequestIntent(requested_model="anthropic:claude-opus-5-5", requested_effort="max"),
+        ),
+        ("no_request", "high", ModelRequestIntent(requested_effort="high")),
+        ("no_request", "none", ModelRequestIntent(requested_effort="none")),
+        ("no_request", "unavailable", ModelRequestIntent(unavailable_effort=True)),
+        (
+            "unavailable",
+            "high",
+            ModelRequestIntent(unavailable_model=True, requested_effort="high"),
+        ),
+        (None, "high", None),
+        ("unknown_model", "high", None),
+        (
+            "anthropic:claude-opus-5-5",
+            None,
+            ModelRequestIntent(requested_model="anthropic:claude-opus-5-5"),
+        ),
+        ("no_request", "no_request", ModelRequestIntent()),
+    ],
+)
+async def test_effort_selection_preserves_model_failure_safety(
+    monkeypatch: pytest.MonkeyPatch,
+    model_choice: str | None,
+    effort_choice: str | None,
+    expected: ModelRequestIntent | None,
+) -> None:
+    async def classify(task: str, **kwargs: object) -> dict[str, str | None]:
+        return {"runtime_model": model_choice, "runtime_effort": effort_choice}
+
+    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
+    assert (
+        await infer_requested_model(
+            messages=[HumanMessage(content="Use Opus with max reasoning effort")],
+            requested_models=available_requested_models(fable_enabled=False),
+        )
+        == expected
+    )

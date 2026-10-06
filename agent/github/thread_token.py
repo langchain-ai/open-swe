@@ -192,13 +192,6 @@ async def resolve_thread_github_token(run_config: Mapping[str, Any] | None = Non
     return token
 
 
-async def get_github_token_from_thread(
-    thread_id: str, *, principal: str | None = None
-) -> tuple[str | None, str | None]:
-    """Resolve the current process's cached GitHub token for a thread and principal."""
-    return _cached_token_if_fresh(thread_id, principal)
-
-
 async def invalidate_cached_github_token(thread_id: str) -> None:
     """Clear every cached GitHub token for a thread."""
     for key in [key for key in _GITHUB_TOKEN_CACHE if key[0] == thread_id]:

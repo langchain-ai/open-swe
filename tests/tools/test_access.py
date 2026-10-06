@@ -85,13 +85,44 @@ async def test_slack_thread_counts_every_human_poster(metadata: dict, slack: lis
     assert (await resolve_access(cfg)).mode(_OWN) is None
 
 
-@pytest.mark.parametrize("visibility", ["private", "unknown"])
+@pytest.mark.parametrize(
+    "scope, expected",
+    [
+        ({"visibility": "private"}, "full"),
+        ({"visibility": "unknown"}, None),
+        ({"visibility": "private", "owner_type": "unknown"}, None),
+        ({"visibility": "private", "owner_type": "system"}, None),
+        ({"visibility": "private", "admin_thread": "true"}, None),
+    ],
+)
 async def test_private_owner_gets_full_results_and_unknown_scope_fails_closed(
-    metadata: dict, visibility: str
+    metadata: dict[str, object], scope: dict[str, object], expected: tool_access.Mode | None
 ) -> None:
-    metadata.update(visibility=visibility, owner_login="alice")
-    expected = "full" if visibility == "private" else None
-    assert (await resolve_access(_cfg())).mode(_OWN) == expected
+    metadata.update(owner_login="alice", **scope)
+    resolved = await resolve_access(_cfg(admin_thread=True))
+    assert resolved.mode(_OWN) == expected
+    if expected is None:
+        assert resolved == tool_access.Access()
+
+
+@pytest.mark.parametrize("place", ["private", "admin_thread", "admin_surface"])
+async def test_sharing_revokes_tools_despite_stale_private_admin_run_config(
+    metadata: dict[str, object], monkeypatch: pytest.MonkeyPatch, place: tool_access.Place
+) -> None:
+    metadata.update(visibility="private", owner_login="alice", admin_thread=True)
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
+    monkeypatch.setattr(tool_access, "configurable", lambda: _cfg(admin_thread=True))
+    calls: list[str] = []
+
+    @tool_access.access(Policy(trusted=place, actor="admin"))
+    async def tool() -> dict[str, object]:
+        calls.append("called")
+        return {"secret": "private data"}
+
+    assert await tool() == {"secret": "private data"}
+    metadata.update(visibility="public", admin_thread=False)
+    assert (await tool())["ok"] is False
+    assert calls == ["called"]
 
 
 async def test_calls_are_rechecked_and_projected(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -57,6 +57,9 @@ class ReviewerThreadMissingError(RuntimeError):
 
 REVIEWER_THREAD_KIND = "reviewer"
 REVIEWER_EVAL_PUBLICATION_KEY = "reviewer_eval_publication"
+# Sidebar label for reviewer threads that have no PR identity yet. Real PR
+# titles land in ``pr`` metadata from the first webhook that reaches them.
+REVIEWER_UNTITLED = "Review: pending"
 
 # Suggestions are only useful when the reader can scan them at a glance and
 # accept with one click. Anything longer reads as the reviewer rewriting the
@@ -65,7 +68,6 @@ REVIEWER_EVAL_PUBLICATION_KEY = "reviewer_eval_publication"
 MAX_SUGGESTION_LINES = 4
 MAX_FINDING_TITLE_LENGTH = 120
 DEFAULT_FINDING_TITLE = "Code review finding"
-REVIEW_FINDING_CAP = 6
 FINDING_FINGERPRINT_VERSION = 1
 
 
@@ -195,12 +197,6 @@ class ReviewerSlackThread(TypedDict, total=False):
 
     channel_id: str
     thread_ts: str
-
-
-class ReviewerEvalPublication(TypedDict):
-    finding_ids: list[str]
-    severity_threshold: Severity
-    cap: int
 
 
 def new_finding_id() -> str:
@@ -1099,10 +1095,6 @@ async def set_reviewer_thread_metadata(
         raise ReviewerThreadMissingError(thread_id, exc) from exc
 
 
-def get_thread_watch_flag(metadata: dict[str, Any]) -> bool:
-    return bool(metadata.get("watch"))
-
-
 def get_thread_last_reviewed_sha(metadata: dict[str, Any]) -> str | None:
     value = metadata.get("last_reviewed_sha")
     return value if isinstance(value, str) and value else None
@@ -1113,6 +1105,18 @@ def get_thread_pr_meta(metadata: dict[str, Any]) -> ReviewerPRMeta | None:
     if not isinstance(pr, dict):
         return None
     return cast(ReviewerPRMeta, pr)
+
+
+def reviewer_thread_title(pr: ReviewerPRMeta) -> str:
+    """Sidebar title for a reviewer thread: ``Review: #nn <PR title>``."""
+    number = pr.get("number")
+    title = (pr.get("title") or "").strip()
+    parts = [
+        f"#{number}" if isinstance(number, int) and not isinstance(number, bool) else "",
+        title,
+    ]
+    label = " ".join(part for part in parts if part)
+    return f"Review: {label}" if label else REVIEWER_UNTITLED
 
 
 def get_thread_slack_ref(metadata: dict[str, Any]) -> ReviewerSlackThread | None:
@@ -1132,7 +1136,6 @@ def filter_findings_for_publish(
     findings: list[Finding],
     *,
     severity_threshold: Severity = "medium",
-    cap: int | None = None,
 ) -> list[Finding]:
     """Return findings to surface to GitHub.
 
@@ -1140,7 +1143,6 @@ def filter_findings_for_publish(
     - severity must be at or above ``severity_threshold``
     - sorted by the reviewer's ``rank``; unranked findings follow by severity
       descending, then file/start_line for stable ordering
-    - optionally capped at ``cap`` for benchmark runs
     """
     severity_rank = SEVERITY_ORDER[severity_threshold]
     eligible = [
@@ -1158,4 +1160,4 @@ def filter_findings_for_publish(
             f.get("start_line") or 0,
         )
     )
-    return eligible[:cap]
+    return eligible

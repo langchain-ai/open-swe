@@ -77,13 +77,6 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "default_effort": "high",
         "supports_images": False,
     },
-    {
-        "id": "fireworks:accounts/fireworks/models/glm-5p3-flash",
-        "label": "GLM-5.3 Flash",
-        "efforts": ["low", "high", "max"],
-        "default_effort": "high",
-        "supports_images": True,
-    },
 ]
 
 SUPPORTED_MODEL_IDS: frozenset[str] = frozenset(m["id"] for m in SUPPORTED_MODELS)
@@ -122,6 +115,7 @@ DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
         "fireworks:accounts/fireworks/models/kimi-k3-code",
         "fireworks:accounts/fireworks/models/glm-5p2",
         "fireworks:accounts/fireworks/models/glm-5p3",
+        "fireworks:accounts/fireworks/models/glm-5p3-flash",
         "fireworks:accounts/fireworks/models/deepseek-v4-pro",
     }
 )
@@ -147,7 +141,6 @@ _PROFILE_ALIASES = {"gpt-6.1-sol": "gpt-6-sol", "gpt-6-luna": "gpt-5.6-luna"}
 _PROFILE_CONTEXT_WINDOW_FALLBACKS: dict[str, int] = {
     "anthropic:claude-sonnet-5-5": 1_000_000,
     "fireworks:accounts/fireworks/models/kimi-k3": 1_048_576,
-    "fireworks:accounts/fireworks/models/glm-5p3-flash": 1_048_576,
 }
 
 
@@ -285,14 +278,6 @@ def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
         and "minimal" in model["efforts"]
     ):
         return "minimal"
-    return None
-
-
-def is_deprecated_model(model_id: object) -> bool:
-    return isinstance(model_id, str) and model_id in DEPRECATED_MODEL_IDS
-
-
-def canonical_model_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
     return None
 
 

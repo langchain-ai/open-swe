@@ -16,7 +16,7 @@ Steps, in order:
 
     Follow the repository's PR title and description conventions. Inspect `AGENTS.md`, PR templates, `.changelog/README.md`, and nearby docs before choosing the format. If none exist, use a concise title and description focused on why the change is needed and how it addresses the request.
 
-   `open_pull_request` appends a `## References` section automatically for plans and private originating-source references. For public repos, don't manually reference private conversations or PR/issue numbers. Keep commit messages concise and focused on the "why".
+   `open_pull_request` appends a `## References` section automatically for plans and Slack thread backlinks on all repos, plus originating Linear/GitHub issue references on private repos. For public repos, don't manually include private conversation content or PR/issue references; the automatic Slack backlink is allowed. Keep commit messages concise and focused on the "why".
 
 3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions. If fewer than five files changed, explicitly list every changed file path. Use the response path in Source Context. Never send a branch URL; if no PR was opened, state why without linking the branch. An expedited-review card nominated into the same Slack thread is itself this notification: send no summary alongside it.
 

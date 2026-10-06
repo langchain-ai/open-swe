@@ -1,19 +1,48 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
+import httpx
 import httpx2
 import pytest
+from githubkit import GitHub
 
 from agent.expedited_review.readiness import PullRequestSnapshot
+from agent.github.pull_requests import PullRequest
 from agent.github.repo_files import RepoSettings
+from agent.human_review.lifecycle import _render_standard, _unrequest_github_review
+from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.human_review.standard import (
     SUMMARY_MAX_CHARS,
     merge_wait,
     request_blockers,
+    review_reminder_at,
     summary_line,
 )
+from agent.slack.blocks import block_payload
+from agent.users import User, UserIdentity
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("status", [200, 503])
+async def test_reviewer_removal_sends_delete_body_without_aborting(status: int) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    received: list[httpx.Request] = []
+
+    def respond(outgoing: httpx.Request) -> httpx.Response:
+        received.append(outgoing)
+        return httpx.Response(status, json={})
+
+    client = GitHub("token", async_transport=httpx.MockTransport(respond), auto_retry=False)
+    with patch("agent.human_review.lifecycle.github_sdk", return_value=client):
+        await _unrequest_github_review(request, "grace", "token")
+    assert len(received) == 1
+    assert received[0].method == "DELETE"
+    assert received[0].url.path == "/repos/lc/repo/pulls/7/requested_reviewers"
+    assert received[0].content == b'{"reviewers":["grace"]}'
 
 
 def _snapshot(**overrides: object) -> PullRequestSnapshot:
@@ -32,6 +61,22 @@ def _snapshot(**overrides: object) -> PullRequestSnapshot:
     for name, value in overrides.items():
         setattr(base, name, value)
     return base
+
+
+@pytest.mark.parametrize(
+    ("start", "expected"),
+    [
+        ("2026-09-28T08:00:00", "2026-09-28T11:00:00"),
+        ("2026-09-28T17:00:00", "2026-09-29T10:00:00"),
+        ("2026-10-30T17:00:00", "2026-11-02T10:00:00"),
+        ("2026-10-31T12:00:00", "2026-11-02T11:00:00"),
+    ],
+)
+def test_review_reminders_count_only_local_business_hours(start: str, expected: str) -> None:
+    timezone = ZoneInfo("America/New_York")
+    assert review_reminder_at(datetime.fromisoformat(start).replace(tzinfo=timezone), timezone) == (
+        datetime.fromisoformat(expected).replace(tzinfo=timezone).astimezone(UTC)
+    )
 
 
 def test_a_ready_pull_request_can_be_put_up_for_review() -> None:
@@ -70,6 +115,32 @@ def test_a_failing_check_github_does_not_require_does_not_block_the_request() ->
     assert request_blockers(snapshot) == []
 
 
+@pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
+async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expected: str) -> None:
+    from agent.human_review.standard import AutoAssignResult, run_deadline
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        state="open",
+    )
+    request.created_at = datetime.now(UTC) - timedelta(minutes=30)
+    request.pull_request = pr
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("agent.human_review.standard._assignment_minutes", AsyncMock(return_value=minutes)),
+        patch("agent.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("agent.human_review.standard._github_approvers", AsyncMock(return_value=[])),
+        patch(
+            "agent.human_review.standard.start_auto_assign",
+            AsyncMock(return_value=AutoAssignResult("woken")),
+        ),
+    ):
+        assert await run_deadline(str(request.id), "unclaimed") == {"status": expected}
+
+
 def test_nothing_merges_without_an_approval() -> None:
     long_ago = _NOW - timedelta(days=1)
     assert merge_wait([], long_ago, {}, _NOW) == "an approval on GitHub"
@@ -94,6 +165,38 @@ def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
     assert merge_wait([], _NOW, {"hopper": "APPROVED"}, _NOW) is None
 
 
+@pytest.mark.parametrize(
+    "states", [{"Grace": "APPROVED", "hopper": "APPROVED", "linus": "DISMISSED"}, None]
+)
+async def test_merged_card_names_only_actual_approvers(states: dict[str, str] | None) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    for login in ("grace", "linus"):
+        user = User(
+            identities=[
+                UserIdentity(provider="github", external_id=login, login=login),
+                UserIdentity(provider="slack", external_id=f"U_{login}"),
+            ]
+        )
+        participant = HumanReviewParticipant(user_id=user.id, decision="review")
+        participant.user = user
+        request.participants.append(participant)
+    with patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)):
+        text, blocks = await _render_standard(request, "merged", "token")
+    payload = block_payload(blocks)
+    assert payload is not None
+    rendered = str(payload)
+    for message in (text, rendered):
+        assert "merged" in message
+        assert "by @ada" in message
+        if states:
+            assert "approved by <@U_grace>, @hopper" in message
+        else:
+            assert "approved by" not in message
+        assert "linus" not in message
+
+
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:
     assert summary_line("<!-- template -->\nFixes the\nretry loop.\n") == "Fixes the retry loop."
 
@@ -106,6 +209,38 @@ def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
     assert len(line) <= SUMMARY_MAX_CHARS
     assert description.startswith(kept)
     assert description[len(kept)] in {" ", ","}
+
+
+@pytest.mark.parametrize(
+    ("states", "collapsed"),
+    [
+        ({"grace": "APPROVED"}, True),
+        ({}, False),
+        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False),
+    ],
+)
+async def test_approved_card_collapses_without_closing_the_request(
+    states: dict[str, str], collapsed: bool
+) -> None:
+    from agent.github.pull_requests import PullRequest
+    from agent.human_review.lifecycle import _render_standard
+    from agent.human_review.requests import HumanReviewRequest
+
+    pr = PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    request.requested_by = None
+    with (
+        patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
+    ):
+        text, blocks = await _render_standard(request, None, "token")
+    assert ("Review request: approved" in text) is collapsed
+    assert (len(blocks) == 1) is collapsed
+    assert "<@U_ada>" in str(block_payload(blocks))
+    if collapsed:
+        assert "by <@U_ada>" in text
+    assert request.state == "open"
 
 
 def _github(status: int, text: str = "") -> AsyncMock:

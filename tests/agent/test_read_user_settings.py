@@ -31,7 +31,7 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
         patch(
             "agent.tools.read_user_settings.resolve_thread_participant_logins",
             new_callable=AsyncMock,
-            return_value=({"octocat"}, 1, None),
+            return_value=({"octocat"}, 1),
         ),
         patch(
             "agent.tools.read_user_settings.get_profile",
@@ -94,7 +94,7 @@ async def test_read_user_settings_fails_before_settings_reads() -> None:
         patch(
             "agent.tools.read_user_settings.resolve_thread_participant_logins",
             new_callable=AsyncMock,
-            return_value=(None, 0, "Could not verify the active thread"),
+            side_effect=ValueError("Could not verify the active thread"),
         ),
         patch("agent.tools.read_user_settings.get_profile", profile),
     ):
@@ -135,28 +135,6 @@ async def test_slack_participants_include_broadcasts_and_exclude_system_messages
 
 
 @pytest.mark.asyncio
-async def test_linear_participants_use_verified_email_mappings() -> None:
-    async def login_for_email(email: str) -> str | None:
-        return {"octo@example.com": "octocat", "missing@example.com": None}.get(email)
-
-    with (
-        patch.object(participants.User, "login_for_email", side_effect=login_for_email),
-        patch.object(
-            participants.User,
-            "for_login",
-            new_callable=AsyncMock,
-            return_value=SimpleNamespace(github_login="octocat"),
-        ),
-    ):
-        logins, unresolved = await participants._mapped_email_logins(
-            {"octo@example.com", "missing@example.com"}
-        )
-
-    assert logins == {"octocat"}
-    assert unresolved == 1
-
-
-@pytest.mark.asyncio
 async def test_dashboard_participants_are_read_from_trusted_metadata() -> None:
     class Threads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -179,10 +157,9 @@ async def test_dashboard_participants_are_read_from_trusted_metadata() -> None:
         patch.object(participants, "get_client", return_value=Client()),
         patch.object(participants.User, "for_login", side_effect=for_login),
     ):
-        logins, unresolved, error = await participants.resolve_thread_participant_logins(
+        logins, unresolved = await participants.resolve_thread_participant_logins(
             {"configurable": {"thread_id": "thread-1", "source": "dashboard"}}
         )
 
-    assert error is None
     assert unresolved == 0
     assert logins == {"owner", "teammate"}

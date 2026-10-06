@@ -32,7 +32,12 @@ from agent.dashboard.workspace_settings import (
     get_workspace_settings,
 )
 from agent.database import postgres
-from agent.dispatch import FOLLOW_UP_PICKUP_KIND, create_durable_run, dispatch_agent_run
+from agent.dispatch import (
+    FOLLOW_UP_PICKUP_KIND,
+    _run_user_id,
+    create_durable_run,
+    dispatch_agent_run,
+)
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from agent.input_messages import (
     PersonIdentity,
@@ -249,12 +254,7 @@ async def _resolve_requested_workspace(
     return (await resolve_workspace(tag=tag, repo=repo, login=login)).slug
 
 
-def _resolve_repo_config(repo: str | None) -> dict[str, str]:
-    """Resolve the run's repo from the request, or ``{}`` when none is given."""
-    return _parse_repo(repo) or {}
-
-
-async def _create_dashboard_thread_record(
+async def create_dashboard_thread_record(
     thread_id: str,
     *,
     login: str,
@@ -269,6 +269,7 @@ async def _create_dashboard_thread_record(
     model_selection: str = "auto",
     visibility: Literal["public", "private"] = "public",
     workspace: str | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a dashboard thread with immutable ownership and visibility."""
     profile = await get_profile(login) or {}
@@ -323,6 +324,8 @@ async def _create_dashboard_thread_record(
         metadata["repo_name"] = repo_config["name"]
     elif repo_explicitly_none:
         metadata["repo_explicitly_none"] = True
+    if extra_metadata:
+        metadata.update(extra_metadata)
 
     # A deployment without PostgreSQL has nowhere to keep a transcript, so the
     # thread is not stamped as one and keeps reading LangGraph state.
@@ -381,6 +384,7 @@ async def _build_dashboard_configurable(
         "source": source,
         "github_login": login,
         "user_email": await resolve_run_email(login, profile),
+        "background_task_completion": False,
     }
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
@@ -431,7 +435,7 @@ async def start_dashboard_thread(
         repo_configs.append(repo_config)
     await _ensure_dashboard_github_token(login)
     primary = repo_configs[0] if repo_configs else {}
-    thread = await _create_dashboard_thread_record(
+    thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
         login=login,
         email=email,
@@ -452,6 +456,46 @@ async def start_dashboard_thread(
         client=client,
     )
     return thread_id
+
+
+async def start_sandbox_guest_run(
+    thread_id: str,
+    login: str,
+    *,
+    prompt: str,
+    tool_results: Sequence[Mapping[str, str]],
+    overrides: dict[str, Any],
+) -> str:
+    """Start a run on a thread a sandbox program talks to, with the tool results it ran for it."""
+    await _ensure_dashboard_github_token(login)
+    client = langgraph_client()
+    metadata = thread_metadata(await client.threads.get(thread_id))
+    configurable = await _build_dashboard_configurable(
+        thread_id, login, metadata, overrides=overrides
+    )
+    if tool_results:
+        user = [{"role": "user", "content": prompt}] if prompt else []
+        run = await create_durable_run(
+            thread_id,
+            _ASSISTANT_ID,
+            input={"messages": [*tool_results, *user]},
+            config={"configurable": configurable},
+            source=DASHBOARD_SOURCE,
+            thread_title=None,
+            client=client,
+            multitask_strategy="enqueue",
+        )
+    else:
+        run = await dispatch_agent_run(
+            thread_id,
+            prompt,
+            configurable,
+            source=DASHBOARD_SOURCE,
+            thread_title=None,
+            client=client,
+            multitask_strategy="enqueue",
+        )
+    return str(run["run_id"])
 
 
 def _extract_run_id_from_command_response(payload: Any) -> str | None:
@@ -778,7 +822,7 @@ async def _enrich_run_start_command(
         # the stamped metadata below).
         visibility = await _requested_visibility(client_configurable, login=login)
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
-        thread = await _create_dashboard_thread_record(
+        thread = await create_dashboard_thread_record(
             thread_id,
             login=login,
             email=email,
@@ -951,7 +995,14 @@ async def _enrich_run_start_command(
             **{
                 key: value
                 for key, value in run_metadata.items()
-                if key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
+                if key
+                not in {
+                    "visibility",
+                    "owner_type",
+                    "owner_login",
+                    "system_authorization",
+                    "user_id",
+                }
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
@@ -971,7 +1022,20 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    params["config"] = {**client_config, "configurable": merged_configurable}
+    user_id = await _run_user_id({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
+    if user_id:
+        run_metadata["user_id"] = user_id
+    config_metadata = client_config.get("metadata")
+    if not isinstance(config_metadata, dict):
+        config_metadata = {}
+    params["config"] = {
+        **client_config,
+        "configurable": merged_configurable,
+        "metadata": {
+            **{k: v for k, v in config_metadata.items() if k != "user_id"},
+            **run_metadata,
+        },
+    }
     params["metadata"] = run_metadata
     command["params"] = params
     return command
@@ -1341,7 +1405,7 @@ async def _create_system_thread_record(
 ) -> dict[str, Any]:
     """Stamp a thread that belongs to a workspace rather than to a person.
 
-    Deliberately not built from :func:`_create_dashboard_thread_record`: there is
+    Deliberately not built from :func:`create_dashboard_thread_record`: there is
     no profile to read defaults from, no owner to record, and no participant to
     merge, and inheriting those would give the thread a person it does not have.
     """
@@ -1484,6 +1548,7 @@ async def _enrich_system_run_start_command(
             "workspace": principal.workspace,
             "environment": principal.workspace,
             STARTED_BY_ID: principal.started_by_id,
+            "background_task_completion": False,
         },
         invocation_id,
     )

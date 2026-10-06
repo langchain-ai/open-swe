@@ -1,6 +1,7 @@
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query"
 
 import { api } from "@/lib/api"
+import { expiresInBrowser } from "@/lib/query"
 import type { ReviewSort } from "../search"
 
 export function useOpenPullRequests(
@@ -18,7 +19,7 @@ export function useOpenPullRequests(
     // Re-sorting keeps the previous snapshot on screen: blanking the list and
     // growing it back shifts every row under the pointer.
     placeholderData: keepPreviousData,
-    staleTime: Infinity,
+    ...expiresInBrowser,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
