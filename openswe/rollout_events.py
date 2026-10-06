@@ -19,6 +19,7 @@ from openswe.database import configured
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.repositories import Repository
+from openswe.source_context import SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.routing import workspace_for_repo
@@ -120,6 +121,12 @@ def _instructions(sha: str) -> str:
     )
 
 
+def _copy_config(config: dict[str, JsonValue], values: dict[str, object]) -> None:
+    for key, value in values.items():
+        if isinstance(value, (str, int, float, bool, dict, list)):
+            config[key] = value
+
+
 def _run_config(
     thread_id: str,
     owner: str,
@@ -129,12 +136,17 @@ def _run_config(
     metadata: dict[str, object],
 ) -> dict[str, JsonValue]:
     config: dict[str, JsonValue] = {}
-    for key in _CONFIG_KEYS:
-        value = metadata.get(key)
-        if isinstance(value, (str, int, float, bool, dict, list)):
-            config[key] = value
+    _copy_config(config, {key: metadata.get(key) for key in _CONFIG_KEYS})
+    _copy_config(config, SourceContext.from_metadata(metadata).dump())
+    email = metadata.get("triggering_user_email")
+    if not isinstance(config.get("user_email"), str) and isinstance(email, str) and email:
+        config["user_email"] = email
     config["thread_id"] = thread_id
     config["source"] = config.get("source") if isinstance(config.get("source"), str) else "github"
+    config["repo"] = {"owner": owner, "name": repo}
+    config["pr_number"] = number
+    config["workspace"] = workspace
+    return config
     config["repo"] = {"owner": owner, "name": repo}
     config["pr_number"] = number
     config["workspace"] = workspace

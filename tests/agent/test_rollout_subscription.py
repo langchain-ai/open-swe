@@ -50,7 +50,11 @@ async def test_subscribe_merged_thread_listens_for_the_merge_commit(
         repo="repo",
         number=7,
         sha=_SHA.upper(),
-        metadata={"github_login": "octo"},
+        metadata={
+            "github_login": "octo",
+            "triggering_user_email": "octo@example.com",
+            "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.2"}},
+        },
     )
     assert len(created) == 1
     subscription = created[0]
@@ -63,6 +67,8 @@ async def test_subscribe_merged_thread_listens_for_the_merge_commit(
     assert subscription.run_config["repo"] == {"owner": "lc", "name": "repo"}
     assert subscription.run_config["pr_number"] == 7
     assert subscription.run_config["github_login"] == "octo"
+    assert subscription.run_config["user_email"] == "octo@example.com"
+    assert subscription.run_config["slack_thread"] == {"channel_id": "C1", "thread_ts": "1.2"}
     assert "every target" in subscription.instructions
 
 
