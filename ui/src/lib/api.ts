@@ -461,19 +461,6 @@ export interface LeaderboardUser {
   avatar_url?: string | null
 }
 
-export interface ReviewLeaderboardRow {
-  rank: number
-  user: LeaderboardUser
-  reviews: number
-  is_current: boolean
-}
-
-export interface ReviewLeaderboardPayload {
-  period: UsageLeaderboardPeriod
-  rows: Array<ReviewLeaderboardRow>
-  current_user: ReviewLeaderboardRow | null
-}
-
 export interface UsageLeaderboardRow {
   rank: number
   user: LeaderboardUser
@@ -1695,10 +1682,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ full_name, enabled: runAutomatically }),
     }),
-  reviewLeaderboard: (period: UsageLeaderboardPeriod, limit = 25) =>
-    request<ReviewLeaderboardPayload>(
-      `/human-review/leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
-    ),
   usageLeaderboard: (
     period: UsageLeaderboardPeriod = "7d",
     limit = 10,

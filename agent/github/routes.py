@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Response
 
 from agent.github import webhook as service
-from agent.human_review.leaderboard import CompletedReview
+from agent.human_review.completed_reviews import CompletedReview
 from agent.schedules import store as schedules
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
