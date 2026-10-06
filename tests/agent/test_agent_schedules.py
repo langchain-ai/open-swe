@@ -644,6 +644,50 @@ async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
     assert opening["workspace"] == "core"
 
 
+async def test_admin_automations_refuse_events_from_public_repositories(
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    visibility = {"langchain-ai/open-swe": False, "langchain-ai/private": True}
+
+    async def repo_is_private(full_name: str) -> bool | None:
+        return visibility.get(full_name)
+
+    monkeypatch.setattr(schedules, "repo_is_private", repo_is_private)
+
+    def admin_body(repo: str) -> ScheduleCreateBody:
+        return ScheduleCreateBody(
+            workspace="default",
+            prompt="Triage",
+            admin_thread=True,
+            triggers=[GitHubTrigger(repo=repo, events=["issues.opened"])],
+        )
+
+    with pytest.raises(HTTPException) as refused:
+        await schedules.create_agent_schedule(
+            "alice", admin_body("langchain-ai/open-swe"), allow_admin_thread=True
+        )
+    assert refused.value.status_code == 422
+    created = await schedules.create_agent_schedule(
+        "alice", admin_body("langchain-ai/private"), allow_admin_thread=True
+    )
+
+    def opened(*, private: bool) -> dict[str, Any]:
+        return {
+            "action": "opened",
+            "repository": {
+                "owner": {"login": "langchain-ai"},
+                "name": "private",
+                "private": private,
+            },
+            "issue": {"number": 1},
+        }
+
+    # The repository went public after the automation was saved.
+    assert await schedules.launch_github_automations("issues", opened(private=False), "d-1") == []
+    started = await schedules.launch_github_automations("issues", opened(private=True), "d-2")
+    assert [result["schedule_id"] for result in started] == [created["id"]]
+
+
 async def test_open_swe_events_do_not_trigger_automations(
     fake_client: _FakeClient, auth: None
 ) -> None:

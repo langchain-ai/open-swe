@@ -22,3 +22,5 @@ Args:
         Slack member ID starting with U or W to DM that person instead.
     slack_notification_mode: Post every run or only when the run takes action.
     admin_thread: Give runs workspace-admin capabilities while the creator remains an admin.
+        Not allowed with GitHub triggers on public repositories, whose event text
+        anyone can write.

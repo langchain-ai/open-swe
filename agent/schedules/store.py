@@ -27,6 +27,7 @@ from agent.dashboard.profiles import get_profile, get_valid_access_token
 from agent.dashboard.repo_access import (
     repo_config_for_user,
     repo_config_for_workspace,
+    repo_is_private,
     require_repo_access_for_workspace,
 )
 from agent.dashboard.workspace_settings import get_workspace_settings
@@ -561,6 +562,25 @@ async def _checked_triggers(
     return list(triggers)
 
 
+async def _refuse_public_events_for_admin(
+    triggers: Sequence[TriggerConfig], *, admin_thread: bool
+) -> None:
+    """An admin-thread automation never runs on events in a public repository.
+
+    Anyone can write the issue or pull request text such an event carries, and
+    an admin thread holds workspace-admin tools.
+    """
+    if not admin_thread:
+        return
+    for repo in sorted({t.repo for t in triggers if isinstance(t, GitHubTrigger)}):
+        if await repo_is_private(repo) is not True:
+            raise HTTPException(
+                422,
+                f"admin-thread automations can't run on GitHub events in {repo}: it is public, "
+                "or its visibility could not be checked",
+            )
+
+
 def _repo_dict(full_name: str | None) -> dict[str, str] | None:
     if not full_name or "/" not in full_name:
         return None
@@ -602,6 +622,7 @@ async def create_agent_schedule(
     triggers = await _checked_triggers(
         body.triggers, login, use_workspace_credentials=use_workspace_credentials
     )
+    await _refuse_public_events_for_admin(triggers, admin_thread=body.admin_thread)
     workspace = await _existing_workspace(body.workspace)
     workspace_id = await WORKSPACES.id_for_slug(workspace)
     if workspace_id is None:
@@ -705,6 +726,15 @@ async def update_agent_schedule(
             existing["created_by"],
             use_workspace_credentials=use_workspace_credentials,
         )
+
+    await _refuse_public_events_for_admin(
+        triggers,
+        admin_thread=(
+            body.admin_thread
+            if body.admin_thread is not None
+            else existing.get("admin_thread") is True
+        ),
+    )
 
     enabled = bool(columns.get("enabled", existing.get("enabled")))
     rebuild_triggers = triggers is not current_triggers or enabled != bool(existing.get("enabled"))
@@ -1371,8 +1401,16 @@ async def launch_github_automations(
     if event_type == "pull_request" and await enforce_public_repo_org_gate(payload, event_type):
         return []
     results: list[dict[str, Any]] = []
+    private = repo_private_from_payload(payload)
     for record, event in matches:
         schedule_id = record["id"]
+        if record.get("admin_thread") is True and private is not True:
+            # Saving refuses this, but a repository can go public afterwards.
+            logger.warning(
+                "Skipping an admin-thread automation for a public repository event",
+                extra={"schedule_id": schedule_id, "github_delivery": delivery_id},
+            )
+            continue
         claim_key = f"{schedule_id}:{delivery_id}"
         try:
             claimed = await event_claims.claim(
@@ -1398,7 +1436,7 @@ async def launch_github_automations(
                 # An outsider can open an issue on a public repository, so the
                 # run it starts reaches only that repository.
                 token_repositories=event_token_repositories(
-                    owner_login, repo_name, private=repo_private_from_payload(payload)
+                    owner_login, repo_name, private=private
                 ),
             )
         except Exception:
