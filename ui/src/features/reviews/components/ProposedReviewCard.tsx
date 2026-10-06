@@ -4,7 +4,7 @@ import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import {
   Card,
   CardContent,
@@ -12,7 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -82,7 +82,7 @@ export function ProposedReviewCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {!outcome && pendingCount > 0 && (
-          <p className="text-muted-foreground">
+          <p className="text-ink-subtle">
             Includes your {pendingCount} pending comment
             {pendingCount === 1 ? "" : "s"}.
           </p>
@@ -96,14 +96,14 @@ export function ProposedReviewCard({
             {EVENTS.map(([value, label]) => (
               <Button
                 key={value}
-                size="sm"
+                size="compact"
                 role="radio"
                 aria-checked={event === value}
                 variant={event === value ? "secondary" : "ghost"}
                 className={cn(
                   event === value &&
                     value === "REQUEST_CHANGES" &&
-                    "text-destructive"
+                    "text-risk"
                 )}
                 disabled={submit.isPending}
                 onClick={() => drafts.edit(id, { event: value })}
@@ -115,7 +115,7 @@ export function ProposedReviewCard({
         )}
         {outcome ? (
           body && (
-            <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+            <p className="line-clamp-3 whitespace-pre-wrap text-ink-subtle">
               {body}
             </p>
           )
@@ -133,7 +133,7 @@ export function ProposedReviewCard({
       <CardFooter className="justify-end gap-2">
         {outcome?.state === "posted" ? (
           <Button
-            size="sm"
+            size="compact"
             variant="outline"
             render={
               <a href={outcome.url} target="_blank" rel="noopener noreferrer" />
@@ -144,7 +144,7 @@ export function ProposedReviewCard({
         ) : outcome ? null : (
           <>
             <Button
-              size="sm"
+              size="compact"
               variant="ghost"
               disabled={submit.isPending}
               onClick={() => drafts.settle(id, { state: "discarded" })}
@@ -152,7 +152,7 @@ export function ProposedReviewCard({
               Discard
             </Button>
             <Button
-              size="sm"
+              size="compact"
               variant={event === "REQUEST_CHANGES" ? "destructive" : "default"}
               disabled={submit.isPending || (needsBody && !body.trim())}
               onClick={() => submit.mutate()}

@@ -1,7 +1,7 @@
 import { useState } from "react"
 
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import type { MCPConnectionUpdate, MCPOAuthUpdate } from "@/lib/api"
 
 export type ImportedMCP = Pick<
@@ -130,7 +130,7 @@ export function MCPImport({
   const [error, setError] = useState<string | null>(null)
   return (
     <form
-      className="space-y-3 rounded-md border p-4"
+      className="space-y-3 rounded-badge border p-4"
       onSubmit={(event) => {
         event.preventDefault()
         try {
@@ -144,8 +144,8 @@ export function MCPImport({
         }
       }}
     >
-      <p className="text-sm font-medium">Import MCP JSON</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-body font-medium">Import MCP JSON</p>
+      <p className="text-meta text-ink-subtle">
         Paste a Claude-style mcpServers configuration. Review each connection
         before saving. New connections preselect all tools after discovery.
       </p>
@@ -161,15 +161,15 @@ export function MCPImport({
         }
       />
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-body text-risk">
           {error}
         </p>
       )}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={!text.trim()}>
+        <Button type="submit" size="compact" disabled={!text.trim()}>
           Review connections
         </Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+        <Button type="button" size="compact" variant="ghost" onClick={onCancel}>
           {text ? "Cancel import" : "Close import"}
         </Button>
       </div>

@@ -1,18 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import { Button } from "@/components/ui/button"
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "@/components/ui/combobox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@langchain/gtm-platform-design-system/ui/combobox"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Label } from "@langchain/gtm-platform-design-system/ui/label"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import {
   api,
@@ -142,7 +135,7 @@ export function AgentInstructionsPanel() {
   return (
     <div className="flex flex-col gap-6 p-4">
       {githubReauth && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <div className="rounded-badge border border-risk/40 bg-risk-bg px-3 py-2 text-label text-risk">
           Your GitHub connection expired.{" "}
           <a
             href={loginUrl()}
@@ -171,7 +164,7 @@ export function AgentInstructionsPanel() {
               className="sm:flex-1"
             />
             <Button
-              size="sm"
+              size="compact"
               className="shrink-0 sm:w-auto"
               disabled={!canAdd || create.isPending}
               onClick={handleAdd}
@@ -199,7 +192,7 @@ export function AgentInstructionsPanel() {
                         {r.full_name}
                       </span>
                       {r.private && (
-                        <span className="ml-auto text-[10px] text-muted-foreground">
+                        <span className="ml-auto text-meta text-ink-subtle">
                           private
                         </span>
                       )}
@@ -212,9 +205,9 @@ export function AgentInstructionsPanel() {
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs font-medium text-foreground">Repositories</p>
+          <p className="text-label font-medium text-ink">Repositories</p>
           {(instructions.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-ink-subtle">
               No repositories yet.
             </p>
           ) : (
@@ -223,10 +216,10 @@ export function AgentInstructionsPanel() {
                 <li key={s.full_name}>
                   <button
                     type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
+                    className={`inline-flex max-w-full items-center gap-2 rounded-badge border px-2.5 py-1.5 text-left text-label transition-colors hover:bg-muted ${
                       selected === s.full_name
                         ? "border-primary bg-muted font-medium"
-                        : "border-border"
+                        : "border-line"
                     }`}
                     onClick={() => setSelected(s.full_name)}
                   >
@@ -239,22 +232,22 @@ export function AgentInstructionsPanel() {
         </div>
       </section>
 
-      <div className="border-t border-border" />
+      <div className="border-t border-line" />
 
       <section className="space-y-3">
         {!selected || !active ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-ink-subtle">
             Select a repository above to view or edit its custom agent
             instructions.
           </p>
         ) : (
           <>
-            <p className="text-sm font-medium text-foreground">
+            <p className="text-body font-medium text-ink">
               {active.full_name}
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
-                size="sm"
+                size="compact"
                 disabled={!dirty || save.isPending}
                 onClick={() =>
                   save.mutate({
@@ -266,12 +259,12 @@ export function AgentInstructionsPanel() {
                 Save instructions
               </Button>
               {dirty && (
-                <span className="self-center text-xs text-muted-foreground">
+                <span className="self-center text-meta text-ink-subtle">
                   Unsaved changes
                 </span>
               )}
               <Button
-                size="sm"
+                size="compact"
                 variant="destructive"
                 className="ml-auto"
                 onClick={() => {
@@ -295,7 +288,7 @@ export function AgentInstructionsPanel() {
             />
           </>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-label text-risk">{error}</p>}
       </section>
     </div>
   )

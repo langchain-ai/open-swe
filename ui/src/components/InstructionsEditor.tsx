@@ -1,5 +1,5 @@
 import Editor from "@monaco-editor/react"
-import { Textarea } from "@/components/ui/textarea"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import { useIsHydrated } from "@/lib/hydration"
 
 interface InstructionsEditorProps {
@@ -21,7 +21,7 @@ export function InstructionsEditor({
   if (!mounted) {
     return (
       <Textarea
-        className="min-h-[360px] w-full font-mono text-xs"
+        className="min-h-[360px] w-full font-mono text-label"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -31,7 +31,7 @@ export function InstructionsEditor({
   }
 
   return (
-    <div className="overflow-hidden rounded-md border border-border">
+    <div className="overflow-hidden rounded-badge border border-line">
       <Editor
         height="360px"
         language="markdown"

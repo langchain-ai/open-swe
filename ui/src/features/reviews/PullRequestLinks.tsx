@@ -5,23 +5,18 @@ import { useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
-import { Menu, MenuTrigger, MenuPopup, MenuItem } from "@/components/ui/menu"
-import {
-  Dialog,
-  DialogPopup,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@langchain/gtm-platform-design-system/ui/dialog"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
-import { buttonVariants } from "@/components/ui/button"
+import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 export const navLink = cn(
-  buttonVariants({ variant: "ghost", size: "sm" }),
-  "px-1.5 text-muted-foreground"
+  buttonVariants({ variant: "ghost", size: "compact" }),
+  "px-1.5 text-ink-subtle"
 )
 
 export function PullRequestLinks({
@@ -72,7 +67,7 @@ export function PullRequestLinks({
     retry: false,
   })
   return (
-    <div className="text-xs">
+    <div className="text-label">
       <span className="flex flex-wrap items-center gap-0.5">
         <span className="inline-flex items-center">
           <button
@@ -84,22 +79,22 @@ export function PullRequestLinks({
           >
             {thread.isPending ? "Opening thread…" : "Agent"}
           </button>
-          <Menu>
-            <MenuTrigger
-              className={cn(navLink, "border-l border-border px-1")}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(navLink, "border-l border-line px-1")}
               aria-label="Agent options"
             >
               <ChevronDown className="size-3" />
-            </MenuTrigger>
-            <MenuPopup align="start">
-              <MenuItem onClick={() => setMessageOpen(true)}>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => setMessageOpen(true)}>
                 Send a message…
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
         <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
-          <DialogPopup className="gap-4 p-5">
+          <DialogContent className="gap-4 p-5">
             <DialogTitle>Send a message to the agent</DialogTitle>
             <DialogDescription>
               {repo}#{number} · {title}
@@ -136,7 +131,7 @@ export function PullRequestLinks({
                 </Button>
               </div>
             </form>
-          </DialogPopup>
+          </DialogContent>
         </Dialog>
         {!onReviewPage && (
           <>

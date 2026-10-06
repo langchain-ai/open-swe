@@ -39,11 +39,11 @@ export default function PerfHud() {
   return (
     <aside
       aria-label="Performance"
-      className="fixed bottom-3 left-3 z-[1000] w-[26rem] max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-background/95 font-mono text-[11px] leading-snug text-foreground shadow-lg backdrop-blur"
+      className="fixed bottom-3 left-3 z-[1000] w-[26rem] max-w-[calc(100vw-1.5rem)] rounded-badge border border-line bg-canvas/95 font-mono text-meta leading-snug text-ink shadow-popup backdrop-blur"
     >
-      <header className="flex items-center gap-2 border-b border-border px-2 py-1">
+      <header className="flex items-center gap-2 border-b border-line px-2 py-1">
         <span className="font-semibold">perf</span>
-        <span className="text-muted-foreground">{spans.length} spans</span>
+        <span className="text-ink-subtle">{spans.length} spans</span>
         <span className="flex-1" />
         <button type="button" className="hover:underline" onClick={copy}>
           {copied ? "copied" : "copy json"}
@@ -58,15 +58,15 @@ export default function PerfHud() {
       </header>
       <ul className="max-h-[40vh] overflow-y-auto">
         {visible.length === 0 && (
-          <li className="px-2 py-1 text-muted-foreground">
+          <li className="px-2 py-1 text-ink-subtle">
             Open a thread or send a message to record a span.
           </li>
         )}
         {visible.map((span) => (
-          <li key={span.id} className="border-b border-border/60 last:border-0">
+          <li key={span.id} className="border-b border-line/60 last:border-0">
             <button
               type="button"
-              className="w-full px-2 py-1 text-left hover:bg-accent/40"
+              className="w-full px-2 py-1 text-left hover:bg-hover/40"
               onClick={() =>
                 setExpanded((current) => (current === span.id ? null : span.id))
               }
@@ -74,9 +74,9 @@ export default function PerfHud() {
               <span
                 className={
                   span.status === "abandoned"
-                    ? "text-muted-foreground line-through"
+                    ? "text-ink-subtle line-through"
                     : span.status === "open"
-                      ? "text-muted-foreground"
+                      ? "text-ink-subtle"
                       : undefined
                 }
               >
@@ -84,7 +84,7 @@ export default function PerfHud() {
               </span>
             </button>
             {expanded === span.id && (
-              <p className="px-2 pb-1 break-all whitespace-pre-wrap text-muted-foreground">
+              <p className="px-2 pb-1 break-all whitespace-pre-wrap text-ink-subtle">
                 {attributeSummary(span) || "no attributes"}
               </p>
             )}

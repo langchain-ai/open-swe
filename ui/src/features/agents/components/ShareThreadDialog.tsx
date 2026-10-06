@@ -2,7 +2,7 @@ import { Dialog } from "@base-ui/react/dialog"
 import { WarningIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 
 export function ShareThreadDialog({
   open,
@@ -29,32 +29,32 @@ export function ShareThreadDialog({
     >
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/70" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-destructive/50 bg-popover p-6 text-popover-foreground shadow-xl">
+        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-compact border border-risk/50 bg-panel p-6 text-ink shadow-overlay">
           <div className="flex flex-col gap-4">
-            <Dialog.Title className="flex items-center gap-2 font-semibold text-destructive">
+            <Dialog.Title className="flex items-center gap-2 font-semibold text-risk">
               <WarningIcon className="size-6 shrink-0" weight="fill" />
               Expose this entire thread to the workspace?
             </Dialog.Title>
-            <Dialog.Description className="text-sm">
+            <Dialog.Description className="text-body">
               Everyone with workspace access will be able to read everything
               already in this thread and anything added later: messages, private
               tool results, attachments, plans, and sandbox files. This may
               include secrets or sensitive personal information.
             </Dialog.Description>
-            <p className="text-sm font-semibold">
+            <p className="text-body font-semibold">
               This cannot be undone. Continuing privately creates a new copy; it
               does not hide this shared thread.
             </p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-body text-ink-subtle">
               Private-only tools, personal integrations, and private admin
               capabilities will no longer be available in this thread.
             </p>
             {running && (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" className="text-body text-risk">
                 Stop the active run before sharing this thread.
               </p>
             )}
-            <label className="flex items-start gap-2 text-sm">
+            <label className="flex items-start gap-2 text-body">
               <input
                 type="checkbox"
                 checked={acknowledged}

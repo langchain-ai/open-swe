@@ -47,7 +47,7 @@ import type {
   SerializedLexicalNode,
   Spread,
 } from "lexical"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export type ComposerCommandKey =
@@ -66,7 +66,7 @@ export interface ComposerPromptEditorHandle {
 
 const EMPTY_SKILL_NAMES = new Set<string>()
 const MENTION_CHIP_CLASS_NAME =
-  "inline-flex max-w-full select-none items-center gap-1 rounded-md border border-border/70 bg-accent/40 px-1.5 py-px align-middle text-[12px] font-medium leading-[1.1] text-foreground"
+  "inline-flex max-w-full select-none items-center gap-1 rounded-badge border border-line/70 bg-hover/40 px-1.5 py-px align-middle text-meta font-medium leading-[1.1] text-ink"
 
 type SerializedComposerMentionNode = Spread<
   { path: string; source: string; type: "composer-mention"; version: 1 },
@@ -95,12 +95,12 @@ function ComposerMentionChip({ path }: { path: string }) {
           </span>
         }
       />
-      <TooltipPopup
+      <TooltipContent
         className="max-w-[30rem] leading-tight break-words whitespace-normal"
         side="top"
       >
         {path}
-      </TooltipPopup>
+      </TooltipContent>
     </Tooltip>
   )
 }
@@ -754,7 +754,7 @@ function ComposerPromptEditorInner({
             aria-label="Message"
             aria-placeholder={placeholder}
             className={cn(
-              "block max-h-50 w-full overflow-y-auto bg-transparent text-[14px] leading-relaxed break-words whitespace-pre-wrap text-foreground focus:outline-none",
+              "block max-h-50 w-full overflow-y-auto bg-transparent text-body leading-relaxed break-words whitespace-pre-wrap text-ink focus:outline-none",
               className
             )}
             data-testid="composer-editor"
@@ -763,7 +763,7 @@ function ComposerPromptEditorInner({
           />
         }
         placeholder={
-          <div className="pointer-events-none absolute inset-0 text-[14px] leading-relaxed text-muted-foreground/60">
+          <div className="pointer-events-none absolute inset-0 text-body leading-relaxed text-ink-subtle/60">
             {placeholder}
           </div>
         }

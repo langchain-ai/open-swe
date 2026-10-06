@@ -1,0 +1,37 @@
+/*
+ * Open SWE behaviour the design system does not carry. Colour comes only from
+ * `--gtm-*` tokens; nothing here picks a value of its own.
+ */
+
+:root {
+  /* Height of the right panel's tab bar; the empty-state launcher offsets by
+     it so its cards center against the whole panel. */
+  --workspace-topbar-height: 2.75rem;
+}
+
+/* Native scrollers outside ScrollArea follow the same quiet thumb. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gtm-line-strong) transparent;
+}
+
+.shimmer-text {
+  color: var(--gtm-ink-subtle);
+}
+
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  .shimmer-text {
+    background: linear-gradient(90deg, transparent, var(--gtm-ink), transparent)
+      -4.5rem 0 / 4.5rem 100% no-repeat var(--gtm-ink-subtle);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer-sweep 2.2s linear infinite;
+  }
+}
+
+@keyframes shimmer-sweep {
+  to {
+    background-position: calc(100% + 4.5rem) 0;
+  }
+}

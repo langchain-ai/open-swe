@@ -7,8 +7,8 @@ import type {
 } from "@/lib/api"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
 interface Props {
   assessment: PublishedReviewAssessment
@@ -84,12 +84,12 @@ function AssessmentCard({
     <section
       id="assessment-feedback"
       aria-label="Review assessment"
-      className="mt-4 rounded-lg border border-border bg-card p-4 text-sm"
+      className="mt-4 rounded-compact border border-line bg-panel p-4 text-body"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">Risk {assessment.risk_score}/5</span>
-          <span className="text-muted-foreground">·</span>
+          <span className="text-ink-subtle">·</span>
           <span>
             {assessment.approved
               ? "Approved"
@@ -97,7 +97,7 @@ function AssessmentCard({
                 ? "Would approve"
                 : "Needs human review"}
           </span>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-meta text-ink-subtle">
             {assessment.approved
               ? "Automatic approval"
               : assessment.dry_run
@@ -110,13 +110,13 @@ function AssessmentCard({
             {feedback.data && (
               <span
                 role="status"
-                className="flex items-center gap-1 text-xs text-muted-foreground"
+                className="flex items-center gap-1 text-meta text-ink-subtle"
               >
                 <CheckIcon /> Feedback saved
               </span>
             )}
             <Button
-              size="sm"
+              size="compact"
               variant="ghost"
               onClick={() => {
                 save.reset()
@@ -128,9 +128,9 @@ function AssessmentCard({
           </div>
         )}
       </div>
-      <details className="mt-2 text-xs text-muted-foreground">
+      <details className="mt-2 text-meta text-ink-subtle">
         <summary className="cursor-pointer">Why this assessment?</summary>
-        <p className="mt-2 text-sm whitespace-pre-wrap text-foreground">
+        <p className="mt-2 text-body whitespace-pre-wrap text-ink">
           {assessment.explanation}
         </p>
         <p className="mt-2">
@@ -139,12 +139,12 @@ function AssessmentCard({
         </p>
       </details>
       {headSha !== assessment.head_sha && (
-        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+        <p className="mt-2 text-label text-attention">
           This assessment is for an earlier commit.
         </p>
       )}
       {feedback.isError && (
-        <p role="alert" className="mt-3 text-xs text-destructive">
+        <p role="alert" className="mt-3 text-label text-risk">
           Could not load your feedback.{" "}
           <button
             type="button"
@@ -157,7 +157,7 @@ function AssessmentCard({
       )}
       {editing && login && feedback.isSuccess && (
         <form
-          className="mt-3 space-y-3 border-t border-border pt-3"
+          className="mt-3 space-y-3 border-t border-line pt-3"
           onSubmit={(event) => {
             event.preventDefault()
             if (value?.rating && !save.isPending)
@@ -165,7 +165,7 @@ function AssessmentCard({
           }}
         >
           <fieldset disabled={save.isPending} className="space-y-3">
-            <legend className="mb-2 text-xs font-medium">
+            <legend className="mb-2 text-label font-medium">
               Was this assessment helpful?
             </legend>
             <div className="flex gap-2">
@@ -173,7 +173,7 @@ function AssessmentCard({
                 <Button
                   key={rating}
                   type="button"
-                  size="sm"
+                  size="compact"
                   variant={value?.rating === rating ? "secondary" : "outline"}
                   aria-pressed={value?.rating === rating}
                   onClick={() =>
@@ -185,7 +185,7 @@ function AssessmentCard({
                 </Button>
               ))}
             </div>
-            <label className="block space-y-1.5 text-xs text-muted-foreground">
+            <label className="block space-y-1.5 text-meta text-ink-subtle">
               <span>Comment (optional)</span>
               <Textarea
                 maxLength={3000}
@@ -197,19 +197,19 @@ function AssessmentCard({
                   })
                 }
                 placeholder="What was right, or what did we miss?"
-                className="min-h-20 text-sm"
+                className="min-h-20 text-body"
               />
             </label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-ink-subtle">
               Saved in Open SWE. Your comment is not posted to GitHub.
             </p>
             <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={!value?.rating}>
+              <Button type="submit" size="compact" disabled={!value?.rating}>
                 {save.isPending ? "Saving…" : "Save feedback"}
               </Button>
               <Button
                 type="button"
-                size="sm"
+                size="compact"
                 variant="ghost"
                 onClick={() => {
                   setEditing(false)

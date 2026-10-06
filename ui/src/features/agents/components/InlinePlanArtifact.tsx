@@ -38,7 +38,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
             params: { threadId },
           })
         }
-        className="block h-[250px] w-full overflow-hidden rounded-xl border border-border bg-background text-left shadow-sm transition-[border-color,box-shadow] outline-none hover:border-foreground/25 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
+        className="block h-[250px] w-full overflow-hidden rounded-control border border-line bg-canvas text-left shadow-control transition-[border-color,box-shadow] outline-none hover:border-ink/25 hover:shadow-popup focus-visible:ring-2 focus-visible:ring-primary"
       >
         {html ? (
           <PlanArtifactFrame
@@ -53,9 +53,9 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         )}
         <span
           data-testid="inline-plan-fade"
-          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-background/75 to-background p-3"
+          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-canvas/75 to-canvas p-3"
         >
-          <span className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-sm">
+          <span className="inline-flex items-center gap-1 rounded-badge bg-ink px-2.5 py-1.5 text-label font-medium text-canvas shadow-control">
             Open artifact
             <ArrowUpRight className="size-3.5" />
           </span>
@@ -66,7 +66,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         aria-label="Dismiss artifact"
         disabled={dismiss.isPending}
         onClick={() => dismiss.mutate()}
-        className="absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-full border border-border bg-background/90 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-full border border-line bg-canvas/90 text-ink-subtle shadow-control backdrop-blur-sm transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-primary"
       >
         <X className="size-3.5" />
       </button>

@@ -18,8 +18,8 @@ import {
 } from "@/features/agents/utils/codeExcerpt"
 import { DiffSelectionPopover } from "@/features/agents/components/DiffSelectionPopover"
 import { reportError } from "@/lib/errorReporting"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
@@ -110,27 +110,27 @@ export const TREE_UNSAFE_CSS = `
 
 export function treeThemeStyle(): React.CSSProperties {
   return {
-    "--trees-theme-sidebar-bg": "var(--card)",
-    "--trees-theme-sidebar-fg": "var(--foreground)",
-    "--trees-theme-sidebar-border": "var(--border)",
-    "--trees-theme-sidebar-header-fg": "var(--muted-foreground)",
+    "--trees-theme-sidebar-bg": "var(--gtm-panel)",
+    "--trees-theme-sidebar-fg": "var(--gtm-ink)",
+    "--trees-theme-sidebar-border": "var(--gtm-line)",
+    "--trees-theme-sidebar-header-fg": "var(--gtm-ink-subtle)",
     "--trees-theme-list-hover-bg":
-      "color-mix(in oklab, var(--primary) 10%, transparent)",
+      "color-mix(in oklab, var(--gtm-primary) 10%, transparent)",
     "--trees-theme-list-active-selection-bg":
-      "color-mix(in oklab, var(--primary) 22%, transparent)",
-    "--trees-theme-list-active-selection-fg": "var(--foreground)",
+      "color-mix(in oklab, var(--gtm-primary) 22%, transparent)",
+    "--trees-theme-list-active-selection-fg": "var(--gtm-ink)",
     "--trees-selected-focused-border-color-override": "transparent",
-    "--trees-theme-input-bg": "var(--card)",
-    "--trees-theme-input-fg": "var(--foreground)",
-    "--trees-theme-input-border": "var(--border)",
-    "--trees-theme-focus-ring": "var(--primary)",
-    "--trees-theme-scrollbar-thumb": "var(--border)",
+    "--trees-theme-input-bg": "var(--gtm-panel)",
+    "--trees-theme-input-fg": "var(--gtm-ink)",
+    "--trees-theme-input-border": "var(--gtm-line)",
+    "--trees-theme-focus-ring": "var(--gtm-primary)",
+    "--trees-theme-scrollbar-thumb": "var(--gtm-line)",
     "--trees-theme-git-added-fg": TREE_FILE_FG,
     "--trees-theme-git-modified-fg": TREE_FILE_FG,
     "--trees-theme-git-deleted-fg": TREE_FILE_FG,
     "--trees-theme-git-renamed-fg": TREE_FILE_FG,
     "--trees-theme-git-untracked-fg": TREE_FILE_FG,
-    "--trees-theme-git-ignored-fg": "var(--muted-foreground)",
+    "--trees-theme-git-ignored-fg": "var(--gtm-ink-subtle)",
   } as React.CSSProperties
 }
 
@@ -211,13 +211,13 @@ export function DiffFilesView({
   return (
     <>
       {!hideHeader && (
-        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-border px-3 py-1">
+        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-line px-3 py-1">
           <div className="min-w-0 flex-1">{leading}</div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <DiffWrapToggle />
             {actions}
             {files.length > 0 && (
-              <span className="flex shrink-0 items-center gap-2 text-[11px] whitespace-nowrap text-muted-foreground/70">
+              <span className="flex shrink-0 items-center gap-2 text-meta whitespace-nowrap text-ink-subtle/70">
                 <span
                   className="@max-[620px]:hidden"
                   title={
@@ -227,10 +227,10 @@ export function DiffFilesView({
                   {truncated ? "first " : ""}
                   {files.length} file{files.length === 1 ? "" : "s"}
                 </span>
-                <span className="text-success-foreground">
+                <span className="text-positive">
                   +{totals.additions}
                 </span>
-                <span className="text-destructive">-{totals.deletions}</span>
+                <span className="text-risk">-{totals.deletions}</span>
               </span>
             )}
           </div>
@@ -261,13 +261,13 @@ export function DiffFilesView({
             </Virtualizer>
           </WorkerPoolContextProvider>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
+          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-meta text-ink-subtle/70">
             {emptyLabel}
           </div>
         )}
 
         {fullScreen && !isMobile && files.length > 0 && (
-          <div className="w-72 shrink-0 border-l border-border bg-card">
+          <div className="w-72 shrink-0 border-l border-line bg-panel">
             <FileTreeExplorer
               files={files}
               selectedTreePath={selectedTreePath}
@@ -357,47 +357,47 @@ const FileDiffSection = memo(
     const fileName = file.treePath.slice(lastSlash + 1)
 
     return (
-      <div ref={sectionRef} className="overflow-hidden border-b border-border">
+      <div ref={sectionRef} className="overflow-hidden border-b border-line">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
+          className="flex w-full items-center gap-2 bg-panel px-3 py-2 text-left text-label transition-colors hover:bg-hover"
         >
           <CaretDownIcon
             className={cn(
-              "size-3 shrink-0 text-muted-foreground transition-transform",
+              "size-3 shrink-0 text-ink-subtle transition-transform",
               !open && "-rotate-90"
             )}
           />
           <span className="min-w-0 truncate" title={file.treePath}>
             {directory && (
-              <span className="text-muted-foreground">{directory}</span>
+              <span className="text-ink-subtle">{directory}</span>
             )}
-            <span className="font-medium text-foreground">{fileName}</span>
+            <span className="font-medium text-ink">{fileName}</span>
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2">
-            <span className="text-success-foreground">+{file.additions}</span>
-            <span className="text-destructive">-{file.deletions}</span>
+            <span className="text-positive">+{file.additions}</span>
+            <span className="text-risk">-{file.deletions}</span>
           </span>
         </button>
         {open &&
           (file.unrenderable ? (
             file.patch ? (
-              <pre className="overflow-x-auto bg-background p-4 font-mono text-xs leading-5 text-foreground">
+              <pre className="overflow-x-auto bg-canvas p-4 font-mono text-label leading-5 text-ink">
                 <code>{file.patch}</code>
               </pre>
             ) : (
-              <div className="bg-background p-4 text-center text-xs text-muted-foreground/70">
+              <div className="bg-canvas p-4 text-center text-meta text-ink-subtle/70">
                 Binary file — diff not available.
               </div>
             )
           ) : (
             <div
               {...lineSelection.wrapperProps}
-              className="overflow-hidden bg-background"
+              className="overflow-hidden bg-canvas"
               style={
                 {
-                  "--panel-diff-bg": "var(--background)",
+                  "--panel-diff-bg": "var(--gtm-canvas)",
                 } as React.CSSProperties
               }
             >
@@ -424,7 +424,7 @@ const FileDiffSection = memo(
               }}
             >
               {draft && (
-                <div className="truncate text-xs text-muted-foreground">
+                <div className="truncate text-meta text-ink-subtle">
                   {file.treePath} ·{" "}
                   {draft.start === draft.end
                     ? `line ${draft.start}`
@@ -454,7 +454,7 @@ const FileDiffSection = memo(
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
+                  size="compact"
                   disabled={sending}
                   onClick={() => {
                     lineSelection.close()
@@ -465,7 +465,7 @@ const FileDiffSection = memo(
                 </Button>
                 <Button
                   type="submit"
-                  size="sm"
+                  size="compact"
                   disabled={sending || !comment.trim()}
                 >
                   {sending ? "Sending…" : "Send to Open SWE"}

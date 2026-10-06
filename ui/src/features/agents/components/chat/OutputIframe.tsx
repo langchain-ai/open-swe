@@ -7,7 +7,7 @@ import {
   ARTIFACT_SANDBOX,
 } from "@/features/agents/lib/artifactShell"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
-import { IconButton } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@/lib/utils"
 
 const IFRAME_HEIGHT = 480
@@ -26,7 +26,7 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
   const isLegacy = "html" in display
 
   return (
-    <section className="my-2 overflow-hidden rounded-lg border border-border bg-card">
+    <section className="my-2 overflow-hidden rounded-compact border border-line bg-panel">
       <header className="flex items-center gap-2 px-3 py-2">
         <button
           type="button"
@@ -36,16 +36,16 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
         >
           <ChevronDown
             className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              "size-3.5 shrink-0 text-ink-subtle transition-transform",
               !expanded && "-rotate-90"
             )}
           />
-          <span className="truncate text-xs font-medium text-foreground">
+          <span className="truncate text-label font-medium text-ink">
             {display.title}
           </span>
         </button>
         {!isLegacy && (
-          <IconButton
+          <Button
             type="button"
             variant="ghost"
             size="icon-sm"
@@ -53,7 +53,7 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
             onClick={() => openDownload(display.downloadUrl)}
           >
             <Download />
-          </IconButton>
+          </Button>
         )}
       </header>
       {expanded &&
@@ -63,7 +63,7 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
             html={display.html}
             sandbox={ARTIFACT_SANDBOX}
             allow={ARTIFACT_ALLOW}
-            className="border-t border-border bg-background"
+            className="border-t border-line bg-canvas"
             style={{ height: IFRAME_HEIGHT }}
           />
         ) : (
@@ -72,7 +72,7 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
             src={display.previewUrl}
             sandbox={ARTIFACT_SANDBOX}
             allow={ARTIFACT_ALLOW}
-            className="border-t border-border bg-background"
+            className="border-t border-line bg-canvas"
             style={{ height: IFRAME_HEIGHT }}
           />
         ))}

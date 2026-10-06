@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { Copy } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { ErrorState, isReadUnavailable } from "./shared"
@@ -22,7 +22,7 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
   })
   if (documents.isPending)
     return (
-      <p role="status" className="text-sm text-muted-foreground">
+      <p role="status" className="text-body text-ink-subtle">
         Loading incident summary…
       </p>
     )
@@ -48,11 +48,11 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
     }
   }
   return (
-    <section className="space-y-4 rounded-xl border border-border bg-card p-5">
+    <section className="space-y-4 rounded-control border border-line bg-panel p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">Postmortem summary</h2>
+        <h2 className="text-body font-medium">Postmortem summary</h2>
         <Button
-          size="sm"
+          size="compact"
           variant="outline"
           disabled={!markdown.trim()}
           onClick={() => void copy()}
@@ -62,7 +62,7 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
         </Button>
       </div>
       {documents.error && (
-        <p role="alert" className="text-sm text-warning-foreground">
+        <p role="alert" className="text-body text-attention">
           {documents.error.message}
         </p>
       )}
@@ -71,12 +71,12 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
           <Markdown content={markdown} />
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body text-ink-subtle">
           The agent will add a summary after investigating.
         </p>
       )}
       {copyNotice && (
-        <p role="status" className="text-xs">
+        <p role="status" className="text-label">
           {copyNotice}
         </p>
       )}

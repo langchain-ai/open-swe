@@ -8,16 +8,10 @@ import { useState } from "react"
 
 import type { Theme } from "@/lib/theme"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import {
   notificationsEnabled,
   notificationsSupported,
@@ -311,7 +305,7 @@ export function GeneralSettings() {
           }
           control={
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={archiveThreads.isPending}
               onClick={() => {

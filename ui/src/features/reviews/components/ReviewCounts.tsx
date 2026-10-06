@@ -15,14 +15,14 @@ export function ReviewCounts({
       <span
         className={cn(
           "inline-flex items-center gap-1",
-          counts.bugs > 0 ? "text-destructive" : "text-muted-foreground"
+          counts.bugs > 0 ? "text-risk" : "text-ink-subtle"
         )}
       >
         <BugBeetleIcon aria-hidden="true" className="size-3.5" />
         {counts.bugs}
         {withLabels && " bugs"}
       </span>
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
+      <span className="inline-flex items-center gap-1 text-ink-subtle">
         <FlagIcon aria-hidden="true" className="size-3.5" />
         {counts.flags}
         {withLabels && " flags"}

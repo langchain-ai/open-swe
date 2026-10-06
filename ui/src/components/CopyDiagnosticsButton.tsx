@@ -1,7 +1,7 @@
 import { CopyIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 
 export function CopyDiagnosticsButton({
   getDiagnostics,
@@ -26,7 +26,7 @@ export function CopyDiagnosticsButton({
     <div className="flex items-center gap-2 pt-1">
       <Button
         type="button"
-        size="sm"
+        size="compact"
         variant="outline"
         onClick={() => void copy()}
       >

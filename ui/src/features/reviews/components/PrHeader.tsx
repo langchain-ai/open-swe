@@ -4,10 +4,10 @@ import { IoLogoGithub } from "react-icons/io5"
 import { cn } from "@/lib/utils"
 
 const STATE_STYLES: Record<string, string> = {
-  open: "border-emerald-600/40 text-emerald-500",
-  draft: "border-border text-muted-foreground",
-  merged: "border-purple-600/40 text-purple-500",
-  closed: "border-red-600/40 text-red-500",
+  open: "border-positive/40 text-positive",
+  draft: "border-line text-ink-subtle",
+  merged: "border-merged/40 text-merged",
+  closed: "border-risk/40 text-risk",
 }
 
 export interface PrHeaderProps {
@@ -46,7 +46,7 @@ export function PrHeader({
       <div className="flex min-w-0 items-center gap-2">
         <span
           className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
+            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-meta capitalize",
             STATE_STYLES[state] ?? STATE_STYLES.open
           )}
         >
@@ -56,8 +56,8 @@ export function PrHeader({
         <h1
           className={cn(
             compact
-              ? "min-w-0 flex-1 truncate text-sm font-medium"
-              : "min-w-0 text-base font-medium",
+              ? "min-w-0 flex-1 truncate text-body font-medium"
+              : "min-w-0 text-title font-medium",
             titleClassName
           )}
         >
@@ -69,23 +69,23 @@ export function PrHeader({
           >
             <IoLogoGithub
               aria-label="GitHub"
-              className="mr-1.5 inline size-4 align-[-2px] text-muted-foreground"
+              className="mr-1.5 inline size-4 align-[-2px] text-ink-subtle"
             />
             {title}
             {number != null && (
-              <span className="text-muted-foreground"> #{number}</span>
+              <span className="text-ink-subtle"> #{number}</span>
             )}
           </a>
         </h1>
       </div>
       <div
         className={cn(
-          "flex items-center gap-2 text-xs text-muted-foreground",
+          "flex items-center gap-2 text-meta text-ink-subtle",
           compact ? "mt-1.5 min-w-0 overflow-hidden" : "mt-2 flex-wrap"
         )}
       >
         {author && (
-          <span className="shrink-0 font-medium text-foreground">{author}</span>
+          <span className="shrink-0 font-medium text-ink">{author}</span>
         )}
         {compact ? (
           <>
@@ -99,11 +99,11 @@ export function PrHeader({
           </>
         ) : (
           <>
-            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="rounded-tick border border-line px-1.5 py-0.5 font-mono text-meta">
               {baseRef}
             </span>
             <span>←</span>
-            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="rounded-tick border border-line px-1.5 py-0.5 font-mono text-meta">
               {headRef}
             </span>
           </>
@@ -113,10 +113,10 @@ export function PrHeader({
             <span className="shrink-0">
               {stats.changedFiles} file{stats.changedFiles === 1 ? "" : "s"}
             </span>
-            <span className="shrink-0 text-emerald-500">
+            <span className="shrink-0 text-positive">
               +{stats.additions}
             </span>
-            <span className="shrink-0 text-red-500">-{stats.deletions}</span>
+            <span className="shrink-0 text-risk">-{stats.deletions}</span>
           </>
         )}
       </div>

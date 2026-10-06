@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import type { OpenPullRequest } from "@/lib/api"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import { pullRequestKey } from "../lib/status"
@@ -25,7 +25,7 @@ export function ClosePullRequest({
       <TextPopover
         trigger={
           <Button
-            size="sm"
+            size="compact"
             variant="outline"
             disabled={close.isPending || close.isSuccess}
             aria-live="polite"

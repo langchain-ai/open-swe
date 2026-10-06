@@ -18,17 +18,11 @@ import type {
 
 import type { RightPanelSurface } from "@/features/agents/lib/rightPanelStore"
 import type { RightPanelMode } from "@/features/agents/components/panel/RightPanelShell"
-import { Button } from "@/components/ui/button"
-import { Kbd } from "@/components/ui/kbd"
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuShortcut,
-  MenuTrigger,
-} from "@/components/ui/menu"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Kbd } from "@langchain/gtm-platform-design-system/ui/kbd"
+import { DropdownMenu, DropdownMenuItem, DropdownMenuContent, DropdownMenuShortcut, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
+import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { cn } from "@/lib/utils"
 
@@ -110,7 +104,7 @@ function DisabledReasonTooltip(props: {
   return (
     <Tooltip>
       <TooltipTrigger render={props.trigger} />
-      <TooltipPopup side="top">{props.reason}</TooltipPopup>
+      <TooltipContent side="top">{props.reason}</TooltipContent>
     </Tooltip>
   )
 }
@@ -123,7 +117,7 @@ function SurfaceMenuItem(props: {
   children: ReactNode
 }) {
   const item = (
-    <MenuItem
+    <DropdownMenuItem
       className={
         !props.available ? "data-disabled:pointer-events-auto" : undefined
       }
@@ -132,8 +126,8 @@ function SurfaceMenuItem(props: {
       aria-keyshortcuts={props.shortcut}
     >
       {props.children}
-      <MenuShortcut>{props.shortcut}</MenuShortcut>
-    </MenuItem>
+      <DropdownMenuShortcut>{props.shortcut}</DropdownMenuShortcut>
+    </DropdownMenuItem>
   )
   if (props.available || !props.disabledReason) return item
   return <DisabledReasonTooltip reason={props.disabledReason} trigger={item} />
@@ -278,8 +272,8 @@ function RightPanelEmptyState(props: {
   }
 
   const cardShellClass =
-    "rounded-lg border border-border/80 bg-card dark:border-transparent dark:shadow-none dark:inset-ring-1 dark:inset-ring-white/5"
-  const highlightedCardClass = "bg-accent/60 dark:inset-ring-white/20"
+    "rounded-compact border border-line/80 bg-panel dark:shadow-none dark:inset-ring-1 dark:inset-ring-white/5"
+  const highlightedCardClass = "bg-hover/60 dark:inset-ring-white/20"
 
   return (
     <div
@@ -299,10 +293,10 @@ function RightPanelEmptyState(props: {
     >
       <div className="relative w-full max-w-lg">
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
-          <h3 className="text-sm font-medium text-foreground">
+          <h3 className="text-body font-medium text-ink">
             Open a surface
           </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-meta text-ink-subtle">
             Choose what to show in the right panel.
           </p>
         </div>
@@ -322,7 +316,7 @@ function RightPanelEmptyState(props: {
                   )
                 }
                 className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-border hover:bg-accent/60",
+                  "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-line hover:bg-hover/60",
                   cardShellClass,
                   isHighlighted(action) && highlightedCardClass
                 )}
@@ -330,9 +324,9 @@ function RightPanelEmptyState(props: {
                 <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
                 <span className="flex items-center gap-2 pe-8">
                   {actionIcon(action)}
-                  <span className="text-sm font-medium">{action.label}</span>
+                  <span className="text-body font-medium">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                <span className="mt-1.5 text-meta leading-relaxed text-ink-subtle">
                   {action.description}
                 </span>
               </button>
@@ -347,9 +341,9 @@ function RightPanelEmptyState(props: {
                 <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
                 <span className="flex items-center gap-2 pe-8">
                   {actionIcon(action)}
-                  <span className="text-sm font-medium">{action.label}</span>
+                  <span className="text-body font-medium">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                <span className="mt-1.5 text-meta leading-relaxed text-ink-subtle">
                   {action.disabledReason}
                 </span>
               </div>
@@ -525,15 +519,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     handleTabContextMenu(event, surface)
                   }
                   className={cn(
-                    "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
+                    "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-badge pr-2 pl-1.5 text-label",
                     active
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                      ? "bg-hover text-ink"
+                      : "text-ink-subtle hover:bg-hover/60 hover:text-ink"
                   )}
                 >
                   <button
                     type="button"
-                    className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted"
+                    className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-tick hover:bg-muted"
                     aria-label={`Close ${title}`}
                     onClick={() => props.onCloseSurface(surface)}
                   >
@@ -560,7 +554,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         </button>
                       }
                     />
-                    <TooltipPopup>{title}</TooltipPopup>
+                    <TooltipContent>{title}</TooltipContent>
                   </Tooltip>
                 </div>
               )
@@ -568,20 +562,20 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           </div>
         </ScrollArea>
         {props.surfaces.length > 0 ? (
-          <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
-            <MenuTrigger
+          <DropdownMenu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
+            <DropdownMenuTrigger
               render={
                 <Button
                   aria-label="Add panel surface"
-                  className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                  size="icon-xs"
+                  className="size-6 shrink-0 text-ink-subtle hover:text-ink"
+                  size="icon-sm"
                   variant="ghost"
                 />
               }
             >
               <Plus className="size-3.5" />
-            </MenuTrigger>
-            <MenuPopup
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
               align="start"
               side="bottom"
               sideOffset={6}
@@ -603,19 +597,19 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   </SurfaceMenuItem>
                 )
               })}
-            </MenuPopup>
-          </Menu>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
         {props.layoutControls}
       </div>
       {tabMenu ? (
-        <Menu
+        <DropdownMenu
           open
           onOpenChange={(open) => {
             if (!open) setTabMenu(null)
           }}
         >
-          <MenuPopup
+          <DropdownMenuContent
             align="start"
             side="bottom"
             sideOffset={0}
@@ -626,7 +620,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             }}
           >
             {tabMenu.surface.kind === "file" ? (
-              <MenuItem
+              <DropdownMenuItem
                 onClick={() => {
                   if (tabMenu.surface.kind === "file") {
                     props.onCopyFilePath(tabMenu.surface.relativePath)
@@ -634,31 +628,31 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 }}
               >
                 Copy path
-              </MenuItem>
+              </DropdownMenuItem>
             ) : null}
-            <MenuItem onClick={() => props.onCloseSurface(tabMenu.surface)}>
+            <DropdownMenuItem onClick={() => props.onCloseSurface(tabMenu.surface)}>
               Close
-            </MenuItem>
-            <MenuItem
+            </DropdownMenuItem>
+            <DropdownMenuItem
               disabled={props.surfaces.length <= 1}
               onClick={() => props.onCloseOtherSurfaces(tabMenu.surface)}
             >
               Close others
-            </MenuItem>
-            <MenuItem
+            </DropdownMenuItem>
+            <DropdownMenuItem
               disabled={menuSurfaceIndex >= props.surfaces.length - 1}
               onClick={() => props.onCloseSurfacesToRight(tabMenu.surface)}
             >
               Close to the right
-            </MenuItem>
-            <MenuItem
+            </DropdownMenuItem>
+            <DropdownMenuItem
               disabled={props.surfaces.length === 0}
               onClick={() => props.onCloseAllSurfaces()}
             >
               Close all
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
       <div
         className="flex min-h-0 flex-1 flex-col"

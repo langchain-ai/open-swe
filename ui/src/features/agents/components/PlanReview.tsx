@@ -9,7 +9,7 @@ import {
   submitPlanComments,
 } from "@/lib/plan"
 import { reportError } from "@/lib/errorReporting"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 
@@ -157,13 +157,13 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   return (
     <main
       data-testid="plan-review"
-      className="@container flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
+      className="@container flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas text-ink"
     >
       <div className="flex min-h-0 w-full flex-1 flex-col gap-3 p-3 md:p-4">
-        <header className="flex flex-col gap-3 border-b border-border pb-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
+        <header className="flex flex-col gap-3 border-b border-line pb-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
           <div data-testid="plan-summary" className="min-w-0">
-            <h1 className="text-lg font-semibold text-foreground">Artifact</h1>
-            <p className="text-xs text-muted-foreground/70">
+            <h1 className="text-title font-semibold text-ink">Artifact</h1>
+            <p className="text-meta text-ink-subtle/70">
               Viewing as {plan.user.name}
             </p>
           </div>
@@ -173,7 +173,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           >
             <Button
               data-testid="copy-plan"
-              variant="secondary"
+              variant="outline"
               disabled={!content.trim()}
               onClick={() => void copyPlan()}
             >
@@ -184,11 +184,11 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           </div>
         </header>
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-label text-risk">{error}</p>}
 
         <section
           data-testid="plan-document"
-          className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-card"
+          className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-control border border-line bg-panel"
         >
           {content.trim() ? (
             format === "html" ? (
@@ -204,20 +204,20 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                 />
                 <aside
                   data-testid="plan-comments"
-                  className="flex max-h-1/2 shrink-0 flex-col overflow-y-auto border-t border-border bg-background/95 @3xl:max-h-none @3xl:w-80 @3xl:border-t-0 @3xl:border-l"
+                  className="flex max-h-1/2 shrink-0 flex-col overflow-y-auto border-t border-line bg-canvas/95 @3xl:max-h-none @3xl:w-80 @3xl:border-t-0 @3xl:border-l"
                 >
-                  <div className="border-b border-border p-3">
-                    <h2 className="text-sm font-semibold">Comments</h2>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
+                  <div className="border-b border-line p-3">
+                    <h2 className="text-body font-semibold">Comments</h2>
+                    <p className="mt-0.5 text-meta text-ink-subtle">
                       Highlight text in the preview to comment.
                     </p>
                   </div>
                   {anchor && (
                     <div
                       data-testid="comment-composer"
-                      className="border-b border-border bg-muted/30 p-3"
+                      className="border-b border-line bg-muted/30 p-3"
                     >
-                      <blockquote className="line-clamp-3 border-l-2 border-primary pl-2 text-xs text-muted-foreground">
+                      <blockquote className="line-clamp-3 border-l-2 border-primary pl-2 text-meta text-ink-subtle">
                         {anchor.exact}
                       </blockquote>
                       <textarea
@@ -228,12 +228,12 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                         placeholder="Leave a comment"
                         rows={3}
                         autoFocus
-                        className="mt-3 w-full resize-none rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="mt-3 w-full resize-none rounded-badge border border-line bg-canvas px-3 py-2 text-body outline-none focus-visible:ring-2 focus-visible:ring-primary"
                       />
                       <div className="mt-2 flex justify-end gap-2">
                         <Button
                           variant="ghost"
-                          size="sm"
+                          size="compact"
                           disabled={posting}
                           onClick={() => {
                             setAnchor(null)
@@ -245,7 +245,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                         <Button
                           data-testid="comment-submit"
                           aria-keyshortcuts="Meta+Enter Control+Enter"
-                          size="sm"
+                          size="compact"
                           disabled={posting || !draft.trim()}
                           onClick={() => void submitComment()}
                         >
@@ -253,7 +253,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                           {!posting && (
                             <kbd
                               aria-hidden="true"
-                              className="ml-1 font-sans text-[0.625rem] opacity-80"
+                              className="ml-1 font-sans text-meta opacity-80"
                             >
                               ⌘ ↵
                             </kbd>
@@ -264,7 +264,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   )}
                   <div className="min-h-0 flex-1 overflow-y-auto p-3">
                     {comments.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-meta text-ink-subtle">
                         No comments yet.
                       </p>
                     ) : (
@@ -278,22 +278,22 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                               else commentRefs.current.delete(comment.id)
                             }}
                             data-testid="plan-comment"
-                            className="rounded-lg border border-border bg-card p-3"
+                            className="rounded-compact border border-line bg-panel p-3"
                           >
                             <button
                               type="button"
-                              className="block w-full text-left focus-visible:outline-2 focus-visible:outline-ring"
+                              className="block w-full text-left focus-visible:outline-2 focus-visible:outline-primary"
                               onClick={() => openComment(comment.id)}
                             >
-                              <span className="text-xs font-semibold">
+                              <span className="text-label font-semibold">
                                 {index + 1}. {comment.author}
                               </span>
                               {comment.anchor && (
-                                <blockquote className="mt-2 line-clamp-2 border-l-2 border-yellow-400 pl-2 text-xs text-muted-foreground">
+                                <blockquote className="mt-2 line-clamp-2 border-l-2 border-attention pl-2 text-meta text-ink-subtle">
                                   {comment.anchor.exact}
                                 </blockquote>
                               )}
-                              <span className="mt-2 block text-sm whitespace-pre-wrap">
+                              <span className="mt-2 block text-body whitespace-pre-wrap">
                                 {comment.body}
                               </span>
                             </button>
@@ -301,7 +301,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                               <button
                                 type="button"
                                 data-testid="comment-delete"
-                                className="mt-2 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                className="mt-2 text-meta text-ink-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
                                 onClick={() => void removeComment(comment.id)}
                               >
                                 Delete
@@ -315,7 +315,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   {comments.some(
                     (comment) => comment.author_login === plan.user.login
                   ) && (
-                    <div className="border-t border-border p-3">
+                    <div className="border-t border-line p-3">
                       <Button
                         className="w-full"
                         disabled={submitting || posting || submitted}
@@ -340,7 +340,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
               </div>
             )
           ) : (
-            <p className="p-6 text-sm text-muted-foreground/70">
+            <p className="p-6 text-body text-ink-subtle/70">
               The artifact hasn't been written yet.
             </p>
           )}

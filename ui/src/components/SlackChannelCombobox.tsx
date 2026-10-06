@@ -6,21 +6,9 @@ import {
   LockSimpleIcon,
 } from "@phosphor-icons/react"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 
-import {
-  Combobox,
-  ComboboxChip,
-  ComboboxChips,
-  ComboboxChipsInput,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxValue,
-  useComboboxAnchor,
-} from "@/components/ui/combobox"
+import { Combobox, ComboboxChip, ComboboxChips, ComboboxChipsInput, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxValue, useComboboxAnchor } from "@langchain/gtm-platform-design-system/ui/combobox"
 import type { SlackChannelOption } from "@/lib/api"
 import {
   normalizeSlackChannelId,
@@ -62,11 +50,11 @@ export function SlackChannelRow({
       <SlackChannelIcon channel={channel} />
       <span className="min-w-0 flex-1 truncate">{channel?.name ?? id}</span>
       {channel && !channel.is_member ? (
-        <span className="shrink-0 pr-5 text-muted-foreground">
+        <span className="shrink-0 pr-5 text-ink-subtle">
           bot not in channel
         </span>
       ) : channel?.num_members != null ? (
-        <span className="shrink-0 pr-5 text-muted-foreground">
+        <span className="shrink-0 pr-5 text-ink-subtle">
           {channel.num_members}
         </span>
       ) : null}
@@ -93,7 +81,7 @@ export function RefreshSlackChannels({
     <Button
       type="button"
       variant="ghost"
-      size="sm"
+      size="compact"
       disabled={isRefreshing}
       onClick={() => refresh()}
     >

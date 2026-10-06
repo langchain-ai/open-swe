@@ -1,0 +1,84 @@
+{
+  "name": "@langchain/gtm-platform-design-system",
+  "version": "0.1.0",
+  "description": "The GTM Platform internal design system: tokens, primitives, and the product decisions that go with them.",
+  "author": "Amal Irgashev",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "sideEffects": [
+    "*.css"
+  ],
+  "files": [
+    "src",
+    "agent",
+    "scripts",
+    "README.md",
+    "AGENTS.md",
+    "ONBOARDING-open-swe.md"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./host": "./src/host.tsx",
+    "./styles.css": "./src/styles/theme.css",
+    "./tokens.css": "./src/styles/tokens.css",
+    "./bridge.css": "./src/styles/bridge.css",
+    "./ui/cn": "./src/ui/cn.ts",
+    "./ui/field-focus": "./src/ui/field-focus.ts",
+    "./ui/glyphs": "./src/ui/glyphs.ts",
+    "./ui/markdown-codec": "./src/ui/markdown-codec.ts",
+    "./ui/popup-surface": "./src/ui/popup-surface.ts",
+    "./ui/*": "./src/ui/*.tsx",
+    "./patterns/*": "./src/patterns/*.tsx",
+    "./data-grid/*": "./src/data-grid/*.tsx",
+    "./agent/*": "./agent/*",
+    "./package.json": "./package.json",
+    "./lib/*": "./src/lib/*.ts"
+  },
+  "bin": {
+    "design": "./scripts/cli.mjs"
+  },
+  "scripts": {
+    "extract": "node scripts/extract.mjs && node scripts/extract-styles.mjs && node scripts/build-index.mjs",
+    "verify": "node scripts/extract.mjs --verify && node scripts/extract-styles.mjs --verify && node scripts/build-index.mjs --verify",
+    "doctor": "node scripts/cli.mjs doctor",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@base-ui/react": ">=1.7.0",
+    "@heroicons/react": ">=2.2.0",
+    "react": ">=19.0.0",
+    "react-dom": ">=19.0.0",
+    "tailwindcss": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@heroicons/react": {
+      "optional": false
+    }
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "optionalDependencies": {
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.14.11",
+    "cmdk": "^1.1.1",
+    "date-fns": "^3.6.0",
+    "react-day-picker": "^8.10.2",
+    "sonner": "^2.0.8"
+  },
+  "devDependencies": {
+    "@base-ui/react": "^1.7.0",
+    "@heroicons/react": "^2.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3"
+  }
+}

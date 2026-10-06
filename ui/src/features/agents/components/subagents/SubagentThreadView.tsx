@@ -7,7 +7,7 @@ import {
   WarningCircleIcon,
 } from "@phosphor-icons/react"
 
-import { Badge } from "@/components/ui/badge"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
 import { LoadError } from "@/components/LoadError"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Messages } from "@/features/agents/components/messages"
@@ -61,10 +61,10 @@ export function SubagentThreadView({
       params={{ threadId: thread.id }}
       search={{}}
       data-no-drag=""
-      className="flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      className="flex h-7 shrink-0 items-center gap-1 rounded-badge px-1.5 text-ink-subtle transition-colors hover:bg-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
     >
       <ArrowLeftIcon className="size-3.5" aria-hidden />
-      <span className="max-w-48 truncate text-xs" title={thread.title}>
+      <span className="max-w-48 truncate text-label" title={thread.title}>
         {thread.title}
       </span>
     </Link>
@@ -107,7 +107,7 @@ export function SubagentThreadView({
         contentWidthClass="max-w-3xl"
         footer={
           !isRunning && (
-            <p className="px-1 pt-2 pb-6 text-center text-xs text-muted-foreground/70">
+            <p className="px-1 pt-2 pb-6 text-center text-meta text-ink-subtle/70">
               Subagents cannot be replied to. Follow up in the parent thread.
             </p>
           )
@@ -120,7 +120,7 @@ export function SubagentThreadView({
     <div className="flex min-w-0 flex-1 flex-col">
       <header
         data-desktop-drag-region=""
-        className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
+        className="relative z-10 h-11 shrink-0 border-b border-line/60 bg-canvas/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-canvas/60 after:to-transparent"
       >
         <div
           className={cn(
@@ -129,10 +129,10 @@ export function SubagentThreadView({
           )}
         >
           {backLink}
-          <span className="text-muted-foreground/50" aria-hidden>
+          <span className="text-ink-subtle/50" aria-hidden>
             /
           </span>
-          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <div className="flex min-w-0 items-center gap-2 text-body font-medium">
             <span className="min-w-0 truncate" title={description || title}>
               {title}
             </span>
@@ -143,17 +143,17 @@ export function SubagentThreadView({
             )}
             {task?.status === "in_progress" ? (
               <CircleNotchIcon
-                className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+                className="size-3.5 shrink-0 animate-spin text-ink-subtle"
                 aria-label="Subagent running"
               />
             ) : task?.status === "error" ? (
               <WarningCircleIcon
-                className="size-3.5 shrink-0 text-destructive"
+                className="size-3.5 shrink-0 text-risk"
                 aria-label="Subagent failed"
               />
             ) : task ? (
               <CheckCircleIcon
-                className="size-3.5 shrink-0 text-muted-foreground/70"
+                className="size-3.5 shrink-0 text-ink-subtle/70"
                 aria-label="Subagent finished"
               />
             ) : null}

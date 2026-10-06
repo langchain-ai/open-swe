@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
 
-import { buttonVariants } from "@/components/ui/button"
+import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
 import {
   Card,
   CardContent,
@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { loginUrl } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import {
@@ -71,7 +71,7 @@ function Login() {
         <CardContent className="flex flex-col gap-3">
           <a
             href={loginUrl(intendedPath)}
-            className={cn(buttonVariants({ size: "lg" }), "w-full")}
+            className={cn(buttonVariants({ size: "control" }), "w-full")}
           >
             Continue with GitHub
           </a>

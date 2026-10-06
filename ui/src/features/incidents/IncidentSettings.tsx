@@ -14,10 +14,10 @@ import {
   SettingsRow,
   SettingsSection,
 } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import { SlackChannelMultiCombobox } from "@/components/SlackChannelCombobox"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { incidentsApi } from "./api"
@@ -45,7 +45,7 @@ function Field({
       <label
         id={`policy-${name}-label`}
         htmlFor={`policy-${name}`}
-        className="block text-xs font-medium"
+        className="block text-label font-medium"
       >
         {label}
       </label>
@@ -56,7 +56,7 @@ function Field({
           aria-describedby={describedBy}
           defaultValue={value}
           placeholder={placeholder}
-          className="min-h-20 bg-background"
+          className="min-h-20 bg-canvas"
         />
       ) : (
         <Input
@@ -68,13 +68,13 @@ function Field({
           required={name === "channel_prefix"}
           maxLength={name === "channel_prefix" ? 60 : undefined}
           pattern={name === "channel_prefix" ? "[a-z0-9_-]+" : undefined}
-          className="h-9 bg-background"
+          className="h-9 bg-canvas"
         />
       )}
       {description && (
         <p
           id={`policy-${name}-description`}
-          className="text-xs leading-relaxed text-muted-foreground"
+          className="text-meta leading-relaxed text-ink-subtle"
         >
           {description}
         </p>
@@ -106,7 +106,7 @@ function Notice({ children, error }: { children: ReactNode; error?: boolean }) {
   return (
     <div
       role={error ? "alert" : "status"}
-      className={`rounded-lg border p-3 text-sm ${error ? "border-destructive/20 bg-destructive/5 text-destructive-foreground" : "border-info/20 bg-info/5 text-info-foreground"}`}
+      className={`rounded-compact border p-3 text-body ${error ? "border-risk/20 bg-risk-bg text-risk" : "border-info/20 bg-info/5 text-info"}`}
     >
       {children}
     </div>
@@ -185,20 +185,20 @@ function PolicyForm({
               placeholder="inc-"
             />
             <div className="space-y-2">
-              <span className="block text-xs font-medium">
+              <span className="block text-label font-medium">
                 Excluded channels
               </span>
               <SlackChannelMultiCombobox
                 value={excludedChannelIds}
                 onValueChange={setExcludedChannelIds}
                 aria-label="Excluded channels"
-                className="min-h-9 bg-background"
+                className="min-h-9 bg-canvas"
               />
             </div>
           </div>
         </SettingsPanel>
         <details>
-          <summary className="cursor-pointer px-4 py-3 text-xs font-medium">
+          <summary className="cursor-pointer px-4 py-3 text-label font-medium">
             Model and analysis limits
           </summary>
           <SettingsPanel>
@@ -217,7 +217,7 @@ function PolicyForm({
                   htmlFor={`policy-${name}`}
                   className="space-y-2"
                 >
-                  <span className="block text-xs font-medium">{label}</span>
+                  <span className="block text-label font-medium">{label}</span>
                   <Input
                     type="number"
                     min={min}
@@ -227,7 +227,7 @@ function PolicyForm({
                     id={`policy-${name}`}
                     name={name}
                     defaultValue={value}
-                    className="h-9 bg-background"
+                    className="h-9 bg-canvas"
                   />
                 </label>
               ))}
@@ -255,8 +255,8 @@ function PolicyForm({
             : "Settings update requested. The policy becomes effective after server validation."}
         </Notice>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-5">
-        <p className="max-w-md text-xs leading-relaxed text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-5">
+        <p className="max-w-md text-meta leading-relaxed text-ink-subtle">
           Policy version {initial.version}. Existing matching channels are not
           enrolled unless a new matching rename event is received.
         </p>
@@ -264,7 +264,7 @@ function PolicyForm({
           <Button
             type="button"
             variant="outline"
-            size="sm"
+            size="compact"
             onClick={onReload}
             disabled={save.isPending}
           >
@@ -273,7 +273,7 @@ function PolicyForm({
           </Button>
           <Button
             type="submit"
-            size="sm"
+            size="compact"
             disabled={
               save.isPending ||
               (save.isSuccess && submittedOperation?.status !== "failed")
@@ -309,24 +309,24 @@ function SlackConnectionStatus({
     <div className="px-4 py-4">
       <div className="flex items-start gap-3">
         {connectionError ? (
-          <CircleAlert className="mt-0.5 size-5 text-warning-foreground" />
+          <CircleAlert className="mt-0.5 size-5 text-attention" />
         ) : (
-          <Radio className="mt-0.5 size-5 text-info-foreground" />
+          <Radio className="mt-0.5 size-5 text-info" />
         )}
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-body font-medium">
             {connectionError
               ? "Slack connection needs attention"
               : "Slack connection configured"}
           </h2>
           {connectionError && (
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            <p className="mt-1 text-meta leading-relaxed text-ink-subtle">
               {connectionError}
             </p>
           )}
-          <dl className="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+          <dl className="mt-4 grid grid-cols-1 gap-3 text-label sm:grid-cols-3">
             <div>
-              <dt className="text-muted-foreground">Workspace</dt>
+              <dt className="text-ink-subtle">Workspace</dt>
               <dd className="mt-1 font-mono">
                 {connection.workspace_id ||
                   policy.workspace_id ||
@@ -334,7 +334,7 @@ function SlackConnectionStatus({
               </dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Slack app</dt>
+              <dt className="text-ink-subtle">Slack app</dt>
               <dd className="mt-1 font-mono">
                 {connection.slack_app_id ||
                   policy.slack_app_id ||
@@ -342,7 +342,7 @@ function SlackConnectionStatus({
               </dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Last verified</dt>
+              <dt className="text-ink-subtle">Last verified</dt>
               <dd className="mt-1">{formatTime(connection.verified_at)}</dd>
             </div>
           </dl>

@@ -44,7 +44,7 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
+import { DropdownMenu, DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
 import { slackChannelMatches } from "@/components/SlackChannelCombobox"
 import type { SlackChannelOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
@@ -752,18 +752,18 @@ export const ChatComposer = memo(function ChatComposer({
   return (
     <div
       className={cn(
-        "relative w-full font-sans text-[13px]",
+        "relative w-full font-sans text-label",
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
       {composerError && (
-        <div className="mb-2 px-1 text-xs text-destructive" role="alert">
+        <div className="mb-2 px-1 text-label text-risk" role="alert">
           {composerError}
         </div>
       )}
 
       {!selectedModelSupportsImages && (
-        <div className="dropdown-glass mb-2 rounded-xl border border-warning/30 px-3 py-2 text-xs text-muted-foreground">
+        <div className="dropdown-glass mb-2 rounded-control border border-attention/30 px-3 py-2 text-meta text-ink-subtle">
           The selected model does not accept image input. Remove the image
           {pendingImages.length > 1 ? "s" : ""} or switch to a vision-enabled
           model to send.
@@ -771,7 +771,7 @@ export const ChatComposer = memo(function ChatComposer({
       )}
 
       {targetControls && !targetControlsBelow && (
-        <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
+        <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-panel bg-hover px-4 pt-3 pb-5 text-label">
           {targetControls}
         </div>
       )}
@@ -779,11 +779,11 @@ export const ChatComposer = memo(function ChatComposer({
       <div
         data-chat-composer
         className={cn(
-          "relative z-10 flex flex-col rounded-2xl border border-foreground/20 bg-card px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-300 hover:shadow-lg dark:border-[0.75px] dark:border-foreground/[0.06] dark:bg-[#222] dark:shadow-none dark:hover:shadow-none",
+          "relative z-10 flex flex-col rounded-panel border border-ink/20 bg-panel px-3 py-2.5 shadow-popup transition-[border-color,box-shadow] duration-300 hover:shadow-popup dark:border-[0.75px] dark:bg-[#222] dark:shadow-none dark:hover:shadow-none",
           compact ? "min-h-[88px]" : "min-h-[106px]",
           dragKind
-            ? "border-primary dark:border dark:border-primary"
-            : "focus-within:border-foreground/30 hover:border-foreground/30 dark:focus-within:border-foreground/[0.06] dark:hover:border-foreground/[0.06]"
+            ? "border-primary dark:border"
+            : "focus-within:border-ink/30 hover:border-ink/30"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -801,8 +801,8 @@ export const ChatComposer = memo(function ChatComposer({
         )}
 
         {dragKind && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-card/80 backdrop-blur-sm">
-            <span className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-panel bg-panel/80 backdrop-blur-sm">
+            <span className="rounded-badge bg-hover px-3 py-1.5 text-label font-medium text-ink">
               {dragKind === "path"
                 ? "Drop to mention this file"
                 : "Drop images here"}
@@ -828,12 +828,12 @@ export const ChatComposer = memo(function ChatComposer({
               >
                 <img
                   alt={image.fileName || "Pending image"}
-                  className="size-16 rounded-lg border border-border object-cover"
+                  className="size-16 rounded-compact border border-line object-cover"
                   src={`data:${image.mimeType};base64,${image.base64}`}
                 />
                 <button
                   aria-label="Remove image"
-                  className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:text-foreground"
+                  className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-line bg-panel text-ink-subtle opacity-0 shadow-control transition-opacity group-hover:opacity-100 hover:text-ink"
                   onClick={() =>
                     setPendingImages((prev) =>
                       prev.filter((_, i) => i !== index)
@@ -870,9 +870,9 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
-          <Menu onOpenChange={setExtrasMenuOpen}>
-            <MenuTrigger
+        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-meta text-ink-subtle">
+          <DropdownMenu onOpenChange={setExtrasMenuOpen}>
+            <DropdownMenuTrigger
               render={
                 <ComposerControl
                   aria-label="More composer options"
@@ -882,17 +882,17 @@ export const ChatComposer = memo(function ChatComposer({
               }
             >
               <Plus className="size-4" />
-            </MenuTrigger>
-            <MenuPopup align="start" className="w-44" side="top" sideOffset={7}>
-              <MenuItem
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44" side="top" sideOffset={7}>
+              <DropdownMenuItem
                 disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <ImagePlus />
                 Attach images
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <div className="flex min-w-0 flex-wrap items-center gap-1">
             {models.length > 0 && (
@@ -904,7 +904,7 @@ export const ChatComposer = memo(function ChatComposer({
                 requireImageSupport={pendingImages.length > 0}
                 routed={routed}
                 selection={selection}
-                triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
+                triggerClassName="h-7 max-w-full rounded-badge px-2 text-meta text-ink-subtle/70 hover:bg-muted hover:text-ink/80"
               />
             )}
           </div>
@@ -931,7 +931,7 @@ export const ChatComposer = memo(function ChatComposer({
       </div>
 
       {targetControls && targetControlsBelow && (
-        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 px-3 text-xs">
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 px-3 text-label">
           {targetControls}
         </div>
       )}

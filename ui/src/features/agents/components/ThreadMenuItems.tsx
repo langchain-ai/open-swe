@@ -14,7 +14,7 @@ import type { DesktopLegacyLocalThread } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
 
 const menuItemClassName =
-  "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none select-none data-highlighted:bg-muted"
+  "flex cursor-default items-center gap-2 rounded-tick px-2 py-1.5 text-label outline-none select-none data-highlighted:bg-muted"
 
 export function ThreadMenuItems({
   thread,
@@ -119,7 +119,7 @@ export function ThreadMenuItems({
       <Menu.Item
         onClick={onDelete}
         disabled={isDeleting}
-        className={`${menuItemClassName} text-destructive data-disabled:pointer-events-none data-disabled:opacity-50`}
+        className={`${menuItemClassName} text-risk data-disabled:pointer-events-none data-disabled:opacity-50`}
       >
         <TrashIcon className="size-3.5" />
         Delete thread

@@ -56,19 +56,19 @@ export function statusDetail(pr: OpenPullRequest): string | null {
 }
 
 export const statusTones: Record<string, string> = {
-  Conflicted: "border-destructive/30 bg-destructive/10 text-destructive",
-  Failing: "border-destructive/30 bg-destructive/10 text-destructive",
+  Conflicted: "border-risk/30 bg-risk-bg text-risk",
+  Failing: "border-risk/30 bg-risk-bg text-risk",
   "Changes Requested":
-    "border-destructive/30 bg-destructive/10 text-destructive",
+    "border-risk/30 bg-risk-bg text-risk",
   Approved:
-    "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    "border-positive/30 bg-positive-bg text-positive",
   Pending:
-    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    "border-attention/30 bg-attention-bg text-attention",
   "Review required":
-    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    "border-attention/30 bg-attention-bg text-attention",
   "Status unavailable":
-    "border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  Reviewable: "border-sky-600/30 bg-sky-500/10 text-sky-700 dark:text-sky-400",
+    "border-attention/30 bg-attention-bg text-attention",
+  Reviewable: "border-info/30 bg-info-bg text-info",
 }
 
 export function isConflicted(pr: OpenPullRequest) {

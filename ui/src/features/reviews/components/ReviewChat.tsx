@@ -25,9 +25,9 @@ import {
 } from "@/features/agents/utils/codeExcerpt"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
-import { IconButton } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { reviewChatApiBase } from "@/lib/api"
 import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import {
@@ -125,19 +125,19 @@ function AttachmentPill({
   onRemove?: () => void
 }) {
   return (
-    <span className="inline-flex max-w-[200px] items-center gap-1 rounded-md border border-border bg-muted/60 py-0.5 pr-1 pl-1.5 text-[11px] text-foreground">
-      <CodeIcon className="size-3 shrink-0 text-muted-foreground" />
+    <span className="inline-flex max-w-[200px] items-center gap-1 rounded-badge border border-line bg-muted/60 py-0.5 pr-1 pl-1.5 text-meta text-ink">
+      <CodeIcon className="size-3 shrink-0 text-ink-subtle" />
       <span className="truncate font-mono">{label}</span>
       {onRemove && (
-        <IconButton
+        <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-sm"
           aria-label="Remove attachment"
           onClick={onRemove}
         >
           <XIcon />
-        </IconButton>
+        </Button>
       )}
     </span>
   )
@@ -189,13 +189,13 @@ function EmptyState({
     : SUGGESTED_PROMPTS.filter((prompt) => prompt !== FINDINGS_PROMPT)
   return (
     <div className="flex flex-1 flex-col gap-4 p-4">
-      <p className="text-[13px] text-foreground">
+      <p className="text-label text-ink">
         {reviewed
           ? "I've reviewed this PR. Ask me about the diff, the findings, or the surrounding code — I have read-only access to the repository."
           : "This PR hasn't been reviewed yet. Ask me about the diff or the surrounding code — I have read-only access to the repository."}
       </p>
       <div className="flex flex-col gap-1.5">
-        <span className="text-xs font-medium text-muted-foreground">
+        <span className="text-meta font-medium text-ink-subtle">
           Suggested prompts
         </span>
         {prompts.map((prompt) => (
@@ -203,9 +203,9 @@ function EmptyState({
             key={prompt}
             type="button"
             onClick={() => onPick(prompt)}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-foreground hover:bg-muted/60"
+            className="flex items-center gap-2 rounded-badge px-2 py-1.5 text-left text-label text-ink hover:bg-muted/60"
           >
-            <SparkleIcon className="size-4 shrink-0 text-muted-foreground" />
+            <SparkleIcon className="size-4 shrink-0 text-ink-subtle" />
             {prompt}
           </button>
         ))}
@@ -218,7 +218,7 @@ function LoadingState() {
   return (
     <div className="flex flex-1 flex-col gap-4 p-4">
       <div className="flex justify-end">
-        <Skeleton className="h-12 w-2/5 rounded-lg" />
+        <Skeleton className="h-12 w-2/5 rounded-compact" />
       </div>
       <div className="flex flex-col gap-2">
         <Skeleton className="h-4 w-4/5" />
@@ -429,7 +429,7 @@ function ChatBody({
             if (!isUser) {
               return (
                 <div key={message.id ?? index} className="flex justify-start">
-                  <div className="w-full text-[13px] text-foreground">
+                  <div className="w-full text-label text-ink">
                     <Markdown content={content} />
                   </div>
                 </div>
@@ -466,9 +466,9 @@ function ChatBody({
                   )}
                   {parsed.text && (
                     <span
-                      className={`rounded-lg px-3 py-2 text-[13px] whitespace-pre-wrap text-foreground ${
+                      className={`rounded-compact px-3 py-2 text-label whitespace-pre-wrap text-ink ${
                         isSystem
-                          ? "border border-border bg-muted/50"
+                          ? "border border-line bg-muted/50"
                           : "bg-muted"
                       }`}
                     >
@@ -481,13 +481,13 @@ function ChatBody({
           })}
           {busy && (
             <div className="flex justify-start">
-              <div className="px-3 py-2 text-xs text-muted-foreground">
+              <div className="px-3 py-2 text-meta text-ink-subtle">
                 Thinking…
               </div>
             </div>
           )}
           {!busy && streamError && (
-            <p className="rounded-md border border-destructive/40 px-3 py-2 text-xs break-words text-destructive">
+            <p className="rounded-badge border border-risk/40 px-3 py-2 text-label break-words text-risk">
               The chat run failed: {streamError}
             </p>
           )}
@@ -495,7 +495,7 @@ function ChatBody({
       )}
 
       <div className="p-3">
-        <div className="flex flex-col gap-1.5 rounded-2xl border border-border bg-background px-1.5 py-1.5 transition-colors focus-within:border-ring/60">
+        <div className="flex flex-col gap-1.5 rounded-panel border border-line bg-canvas px-1.5 py-1.5 transition-colors focus-within:border-primary/60">
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-0.5 pl-2">
               {attachments.map((attachment) => (
@@ -520,9 +520,9 @@ function ChatBody({
               }}
               placeholder="Ask anything about this PR…"
               rows={1}
-              className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+              className="max-h-40 min-h-7 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-1 shadow-none focus-visible:border-transparent focus-visible:ring-0 "
             />
-            <IconButton
+            <Button
               type="button"
               onClick={submitComposer}
               disabled={(!value.trim() && attachments.length === 0) || busy}
@@ -530,7 +530,7 @@ function ChatBody({
               className="rounded-full"
             >
               <ArrowUpIcon className="size-4" />
-            </IconButton>
+            </Button>
           </div>
         </div>
       </div>
@@ -602,7 +602,7 @@ export function ReviewChat({
 
   if (meta.isError || !meta.data.available) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6 text-center text-xs text-muted-foreground">
+      <div className="flex flex-1 items-center justify-center p-6 text-center text-meta text-ink-subtle">
         Chat is unavailable right now. Reload the page to try again.
       </div>
     )

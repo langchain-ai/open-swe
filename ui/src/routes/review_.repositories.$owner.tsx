@@ -3,10 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 
 import { AppShell } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
@@ -131,10 +131,10 @@ function RepositoriesOwnerPage() {
     >
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          <h2 className="text-meta font-medium tracking-wide text-ink-subtle uppercase">
             Repositories
           </h2>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-meta text-ink-subtle">
             {autoReviewCount}/{ownerRepos.length} run automatically
           </span>
         </div>
@@ -147,20 +147,20 @@ function RepositoriesOwnerPage() {
           placeholder="Search repositories…"
           aria-label="Search repositories"
         />
-        <div className="rounded-lg border border-border bg-card">
+        <div className="rounded-compact border border-line bg-panel">
           {loading && (
             <div className="p-4">
               <Skeleton className="h-32 w-full" />
             </div>
           )}
           {!loading && filteredRepos.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">
+            <p className="px-4 py-3 text-meta text-ink-subtle">
               {ownerRepos.length === 0
                 ? "No repositories found for this installation."
                 : "No repositories match your search."}
             </p>
           )}
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-line">
             {pageRepos.map((r) => {
               const runsAutomatically = autoReviewSet.has(r.full_name)
               return (
@@ -168,21 +168,21 @@ function RepositoriesOwnerPage() {
                   key={r.full_name}
                   className="flex items-center justify-between gap-4 px-4 py-3"
                 >
-                  <div className="flex min-w-0 items-center gap-2 text-xs">
+                  <div className="flex min-w-0 items-center gap-2 text-label">
                     <span className="truncate">
-                      <span className="text-muted-foreground">{owner}/</span>
-                      <span className="font-medium text-foreground">
+                      <span className="text-ink-subtle">{owner}/</span>
+                      <span className="font-medium text-ink">
                         {r.full_name.slice(owner.length + 1)}
                       </span>
                     </span>
                     {r.private && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-meta text-ink-subtle">
                         private
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-meta text-ink-subtle">
                       Run automatically
                     </span>
                     <span
@@ -211,24 +211,24 @@ function RepositoriesOwnerPage() {
             })}
           </ul>
           {filteredRepos.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
-              <span className="text-muted-foreground">
+            <div className="flex items-center justify-between gap-4 border-t border-line px-4 py-2 text-label">
+              <span className="text-ink-subtle">
                 Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
               </span>
               <div className="flex items-center gap-2">
                 <Button
-                  size="sm"
+                  size="compact"
                   variant="outline"
                   disabled={safePage === 0}
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                 >
                   Prev
                 </Button>
-                <span className="text-muted-foreground">
+                <span className="text-ink-subtle">
                   {safePage + 1} / {totalPages}
                 </span>
                 <Button
-                  size="sm"
+                  size="compact"
                   variant="outline"
                   disabled={safePage >= totalPages - 1}
                   onClick={() =>

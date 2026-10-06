@@ -1,0 +1,112 @@
+/*
+ * The elevation ladder. Four rungs, named for the job each one does.
+ *
+ * MERGE NOTE: these values belong in tokens.css beside the rest of CORE 14 and
+ * will move there once the concurrent state-palette round lands. They live in
+ * their own file only to keep two rounds off one file; nothing else about them
+ * is special, and the fold-in is a copy of both blocks below into the matching
+ * blocks of tokens.css plus deleting the import from globals.css.
+ *
+ * WHY FOUR AND NOT EIGHT. The physics is ported from fluid-functionalism
+ * (docs/reference/fluid-functionalism/surfaces-theme.json), which ships an
+ * eight-level ladder. Eight rungs is a ladder you have to pick a number off,
+ * and a number picked is a number argued about. Four rungs named for their job
+ * -- a raised pressable, one step of lift under the pointer, an anchored popup,
+ * a modal overlay -- is the whole set of jobs this product has, so the rung is
+ * chosen by what the thing IS rather than by how deep it feels.
+ *
+ * LIGHT: the accumulating ramp, drops only. Each rung adds one layer at double
+ * the previous distance (1 / 3 / 6 / 12 / 24), all at one opacity. Doubling is
+ * what makes the ramp read as one light source moving further away rather than
+ * as four unrelated shadows; one opacity is what keeps it from muddying.
+ *
+ * Two departures from the source, both Amal's light-mode ruling (2026-08-05).
+ * The source seats every rung on a 1px ring at 6% black; ours drop the ring,
+ * because every consumer of this ladder already owns its edge (a button brings
+ * a border or a strong fill, every popup and overlay brings ring-line-strong),
+ * and a shadow ring under a real border doubles the edge into a dirty outline.
+ * And the tint is a warm near-black rather than pure black: the light surfaces
+ * are warm paper (#ecebe8 desk, #fbfbfa canvas), and a cold gray shadow on
+ * warm paper reads as dirt, not depth.
+ *
+ * THINNING (Amal 2026-08-06, against fluid-functionalism). Our first port took
+ * source levels 2/3/4/6 and read thicker than fluid on every small surface:
+ * buttons, tabs, and popovers stacked fill + hairline + multi-drop. The ladder
+ * is now quieter at the bottom and middle:
+ *   - control = source level 2's drop only (1px whisper)
+ *   - raised-hover = level 3 drops (1 + 3)
+ *   - popup = level 3 drops too (1 + 3), NOT level 4 -- an anchored menu is a
+ *     soft float, not a modal; the 6px layer starts at overlay
+ *   - overlay = level 6 stack (1 + 3 + 6 + 12 + 24), the one surface that
+ *     should feel heavy
+ *
+ * DARK: inverted physics. Depth cue is a 1px inset top highlight plus soft
+ * black drops. ONE EDGE RULE (Amal 2026-08-06): the shadow NEVER paints a ring
+ * or an outer hairline. Every floating consumer already brings
+ * `ring-1 ring-line-strong` or a real `border`; putting a ring in the shadow
+ * too is the bevel that made dark popovers and buttons look thicker than
+ * fluid. Highlight + drops only, at every rung. The `--gtm-elev-ring-*` and
+ * `--gtm-elev-edge` tokens stay defined for the fold-in / archaeology, but no
+ * rung spends them.
+ *
+ * SCOPING IS THE TASTE. See ELEVATION_RULES in elevated.tsx for when a rung
+ * is legal and when it is not. Containment -- panels, cards, frames, tables,
+ * rows -- is surface plus one hairline and grows no shadow, ever.
+ */
+
+:root {
+  /* One warm tint, one opacity, every layer. */
+  --gtm-elev-tint: rgb(66 50 30 / 0.06);
+
+  --gtm-shadow-control: 0 1px 1px -0.5px var(--gtm-elev-tint);
+
+  --gtm-shadow-raised-hover:
+    0 1px 1px -0.5px var(--gtm-elev-tint), 0 3px 3px -1.5px var(--gtm-elev-tint);
+
+  /* Same stack as raised-hover: an anchored popup is a soft float. */
+  --gtm-shadow-popup:
+    0 1px 1px -0.5px var(--gtm-elev-tint), 0 3px 3px -1.5px var(--gtm-elev-tint);
+
+  --gtm-shadow-overlay:
+    0 1px 1px -0.5px var(--gtm-elev-tint),
+    0 3px 3px -1.5px var(--gtm-elev-tint), 0 6px 6px -3px var(--gtm-elev-tint),
+    0 12px 12px -6px var(--gtm-elev-tint),
+    0 24px 24px -12px var(--gtm-elev-tint);
+}
+
+[data-theme="dark"] {
+  /* The lit-from-above line, one step per rung. */
+  --gtm-elev-hi-1: rgb(255 255 255 / 0.03);
+  --gtm-elev-hi-2: rgb(255 255 255 / 0.04);
+  --gtm-elev-hi-3: rgb(255 255 255 / 0.05);
+  --gtm-elev-hi-4: rgb(255 255 255 / 0.06);
+
+  /* Kept for archaeology / fold-in; no rung spends these (one-edge rule). */
+  --gtm-elev-ring-1: rgb(255 255 255 / 0.04);
+  --gtm-elev-ring-2: rgb(255 255 255 / 0.06);
+  --gtm-elev-edge: rgb(0 0 0 / 0.16);
+
+  --gtm-elev-drop: rgb(0 0 0 / 0.22);
+
+  --gtm-shadow-control:
+    inset 0 1px 0 0 var(--gtm-elev-hi-1),
+    0 1px 1px -0.5px var(--gtm-elev-drop);
+
+  --gtm-shadow-raised-hover:
+    inset 0 1px 0 0 var(--gtm-elev-hi-2),
+    0 1px 1px -0.5px var(--gtm-elev-drop),
+    0 3px 3px -1.5px var(--gtm-elev-drop);
+
+  --gtm-shadow-popup:
+    inset 0 1px 0 0 var(--gtm-elev-hi-3),
+    0 1px 1px -0.5px var(--gtm-elev-drop),
+    0 3px 3px -1.5px var(--gtm-elev-drop);
+
+  --gtm-shadow-overlay:
+    inset 0 1px 0 0 var(--gtm-elev-hi-4),
+    0 1px 1px -0.5px var(--gtm-elev-drop),
+    0 3px 3px -1.5px var(--gtm-elev-drop),
+    0 6px 6px -3px var(--gtm-elev-drop),
+    0 12px 12px -6px var(--gtm-elev-drop),
+    0 24px 24px -12px var(--gtm-elev-drop);
+}

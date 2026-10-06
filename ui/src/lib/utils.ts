@@ -7,8 +7,8 @@ import type { ClassValue } from "clsx"
  * @param inputs - The class names to merge.
  * @returns The merged class name string.
  * @example
- * cn("text-red-500", "bg-blue-500") // "text-red-500 bg-blue-500"
- * cn("text-red-500", "bg-blue-500", "text-2xl") // "text-red-500 bg-blue-500 text-2xl"
+ * cn("text-risk", "bg-info") // "text-risk bg-info"
+ * cn("text-risk", "bg-info", "text-page") // "text-risk bg-info text-page"
  */
 export function cn(...inputs: Array<ClassValue>) {
   return twMerge(clsx(inputs))

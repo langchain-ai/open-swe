@@ -1,11 +1,5 @@
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
 
 const PAGE_SIZES = [10, 25, 50, 100] as const
 
@@ -31,7 +25,7 @@ export function TablePagination({
   const end = Math.min(page * pageSize, total)
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-meta text-ink-subtle">
       <span>
         {start.toLocaleString("en-US")}–{end.toLocaleString("en-US")} of{" "}
         {total.toLocaleString("en-US")}

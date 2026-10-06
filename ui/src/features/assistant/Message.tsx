@@ -32,7 +32,7 @@ function HumanText({ text }: { text: string }) {
     (parsed.type === "message" && parsed.senderKind === "system")
   ) {
     return (
-      <details className="text-xs text-muted-foreground">
+      <details className="text-meta text-ink-subtle">
         <summary className="cursor-pointer">Context</summary>
         <pre className="whitespace-pre-wrap">{text}</pre>
       </details>
@@ -58,12 +58,12 @@ export function ToolResult({
 }: ToolCallMessagePartProps) {
   return (
     <details
-      className={`my-2 rounded-xl border p-3 text-sm ${isError ? "border-destructive text-destructive" : "border-border"}`}
+      className={`my-2 rounded-control border p-3 text-body ${isError ? "border-risk text-risk" : "border-line"}`}
       open={isError || undefined}
     >
       <summary className="cursor-pointer font-medium">
         {toolName}{" "}
-        <span className="ml-2 text-xs text-muted-foreground">
+        <span className="ml-2 text-meta text-ink-subtle">
           {isError
             ? "Failed"
             : status.type === "running"
@@ -71,11 +71,11 @@ export function ToolResult({
               : "Complete"}
         </span>
       </summary>
-      <pre className="mt-2 max-h-48 overflow-auto text-xs whitespace-pre-wrap">
+      <pre className="mt-2 max-h-48 overflow-auto text-label whitespace-pre-wrap">
         {JSON.stringify(args, null, 2)}
       </pre>
       {result !== undefined && (
-        <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+        <pre className="mt-2 max-h-80 overflow-auto rounded-compact bg-muted p-3 text-label whitespace-pre-wrap">
           {outputText(result)}
         </pre>
       )}
@@ -116,7 +116,7 @@ function SubagentTool(props: ToolCallMessagePartProps) {
   const subagents = useLangChainSubagents()
   const target = subagents.get(props.toolCallId)
   return (
-    <details className="my-2 rounded-xl border border-border p-3 text-sm">
+    <details className="my-2 rounded-control border border-line p-3 text-body">
       <summary className="cursor-pointer">
         Subagent:{" "}
         {typeof props.args.description === "string"
@@ -194,7 +194,7 @@ export function AssistantMessage() {
   return (
     <MessagePrimitive.Root
       data-message-id={id}
-      className={`group/message my-6 min-w-0 ${role === "user" ? "ml-auto max-w-[85%] rounded-2xl bg-muted px-4 py-3" : "w-full leading-7"}`}
+      className={`group/message my-6 min-w-0 ${role === "user" ? "ml-auto max-w-[85%] rounded-panel bg-muted px-4 py-3" : "w-full leading-7"}`}
     >
       <MessagePrimitive.GroupedParts groupBy={groupActivity}>
         {({ part, children }) => {
@@ -203,12 +203,12 @@ export function AssistantMessage() {
             const reading = part.type.startsWith("group-read:")
             const path = part.type.slice(part.type.indexOf(":") + 1)
             return (
-              <details className="my-2 rounded-xl border border-border p-3 text-sm">
+              <details className="my-2 rounded-control border border-line p-3 text-body">
                 <summary className="cursor-pointer font-medium break-all">
                   {reading ? "Read" : "Edit"} {path} · {part.indices.length}{" "}
                   calls
                   {part.status.type === "running" && (
-                    <span className="ml-2 text-xs text-muted-foreground">
+                    <span className="ml-2 text-meta text-ink-subtle">
                       Running
                     </span>
                   )}
@@ -220,7 +220,7 @@ export function AssistantMessage() {
           switch (part.type) {
             case "group-activity":
               return (
-                <details className="my-3 rounded-xl border border-border p-3 text-sm text-muted-foreground">
+                <details className="my-3 rounded-control border border-line p-3 text-body text-ink-subtle">
                   <summary className="cursor-pointer">
                     {part.status.type === "running"
                       ? "Working…"
@@ -242,7 +242,7 @@ export function AssistantMessage() {
               return (
                 <div
                   data-testid="reasoning"
-                  className="border-l-2 border-border pl-3 whitespace-pre-wrap"
+                  className="border-l-2 border-line pl-3 whitespace-pre-wrap"
                 >
                   {part.text}
                 </div>
@@ -254,16 +254,16 @@ export function AssistantMessage() {
                 <img
                   src={part.image}
                   alt={part.filename ?? "Attached image"}
-                  className="my-2 max-h-72 rounded-xl"
+                  className="my-2 max-h-72 rounded-control"
                 />
               )
             case "file":
               return (
-                <span className="text-sm">{part.filename ?? "Attachment"}</span>
+                <span className="text-body">{part.filename ?? "Attachment"}</span>
               )
             case "indicator":
               return (
-                <p role="status" className="text-sm text-muted-foreground">
+                <p role="status" className="text-body text-ink-subtle">
                   Working…
                 </p>
               )
@@ -276,7 +276,7 @@ export function AssistantMessage() {
         <ActionBarPrimitive.Root className="mt-2">
           <ActionBarPrimitive.Copy
             aria-label="Copy message"
-            className="rounded p-1.5 text-muted-foreground opacity-0 group-hover/message:opacity-100 focus-visible:opacity-100"
+            className="rounded-tick p-1.5 text-ink-subtle opacity-0 group-hover/message:opacity-100 focus-visible:opacity-100"
           >
             <Copy className="size-3.5" />
           </ActionBarPrimitive.Copy>

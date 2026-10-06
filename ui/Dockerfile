@@ -9,8 +9,10 @@ WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY ui/package.json ui/package.json
+COPY gtm-platform-design-system/package.json gtm-platform-design-system/package.json
 RUN pnpm install --frozen-lockfile --filter open-swe-dashboard...
 
+COPY gtm-platform-design-system gtm-platform-design-system
 COPY ui ui
 
 RUN pnpm --filter open-swe-dashboard run build

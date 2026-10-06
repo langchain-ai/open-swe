@@ -1,14 +1,8 @@
 import { useState, type ReactElement } from "react"
 
-import { Button } from "@/components/ui/button"
-import {
-  Popover,
-  PopoverDescription,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Popover, PopoverDescription, PopoverContent, PopoverTitle, PopoverTrigger } from "@langchain/gtm-platform-design-system/ui/popover"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
 /**
  * A trigger that opens an anchored popover asking for optional text before acting.
@@ -42,8 +36,8 @@ export function TextPopover({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={trigger} />
-      <PopoverPopup align="end" className="w-80 max-w-[calc(100vw-2rem)]">
-        <PopoverTitle className="text-xs">{title}</PopoverTitle>
+      <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
+        <PopoverTitle className="text-label">{title}</PopoverTitle>
         {description && (
           <PopoverDescription className="mt-1">
             {description}
@@ -60,18 +54,18 @@ export function TextPopover({
           }}
           placeholder={placeholder}
           rows={3}
-          className="mt-2 resize-y text-xs"
+          className="mt-2 resize-y text-label"
           autoFocus
         />
         <div className="mt-2 flex items-center justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={() => setOpen(false)}>
+          <Button size="compact" variant="outline" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button size="sm" onClick={submit}>
+          <Button size="compact" onClick={submit}>
             {submitLabel}
           </Button>
         </div>
-      </PopoverPopup>
+      </PopoverContent>
     </Popover>
   )
 }

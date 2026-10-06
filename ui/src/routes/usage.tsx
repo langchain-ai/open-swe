@@ -31,18 +31,12 @@ import type {
 import { TablePagination } from "@/components/TablePagination"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { AppShell, SettingsSection } from "@/components/AppShell"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Avatar, AvatarFallback, AvatarImage } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -148,7 +142,7 @@ export function UsageDateRange({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <label htmlFor="usage-date-range" className="text-sm font-medium">
+      <label htmlFor="usage-date-range" className="text-body font-medium">
         Date range
       </label>
       <Select
@@ -286,7 +280,7 @@ function UsageAnalyticsPeriod({
         action={
           <div className="flex items-center gap-2">
             <div
-              className="flex rounded-md bg-muted p-0.5"
+              className="flex rounded-badge bg-muted p-0.5"
               role="group"
               aria-label="Usage scope"
             >
@@ -294,7 +288,7 @@ function UsageAnalyticsPeriod({
                 <Button
                   key={scope}
                   type="button"
-                  size="sm"
+                  size="compact"
                   variant={usageScope === scope ? "secondary" : "ghost"}
                   aria-pressed={usageScope === scope}
                   className="capitalize"
@@ -330,8 +324,8 @@ function UsageAnalyticsPeriod({
             <Skeleton className="h-12 w-full" />
           </div>
         ) : leaderboard.isError ? (
-          <div className="space-y-2 p-4 text-xs" role="alert">
-            <p className="text-destructive">
+          <div className="space-y-2 p-4 text-label" role="alert">
+            <p className="text-risk">
               {leaderboard.error instanceof ApiError &&
               leaderboard.error.status === 503
                 ? "Usage analytics is unavailable on this deployment."
@@ -346,7 +340,7 @@ function UsageAnalyticsPeriod({
             </button>
           </div>
         ) : !leaderboard.data?.total_members ? (
-          <div className="p-6 text-center text-xs text-muted-foreground">
+          <div className="p-6 text-center text-meta text-ink-subtle">
             No Open SWE Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -406,13 +400,13 @@ function UsageAnalyticsPeriod({
             <Skeleton className="h-24 w-full" />
           </div>
         ) : leaderboard.isError ? (
-          <p className="p-4 text-xs text-destructive">
+          <p className="p-4 text-label text-risk">
             Reviewer stats are unavailable. Retry usage analytics above.
           </p>
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
         ) : (
-          <div className="p-6 text-center text-xs text-muted-foreground">
+          <div className="p-6 text-center text-meta text-ink-subtle">
             No reviewer stats have been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -470,44 +464,44 @@ function AnalyticsCoverage({
         description:
           "Some events could not be processed. Reports may be incomplete.",
         icon: WarningCircleIcon,
-        tone: "text-destructive",
+        tone: "text-risk",
       }
     : hasPendingEvents
       ? {
           label: "Analytics are updating",
           description: "New activity is still being processed.",
           icon: ClockCountdownIcon,
-          tone: "text-amber-600 dark:text-amber-400",
+          tone: "text-attention",
         }
       : {
           label: "Analytics are up to date",
           icon: CheckCircleIcon,
-          tone: "text-emerald-600 dark:text-emerald-400",
+          tone: "text-positive",
         }
   const StatusIcon = status.icon
 
   return (
     <div role="status" aria-label="Analytics coverage">
-      <details className="group rounded-xl border border-border bg-card text-xs">
-        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+      <details className="group rounded-control border border-line bg-panel text-label">
+        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-control px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden">
           <StatusIcon
             aria-hidden="true"
             className={`size-4 shrink-0 ${status.tone}`}
             weight="fill"
           />
           <span className="min-w-0 flex-1">
-            <span className="block font-medium text-foreground">
+            <span className="block font-medium text-ink">
               {status.label}
             </span>
             {status.description ? (
-              <span className="mt-0.5 block text-muted-foreground">
+              <span className="mt-0.5 block text-ink-subtle">
                 {status.description}
               </span>
             ) : null}
           </span>
           <Button
             type="button"
-            size="sm"
+            size="compact"
             variant="outline"
             className="shrink-0"
             disabled={refreshing}
@@ -522,7 +516,7 @@ function AnalyticsCoverage({
             />
             {refreshing ? "Refreshing…" : "Refresh now"}
           </Button>
-          <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground group-open:text-foreground">
+          <span className="flex shrink-0 items-center gap-1 font-medium text-ink-subtle group-open:text-ink">
             Details
             <CaretDownIcon
               aria-hidden="true"
@@ -530,7 +524,7 @@ function AnalyticsCoverage({
             />
           </span>
         </summary>
-        <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
+        <div className="space-y-1 border-t border-line px-4 py-3 text-ink-subtle">
           <p>
             Period: {PERIOD_LABELS[period]} · PR report as of{" "}
             {reportServerAsOf ? (
@@ -547,7 +541,7 @@ function AnalyticsCoverage({
             .
           </p>
           {reportRefreshError ? (
-            <p className="text-destructive">
+            <p className="text-risk">
               Last PR report refresh failed (
               {reportRefreshError.status > 0
                 ? `HTTP ${reportRefreshError.status}`
@@ -656,8 +650,8 @@ function PRMergeRateSection({
           <Skeleton className="h-16 w-full" />
         </div>
       ) : failed ? (
-        <div className="space-y-2 p-4 text-xs" role="alert">
-          <p className="text-destructive">
+        <div className="space-y-2 p-4 text-label" role="alert">
+          <p className="text-risk">
             {report.error instanceof ApiError && report.error.status === 503
               ? "PR analytics is unavailable on this deployment."
               : "Could not load PR outcomes. Try again."}
@@ -678,15 +672,15 @@ function PRMergeRateSection({
         />
       ) : (
         <p
-          className="p-6 text-center text-xs text-muted-foreground"
+          className="p-6 text-center text-meta text-ink-subtle"
           role="status"
         >
           {emptyMessage}
         </p>
       )}
       {data?.unavailable_thread_ids.length ? (
-        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        <details className="border-t border-line px-4 py-3 text-meta text-ink-subtle">
+          <summary className="cursor-pointer rounded-tick focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary">
             Unavailable model attribution ({data.unavailable_thread_ids.length})
           </summary>
           <p className="mt-3">
@@ -699,7 +693,7 @@ function PRMergeRateSection({
                 <code className="select-all">{threadId}</code>
                 <button
                   type="button"
-                  className="rounded-sm underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  className="rounded-tick underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   onClick={() => void navigator.clipboard.writeText(threadId)}
                 >
                   Copy
@@ -710,8 +704,8 @@ function PRMergeRateSection({
         </details>
       ) : null}
       {data ? (
-        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        <details className="border-t border-line px-4 py-3 text-meta text-ink-subtle">
+          <summary className="cursor-pointer rounded-tick focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary">
             How these numbers work
           </summary>
           <div className="mt-3 space-y-3">
@@ -798,7 +792,7 @@ function AvgTimeToPR({
     // A backend that predates the metric has no key for it at all.
     return (
       <span
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="cursor-help rounded-tick underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         title="Metric unavailable from this backend"
         aria-label="Time to PR: metric unavailable from this backend"
         tabIndex={0}
@@ -855,7 +849,7 @@ function OutcomeCell({
   const value = (
     <>
       {count}{" "}
-      <span className="text-muted-foreground">
+      <span className="text-ink-subtle">
         ({outcomePercent(group, outcome)}%)
       </span>
     </>
@@ -866,18 +860,18 @@ function OutcomeCell({
       <TooltipTrigger
         closeOnClick={false}
         onClick={() => setOpen(true)}
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="cursor-help rounded-tick underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
         {value}
       </TooltipTrigger>
-      <TooltipPopup>
+      <TooltipContent>
         <div>
           {group.waiting} open for less than {maturityDays} days
         </div>
         <div>
           {group.mature_pending} open for {maturityDays} days or longer
         </div>
-      </TooltipPopup>
+      </TooltipContent>
     </Tooltip>
   )
 }
@@ -974,7 +968,7 @@ function PROutcomeCells({
     <>
       <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
         {group.cohort_size}{" "}
-        <span className="text-muted-foreground">(100%)</span>
+        <span className="text-ink-subtle">(100%)</span>
       </td>
       {(["merged", "closed_without_merge", "open"] as const).map((outcome) => (
         <Fragment key={outcome}>
@@ -991,12 +985,12 @@ function PROutcomeCells({
                 {rate == null ? "—" : formatPercent(rate)}
               </span>
               {rate != null && (
-                <div className="text-xs text-muted-foreground">
+                <div className="text-meta text-ink-subtle">
                   {group.merged}/{group.mature_denominator} eligible
                 </div>
               )}
               {rate != null && group.mature_denominator < 5 && (
-                <div className="text-xs text-amber-600 dark:text-amber-400">
+                <div className="text-label text-attention">
                   Small sample
                 </div>
               )}
@@ -1019,24 +1013,24 @@ function PROutcomeCells({
             className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
           >
             <Tooltip>
-              <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              <TooltipTrigger className="cursor-help rounded-tick underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                 {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
               </TooltipTrigger>
-              <TooltipPopup>
+              <TooltipContent>
                 {supported
                   ? `${group.distance_sample_size ?? 0}/${group.merged} merged PRs measured`
                   : "Mean distance unavailable for this group"}
-              </TooltipPopup>
+              </TooltipContent>
             </Tooltip>
             {supported && group.distance_sample_size !== undefined && (
-              <div className="text-xs text-muted-foreground">
+              <div className="text-meta text-ink-subtle">
                 {group.distance_sample_size}/{group.merged} measured
               </div>
             )}
             {supported &&
               (group.distance_sample_size ?? 0) > 0 &&
               (group.distance_sample_size ?? 0) < 5 && (
-                <div className="text-xs text-amber-600 dark:text-amber-400">
+                <div className="text-label text-attention">
                   Small sample
                 </div>
               )}
@@ -1091,12 +1085,12 @@ function PRMergeRateTable({
   return (
     <div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1100px] text-xs">
-          <caption className="px-4 py-3 text-left text-muted-foreground">
+        <table className="w-full min-w-[1100px] text-label">
+          <caption className="px-4 py-3 text-left text-ink-subtle">
             Outcome shares use PRs opened in each row as their base. Expand a
             model to see its reasoning efforts.
           </caption>
-          <thead className="border-b border-border text-muted-foreground">
+          <thead className="border-b border-line text-ink-subtle">
             <tr>
               {prOutcomeColumns(maturityDays).map((column) => (
                 <SortableHeader
@@ -1117,14 +1111,14 @@ function PRMergeRateTable({
                   }}
                   className={
                     column.key === "model"
-                      ? "sticky left-0 z-10 bg-card pl-4 text-left"
+                      ? "sticky left-0 z-10 bg-panel pl-4 text-left"
                       : "text-right"
                   }
                 />
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border [&>tr:nth-child(even)]:bg-card [&>tr:nth-child(odd)]:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]">
+          <tbody className="divide-y divide-line [&>tr:nth-child(even)]:bg-panel [&>tr:nth-child(odd)]:bg-[color-mix(in_oklab,var(--gtm-ink)_3%,var(--gtm-panel))]">
             {rows.map((cohort) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
               const modelLabel =
@@ -1142,7 +1136,7 @@ function PRMergeRateTable({
                         {hasMultipleEfforts ? (
                           <button
                             type="button"
-                            className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            className="-ml-1 size-5.5 shrink-0 rounded-tick p-1 text-ink-subtle hover:bg-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                             aria-expanded={isExpanded}
                             aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
                             onClick={() =>
@@ -1168,7 +1162,7 @@ function PRMergeRateTable({
                         )}
                         <div>
                           <div className="font-medium">{modelLabel}</div>
-                          <div className="text-muted-foreground">
+                          <div className="text-ink-subtle">
                             {hasMultipleEfforts
                               ? "All efforts"
                               : formatEffort(cohort.efforts[0]?.effort)}{" "}
@@ -1295,9 +1289,9 @@ function SortableHeader<Key extends string>({
     <button
       type="button"
       onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
-      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+      className={`flex w-full items-center gap-1 rounded-tick px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
         column.align === "right" ? "justify-end" : "justify-start"
-      } ${isActive ? "text-foreground" : ""} ${
+      } ${isActive ? "text-ink" : ""} ${
         column.tooltip
           ? "cursor-help underline decoration-dotted underline-offset-2"
           : ""
@@ -1305,7 +1299,7 @@ function SortableHeader<Key extends string>({
     >
       {column.label}
       <Icon
-        className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+        className={`size-3 shrink-0 ${isActive ? "" : "text-ink-subtle/50"}`}
         aria-hidden
       />
     </button>
@@ -1320,7 +1314,7 @@ function SortableHeader<Key extends string>({
       {column.tooltip ? (
         <Tooltip>
           <TooltipTrigger render={button} />
-          <TooltipPopup className="max-w-xs">{column.tooltip}</TooltipPopup>
+          <TooltipContent className="max-w-xs">{column.tooltip}</TooltipContent>
         </Tooltip>
       ) : (
         button
@@ -1367,11 +1361,11 @@ function UsageTable({
   return (
     <div>
       <div className="overflow-x-auto">
-        <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-xs">
+        <table aria-busy={isUpdating} className="w-full min-w-[1040px] text-label">
           {isUpdating ? (
             <caption className="sr-only">Updating leaderboard</caption>
           ) : null}
-          <thead className="border-b border-border text-xs text-muted-foreground">
+          <thead className="border-b border-line text-meta text-ink-subtle">
             <tr>
               {usageColumns(scope, period).map((column, index, columns) => (
                 <SortableHeader
@@ -1380,27 +1374,27 @@ function UsageTable({
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={onSort}
-                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-card" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-panel" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
           </thead>
           <tbody
-            className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
+            className={`divide-y divide-line ${isUpdating ? "opacity-50" : ""}`}
           >
             {rows.map((row) => (
               <tr
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
-                className="bg-card odd:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]"
+                className="bg-panel odd:bg-[color-mix(in_oklab,var(--gtm-ink)_3%,var(--gtm-panel))]"
               >
-                <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
+                <td className="px-4 py-3 text-ink-subtle">{row.rank}</td>
                 <td className="sticky left-0 z-10 bg-inherit px-2 py-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}
                   />
                 </td>
-                <td className="max-w-48 px-2 py-3 text-muted-foreground">
+                <td className="max-w-48 px-2 py-3 text-ink-subtle">
                   <div className="truncate">
                     {safeModelLabel(row.favorite_model) || "Unavailable"}
                   </div>
@@ -1506,18 +1500,18 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
     <div className="space-y-4 p-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (
-          <div key={card.label} className="rounded-md border border-border p-3">
-            <div className="text-xs text-muted-foreground">{card.label}</div>
-            <div className="mt-1 text-lg font-medium tabular-nums">
+          <div key={card.label} className="rounded-badge border border-line p-3">
+            <div className="text-meta text-ink-subtle">{card.label}</div>
+            <div className="mt-1 text-title font-medium tabular-nums">
               {formatNumber(card.value)}
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">
+            <div className="mt-1 text-meta text-ink-subtle">
               {card.helper}
             </div>
           </div>
         ))}
       </div>
-      <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+      <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
         <CounterList title="Top categories" rows={stats.top_categories} />
         <CounterList title="Severity mix" rows={severityRows(stats)} />
       </div>
@@ -1545,23 +1539,23 @@ function CounterList({
 }) {
   return (
     <div>
-      <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
+      <h3 className="text-meta font-medium text-ink-subtle">{title}</h3>
       {rows.length ? (
-        <ul className="mt-2 space-y-2 text-xs">
+        <ul className="mt-2 space-y-2 text-label">
           {rows.map((row) => (
             <li
               key={row.name}
               className="flex items-center justify-between gap-3"
             >
-              <span className="truncate text-foreground">{row.name}</span>
-              <span className="text-muted-foreground tabular-nums">
+              <span className="truncate text-ink">{row.name}</span>
+              <span className="text-ink-subtle tabular-nums">
                 {formatNumber(row.count)}
               </span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-xs text-muted-foreground">No data yet.</p>
+        <p className="mt-2 text-meta text-ink-subtle">No data yet.</p>
       )}
     </div>
   )
@@ -1582,12 +1576,12 @@ function UserCell({
       href={profileUrl}
       target="_blank"
       rel="noreferrer"
-      className="truncate font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="truncate font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     >
       {row.user.name}
     </a>
   ) : (
-    <span className="truncate font-medium text-foreground">
+    <span className="truncate font-medium text-ink">
       {row.user.name}
     </span>
   )
@@ -1624,7 +1618,7 @@ function UserCell({
           ) : null}
         </div>
         {detail && detail !== row.user.name ? (
-          <span className="truncate text-xs text-muted-foreground">
+          <span className="truncate text-meta text-ink-subtle">
             {detail}
           </span>
         ) : null}
@@ -1685,11 +1679,11 @@ function UsageCost({ row }: { row: UsageLeaderboardRow }) {
       <Tooltip>
         <TooltipTrigger
           aria-label={`Cost ${label.toLowerCase()}`}
-          className="cursor-help rounded-sm text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="cursor-help rounded-tick text-meta text-ink-subtle underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
         >
           {label}
         </TooltipTrigger>
-        <TooltipPopup className="max-w-xs">{explanation}</TooltipPopup>
+        <TooltipContent className="max-w-xs">{explanation}</TooltipContent>
       </Tooltip>
     </div>
   )

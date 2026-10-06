@@ -589,7 +589,7 @@ export function AgentsHome({
                 alt=""
                 className="size-14 opacity-30 grayscale dark:opacity-20"
               />
-              <h1 className="text-center text-2xl tracking-tight sm:text-3xl">
+              <h1 className="text-center text-page tracking-tightish sm:text-display">
                 What should we build?
               </h1>
             </div>
@@ -597,7 +597,7 @@ export function AgentsHome({
         )}
         <AgentComposerDock>
           {localError && (
-            <div className="mb-3 w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <div className="mb-3 w-full rounded-control border border-risk/30 bg-risk-bg px-3 py-2 text-label text-risk">
               {localError}
             </div>
           )}

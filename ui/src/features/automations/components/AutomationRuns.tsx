@@ -3,7 +3,7 @@ import { ArrowSquareOutIcon, CircleNotchIcon } from "@phosphor-icons/react"
 import { IoLogoSlack } from "react-icons/io5"
 
 import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
@@ -33,20 +33,20 @@ export function AutomationRuns({
 
   if (runsQuery.isLoading) {
     return (
-      <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
+      <div className="rounded-control border border-dashed border-line px-6 py-12 text-center text-meta text-ink-subtle">
         Loading automation runs…
       </div>
     )
   }
   if (runsQuery.isError) {
     return (
-      <div className="flex flex-col items-center rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
-        <p className="text-xs text-destructive">
+      <div className="flex flex-col items-center rounded-control border border-risk/30 bg-risk-bg px-6 py-12 text-center">
+        <p className="text-label text-risk">
           Automation runs could not be loaded.
         </p>
         <Button
           type="button"
-          size="sm"
+          size="compact"
           variant="outline"
           className="mt-3"
           onClick={() => void runsQuery.refetch()}
@@ -59,7 +59,7 @@ export function AutomationRuns({
   }
   if (runs.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
+      <div className="rounded-control border border-dashed border-line px-6 py-12 text-center text-meta text-ink-subtle">
         No automation runs yet.
       </div>
     )
@@ -71,10 +71,10 @@ export function AutomationRuns({
         <section key={group.id}>
           {!automationId && (
             <div className="mb-2 flex items-center gap-2 px-1">
-              <h2 className="text-xs font-medium text-foreground">
+              <h2 className="text-label font-medium text-ink">
                 {group.name}
               </h2>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-meta text-ink-subtle">
                 {group.runs.length}
               </span>
             </div>
@@ -87,7 +87,7 @@ export function AutomationRuns({
         </section>
       ))}
       {runsQuery.data?.hasMore && (
-        <p className="text-center text-xs text-muted-foreground">
+        <p className="text-center text-meta text-ink-subtle">
           Showing the {limit} most recent runs.
         </p>
       )}
@@ -122,7 +122,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
     <Link
       to="/agents/$threadId"
       params={{ threadId: run.id }}
-      className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/70"
+      className="flex items-center gap-3 rounded-control border border-line bg-panel px-4 py-3 transition-colors hover:border-ink-subtle/70"
     >
       {run.status === "running" ? (
         <CircleNotchIcon className="size-4 shrink-0 animate-spin text-primary" />
@@ -131,23 +131,23 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
           className={cn(
             "size-2.5 shrink-0 rounded-full",
             run.status === "error" || run.status === "interrupted"
-              ? "bg-destructive"
+              ? "bg-risk"
               : run.status === "finished"
-                ? "bg-success"
-                : "bg-border"
+                ? "bg-positive"
+                : "bg-line"
           )}
         />
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">
+        <p className="truncate text-body font-medium text-ink">
           {run.title}
         </p>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ink-subtle/70">
           <span>{STATUS_LABELS[run.status]}</span>
           <span>{isTest ? "Test run" : "Scheduled run"}</span>
           {run.automationActionPosted && (
             <span
-              className="flex items-center gap-1 text-success-foreground"
+              className="flex items-center gap-1 text-positive"
               aria-label="Action posted to Slack"
             >
               <IoLogoSlack className="size-3.5" />
@@ -158,7 +158,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
           <span>{formatRelativeTime(run.updatedAt)}</span>
         </div>
       </div>
-      <ArrowSquareOutIcon className="size-4 shrink-0 text-muted-foreground/70" />
+      <ArrowSquareOutIcon className="size-4 shrink-0 text-ink-subtle/70" />
     </Link>
   )
 }

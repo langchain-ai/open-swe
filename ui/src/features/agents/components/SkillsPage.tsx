@@ -2,10 +2,10 @@ import { useEffect, useState } from "react"
 
 import type { Skill } from "@/lib/api"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Label } from "@langchain/gtm-platform-design-system/ui/label"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import {
   useCreateAgentSkill,
   useDeleteAgentSkill,
@@ -105,24 +105,24 @@ export function SkillsPage() {
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="font-heading text-base font-medium text-[var(--ui-text)]">
+        <h1 className="text-title font-medium text-[var(--ui-text)]">
           Skills
         </h1>
-        <p className="mt-1 text-xs text-[var(--ui-text-muted)]">
+        <p className="mt-1 text-label text-[var(--ui-text-muted)]">
           Reusable instructions Open SWE loads when a task matches their
           description.
         </p>
 
         <div className="mt-4 flex gap-1">
           <Button
-            size="sm"
+            size="compact"
             variant={organization ? "ghost" : "default"}
             onClick={() => selectScope(false)}
           >
             Personal
           </Button>
           <Button
-            size="sm"
+            size="compact"
             variant={organization ? "default" : "ghost"}
             onClick={() => selectScope(true)}
           >
@@ -133,7 +133,7 @@ export function SkillsPage() {
         <div className="mt-6 grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
           <section>
             {canEdit && (
-              <Button size="sm" className="w-full" onClick={clear}>
+              <Button size="compact" className="w-full" onClick={clear}>
                 New skill
               </Button>
             )}
@@ -144,31 +144,31 @@ export function SkillsPage() {
                   type="button"
                   onClick={() => select(skill)}
                   className={cn(
-                    "w-full rounded-md px-2.5 py-2 text-left transition-colors",
+                    "w-full rounded-badge px-2.5 py-2 text-left transition-colors",
                     selectedName === skill.name
                       ? "bg-[var(--ui-sidebar-hover)]"
                       : "hover:bg-[var(--ui-sidebar-hover)]"
                   )}
                 >
-                  <span className="block truncate text-xs font-medium text-[var(--ui-text)]">
+                  <span className="block truncate text-label font-medium text-[var(--ui-text)]">
                     {skill.name}
                   </span>
-                  <span className="mt-0.5 block truncate text-[10px] text-[var(--ui-text-muted)]">
+                  <span className="mt-0.5 block truncate text-meta text-[var(--ui-text-muted)]">
                     {skill.description}
                   </span>
                 </button>
               ))}
               {skills.data?.length === 0 && (
-                <p className="px-2.5 py-4 text-xs text-[var(--ui-text-muted)]">
+                <p className="px-2.5 py-4 text-label text-[var(--ui-text-muted)]">
                   No skills yet.
                 </p>
               )}
             </div>
           </section>
 
-          <section className="space-y-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-4">
+          <section className="space-y-4 rounded-compact border border-[var(--ui-border)] bg-[var(--ui-panel)] p-4">
             {!canEdit && !selected ? (
-              <p className="text-xs text-[var(--ui-text-muted)]">
+              <p className="text-label text-[var(--ui-text-muted)]">
                 Select an organization skill to view it.
               </p>
             ) : (
@@ -182,12 +182,12 @@ export function SkillsPage() {
                       onChange={(event) => setNewName(event.target.value)}
                       placeholder="address-review-feedback"
                     />
-                    <p className="text-[10px] text-[var(--ui-text-muted)]">
+                    <p className="text-meta text-[var(--ui-text-muted)]">
                       Lowercase letters, numbers, and single hyphens.
                     </p>
                   </div>
                 ) : (
-                  <p className="text-sm font-medium text-[var(--ui-text)]">
+                  <p className="text-body font-medium text-[var(--ui-text)]">
                     {selectedName}
                   </p>
                 )}
@@ -223,7 +223,7 @@ export function SkillsPage() {
                 {canEdit && (
                   <div className="flex items-center gap-2">
                     <Button
-                      size="sm"
+                      size="compact"
                       disabled={
                         !draft.description.trim() ||
                         (creating
@@ -235,13 +235,13 @@ export function SkillsPage() {
                       {creating ? "Create skill" : "Save skill"}
                     </Button>
                     {dirty && (
-                      <span className="text-xs text-[var(--ui-text-muted)]">
+                      <span className="text-label text-[var(--ui-text-muted)]">
                         Unsaved changes
                       </span>
                     )}
                     {!creating && (
                       <Button
-                        size="sm"
+                        size="compact"
                         variant="destructive"
                         className="ml-auto"
                         disabled={remove.isPending}
@@ -253,7 +253,7 @@ export function SkillsPage() {
                   </div>
                 )}
                 {error && (
-                  <p className="text-xs text-[var(--ui-danger)]">{error}</p>
+                  <p className="text-label text-[var(--ui-danger)]">{error}</p>
                 )}
               </>
             )}

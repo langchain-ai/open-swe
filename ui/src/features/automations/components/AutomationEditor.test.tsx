@@ -91,10 +91,10 @@ vi.mock("@/features/automations/components/TriggerMenu", () => ({
 vi.mock("@/features/agents/components/ModelPicker", () => ({
   ModelPicker: () => <div />,
 }))
-vi.mock("@/components/ui/switch", () => ({
+vi.mock("@langchain/gtm-platform-design-system/ui/switch", () => ({
   Switch: () => <input type="checkbox" />,
 }))
-vi.mock("@/components/ui/select", () => ({
+vi.mock("@langchain/gtm-platform-design-system/ui/select", () => ({
   Select: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),

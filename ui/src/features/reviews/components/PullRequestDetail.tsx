@@ -12,8 +12,8 @@ import type {
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { HumanInputText } from "./HumanInputCard"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { navLink } from "../PullRequestLinks"
 import { TextPopover } from "./TextPopover"
 import { PullRequestFiles } from "./PullRequestFiles"
@@ -37,10 +37,10 @@ const skippedConclusions = new Set(["neutral", "skipped"])
 
 function checkTone(check: PreviewCheck): string {
   const rank = checkRank(check)
-  if (rank === 1) return "text-amber-700 dark:text-amber-400"
-  if (rank === 2) return "text-emerald-700 dark:text-emerald-400"
-  if (rank === 3) return "text-muted-foreground"
-  return "text-destructive"
+  if (rank === 1) return "text-attention"
+  if (rank === 2) return "text-positive"
+  if (rank === 3) return "text-ink-subtle"
+  return "text-risk"
 }
 
 function checkRank(check: PreviewCheck): number {
@@ -64,11 +64,11 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="border-t border-border px-5 py-4 first:border-t-0">
+    <section className="border-t border-line px-5 py-4 first:border-t-0">
       <div className="mb-2.5 flex items-baseline gap-2">
-        <h3 className="text-xs font-medium text-foreground">{heading}</h3>
+        <h3 className="text-label font-medium text-ink">{heading}</h3>
         {count && (
-          <span className="text-xs text-muted-foreground tabular-nums">
+          <span className="text-meta text-ink-subtle tabular-nums">
             {count}
           </span>
         )}
@@ -81,11 +81,11 @@ function Section({
 
 function CheckRow({ check }: { check: PreviewCheck }) {
   return (
-    <li className="flex items-baseline gap-2.5 py-0.5 text-xs">
+    <li className="flex items-baseline gap-2.5 py-0.5 text-label">
       <span className={cn("shrink-0 tabular-nums", checkTone(check))}>
         {checkMarks[checkRank(check)]}
       </span>
-      <span className="min-w-0 flex-1 truncate text-foreground">
+      <span className="min-w-0 flex-1 truncate text-ink">
         {check.url ? (
           <a
             className="hover:underline"
@@ -122,13 +122,13 @@ const checkGroups = [
 function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
   if (checks === null) {
     return (
-      <p className="text-xs text-amber-700 dark:text-amber-400">
+      <p className="text-label text-attention">
         GitHub did not return the checks for this commit.
       </p>
     )
   }
   if (checks.length === 0) {
-    return <p className="text-xs text-muted-foreground">No checks ran.</p>
+    return <p className="text-meta text-ink-subtle">No checks ran.</p>
   }
   const sorted = [...checks].sort((a, b) => checkRank(a) - checkRank(b))
   if (sorted.length <= groupChecksAbove) {
@@ -147,7 +147,7 @@ function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
         if (!group.length) return null
         return (
           <details key={label} open={rank === 0} className="group">
-            <summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground">
+            <summary className="cursor-pointer list-none text-meta text-ink-subtle hover:text-ink">
               <span aria-hidden="true" className="inline-block w-3">
                 {"›"}
               </span>
@@ -227,14 +227,14 @@ function AddToAgentBatch({
   const remove = useAgentBatchStore((state) => state.remove)
   if (entry?.state === "sent")
     return (
-      <Button size="sm" variant="outline" disabled>
+      <Button size="compact" variant="outline" disabled>
         Sent to agent
       </Button>
     )
   if (entry)
     return (
       <Button
-        size="sm"
+        size="compact"
         variant="outline"
         title="Remove from the agent batch"
         onClick={() => remove(key, entry.item.id)}
@@ -246,7 +246,7 @@ function AddToAgentBatch({
   return (
     <TextPopover
       trigger={
-        <Button size="sm" variant="outline">
+        <Button size="compact" variant="outline">
           Add to agent batch
         </Button>
       }
@@ -273,13 +273,13 @@ function AgentBatchBar({ target }: { target: PullRequestRef }) {
   const submit = useSubmitAgentBatch(target)
   if (!queued.length) return null
   return (
-    <div className="flex items-center gap-2 border-t border-border bg-card px-5 py-3">
-      <span className="text-xs text-foreground">
+    <div className="flex items-center gap-2 border-t border-line bg-panel px-5 py-3">
+      <span className="text-label text-ink">
         {queued.length} comment{queued.length === 1 ? "" : "s"} queued for the
         agent
       </span>
       <Button
-        size="sm"
+        size="compact"
         variant="outline"
         className="ml-auto"
         onClick={() => discard(key)}
@@ -287,7 +287,7 @@ function AgentBatchBar({ target }: { target: PullRequestRef }) {
         Discard
       </Button>
       <Button
-        size="sm"
+        size="compact"
         onClick={() => submit.mutate(queued.map(({ item }) => item))}
       >
         Send to agent
@@ -313,22 +313,22 @@ function Conversation({
   }, [])
 
   return (
-    <li className="border-l-2 border-amber-600/40 pl-3">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">
+    <li className="border-l-2 border-attention/40 pl-3">
+      <div className="flex items-center gap-2 text-meta text-ink-subtle">
+        <span className="font-medium text-ink">
           {thread.author ?? "Someone"}
         </span>
         <span className="min-w-0 truncate font-mono">
           {thread.path}
           {thread.line !== null && `:${thread.line}`}
         </span>
-        <div className="ml-auto flex shrink-0 items-center gap-2 text-foreground">
+        <div className="ml-auto flex shrink-0 items-center gap-2 text-ink">
           {thread.url && (
             <AddToAgentBatch target={target} commentUrl={thread.url} />
           )}
           {thread.thread_id && (
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               onClick={() => resolve.mutate([thread.thread_id!])}
             >
@@ -352,10 +352,10 @@ function Conversation({
         <div className="mt-1 max-w-[72ch]">
           <Markdown content={thread.body} />
           {thread.replies.length > 0 && (
-            <ul className="mt-2 space-y-2 border-t border-border pt-2">
+            <ul className="mt-2 space-y-2 border-t border-line pt-2">
               {thread.replies.map((reply, index) => (
                 <li key={reply.url ?? index}>
-                  <span className="text-xs font-medium text-foreground">
+                  <span className="text-label font-medium text-ink">
                     {reply.author ?? "Someone"}
                   </span>
                   <Markdown content={reply.body} />
@@ -367,7 +367,7 @@ function Conversation({
       ) : (
         <p
           ref={measure}
-          className="mt-1 line-clamp-3 text-xs whitespace-pre-wrap text-foreground"
+          className="mt-1 line-clamp-3 text-label whitespace-pre-wrap text-ink"
         >
           {thread.body}
         </p>
@@ -376,7 +376,7 @@ function Conversation({
         <button
           type="button"
           onClick={() => setOpen(!open)}
-          className="mt-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+          className="mt-1 text-meta text-ink-subtle hover:text-ink hover:underline"
         >
           {open
             ? "Show less"
@@ -400,7 +400,7 @@ function Conversations({
 }) {
   if (preview.unresolved === null) {
     return (
-      <p className="text-xs text-amber-700 dark:text-amber-400">
+      <p className="text-label text-attention">
         GitHub did not return the review threads, so unresolved comments cannot
         be counted here. Open the PR to check.
       </p>
@@ -408,7 +408,7 @@ function Conversations({
   }
   if (preview.unresolved.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
+      <p className="text-meta text-ink-subtle">
         Nothing unresolved. Every review thread on this PR is closed.
       </p>
     )
@@ -473,27 +473,27 @@ export function PullRequestDetail({
   return (
     <aside
       aria-label={`Pull request ${pr.repo} #${pr.number}`}
-      className="flex min-h-0 w-full flex-col overflow-hidden rounded-lg border border-border bg-card"
+      className="flex min-h-0 w-full flex-col overflow-hidden rounded-compact border border-line bg-panel"
     >
-      <header className="flex items-start gap-3 border-b border-border px-5 py-4">
+      <header className="flex items-start gap-3 border-b border-line px-5 py-4">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+          <div className="flex items-baseline gap-2 text-meta text-ink-subtle">
             <span className="truncate">{pr.repo}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
             {data && (
               <span className="tabular-nums">
-                <span className="text-emerald-700 dark:text-emerald-400">
+                <span className="text-positive">
                   +{data.additions}
                 </span>{" "}
-                <span className="text-destructive">−{data.deletions}</span>
+                <span className="text-risk">−{data.deletions}</span>
               </span>
             )}
           </div>
-          <h2 className="mt-1 text-sm font-medium break-words text-foreground">
+          <h2 className="mt-1 text-body font-medium break-words text-ink">
             {data?.title ?? pr.title}
           </h2>
           {data && (
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-meta text-ink-subtle">
               {data.author ?? "Someone"} wants to merge {data.commits}{" "}
               {data.commits === 1 ? "commit" : "commits"} into{" "}
               <span className="font-mono">{data.base_ref}</span> from{" "}
@@ -505,13 +505,13 @@ export function PullRequestDetail({
           type="button"
           aria-label="Close pull request preview"
           onClick={onClose}
-          className="-mt-1 -mr-1.5 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-foreground"
+          className="-mt-1 -mr-1.5 rounded-badge p-1.5 text-ink-subtle transition-colors hover:bg-hover hover:text-ink"
         >
           <XIcon className="size-4" />
         </button>
       </header>
 
-      <div className="border-b border-border px-5 py-3">
+      <div className="border-b border-line px-5 py-3">
         <PullRequestActions
           pr={pr}
           login={login}
@@ -530,7 +530,7 @@ export function PullRequestDetail({
           </div>
         )}
         {preview.error && (
-          <p role="alert" className="px-5 py-4 text-xs text-destructive">
+          <p role="alert" className="px-5 py-4 text-label text-risk">
             {preview.error.message}
           </p>
         )}
@@ -542,7 +542,7 @@ export function PullRequestDetail({
                   <Markdown content={data.body} />
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-meta text-ink-subtle">
                   This PR has no description.
                 </p>
               )}
@@ -564,7 +564,7 @@ export function PullRequestDetail({
               action={
                 resolvableIds.length > 1 && (
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="outline"
                     onClick={() => resolve.mutate(resolvableIds)}
                   >
@@ -585,7 +585,7 @@ export function PullRequestDetail({
               }
             >
               {data.files.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-meta text-ink-subtle">
                   No files changed.
                 </p>
               ) : (

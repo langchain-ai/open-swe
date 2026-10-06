@@ -79,7 +79,7 @@ export function MessageTimestamp({
             )
           }
         }}
-        className="cursor-pointer text-[11px] leading-4 text-muted-foreground/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100"
+        className="cursor-pointer text-meta leading-4 text-ink-subtle/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-hover/turn:opacity-100 hover:text-ink focus-visible:opacity-100"
       >
         <time dateTime={date.toISOString()}>{shortTimestamp(date)}</time>
       </button>

@@ -1,0 +1,204 @@
+/*
+ * GTM Platform design tokens.
+ * Source of truth: Paper CORE 14 "Token System" (file 01KYQDVRVBZ6KYPDP179BS2M3G, node SK9-0).
+ * One name, two values: every token is named for the job it does, never for the colour
+ * it happens to be. The theme flips values only; components never branch on theme.
+ */
+
+:root,
+[data-theme="light"] {
+  /* 01 surfaces, ordered back to front */
+  --gtm-desk: #ecebe8;
+  --gtm-shell: #ffffff;
+  --gtm-sidebar: #f4f3f1;
+  --gtm-canvas: #fbfbfa;
+  --gtm-panel: #ffffff;
+  --gtm-muted: #fafaf8;
+  --gtm-hover: #f0efed;
+  --gtm-selected: #eae9e7;
+
+  /* 02 lines, two weights only */
+  --gtm-line: #e6e5e1;
+  --gtm-line-strong: #d9d7d2;
+
+  /* 03 text, three steps; hierarchy comes from weight and position first */
+  --gtm-ink: #333333;
+  --gtm-ink-muted: #333333;
+  --gtm-ink-subtle: #777777;
+
+  /* 04 action; one primary per surface */
+  --gtm-primary: #006ddd;
+  --gtm-primary-ink: #ffffff;
+  --gtm-secondary: #333333;
+  --gtm-secondary-ink: #ffffff;
+
+  /*
+   * 04b mark tile — LangChain masthead substrate (`bg-mark` / `text-mark-ink`).
+   * Mono (foundations variant B): tracks panel / ink so the chip sits quietly
+   * on the rail in both themes — no solid brand fill.
+   */
+  --gtm-mark: #ffffff;
+  --gtm-mark-ink: #333333;
+
+  /*
+   * 05 state, bg + ink pairs named for meaning. Rebuilt 2026-08-05; the
+   * derivation, the reference findings and the full arithmetic are in
+   * docs/reference/state-palette.md.
+   *
+   * FAMILY RULE, one sentence: equal contrast, equal chroma, hue is the only
+   * variable. Every ink sits at exactly 7.0:1 on its own tint (so a row of
+   * mixed badges reads at one weight, and 12-13px text clears AAA); every tint
+   * shares one OKLCH chroma and one CIE Lab lightness; every ink shares one
+   * OKLCH chroma, its lightness solved to hit the 7.0. Only the hue angle
+   * changes: positive 168, attention 68, risk 25, info 250. `neutral` is the
+   * same recipe at chroma 0.005 -- the family's achromatic member, warmed to
+   * our surfaces' temperature, and set one Lab step deeper because with no hue
+   * lightness is the only channel it has to separate from panel and hover.
+   *
+   * The previous values were sampled from Octolane and had drifted muddy
+   * (olive / brown-gold / brick / dusty blue), and two of the ten failed the
+   * 4.5:1 floor outright: light `neutral` measured 3.69:1 on its own tint, and
+   * dark `neutral-bg` was byte-identical to `--gtm-hover`, so a neutral chip
+   * vanished on a hovered row. Sourcing is our own Paper brand book (file
+   * 01KYQDVRVBZ6KYPDP179BS2M3G, board 17 "UI states + components": "Colour
+   * never carries meaning alone"), read against Attio, Linear and Clay, all
+   * three of which ration chroma the same way. Colour here confirms a signal
+   * the shape, icon and label already carry; it never carries one alone.
+   */
+  --gtm-positive-bg: #dcf3e9;
+  --gtm-positive: #005b43;
+  --gtm-attention-bg: #fcecdb;
+  --gtm-attention: #734600;
+  --gtm-risk-bg: #ffe9e7;
+  --gtm-risk: #883431;
+  --gtm-info-bg: #e3f0ff;
+  --gtm-info: #0b528c;
+  --gtm-neutral-bg: #e1e0dc;
+  --gtm-neutral: #494845;
+
+  /*
+   * 05c chart marks. A bar is an area fill, so it takes the tint half of the
+   * state pair -- the same half badges and alerts already use. The ink half
+   * stays on line and area strokes, where a 1.5px mark needs 7:1 contrast.
+   * Primary has no tint pair, so the mark stays primary. Dark remaps below:
+   * dark `*-bg` tints are chip surfaces and would vanish on panel.
+   */
+  --gtm-chart-primary: var(--gtm-primary);
+  --gtm-chart-info: var(--gtm-info-bg);
+  --gtm-chart-positive: var(--gtm-positive-bg);
+  --gtm-chart-attention: var(--gtm-attention-bg);
+  --gtm-chart-risk: var(--gtm-risk-bg);
+  --gtm-chart-neutral: var(--gtm-neutral-bg);
+
+  /*
+   * 05d categorical marks. Eight hues for a strip where every dot is a
+   * different thing and the reader has to tell them apart at a glance (the
+   * adoption capability strip). Hue says which; opacity says how much. Ordered
+   * so neighbours differ in both hue and lightness. These are the only place
+   * the product spends more than one chroma per layer, and only in a strip.
+   */
+  --gtm-series-1: var(--gtm-primary);
+  --gtm-series-2: #1f7a4d;
+  --gtm-series-3: #0f7b83;
+  --gtm-series-4: #6b4fbb;
+  --gtm-series-5: #b3751a;
+  --gtm-series-6: #b0397a;
+  --gtm-series-7: #c4552b;
+  --gtm-series-8: #5b6b7c;
+
+  /*
+   * Composer card + attach foot. Light wants a white input and a whisper of
+   * cool gray under it (ink on panel, not the warm muted/sidebar beige). Dark
+   * keeps the sidebar / desk pair the rest of the composer already uses.
+   */
+  --gtm-composer-card: var(--gtm-panel);
+  --gtm-composer-foot: color-mix(in srgb, var(--gtm-ink) 6%, var(--gtm-panel));
+
+  /*
+   * 06 route measures, the width law's closed set (width-padding-evidence.md
+   * section 5.3 rules 2 and 3). reading 768 is Primer's `medium` and Tailwind's
+   * max-w-3xl; work 1280 is Primer's `xlarge` and Tailwind's max-w-7xl. The
+   * fourth value, `wide`, is behavioural rather than a number: it drops the cap
+   * and owes internal scroll, so it has no token. No dark counterpart: a measure
+   * is geometry and geometry does not flip with theme.
+   *
+   * `thread` is the fourth number and deliberately not a fourth rung: it is the
+   * board-measured 704 the agent conversation column keeps as a documented
+   * exception (APP_SHELL_RULES, surface-decisions section 4). It is a token so
+   * the exception is named once here rather than retyped as an arbitrary value
+   * at the one call site that is allowed to hold it.
+   */
+  --gtm-container-reading: 768px;
+  --gtm-container-work: 1280px;
+  --gtm-container-interstitial: 320px;
+  --gtm-container-thread: 704px;
+  --gtm-container-dock: 420px;
+  --gtm-container-float: 640px;
+}
+
+[data-theme="dark"] {
+  --gtm-desk: #131313;
+  /* Main shell card sits a step above the rail. */
+  --gtm-shell: #161616;
+  /* Rail sits above the desk mat — never darker than desk. */
+  --gtm-sidebar: #1a1a1a;
+  --gtm-canvas: #191919;
+  --gtm-panel: #161616;
+  --gtm-muted: #191919;
+  --gtm-hover: #2a2a2a;
+  --gtm-selected: #2a2a2a;
+
+  --gtm-line: rgb(255 255 250 / 7%);
+  --gtm-line-strong: rgb(255 255 250 / 12%);
+
+  --gtm-ink: #fafaf8;
+  --gtm-ink-muted: #d4d4d0;
+  --gtm-ink-subtle: #a0a09a;
+
+  --gtm-primary: #99d3ff;
+  --gtm-primary-ink: #191919;
+  --gtm-secondary: #4a4a46;
+  --gtm-secondary-ink: #fafaf8;
+
+  /* Mark tile = mono panel / ink (foundations variant B). */
+  --gtm-mark: #161616;
+  --gtm-mark-ink: #fafaf8;
+
+  /*
+   * The dark half of the state family is designed, not flipped. It keeps the
+   * light half's rule (7.0:1 ink on its own tint, one chroma per layer, hue the
+   * only variable, `neutral` achromatic and one step apart) and re-solves every
+   * value against the dark surfaces: tints stay deep and low-chroma, inks stay
+   * light. An algorithmic inversion of the light values would have put the
+   * tints far too bright and the inks far too saturated to sit in a queue.
+   */
+  --gtm-positive-bg: #1d352c;
+  --gtm-positive: #7fccaf;
+  --gtm-attention-bg: #3c2d1e;
+  --gtm-attention: #e4b480;
+  --gtm-risk-bg: #412a28;
+  --gtm-risk: #f3aaa3;
+  --gtm-info-bg: #233241;
+  --gtm-info: #91c2f4;
+  --gtm-neutral-bg: #373633;
+  --gtm-neutral: #c6c5c1;
+
+  --gtm-chart-primary: var(--gtm-primary);
+  --gtm-chart-info: var(--gtm-info);
+  --gtm-chart-positive: var(--gtm-positive);
+  --gtm-chart-attention: var(--gtm-attention);
+  --gtm-chart-risk: var(--gtm-risk);
+  --gtm-chart-neutral: var(--gtm-neutral);
+
+  --gtm-series-1: var(--gtm-primary);
+  --gtm-series-2: #5fb28a;
+  --gtm-series-3: #5cc4cb;
+  --gtm-series-4: #a995e8;
+  --gtm-series-5: #e0ac5a;
+  --gtm-series-6: #e08ac0;
+  --gtm-series-7: #f0946e;
+  --gtm-series-8: #9fb0c2;
+
+  --gtm-composer-card: var(--gtm-sidebar);
+  --gtm-composer-foot: var(--gtm-desk);
+}

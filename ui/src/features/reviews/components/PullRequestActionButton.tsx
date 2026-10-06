@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 
 /** The shared shape of every per-pull-request action: button, label, errors. */
 export function PullRequestActionButton({
@@ -21,7 +21,7 @@ export function PullRequestActionButton({
       <div className="flex flex-wrap items-center gap-2">
         {children}
         <Button
-          size="sm"
+          size="compact"
           variant="outline"
           disabled={disabled}
           aria-live="polite"
@@ -33,7 +33,7 @@ export function PullRequestActionButton({
       {errors.map(
         (error, index) =>
           error && (
-            <p key={index} role="alert" className="mt-1 text-destructive">
+            <p key={index} role="alert" className="mt-1 text-risk">
               {error.message}
             </p>
           )

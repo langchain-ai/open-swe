@@ -1,8 +1,8 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 
 import { AppShell } from "@/components/AppShell"
-import { buttonVariants } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { WorkspacesSection } from "@/features/settings/components/WorkspacesSection"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
@@ -38,7 +38,7 @@ function WorkspacesPage() {
             to="/workspaces/$slug"
             params={{ slug: workspace.slug }}
             aria-label={`Configure ${workspace.name}`}
-            className={buttonVariants({ size: "sm", variant: "outline" })}
+            className={buttonVariants({ size: "compact", variant: "outline" })}
           >
             Configure
           </Link>

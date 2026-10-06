@@ -1,7 +1,7 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 import { AppShell } from "@/components/AppShell"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { WorkspaceSettingsPanel } from "@/features/settings/components/WorkspaceSettings"
 import { RequireLogin } from "@/lib/auth-redirect"

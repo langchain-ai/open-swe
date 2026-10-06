@@ -205,16 +205,16 @@ function TerminalViewport({
 
   return (
     <div
-      className="relative h-full min-h-0 min-w-0 bg-background"
+      className="relative h-full min-h-0 min-w-0 bg-canvas"
       onMouseDown={onFocus}
     >
       <div ref={mountRef} className="h-full w-full overflow-hidden" />
       {selection && (
-        <div className="absolute right-2 bottom-2 z-10 flex overflow-hidden rounded-md border border-border bg-background shadow-sm">
+        <div className="absolute right-2 bottom-2 z-10 flex overflow-hidden rounded-badge border border-line bg-canvas shadow-control">
           {onAddToChat && (
             <button
               type="button"
-              className="flex items-center gap-1 px-2 py-1 text-[11px] hover:bg-accent"
+              className="flex items-center gap-1 px-2 py-1 text-meta hover:bg-hover"
               onClick={() => {
                 onAddToChat(selection)
                 surfaceRef.current?.clearSelection()
@@ -227,8 +227,8 @@ function TerminalViewport({
             type="button"
             aria-label="Copy selection"
             className={cn(
-              "p-1.5 hover:bg-accent",
-              onAddToChat && "border-l border-border"
+              "p-1.5 hover:bg-hover",
+              onAddToChat && "border-l border-line"
             )}
             onClick={() => {
               void navigator.clipboard.writeText(selection)
@@ -240,13 +240,13 @@ function TerminalViewport({
         </div>
       )}
       {target.kind === "cloud" && state.status === "starting" && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-md border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-badge border border-line bg-canvas/95 px-2 py-1 text-meta text-ink-subtle shadow-control">
           <LoaderCircle className="size-3 animate-spin" />
           {state.buffer ? "Reconnecting…" : "Connecting…"}
         </div>
       )}
       {(error || state.error) && (
-        <div className="absolute inset-x-2 top-2 rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-xs text-destructive shadow-sm">
+        <div className="absolute inset-x-2 top-2 rounded-badge border border-risk/40 bg-canvas/95 px-3 py-2 text-label text-risk shadow-control">
           {error ?? state.error}
         </div>
       )}
@@ -272,7 +272,7 @@ function ActionButton({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+      className="rounded-tick p-1.5 text-ink-subtle transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
     >
       {children}
     </button>
@@ -367,7 +367,7 @@ export function TerminalPanel({
       data-hotkeys="ignore"
     >
       {terminals.error && (
-        <div className="absolute inset-x-2 top-2 z-10 rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-xs text-destructive shadow-sm">
+        <div className="absolute inset-x-2 top-2 z-10 rounded-badge border border-risk/40 bg-canvas/95 px-3 py-2 text-label text-risk shadow-control">
           {terminals.error}
         </div>
       )}
@@ -391,8 +391,8 @@ export function TerminalPanel({
               "min-h-0 min-w-0",
               index > 0 &&
                 (group?.splitDirection === "vertical"
-                  ? "border-t border-border"
-                  : "border-l border-border")
+                  ? "border-t border-line"
+                  : "border-l border-line")
             )}
           >
             <TerminalViewport

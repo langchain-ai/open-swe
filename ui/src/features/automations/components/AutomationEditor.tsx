@@ -28,8 +28,8 @@ import { AutomationRuns } from "@/features/automations/components/AutomationRuns
 import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
-import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import { describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
@@ -311,15 +311,15 @@ export function AutomationEditor({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <header className="flex items-center justify-between gap-3 px-6 py-4 max-md:pt-14">
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/70">
+        <div className="flex min-w-0 items-center gap-1.5 text-meta text-ink-subtle/70">
           <Link
             to="/agents/automations"
-            className="shrink-0 transition-colors hover:text-foreground"
+            className="shrink-0 transition-colors hover:text-ink"
           >
             Automations
           </Link>
           <span className="shrink-0">/</span>
-          <span className="truncate text-foreground">
+          <span className="truncate text-ink">
             {name.trim() || "New automation"}
           </span>
         </div>
@@ -328,11 +328,11 @@ export function AutomationEditor({
             {mode === "edit" && (
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 onClick={handleDelete}
                 disabled={deleteSchedule.isPending}
                 aria-label="Delete automation"
-                className="text-muted-foreground/70 hover:text-destructive"
+                className="text-ink-subtle/70 hover:text-risk"
               >
                 <TrashIcon className="size-4" />
               </Button>
@@ -350,7 +350,7 @@ export function AutomationEditor({
 
       <div className="mx-auto w-full max-w-3xl px-6 pt-2 pb-16">
         {!canManage && (
-          <p className="mb-4 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+          <p className="mb-4 rounded-compact border border-line bg-panel px-3 py-2 text-meta text-ink-subtle">
             This workspace automation is read-only. Ask a workspace admin to
             change it.
           </p>
@@ -360,21 +360,21 @@ export function AutomationEditor({
           onChange={(e) => setName(e.target.value)}
           disabled={!canManage}
           placeholder="Untitled automation"
-          className="w-full bg-transparent text-base font-medium text-foreground outline-none placeholder:text-muted-foreground/70"
+          className="w-full bg-transparent text-title font-medium text-ink outline-none placeholder:text-ink-subtle/70"
         />
 
-        <div className="mt-3 flex items-center gap-3 text-xs">
+        <div className="mt-3 flex items-center gap-3 text-label">
           <div className="flex items-center gap-2">
             <Switch
               checked={enabled}
               onCheckedChange={setEnabled}
               disabled={!canManage}
             />
-            <span className="text-muted-foreground">
+            <span className="text-ink-subtle">
               {enabled ? "Active" : "Paused"}
             </span>
           </div>
-          <span className="text-border">|</span>
+          <span className="text-line">|</span>
           <WorkspaceSelector
             workspaces={workspaces}
             selectedSlug={workspace}
@@ -385,7 +385,7 @@ export function AutomationEditor({
           />
         </div>
         {savedWorkspaceMissing && (
-          <p role="alert" className="mt-2 text-xs text-destructive">
+          <p role="alert" className="mt-2 text-label text-risk">
             Workspace {schedule?.workspace} no longer exists, so runs are
             refused. Pick another workspace and save.
           </p>
@@ -398,8 +398,8 @@ export function AutomationEditor({
             const hint = (fallback: string) => (
               <p
                 className={cn(
-                  "mt-2 text-xs",
-                  problem ? "text-destructive" : "text-muted-foreground/70"
+                  "mt-2 text-label",
+                  problem ? "text-risk" : "text-ink-subtle/70"
                 )}
               >
                 {problem ?? fallback}
@@ -437,18 +437,18 @@ export function AutomationEditor({
                       disabled={!canManage}
                       placeholder="0 9 * * 1-5"
                       aria-label="Cron schedule"
-                      className="w-full bg-transparent font-mono text-sm text-foreground outline-none placeholder:text-muted-foreground/70"
+                      className="w-full bg-transparent font-mono text-body text-ink outline-none placeholder:text-ink-subtle/70"
                     />
                   ) : (
-                    <p className="text-sm text-foreground">
+                    <p className="text-body text-ink">
                       {describeCron(draft.cron)}{" "}
-                      <span className="font-mono text-xs text-muted-foreground/70">
+                      <span className="font-mono text-meta text-ink-subtle/70">
                         {draft.cron}
                       </span>
                     </p>
                   )}
                   {problem && (
-                    <p className="mt-1 text-xs text-destructive">{problem}</p>
+                    <p className="mt-1 text-label text-risk">{problem}</p>
                   )}
                 </TriggerCard>
               )
@@ -462,13 +462,13 @@ export function AutomationEditor({
                   onRemove={() => removeDraft(draft.key)}
                   canManage={canManage}
                 >
-                  <div className="text-sm text-foreground">
+                  <div className="text-body text-ink">
                     <RepoSelector
                       repos={reposQuery.data?.repositories}
                       selectedRepo={draft.repo}
                       onRepoChange={(repo) => set({ repo })}
                       placeholder="Choose repository"
-                      triggerClassName="text-muted-foreground"
+                      triggerClassName="text-ink-subtle"
                       disabled={!canManage}
                     />
                   </div>
@@ -509,9 +509,9 @@ export function AutomationEditor({
                     onToggle={(event) => toggleEvent(draft.key, event)}
                     disabled={!canManage}
                   />
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-meta text-ink-subtle">
                     <span>From</span>
-                    <div className="flex overflow-hidden rounded-md border border-border">
+                    <div className="flex overflow-hidden rounded-badge border border-line">
                       {SENDER_ITEMS.map((item) => (
                         <button
                           key={item.value}
@@ -522,8 +522,8 @@ export function AutomationEditor({
                           className={cn(
                             "px-2 py-1 transition-colors disabled:pointer-events-none",
                             draft.senders === item.value
-                              ? "bg-primary/20 text-foreground"
-                              : "hover:text-foreground"
+                              ? "bg-primary/20 text-ink"
+                              : "hover:text-ink"
                           )}
                         >
                           {item.label}
@@ -617,19 +617,19 @@ export function AutomationEditor({
               onLinear={() =>
                 setDrafts((current) => [...current, linearDraft()])
               }
-              className="flex items-center gap-1.5 self-start rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+              className="flex items-center gap-1.5 self-start rounded-compact border border-dashed border-line px-3 py-2 text-meta text-ink-subtle transition-colors hover:border-ink/30 hover:text-ink"
             >
               <PlusIcon className="size-3.5" />
               Add trigger
             </TriggerMenu>
           )}
           {!canManage && drafts.length === 0 && (
-            <p className="text-xs text-muted-foreground/70">No triggers.</p>
+            <p className="text-meta text-ink-subtle/70">No triggers.</p>
           )}
         </div>
 
         <SectionLabel>Agent Instructions</SectionLabel>
-        <div className="rounded-xl border border-border bg-card p-3">
+        <div className="rounded-control border border-line bg-panel p-3">
           <SlackChannelTextarea
             bare
             value={prompt}
@@ -637,7 +637,7 @@ export function AutomationEditor({
             disabled={!canManage}
             placeholder="What should Open SWE do each time this runs?"
             rows={5}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70"
+            className="w-full resize-none bg-transparent text-body leading-relaxed text-ink outline-none placeholder:text-ink-subtle/70"
           />
           <div className="mt-2 flex items-center">
             <ModelPicker
@@ -648,19 +648,19 @@ export function AutomationEditor({
             />
           </div>
           {session.data?.is_admin === true && (
-            <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-border/60 pt-3">
+            <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-line/60 pt-3">
               <input
                 type="checkbox"
                 checked={adminThread}
                 onChange={(event) => setAdminThread(event.target.checked)}
                 disabled={!canManage}
-                className="mt-0.5 size-4 accent-destructive"
+                className="mt-0.5 size-4 accent-risk"
               />
               <span>
-                <span className="block text-xs font-medium text-foreground">
+                <span className="block text-label font-medium text-ink">
                   Run as admin thread
                 </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground/70">
+                <span className="mt-0.5 block text-meta text-ink-subtle/70">
                   Allow this automation to use workspace admin capabilities.
                 </span>
               </span>
@@ -680,7 +680,7 @@ export function AutomationEditor({
 }
 
 const CARD_ACTION =
-  "rounded p-1 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+  "rounded-tick p-1 text-ink-subtle/70 hover:bg-hover hover:text-ink"
 
 function EventChips<E extends string>({
   items,
@@ -705,10 +705,10 @@ function EventChips<E extends string>({
             onClick={() => onToggle(item.value)}
             disabled={disabled}
             className={cn(
-              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:pointer-events-none",
+              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-label transition-colors disabled:pointer-events-none",
               on
-                ? "border-primary/60 bg-primary/20 text-foreground"
-                : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                ? "border-primary/60 bg-primary/20 text-ink"
+                : "border-line text-ink-subtle hover:border-ink/30 hover:text-ink"
             )}
           >
             {on && <CheckIcon className="size-3 text-primary" />}
@@ -736,7 +736,7 @@ function FilterInput({
   inputMode?: "numeric"
 }) {
   return (
-    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+    <label className="flex flex-col gap-1 text-meta text-ink-subtle">
       {label}
       <input
         value={value}
@@ -744,7 +744,7 @@ function FilterInput({
         placeholder={placeholder}
         inputMode={inputMode}
         disabled={disabled}
-        className="rounded-md border border-border bg-transparent px-2 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-foreground/30"
+        className="rounded-badge border border-line bg-transparent px-2 py-1 text-body text-ink outline-none placeholder:text-ink-subtle/60 focus:border-ink/30"
       />
     </label>
   )
@@ -766,8 +766,8 @@ function TriggerCard({
   canManage: boolean
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-3 py-2.5">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+    <div className="flex items-start gap-3 rounded-control border border-line bg-panel px-3 py-2.5">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-compact bg-muted text-ink-subtle">
         {icon}
       </div>
       <div className="min-w-0 flex-1 py-0.5">{children}</div>
@@ -790,7 +790,7 @@ function TriggerCard({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mt-8 mb-2 text-xs font-medium text-muted-foreground">
+    <h2 className="mt-8 mb-2 text-meta font-medium text-ink-subtle">
       {children}
     </h2>
   )

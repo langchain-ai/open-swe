@@ -1,0 +1,3427 @@
+{
+  "$schema": "https://langchain.dev/schemas/design-index-1.json",
+  "package": "@langchain/gtm-platform-design-system",
+  "title": "The GTM Platform internal design system",
+  "author": "Amal Irgashev",
+  "version": "0.1.0",
+  "generated": "scripts/build-index.mjs",
+  "howToUse": [
+    "Grep `search` for the job you are doing before writing any component.",
+    "Read `rules` for the chosen entry; those are decisions, not suggestions.",
+    "Signatures are in agent/props.json, keyed by component, or in the rules file.",
+    "Read `source` last, for props. Never copy a component into the consumer repo.",
+    "No entry fits a product question? That is a design decision. Surface it, do not invent it."
+  ],
+  "counts": {
+    "primitives": 73,
+    "patterns": 41,
+    "withRules": 43
+  },
+  "entries": [
+    {
+      "name": "ai-chat-input",
+      "component": "AiChatInput",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/ai-chat-input",
+      "source": "src/ui/ai-chat-input.tsx",
+      "rules": null,
+      "exports": [
+        "PromptInput"
+      ],
+      "summary": "PromptInput — gallery / reference composer with spring expand-collapse.",
+      "ruleCount": 0,
+      "search": [
+        "input",
+        "chat",
+        "prompt",
+        "composer",
+        "expand-collapse",
+        "gallery",
+        "promptinput",
+        "reference",
+        "spring"
+      ],
+      "note": null,
+      "propCount": 12
+    },
+    {
+      "name": "alert",
+      "component": "Alert",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/alert",
+      "source": "src/ui/alert.tsx",
+      "rules": null,
+      "exports": [
+        "Alert",
+        "AlertDescription",
+        "AlertTitle"
+      ],
+      "summary": "Alert, on CORE 14. API reference: the ReUI free `alert` (reui.io/r/alert.json, fetched keyless 2026-08-05) -- its part names, its `data-slot` anatomy and its icon-plus-content composition are kept; its class vocabulary is not, because Re...",
+      "ruleCount": 0,
+      "search": [
+        "alert",
+        "reui",
+        "description",
+        "title",
+        "anatomy",
+        "api",
+        "because",
+        "class",
+        "composition",
+        "data-slot",
+        "destructive",
+        "fetched"
+      ],
+      "note": null,
+      "propCount": 2
+    },
+    {
+      "name": "avatar",
+      "component": "Avatar",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/avatar",
+      "source": "src/ui/avatar.tsx",
+      "rules": null,
+      "exports": [
+        "Avatar",
+        "deriveInitials",
+        "deriveTone"
+      ],
+      "summary": "Avatar, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "avatar",
+        "derive",
+        "initials",
+        "tone"
+      ],
+      "note": null,
+      "propCount": 4
+    },
+    {
+      "name": "badge",
+      "component": "Badge",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/badge",
+      "source": "src/ui/badge.tsx",
+      "rules": null,
+      "exports": [
+        "Badge",
+        "badgeVariants"
+      ],
+      "summary": "Badge, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "badge",
+        "variants"
+      ],
+      "note": null,
+      "propCount": 24
+    },
+    {
+      "name": "box",
+      "component": "Box",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/box",
+      "source": "src/ui/box.tsx",
+      "rules": null,
+      "exports": [
+        "Box",
+        "Inline",
+        "Stack"
+      ],
+      "summary": "Typed layout primitives (the Orbit escalation, wiki 02).",
+      "ruleCount": 0,
+      "search": [
+        "box",
+        "inline",
+        "stack",
+        "escalation",
+        "layout",
+        "orbit",
+        "primitives",
+        "typed"
+      ],
+      "note": null,
+      "propCount": 10
+    },
+    {
+      "name": "button",
+      "component": "Button",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/button",
+      "source": "src/ui/button.tsx",
+      "rules": null,
+      "exports": [
+        "Button",
+        "buttonVariants"
+      ],
+      "summary": "Button, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "button",
+        "variants"
+      ],
+      "note": null,
+      "propCount": 13
+    },
+    {
+      "name": "calendar",
+      "component": "Calendar",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/calendar",
+      "source": "src/ui/calendar.tsx",
+      "rules": null,
+      "exports": [
+        "Calendar"
+      ],
+      "summary": "Calendar, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "calendar"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "checkbox-group",
+      "component": "CheckboxGroup",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/checkbox-group",
+      "source": "src/ui/checkbox-group.tsx",
+      "rules": null,
+      "exports": [
+        "CheckboxGroup",
+        "CheckboxGroupItem",
+        "CheckboxGroupSelectAll"
+      ],
+      "summary": "Checkbox group, on CORE 14. The fluid-functionalism item (ANALYSIS.md row 21) adapted onto Base UI's `CheckboxGroup` -- the Base flavour, not the Radix one, because our stack is Base UI and the two files differ in exactly the part that m...",
+      "ruleCount": 0,
+      "search": [
+        "checkbox",
+        "group",
+        "base",
+        "item",
+        "select",
+        "adapted",
+        "analysis",
+        "because",
+        "checkboxgroup",
+        "differ",
+        "exactly",
+        "flavour"
+      ],
+      "note": null,
+      "propCount": 12
+    },
+    {
+      "name": "checkbox",
+      "component": "Checkbox",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/checkbox",
+      "source": "src/ui/checkbox.tsx",
+      "rules": null,
+      "exports": [
+        "Checkbox"
+      ],
+      "summary": "Checkbox, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "checkbox"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "cn",
+      "component": "Cn",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/cn",
+      "source": "src/ui/cn.ts",
+      "rules": null,
+      "exports": [
+        "cn"
+      ],
+      "summary": "Design-system-aware class merge.",
+      "ruleCount": 0,
+      "search": [
+        "class",
+        "design-system-aware",
+        "merge"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "collapsible",
+      "component": "Collapsible",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/collapsible",
+      "source": "src/ui/collapsible.tsx",
+      "rules": null,
+      "exports": [
+        "Collapsible",
+        "CollapsibleChevron",
+        "CollapsibleContent",
+        "CollapsibleTrigger"
+      ],
+      "summary": "Collapsible, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "collapsible",
+        "chevron",
+        "content",
+        "trigger"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "combobox",
+      "component": "Combobox",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/combobox",
+      "source": "src/ui/combobox.tsx",
+      "rules": null,
+      "exports": [
+        "Combobox",
+        "ComboboxContent",
+        "ComboboxEmpty",
+        "ComboboxGroup",
+        "ComboboxInput",
+        "ComboboxItem",
+        "ComboboxList",
+        "ComboboxSeparator",
+        "ComboboxTrigger",
+        "FIELD_TRIGGER_CLASS"
+      ],
+      "summary": "Combobox, on CORE 14: the picker.",
+      "ruleCount": 0,
+      "search": [
+        "combobox",
+        "trigger",
+        "class",
+        "content",
+        "empty",
+        "field",
+        "group",
+        "input",
+        "item",
+        "list",
+        "separator",
+        "picker"
+      ],
+      "note": null,
+      "propCount": 7
+    },
+    {
+      "name": "command",
+      "component": "Command",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/command",
+      "source": "src/ui/command.tsx",
+      "rules": null,
+      "exports": [
+        "Command",
+        "CommandEmpty",
+        "CommandFooter",
+        "CommandGroup",
+        "CommandInput",
+        "CommandItem",
+        "CommandList",
+        "CommandSeparator",
+        "CommandShortcut"
+      ],
+      "summary": "Command, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "command",
+        "empty",
+        "footer",
+        "group",
+        "input",
+        "item",
+        "list",
+        "separator",
+        "shortcut"
+      ],
+      "note": null,
+      "propCount": 1
+    },
+    {
+      "name": "context-menu",
+      "component": "ContextMenu",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/context-menu",
+      "source": "src/ui/context-menu.tsx",
+      "rules": null,
+      "exports": [
+        "ContextMenu",
+        "ContextMenuCheckboxItem",
+        "ContextMenuContent",
+        "ContextMenuItem",
+        "ContextMenuTrigger"
+      ],
+      "summary": null,
+      "ruleCount": 0,
+      "search": [
+        "context",
+        "menu",
+        "item",
+        "checkbox",
+        "content",
+        "trigger"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "conversation-navigator",
+      "component": "ConversationNavigator",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/conversation-navigator",
+      "source": "src/ui/conversation-navigator.tsx",
+      "rules": null,
+      "exports": [
+        "ConversationNavigator"
+      ],
+      "summary": null,
+      "ruleCount": 0,
+      "search": [
+        "conversation",
+        "navigator"
+      ],
+      "note": null,
+      "propCount": 4
+    },
+    {
+      "name": "date-picker",
+      "component": "DatePicker",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/date-picker",
+      "source": "src/ui/date-picker.tsx",
+      "rules": null,
+      "exports": [
+        "DATE_DISPLAY_FORMAT",
+        "DATE_RANGE_SEPARATOR",
+        "DatePicker",
+        "formatRangeValue",
+        "formatSingleValue"
+      ],
+      "summary": "Date picker, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "date",
+        "format",
+        "picker",
+        "range",
+        "value",
+        "display",
+        "separator",
+        "single"
+      ],
+      "note": null,
+      "propCount": 16
+    },
+    {
+      "name": "dialog",
+      "component": "Dialog",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/dialog",
+      "source": "src/ui/dialog.tsx",
+      "rules": null,
+      "exports": [
+        "Dialog",
+        "DialogClose",
+        "DialogContent",
+        "DialogDescription",
+        "DialogFooter",
+        "DialogHeader",
+        "DialogOverlay",
+        "DialogPortal",
+        "DialogTitle",
+        "DialogTrigger"
+      ],
+      "summary": "Dialog, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "dialog",
+        "close",
+        "content",
+        "description",
+        "footer",
+        "header",
+        "overlay",
+        "portal",
+        "title",
+        "trigger"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "dropdown-menu",
+      "component": "DropdownMenu",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/dropdown-menu",
+      "source": "src/ui/dropdown-menu.tsx",
+      "rules": null,
+      "exports": [
+        "DropdownMenu",
+        "DropdownMenuCheckboxItem",
+        "DropdownMenuContent",
+        "DropdownMenuGroup",
+        "DropdownMenuItem",
+        "DropdownMenuLabel",
+        "DropdownMenuPortal",
+        "DropdownMenuRadioGroup",
+        "DropdownMenuRadioItem",
+        "DropdownMenuSeparator",
+        "DropdownMenuShortcut",
+        "DropdownMenuSub",
+        "DropdownMenuSubContent",
+        "DropdownMenuSubTrigger",
+        "DropdownMenuTrigger"
+      ],
+      "summary": "Dropdown menu, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "dropdown",
+        "menu",
+        "item",
+        "sub",
+        "content",
+        "group",
+        "radio",
+        "trigger",
+        "checkbox",
+        "label",
+        "portal",
+        "separator"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "elevated",
+      "component": "Elevated",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/elevated",
+      "source": "src/ui/elevated.tsx",
+      "rules": "agent/rules/ui__elevated.md",
+      "exports": [
+        "Elevated",
+        "MAX_ELEVATION_LEVEL",
+        "SurfaceProvider",
+        "elevationClasses",
+        "elevationLevel",
+        "useSurface"
+      ],
+      "summary": "Depth is computed, never picked: declare an offset, let the context resolve the level.",
+      "ruleCount": 16,
+      "search": [
+        "elevation",
+        "elevated",
+        "level",
+        "surface",
+        "classes",
+        "max",
+        "provider",
+        "hover",
+        "primitive",
+        "alone",
+        "anchored",
+        "card"
+      ],
+      "note": "The elevation primitive.",
+      "propCount": 2
+    },
+    {
+      "name": "empty",
+      "component": "Empty",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/empty",
+      "source": "src/ui/empty.tsx",
+      "rules": null,
+      "exports": [
+        "Empty",
+        "EmptyContent",
+        "EmptyDescription",
+        "EmptyHeader",
+        "EmptyMedia",
+        "EmptyTitle"
+      ],
+      "summary": "Empty — compositional zero-data chrome (shadcn / ReUI Empty family, CORE 14).",
+      "ruleCount": 0,
+      "search": [
+        "empty",
+        "content",
+        "description",
+        "header",
+        "media",
+        "title",
+        "chrome",
+        "compositional",
+        "family",
+        "reui",
+        "shadcn",
+        "zero-data"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "fade-text",
+      "component": "FadeText",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/fade-text",
+      "source": "src/ui/fade-text.tsx",
+      "rules": "agent/rules/ui__fade-text.md",
+      "exports": [
+        "FadeText"
+      ],
+      "summary": "FadeText says there is more. It never uses an ellipsis. The cut is a trailing mask, not a painted wash, so hover and selected fills stay honest.",
+      "ruleCount": 3,
+      "search": [
+        "fade",
+        "text",
+        "fadetext",
+        "ellipsizing",
+        "fades",
+        "instead",
+        "overflow",
+        "preview",
+        "cut",
+        "default",
+        "ellipsis",
+        "fills"
+      ],
+      "note": "FadeText — overflow that fades instead of ellipsizing.",
+      "propCount": 4
+    },
+    {
+      "name": "field-focus",
+      "component": "FieldFocus",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/field-focus",
+      "source": "src/ui/field-focus.ts",
+      "rules": null,
+      "exports": [
+        "FIELD_FOCUS_CLASS",
+        "FIELD_FOCUS_PAINTED_CLASS",
+        "FIELD_INVALID_CLASS"
+      ],
+      "summary": "Shared focus and invalid treatment for bordered form fields.",
+      "ruleCount": 0,
+      "search": [
+        "field",
+        "focus",
+        "class",
+        "invalid",
+        "painted",
+        "bordered",
+        "fields",
+        "form",
+        "shared",
+        "treatment"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "frame",
+      "component": "Frame",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/frame",
+      "source": "src/ui/frame.tsx",
+      "rules": null,
+      "exports": [
+        "Frame",
+        "FrameDescription",
+        "FrameFooter",
+        "FrameHeader",
+        "FramePanel",
+        "FrameTitle",
+        "frameVariants"
+      ],
+      "summary": "Frame, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "frame",
+        "description",
+        "footer",
+        "header",
+        "panel",
+        "title",
+        "variants"
+      ],
+      "note": null,
+      "propCount": 22
+    },
+    {
+      "name": "glyphs",
+      "component": "Glyphs",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/glyphs",
+      "source": "src/ui/glyphs.ts",
+      "rules": null,
+      "exports": [
+        "AlertTriangle",
+        "ArchiveBox",
+        "ArrowDown",
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowUpRight",
+        "Bell",
+        "Bot",
+        "Box",
+        "Building2",
+        "Calendar",
+        "CalendarDays",
+        "Check",
+        "CheckCircle",
+        "ChevronDown",
+        "ChevronLeft",
+        "ChevronRight",
+        "ChevronUp",
+        "ChevronsLeft",
+        "ChevronsRight",
+        "ChevronsUpDown",
+        "Circle",
+        "Clock",
+        "Cloud",
+        "Columns",
+        "Copy",
+        "CornerDownLeft",
+        "Database",
+        "DollarSign",
+        "Ellipsis",
+        "Expand",
+        "ExternalLink",
+        "File",
+        "FileEdit",
+        "FilePlus",
+        "FileSpreadsheet",
+        "FileText",
+        "Filter",
+        "Folder",
+        "FolderOpen",
+        "Globe",
+        "Home",
+        "Image",
+        "Inbox",
+        "Info",
+        "Layers",
+        "LayoutGrid",
+        "LineChart",
+        "List",
+        "ListChecks",
+        "Loader2",
+        "Lock",
+        "Mail",
+        "Megaphone",
+        "MessageSquare",
+        "Minus",
+        "Moon",
+        "Orb",
+        "Palette",
+        "PanelLeft",
+        "PanelRight",
+        "Paperclip",
+        "Pause",
+        "Pencil",
+        "Pin",
+        "PinFilled",
+        "PinOff",
+        "Play",
+        "Plus",
+        "PlusCircle",
+        "PushPin",
+        "QuestionMarkCircle",
+        "RefreshCw",
+        "RotateCcw",
+        "Search",
+        "Send",
+        "Server",
+        "Settings2",
+        "Share2",
+        "Square",
+        "Star",
+        "Sun",
+        "Table2",
+        "Target",
+        "Terminal",
+        "Trash2",
+        "TrendingUp",
+        "Upload",
+        "User",
+        "Users",
+        "Wrench",
+        "X",
+        "XCircle",
+        "Zap"
+      ],
+      "summary": "The glyph barrel.",
+      "ruleCount": 0,
+      "search": [
+        "arrow",
+        "chevron",
+        "circle",
+        "down",
+        "pin",
+        "chevrons",
+        "plus",
+        "box",
+        "calendar",
+        "check",
+        "folder",
+        "list"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "group-row",
+      "component": "GroupRow",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/group-row",
+      "source": "src/ui/group-row.tsx",
+      "rules": "agent/rules/ui__group-row.md",
+      "exports": [
+        "GroupRowContent"
+      ],
+      "summary": "A group row is a row in the same grid, not a heading outside it. The anatomy is fixed: disclosure chevron, then the group identity, then the compact count.",
+      "ruleCount": 4,
+      "search": [
+        "group",
+        "row",
+        "content",
+        "count",
+        "identity",
+        "badge",
+        "below",
+        "column",
+        "comment",
+        "design",
+        "geometry",
+        "law"
+      ],
+      "note": "The rules themselves are `GROUP_ROW_RULES` below, not this comment. `/design` table-grouping restates the count law; this file owns the geometry every table and split-list group row must share.",
+      "propCount": 6
+    },
+    {
+      "name": "hover-card",
+      "component": "HoverCard",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/hover-card",
+      "source": "src/ui/hover-card.tsx",
+      "rules": null,
+      "exports": [
+        "HOVER_CARD_CLOSE_DELAY",
+        "HOVER_CARD_DELAY",
+        "HoverCard",
+        "HoverCardContent",
+        "HoverCardTrigger"
+      ],
+      "summary": "Hover card, on CORE 14. Base UI calls it a preview card; the product calls it a hover card, and the product name wins at the boundary.",
+      "ruleCount": 0,
+      "search": [
+        "card",
+        "hover",
+        "delay",
+        "calls",
+        "close",
+        "content",
+        "product",
+        "trigger",
+        "base",
+        "boundary",
+        "name",
+        "preview"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "icon-well",
+      "component": "IconWell",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/icon-well",
+      "source": "src/ui/icon-well.tsx",
+      "rules": null,
+      "exports": [
+        "ICON_WELL_CLASS",
+        "IconWell"
+      ],
+      "summary": "IconWell — the 24px container every channel mark and tool step icon sits in.",
+      "ruleCount": 0,
+      "search": [
+        "icon",
+        "well",
+        "class",
+        "channel",
+        "container",
+        "iconwell",
+        "mark",
+        "sits",
+        "step",
+        "tool"
+      ],
+      "note": null,
+      "propCount": 1
+    },
+    {
+      "name": "icon",
+      "component": "Icon",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/icon",
+      "source": "src/ui/icon.tsx",
+      "rules": null,
+      "exports": [
+        "Icon"
+      ],
+      "summary": "The one Icon wrapper (wiki 02: \"one set, one wrapper\").",
+      "ruleCount": 0,
+      "search": [
+        "icon",
+        "wrapper"
+      ],
+      "note": null,
+      "propCount": 4
+    },
+    {
+      "name": "input-copy",
+      "component": "InputCopy",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/input-copy",
+      "source": "src/ui/input-copy.tsx",
+      "rules": null,
+      "exports": [
+        "InputCopy"
+      ],
+      "summary": "Input copy, on CORE 14. The fluid-functionalism item (ANALYSIS.md row 29) rebuilt from our own parts: a read-only field carrying a value nobody types back in -- a Salesforce record id, a thread id, a webhook URL, an API key -- plus the o...",
+      "ruleCount": 0,
+      "search": [
+        "copy",
+        "input",
+        "value",
+        "action",
+        "analysis",
+        "api",
+        "back",
+        "carrying",
+        "field",
+        "fluid-functionalism",
+        "item",
+        "key"
+      ],
+      "note": null,
+      "propCount": 5
+    },
+    {
+      "name": "input",
+      "component": "Input",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/input",
+      "source": "src/ui/input.tsx",
+      "rules": null,
+      "exports": [
+        "FIELD_VALUE_CLASS",
+        "Input"
+      ],
+      "summary": "Input, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "input",
+        "class",
+        "field",
+        "value"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "kbd",
+      "component": "Kbd",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/kbd",
+      "source": "src/ui/kbd.tsx",
+      "rules": null,
+      "exports": [
+        "Kbd"
+      ],
+      "summary": "Kbd, on CORE 14. The keyboard hint chip.",
+      "ruleCount": 0,
+      "search": [
+        "kbd",
+        "chip",
+        "hint",
+        "keyboard"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "label",
+      "component": "Label",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/label",
+      "source": "src/ui/label.tsx",
+      "rules": null,
+      "exports": [
+        "HELP_CLASS",
+        "LABEL_CLASS",
+        "Label"
+      ],
+      "summary": "Label, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "label",
+        "class",
+        "help"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "markdown-codec",
+      "component": "MarkdownCodec",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/markdown-codec",
+      "source": "src/ui/markdown-codec.ts",
+      "rules": null,
+      "exports": [
+        "htmlToMarkdown",
+        "markdownToHtml"
+      ],
+      "summary": null,
+      "ruleCount": 0,
+      "search": [
+        "markdown",
+        "html",
+        "codec"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "markdown-editor",
+      "component": "MarkdownEditor",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/markdown-editor",
+      "source": "src/ui/markdown-editor.tsx",
+      "rules": null,
+      "exports": [
+        "MarkdownEditor",
+        "getMarkdownEditor",
+        "setMarkdownEditorValue"
+      ],
+      "summary": "Rich Markdown editor. The surface is TipTap so play prompts edit like formatted text; onChange still emits the Markdown string the agent executes. Color, highlight, and alignment are not offered because they cannot survive that Markdown...",
+      "ruleCount": 0,
+      "search": [
+        "markdown",
+        "editor",
+        "get",
+        "value",
+        "agent",
+        "alignment",
+        "because",
+        "color",
+        "edit",
+        "emits",
+        "executes",
+        "formatted"
+      ],
+      "note": null,
+      "propCount": 17
+    },
+    {
+      "name": "mention-chip",
+      "component": "MentionChip",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/mention-chip",
+      "source": "src/ui/mention-chip.tsx",
+      "rules": null,
+      "exports": [
+        "MentionChip",
+        "MentionChipFace",
+        "MentionChipPeek"
+      ],
+      "summary": "MentionChip — Slack-shaped entity pill.",
+      "ruleCount": 0,
+      "search": [
+        "chip",
+        "mention",
+        "face",
+        "peek",
+        "entity",
+        "mentionchip",
+        "pill",
+        "slack-shaped"
+      ],
+      "note": null,
+      "propCount": 10
+    },
+    {
+      "name": "orb-glyph",
+      "component": "OrbGlyph",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/orb-glyph",
+      "source": "src/ui/orb-glyph.tsx",
+      "rules": null,
+      "exports": [
+        "OrbFull",
+        "OrbMicro",
+        "OrbMini"
+      ],
+      "summary": "The static Orb glyph: the agent's mark when a button or label needs a drawing rather than the animated loading canvas in `ui/orb.tsx`.",
+      "ruleCount": 0,
+      "search": [
+        "orb",
+        "glyph",
+        "full",
+        "micro",
+        "mini",
+        "agent",
+        "animated",
+        "button",
+        "canvas",
+        "drawing",
+        "label",
+        "loading"
+      ],
+      "note": null,
+      "propCount": 2
+    },
+    {
+      "name": "orb",
+      "component": "Orb",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/orb",
+      "source": "src/ui/orb.tsx",
+      "rules": "agent/rules/ui__orb.md",
+      "exports": [
+        "ORB_CAPTION",
+        "ORB_RUNG_PX",
+        "ORB_STATE_FOR_ACTIVITY",
+        "Orb",
+        "OrbStatus"
+      ],
+      "summary": "A call site names what the agent is DOING, never what the orb looks like. `activity` is the product's verb set; the library's nine animation names are not exported and must not be. A recurring product question gets one canonical answer,...",
+      "ruleCount": 8,
+      "search": [
+        "orb",
+        "state",
+        "activity",
+        "caption",
+        "rung",
+        "status",
+        "agent",
+        "library",
+        "names",
+        "scale",
+        "answer",
+        "loading"
+      ],
+      "note": "The orb: the agent's loading state, on CORE 14.",
+      "propCount": 9
+    },
+    {
+      "name": "popover",
+      "component": "Popover",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/popover",
+      "source": "src/ui/popover.tsx",
+      "rules": null,
+      "exports": [
+        "Popover",
+        "PopoverArrow",
+        "PopoverClose",
+        "PopoverContent",
+        "PopoverTrigger"
+      ],
+      "summary": "Popover, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "popover",
+        "arrow",
+        "close",
+        "content",
+        "trigger"
+      ],
+      "note": null,
+      "propCount": 2
+    },
+    {
+      "name": "popup-surface",
+      "component": "PopupSurface",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/popup-surface",
+      "source": "src/ui/popup-surface.ts",
+      "rules": null,
+      "exports": [
+        "POPUP_SURFACE",
+        "POPUP_SURFACE_DENSE",
+        "POPUP_SURFACE_FLUSH",
+        "POPUP_SURFACE_MOTION",
+        "POPUP_SURFACE_PADDED",
+        "POPUP_SURFACE_SHELL"
+      ],
+      "summary": "Shared surface for every anchored float in the product.",
+      "ruleCount": 0,
+      "search": [
+        "surface",
+        "popup",
+        "dense",
+        "flush",
+        "motion",
+        "padded",
+        "shell",
+        "anchored",
+        "float",
+        "product",
+        "shared"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "progress",
+      "component": "Progress",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/progress",
+      "source": "src/ui/progress.tsx",
+      "rules": null,
+      "exports": [
+        "Progress"
+      ],
+      "summary": "Progress, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "progress"
+      ],
+      "note": null,
+      "propCount": 4
+    },
+    {
+      "name": "provider-logos",
+      "component": "ProviderLogos",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/provider-logos",
+      "source": "src/ui/provider-logos.tsx",
+      "rules": null,
+      "exports": [
+        "GoogleMark",
+        "MailProviderLogo",
+        "ProviderLogo",
+        "isMailProviderLogoId",
+        "isProviderLogoId"
+      ],
+      "summary": "Provider brand marks (Simple Icons / brand-kit paths).",
+      "ruleCount": 0,
+      "search": [
+        "provider",
+        "logo",
+        "mail",
+        "logos",
+        "google",
+        "mark",
+        "brand",
+        "brand-kit",
+        "icons",
+        "marks",
+        "paths",
+        "simple"
+      ],
+      "note": null,
+      "propCount": 7
+    },
+    {
+      "name": "pushpin-glyph",
+      "component": "PushpinGlyph",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/pushpin-glyph",
+      "source": "src/ui/pushpin-glyph.tsx",
+      "rules": null,
+      "exports": [
+        "PushPinFull",
+        "PushPinMicro",
+        "PushPinMini"
+      ],
+      "summary": null,
+      "ruleCount": 0,
+      "search": [
+        "pin",
+        "push",
+        "glyph",
+        "pushpin",
+        "full",
+        "micro",
+        "mini"
+      ],
+      "note": null,
+      "propCount": 1
+    },
+    {
+      "name": "radio-group",
+      "component": "RadioGroup",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/radio-group",
+      "source": "src/ui/radio-group.tsx",
+      "rules": null,
+      "exports": [
+        "RadioGroup",
+        "RadioGroupItem"
+      ],
+      "summary": "Radio group, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "group",
+        "radio",
+        "item"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "scroll-area",
+      "component": "ScrollArea",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/scroll-area",
+      "source": "src/ui/scroll-area.tsx",
+      "rules": null,
+      "exports": [
+        "SCROLL_HOST_CLASS",
+        "ScrollArea",
+        "ScrollAreaBody",
+        "ScrollBar"
+      ],
+      "summary": "Scroll area, on CORE 14. This file carries THE SCROLLBAR LAW (wiki 02): \"the thumb appears on hover or while scrolling and fades after; the track is invisible (no gutter, no rail container, no permanent bar)\". Every scrolling region in t...",
+      "ruleCount": 0,
+      "search": [
+        "scroll",
+        "area",
+        "bar",
+        "body",
+        "class",
+        "host",
+        "law",
+        "scrollbar",
+        "scrolling",
+        "after",
+        "app",
+        "appears"
+      ],
+      "note": null,
+      "propCount": 6
+    },
+    {
+      "name": "scroll-fade-container",
+      "component": "ScrollFadeContainer",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/scroll-fade-container",
+      "source": "src/ui/scroll-fade-container.tsx",
+      "rules": null,
+      "exports": [
+        "ScrollFadeContainer"
+      ],
+      "summary": "Scroll fade container, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "container",
+        "fade",
+        "scroll"
+      ],
+      "note": null,
+      "propCount": 6
+    },
+    {
+      "name": "search-input",
+      "component": "SearchInput",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/search-input",
+      "source": "src/ui/search-input.tsx",
+      "rules": null,
+      "exports": [
+        "SearchInput"
+      ],
+      "summary": "Search input, on CORE 14. The one filter field.",
+      "ruleCount": 0,
+      "search": [
+        "input",
+        "search",
+        "field",
+        "filter"
+      ],
+      "note": null,
+      "propCount": 5
+    },
+    {
+      "name": "select",
+      "component": "Select",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/select",
+      "source": "src/ui/select.tsx",
+      "rules": null,
+      "exports": [
+        "Select",
+        "SelectContent",
+        "SelectGroup",
+        "SelectItem",
+        "SelectLabel",
+        "SelectSeparator",
+        "SelectTrigger",
+        "SelectValue"
+      ],
+      "summary": "Select, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "select",
+        "content",
+        "group",
+        "item",
+        "label",
+        "separator",
+        "trigger",
+        "value"
+      ],
+      "note": null,
+      "propCount": 6
+    },
+    {
+      "name": "separator",
+      "component": "Separator",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/separator",
+      "source": "src/ui/separator.tsx",
+      "rules": null,
+      "exports": [
+        "Separator"
+      ],
+      "summary": "Separator, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "separator"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "sheet",
+      "component": "Sheet",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/sheet",
+      "source": "src/ui/sheet.tsx",
+      "rules": null,
+      "exports": [
+        "Sheet",
+        "SheetClose",
+        "SheetContent",
+        "SheetDescription",
+        "SheetFooter",
+        "SheetHeader",
+        "SheetTitle",
+        "SheetTrigger"
+      ],
+      "summary": "Sheet — floating edge panel on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "sheet",
+        "close",
+        "content",
+        "description",
+        "footer",
+        "header",
+        "title",
+        "trigger",
+        "edge",
+        "floating",
+        "panel"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "shortcut",
+      "component": "Shortcut",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/shortcut",
+      "source": "src/ui/shortcut.tsx",
+      "rules": "agent/rules/ui__shortcut.md",
+      "exports": [
+        "Shortcut",
+        "parseShortcutString",
+        "shortcutAriaKeyshortcuts",
+        "shortcutKeyLabel"
+      ],
+      "summary": "Kbd is one key. Shortcut is the chord: a row of Kbd chips, never a string like ⌘K inside one chip.",
+      "ruleCount": 3,
+      "search": [
+        "shortcut",
+        "key",
+        "string",
+        "aria",
+        "chips",
+        "kbd",
+        "keyshortcuts",
+        "label",
+        "parse",
+        "chord",
+        "row",
+        "apple"
+      ],
+      "note": "Shortcut, the chord. Kbd is one key; this is two or more chips in a row.",
+      "propCount": 3
+    },
+    {
+      "name": "sidebar",
+      "component": "Sidebar",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/sidebar",
+      "source": "src/ui/sidebar.tsx",
+      "rules": null,
+      "exports": [
+        "Sidebar",
+        "SidebarContent",
+        "SidebarFooter",
+        "SidebarGroup",
+        "SidebarGroupAction",
+        "SidebarGroupContent",
+        "SidebarGroupLabel",
+        "SidebarHeader",
+        "SidebarInput",
+        "SidebarInset",
+        "SidebarMenu",
+        "SidebarMenuAction",
+        "SidebarMenuBadge",
+        "SidebarMenuButton",
+        "SidebarMenuItem",
+        "SidebarMenuSkeleton",
+        "SidebarMenuSub",
+        "SidebarMenuSubButton",
+        "SidebarMenuSubItem",
+        "SidebarProvider",
+        "SidebarRail",
+        "SidebarSeparator",
+        "SidebarTrigger",
+        "useSidebar"
+      ],
+      "summary": "Sidebar, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "sidebar",
+        "menu",
+        "group",
+        "sub",
+        "action",
+        "button",
+        "content",
+        "item",
+        "badge",
+        "footer",
+        "header",
+        "input"
+      ],
+      "note": null,
+      "propCount": 7
+    },
+    {
+      "name": "skeleton",
+      "component": "Skeleton",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/skeleton",
+      "source": "src/ui/skeleton.tsx",
+      "rules": null,
+      "exports": [
+        "Skeleton"
+      ],
+      "summary": "Skeleton, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "skeleton"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "slider",
+      "component": "Slider",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/slider",
+      "source": "src/ui/slider.tsx",
+      "rules": null,
+      "exports": [
+        "Slider",
+        "sliderControlVariants"
+      ],
+      "summary": "Slider, on CORE 14. The fluid-functionalism item (ANALYSIS.md row 40) re-expressed on Base UI, because we shipped no slider at all and the consumers are already named: churn-risk thresholds, LinkedIn daily send caps and working-hour wind...",
+      "ruleCount": 0,
+      "search": [
+        "slider",
+        "control",
+        "variants",
+        "already",
+        "analysis",
+        "base",
+        "because",
+        "caps",
+        "chart",
+        "churn-risk",
+        "consumers",
+        "daily"
+      ],
+      "note": null,
+      "propCount": 11
+    },
+    {
+      "name": "sonner",
+      "component": "Sonner",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/sonner",
+      "source": "src/ui/sonner.tsx",
+      "rules": null,
+      "exports": [
+        "Toaster"
+      ],
+      "summary": "Toaster, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "sonner",
+        "toaster"
+      ],
+      "note": null,
+      "propCount": 4
+    },
+    {
+      "name": "spinner-glyph",
+      "component": "SpinnerGlyph",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/spinner-glyph",
+      "source": "src/ui/spinner-glyph.tsx",
+      "rules": null,
+      "exports": [
+        "SpinnerFull",
+        "SpinnerMicro",
+        "SpinnerMini"
+      ],
+      "summary": "The Spinner glyph: the one indeterminate loading mark.",
+      "ruleCount": 0,
+      "search": [
+        "spinner",
+        "glyph",
+        "full",
+        "micro",
+        "mini",
+        "indeterminate",
+        "loading",
+        "mark"
+      ],
+      "note": null,
+      "propCount": 2
+    },
+    {
+      "name": "spinner",
+      "component": "Spinner",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/spinner",
+      "source": "src/ui/spinner.tsx",
+      "rules": null,
+      "exports": [
+        "Spinner",
+        "StatusLabel"
+      ],
+      "summary": "Spinner, on CORE 14. The one loading glyph in the product.",
+      "ruleCount": 0,
+      "search": [
+        "spinner",
+        "label",
+        "status",
+        "glyph",
+        "loading",
+        "product"
+      ],
+      "note": null,
+      "propCount": 6
+    },
+    {
+      "name": "switch",
+      "component": "Switch",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/switch",
+      "source": "src/ui/switch.tsx",
+      "rules": null,
+      "exports": [
+        "Switch"
+      ],
+      "summary": "Switch, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "switch"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "table",
+      "component": "Table",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/table",
+      "source": "src/ui/table.tsx",
+      "rules": null,
+      "exports": [
+        "Table",
+        "TableBody",
+        "TableCaption",
+        "TableCell",
+        "TableFooter",
+        "TableHead",
+        "TableHeader",
+        "TableRow"
+      ],
+      "summary": "Table, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "table",
+        "body",
+        "caption",
+        "cell",
+        "footer",
+        "head",
+        "header",
+        "row"
+      ],
+      "note": null,
+      "propCount": 2
+    },
+    {
+      "name": "tabs",
+      "component": "Tabs",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/tabs",
+      "source": "src/ui/tabs.tsx",
+      "rules": null,
+      "exports": [
+        "Tabs",
+        "TabsContent",
+        "TabsList",
+        "TabsTrigger",
+        "tabsListVariants"
+      ],
+      "summary": "Tabs, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "tabs",
+        "list",
+        "content",
+        "trigger",
+        "variants"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "textarea",
+      "component": "Textarea",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/textarea",
+      "source": "src/ui/textarea.tsx",
+      "rules": null,
+      "exports": [
+        "Textarea"
+      ],
+      "summary": "Textarea, on CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "textarea"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "timeline",
+      "component": "Timeline",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/timeline",
+      "source": "src/ui/timeline.tsx",
+      "rules": null,
+      "exports": [
+        "Timeline",
+        "TimelineContent",
+        "TimelineDate",
+        "TimelineHeader",
+        "TimelineIndicator",
+        "TimelineItem",
+        "TimelineSeparator",
+        "TimelineTitle"
+      ],
+      "summary": "Timeline, retokenized from ReUI's Base UI timeline (https://reui.io/docs/components/base/timeline, registry `timeline`).",
+      "ruleCount": 0,
+      "search": [
+        "timeline",
+        "base",
+        "content",
+        "date",
+        "header",
+        "indicator",
+        "item",
+        "reui",
+        "separator",
+        "title",
+        "docs",
+        "https"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "toggle-group",
+      "component": "ToggleGroup",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/toggle-group",
+      "source": "src/ui/toggle-group.tsx",
+      "rules": null,
+      "exports": [
+        "ToggleGroup",
+        "ToggleGroupItem"
+      ],
+      "summary": "Toggle group, on CORE 14. This is the segmented control base.",
+      "ruleCount": 0,
+      "search": [
+        "group",
+        "toggle",
+        "item",
+        "base",
+        "control",
+        "segmented"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "tooltip",
+      "component": "Tooltip",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/ui/tooltip",
+      "source": "src/ui/tooltip.tsx",
+      "rules": null,
+      "exports": [
+        "Tooltip",
+        "TooltipContent",
+        "TooltipProvider",
+        "TooltipTrigger"
+      ],
+      "summary": "Tooltip, retokenized onto CORE 14.",
+      "ruleCount": 0,
+      "search": [
+        "tooltip",
+        "content",
+        "provider",
+        "trigger"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "agent-thread-rail",
+      "component": "AgentThreadRail",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/agent-thread-rail",
+      "source": "src/patterns/agent-thread-rail.tsx",
+      "rules": "agent/rules/patterns__agent-thread-rail.md",
+      "exports": [
+        "AgentThreadMenu",
+        "AgentThreadRail"
+      ],
+      "summary": "In focus mode this rail replaces the navigation rail — it is not a third sidebar. Width follows AppShell's rail (246–400px, default 246).",
+      "ruleCount": 15,
+      "search": [
+        "thread",
+        "agent",
+        "rail",
+        "menu",
+        "chrome",
+        "list",
+        "new",
+        "sidebarnav",
+        "button",
+        "feature",
+        "searchinput",
+        "standalone"
+      ],
+      "note": "Focus-mode rail (CORE 05/12): agent feature destinations (SidebarNav), then list chrome (optional SearchInput + one Display menu), then collapsible grouped threads. Thread management via DropdownMenu — no private chrome, no Status/Project tabs, no standalone New thread button.",
+      "propCount": 24
+    },
+    {
+      "name": "agent-thread",
+      "component": "AgentThread",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/agent-thread",
+      "source": "src/patterns/agent-thread.tsx",
+      "rules": "agent/rules/patterns__agent-thread.md",
+      "exports": [
+        "AgentInterpretation",
+        "AgentThread",
+        "AgentThreadDivider",
+        "AgentTurn",
+        "TurnCopyButton",
+        "UserTurn",
+        "UserTurnCopy"
+      ],
+      "summary": "The thread measure is 704px — a documented contentWidth exception, not a fifth rung (`APP_SHELL_RULES`). Centre it in the work pane. The number lives in one place, `--gtm-container-thread`, reached as `max-w-(--container-thread)`: an exc...",
+      "ruleCount": 7,
+      "search": [
+        "agent",
+        "turn",
+        "thread",
+        "user",
+        "copy",
+        "interpretation",
+        "button",
+        "divider",
+        "exception",
+        "radius",
+        "block",
+        "content"
+      ],
+      "note": "CORE 05/12 conversation column: 704px measure (documented exception), user right-aligned, agent content full-width, interpretation block with speech-tail radius, centred day dividers.",
+      "propCount": 16
+    },
+    {
+      "name": "app-rail-preview",
+      "component": "AppRailPreview",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/app-rail-preview",
+      "source": "src/patterns/app-rail-preview.tsx",
+      "rules": "agent/rules/patterns__app-rail-preview.md",
+      "exports": [
+        "AppRailPreview",
+        "PREVIEW_ITEM_LIMIT"
+      ],
+      "summary": "Collapsed destination icons open one contextual HoverCard to the right after hover or focus intent. Expanded rows already carry their labels and do not duplicate the card.",
+      "ruleCount": 4,
+      "search": [
+        "preview",
+        "rail",
+        "app",
+        "destination",
+        "collapsed",
+        "icon",
+        "item",
+        "limit",
+        "product",
+        "bounded",
+        "document",
+        "hovercard"
+      ],
+      "note": "The collapsed product rail keeps destination recognition in the icon and restores context in one right-side HoverCard. The preview is a bounded summary of an existing server document, never a second product page.",
+      "propCount": 8
+    },
+    {
+      "name": "app-shell",
+      "component": "AppShell",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/app-shell",
+      "source": "src/patterns/app-shell.tsx",
+      "rules": "agent/rules/patterns__app-shell.md",
+      "exports": [
+        "AppShell"
+      ],
+      "summary": "The header is earned, not permanent. The sidebar already says where you are, so chrome above the content has to justify itself on every route rather than being inherited from the layout.",
+      "ruleCount": 23,
+      "search": [
+        "shell",
+        "app",
+        "header",
+        "array",
+        "below",
+        "beside",
+        "builder",
+        "chrome",
+        "comment",
+        "design",
+        "flat",
+        "gallery"
+      ],
+      "note": "The rules themselves are `APP_SHELL_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the shell a builder reads in the gallery and the shell this file mounts are the same strings.",
+      "propCount": 19
+    },
+    {
+      "name": "capacity-metric",
+      "component": "CapacityMetric",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/capacity-metric",
+      "source": "src/patterns/capacity-metric.tsx",
+      "rules": "agent/rules/patterns__capacity-metric.md",
+      "exports": [
+        "CapacityMeter",
+        "CapacityMetric",
+        "CapacityMetricGrid",
+        "getCapacityTone"
+      ],
+      "summary": "Capacity is a remaining allowance, not usage completed. The dominant number says what is left and the meter fills in the same direction.",
+      "ruleCount": 6,
+      "search": [
+        "capacity",
+        "metric",
+        "meter",
+        "get",
+        "grid",
+        "tone",
+        "number",
+        "allowance",
+        "available",
+        "border",
+        "business",
+        "caller"
+      ],
+      "note": null,
+      "propCount": 15
+    },
+    {
+      "name": "change-feed",
+      "component": "ChangeFeed",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/change-feed",
+      "source": "src/patterns/change-feed.tsx",
+      "rules": "agent/rules/patterns__change-feed.md",
+      "exports": [
+        "ChangeFeed",
+        "DEFAULT_COLLAPSED_COUNT",
+        "ListContinuation",
+        "ListViewport",
+        "clipList"
+      ],
+      "summary": "ChangeFeed is the quieter Home band under the DecisionRow queue. It is observational — no Approve CTA, no action lane. Home is a router, so a row that can name a destination opens that surface on the whole row, the same verb Coming up uses.",
+      "ruleCount": 8,
+      "search": [
+        "feed",
+        "list",
+        "change",
+        "clip",
+        "collapsed",
+        "continuation",
+        "count",
+        "default",
+        "home",
+        "viewport",
+        "action",
+        "band"
+      ],
+      "note": "Home quieter band (CORE 01/13). Flat hairline rows — observational, no action lane, no Frame card. Containment ledger: the decision queue is a panel; this feed is a window onto something continuous.",
+      "propCount": 6
+    },
+    {
+      "name": "choice-cards",
+      "component": "ChoiceCards",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/choice-cards",
+      "source": "src/patterns/choice-cards.tsx",
+      "rules": "agent/rules/patterns__choice-cards.md",
+      "exports": [
+        "ChoiceCards"
+      ],
+      "summary": "A fork is cards, not a radio list and not two forms stacked. Each card names the path and what it opens.",
+      "ruleCount": 4,
+      "search": [
+        "cards",
+        "choice",
+        "card",
+        "opens",
+        "fork",
+        "forms",
+        "chosen",
+        "exists",
+        "failure",
+        "path",
+        "prevent",
+        "radio"
+      ],
+      "note": "A fork is a set of cards. The chosen card opens one section. Two forms in one view is the failure this pattern exists to prevent.",
+      "propCount": 6
+    },
+    {
+      "name": "coming-up-calendar",
+      "component": "ComingUpCalendar",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/coming-up-calendar",
+      "source": "src/patterns/coming-up-calendar.tsx",
+      "rules": "agent/rules/patterns__coming-up-calendar.md",
+      "exports": [
+        "ComingUpCalendar",
+        "ComingUpModeToggle"
+      ],
+      "summary": "List is the default Coming up view. List / Calendar is a compact icon switch in the section header, replacing the meeting count. 3 days, week, and month are the same compact icon switch, calendar-only. There is no drag, create, recurrenc...",
+      "ruleCount": 5,
+      "search": [
+        "calendar",
+        "coming",
+        "list",
+        "switch",
+        "compact",
+        "icon",
+        "event",
+        "meeting",
+        "mode",
+        "reui",
+        "toggle",
+        "calendar-only"
+      ],
+      "note": "Home's Coming up band. List is the default. List / Calendar is a compact icon switch in the section header, in the slot Paper used for the meeting count. 3 days / week / month use the same compact icon switch, calendar-only. Inspired by ReUI Event Calendar 1's range switch and Event Calendar 6's hover detail, drawn in CORE tokens. Not the ReUI engine: no drag, no create, no recurrence, no resource columns.",
+      "propCount": 5
+    },
+    {
+      "name": "confirmable-action",
+      "component": "ConfirmableAction",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/confirmable-action",
+      "source": "src/patterns/confirmable-action.tsx",
+      "rules": "agent/rules/patterns__confirmable-action.md",
+      "exports": [
+        "ConfirmableAction"
+      ],
+      "summary": "Required, not optional, for any action that permanently destroys something or sends on a rep's behalf: deleting a campaign, wiping account memory, releasing a queued send, revoking a rep's Gmail grant. If undo is impossible, the flow is...",
+      "ruleCount": 10,
+      "search": [
+        "action",
+        "confirmable",
+        "decision",
+        "button",
+        "array",
+        "below",
+        "beside",
+        "builder",
+        "change",
+        "comment",
+        "design",
+        "dialog"
+      ],
+      "note": "The rules themselves are `CONFIRMABLE_ACTION_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the decision a builder reads in the gallery and the decision this file enforces are the same strings, and there is exactly one place to change either.",
+      "propCount": 1
+    },
+    {
+      "name": "conversation-row",
+      "component": "ConversationRow",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/conversation-row",
+      "source": "src/patterns/conversation-row.tsx",
+      "rules": "agent/rules/patterns__conversation-row.md",
+      "exports": [
+        "CONVERSATION_STATUS_LABEL",
+        "ConversationRow",
+        "ConversationStatusBadge"
+      ],
+      "summary": "An inbox row is not a QueueRow. It is a conversation rung with a 32px mark lane, contact over account, and a trailing column of meta over the status chip — never meta inside the identity and badge floating mid-row.",
+      "ruleCount": 6,
+      "search": [
+        "conversation",
+        "row",
+        "status",
+        "badge",
+        "account",
+        "line",
+        "mark",
+        "contact",
+        "label",
+        "lane",
+        "over",
+        "trailing"
+      ],
+      "note": "Inbox agent-held conversation — carved out of QueueRow. Geometry: 32px mark lane, two-line identity (contact over account), trailing meta-over-badge column. Unread = weight + a corner badge on the ProviderMark (never a left gutter, never colour alone). The row is click-to-open. There is no overflow menu and no hover-revealed action.",
+      "propCount": 10
+    },
+    {
+      "name": "data-scope-select",
+      "component": "DataScopeSelect",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/data-scope-select",
+      "source": "src/patterns/data-scope-select.tsx",
+      "rules": null,
+      "exports": [
+        "DataScopeSelect"
+      ],
+      "summary": null,
+      "ruleCount": 0,
+      "search": [
+        "data",
+        "scope",
+        "select"
+      ],
+      "note": null,
+      "propCount": 4
+    },
+    {
+      "name": "decision-row",
+      "component": "DecisionRow",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/decision-row",
+      "source": "src/patterns/decision-row.tsx",
+      "rules": "agent/rules/patterns__decision-row.md",
+      "exports": [
+        "DecisionList",
+        "DecisionRow"
+      ],
+      "summary": "Home is a router. The row's only verb is Open — never Approve, Send, or Snooze on the Home queue (platform decision 1.2). Owning surfaces hold the decision UX.",
+      "ruleCount": 6,
+      "search": [
+        "decision",
+        "row",
+        "action",
+        "home",
+        "lane",
+        "list",
+        "conversation",
+        "mark",
+        "open",
+        "queue",
+        "rung",
+        "source"
+      ],
+      "note": "Home ranked queue item — 48px conversation rung with source mark + rank reason. Decision 1.2: the row's only verb is Open. No action lane. CopyGrammar: Object → State → Evidence → Action → Receipt.",
+      "propCount": 12
+    },
+    {
+      "name": "diff-row",
+      "component": "DiffRow",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/diff-row",
+      "source": "src/patterns/diff-row.tsx",
+      "rules": "agent/rules/patterns__diff-row.md",
+      "exports": [
+        "ChangeSet",
+        "ChangeSetSection",
+        "DiffRow"
+      ],
+      "summary": "DiffRow shows one field mutation: caps label · before → after. The default is chips (muted line-through before, ink after). `layout=\"block\"` is the same evidence for multiline markdown: stacked pre-wrapped mono blocks, never a second sid...",
+      "ruleCount": 5,
+      "search": [
+        "diff",
+        "row",
+        "change",
+        "before",
+        "after",
+        "changeset",
+        "chip",
+        "receipt",
+        "section",
+        "compared",
+        "completed",
+        "consumers"
+      ],
+      "note": "Structured before→after evidence for its two consumers: a play version compared to live (VersionedEditor's diff slot) and a proposed or completed write (Receipt). ChangeSet is one quiet subcard; sections group related fields; DiffRow is one mutation as label + before chip → after chip. No Frame-in-Frame, no action lane, no sparklines.",
+      "propCount": 11
+    },
+    {
+      "name": "empty-state",
+      "component": "EmptyState",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/empty-state",
+      "source": "src/patterns/empty-state.tsx",
+      "rules": "agent/rules/patterns__empty-state.md",
+      "exports": [
+        "EmptyState"
+      ],
+      "summary": "Compose `ui/empty` (Header → Media → Title → Description, optional Content). Never a bare centred `<p>` pretending to be an empty surface. Reference: ReUI `c-empty-*` under `web/reference/reui/empty/`.",
+      "ruleCount": 6,
+      "search": [
+        "empty",
+        "state",
+        "reui",
+        "reference",
+        "ambient",
+        "content",
+        "continuous",
+        "decoration",
+        "media",
+        "motion",
+        "orb",
+        "settled"
+      ],
+      "note": "Zero-data surfaces get a quiet visual centre, not a lonely caption and not ambient motion. Composition follows the shadcn / ReUI Empty family (`ui/empty` — see `web/reference/reui/empty/` for pulled examples). Empty is settled: never Orb, never Spinner, never continuous decoration.",
+      "propCount": 6
+    },
+    {
+      "name": "filterable-table",
+      "component": "FilterableTable",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/filterable-table",
+      "source": "src/patterns/filterable-table.tsx",
+      "rules": "agent/rules/patterns__filterable-table.md",
+      "exports": [
+        "ExpandedRow",
+        "FilterableTable",
+        "FilterableTableGroupControl",
+        "FilterableTableGroupRow",
+        "FilterableTableGroupTag",
+        "filterableTableSplitFrame"
+      ],
+      "summary": "A catalog may offer Table and Gallery as two layouts of this same dataset. The surface supplies card content and URL-backed view state; this pattern keeps search, filters, grouping, and paging mounted. Gallery hides Columns, uses one lin...",
+      "ruleCount": 25,
+      "search": [
+        "table",
+        "filterable",
+        "group",
+        "row",
+        "composition",
+        "expanded",
+        "control",
+        "frame",
+        "gallery",
+        "split",
+        "tag",
+        "below"
+      ],
+      "note": "The rules themselves are `FILTERABLE_TABLE_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the composition a builder reads in the gallery and the composition this file assembles are the same strings.",
+      "propCount": 31
+    },
+    {
+      "name": "form-field",
+      "component": "FormField",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/form-field",
+      "source": "src/patterns/form-field.tsx",
+      "rules": "agent/rules/patterns__form-field.md",
+      "exports": [
+        "FormField",
+        "FormSection",
+        "FormStack",
+        "SECTION_STACK_GAP"
+      ],
+      "summary": "This is the explicit submit family: creation flows, invite flows, wizard steps. Nothing has happened until the user presses the button. If the surface is configuration, a set of independent switches a user comes back to and adjusts, it i...",
+      "ruleCount": 12,
+      "search": [
+        "form",
+        "field",
+        "section",
+        "stack",
+        "anatomy",
+        "gap",
+        "message",
+        "renders",
+        "user",
+        "wrong",
+        "array",
+        "because"
+      ],
+      "note": "The rules themselves are `FORM_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the anatomy a builder reads in the gallery and the anatomy this file imposes are the same strings.",
+      "propCount": 10
+    },
+    {
+      "name": "input-request",
+      "component": "InputRequest",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/input-request",
+      "source": "src/patterns/input-request.tsx",
+      "rules": "agent/rules/patterns__input-request.md",
+      "exports": [
+        "InputQuestionField",
+        "InputRequestComposer",
+        "InputRequestPausedRow",
+        "InputRequestReceipt",
+        "InputRequestSectionFields",
+        "InputRequestSubmission",
+        "formatInputRequestAnswer",
+        "hasInputRequestErrors",
+        "resolveInputRequestPresentation",
+        "validateInputRequestSection"
+      ],
+      "summary": "Use InputRequest only to collect missing information. ApprovalArtifact remains the boundary for a consequential send or write.",
+      "ruleCount": 14,
+      "search": [
+        "input",
+        "request",
+        "section",
+        "presentation",
+        "question",
+        "composer",
+        "answer",
+        "errors",
+        "field",
+        "fields",
+        "format",
+        "paused"
+      ],
+      "note": "The Agent supplies a bounded semantic request. The host owns identity, lifecycle and presentation selection. Surface adapters own pixels.",
+      "propCount": 25
+    },
+    {
+      "name": "metric-card",
+      "component": "MetricCard",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/metric-card",
+      "source": "src/patterns/metric-card.tsx",
+      "rules": "agent/rules/patterns__metric-card.md",
+      "exports": [
+        "MetricCard",
+        "MetricCardGrid"
+      ],
+      "summary": "Dashboard headline metrics are cards with an icon, a clear title, one dominant value, and one context line. Dense record metadata remains a StatReadout row or cell.",
+      "ruleCount": 12,
+      "search": [
+        "card",
+        "metric",
+        "grid",
+        "three",
+        "trigger",
+        "icon",
+        "title",
+        "accessibility",
+        "amount",
+        "ancestor",
+        "assistive",
+        "button"
+      ],
+      "note": "The drill trigger covers the card and is a sibling of the info button rather than its ancestor. A role on the panel would read as one control to assistive technology and take the provenance trigger out of the accessibility tree with it, which no amount of event handling repairs.",
+      "propCount": 14
+    },
+    {
+      "name": "onboarding-dialog",
+      "component": "OnboardingDialog",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/onboarding-dialog",
+      "source": "src/patterns/onboarding-dialog.tsx",
+      "rules": "agent/rules/patterns__onboarding-dialog.md",
+      "exports": [
+        "OnboardingDialog"
+      ],
+      "summary": "OnboardingDialog teaches a surface. WizardDialog remains the create flow. Do not put fields in this dialog.",
+      "ruleCount": 10,
+      "search": [
+        "dialog",
+        "onboarding",
+        "array",
+        "below",
+        "beside",
+        "comment",
+        "design",
+        "live",
+        "renders",
+        "verbatim",
+        "visual",
+        "caller"
+      ],
+      "note": "The rules themselves are `ONBOARDING_DIALOG_RULES` below, not this comment. /design renders that array verbatim beside the live pattern.",
+      "propCount": 9
+    },
+    {
+      "name": "overflow-tabs",
+      "component": "OverflowTabs",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/overflow-tabs",
+      "source": "src/patterns/overflow-tabs.tsx",
+      "rules": "agent/rules/patterns__overflow-tabs.md",
+      "exports": [
+        "OverflowTabs",
+        "splitOverflowTabs"
+      ],
+      "summary": "Fit tabs that fit; park the rest under Other + Popover. Never a horizontal ScrollArea on a tab strip — especially not inside a narrow list sidebar.",
+      "ruleCount": 9,
+      "search": [
+        "tabs",
+        "overflow",
+        "popover",
+        "tab",
+        "fit",
+        "split",
+        "horizontal",
+        "list",
+        "narrow",
+        "park",
+        "rest",
+        "scrollarea"
+      ],
+      "note": "Narrow rails (Inbox list sidebar at 384 / 320) cannot afford a horizontal ScrollArea on a status tab strip — a track + gutter in the one pane that least can spend width. The established pattern (ServiceNow Horizon, Nuxt UI collapse, CSS-Tricks adapting tabs) is: fit what you can, park the rest under Other + Popover. Never wrap TabsList in overflow-x scroll.",
+      "propCount": 9
+    },
+    {
+      "name": "page-band",
+      "component": "PageBand",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/page-band",
+      "source": "src/patterns/page-band.tsx",
+      "rules": "agent/rules/patterns__page-band.md",
+      "exports": [
+        "PageBand"
+      ],
+      "summary": "Chrome may only assert what the content cannot: where you are (the sidebar), how deep you are (a lineage band), what you can do (the page toolbar). Zero, one, or one. Never two.",
+      "ruleCount": 8,
+      "search": [
+        "band",
+        "page",
+        "array",
+        "below",
+        "beside",
+        "builder",
+        "comment",
+        "content",
+        "design",
+        "draws",
+        "gallery",
+        "live"
+      ],
+      "note": "The rules themselves are `PAGE_BAND_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the band a builder reads in the gallery and the band this file draws are the same strings.",
+      "propCount": 8
+    },
+    {
+      "name": "page-frame",
+      "component": "PageFrame",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/page-frame",
+      "source": "src/patterns/page-frame.tsx",
+      "rules": "agent/rules/patterns__page-frame.md",
+      "exports": [
+        "PAGE_STACK_CLASS",
+        "PageFrame",
+        "PageSection"
+      ],
+      "summary": "A page is one readable column, 768px wide, centred in whatever the shell gives it. That is `max-w-3xl` off the stock scale, chosen because it is the widest step where a label and description on the left and their control on the right sti...",
+      "ruleCount": 9,
+      "search": [
+        "page",
+        "frame",
+        "class",
+        "section",
+        "stack",
+        "shape",
+        "shell",
+        "width",
+        "column",
+        "different",
+        "law",
+        "live"
+      ],
+      "note": "The rules themselves are `PAGE_FRAME_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the shape a builder reads in the gallery and the shape this file imposes are the same strings.",
+      "propCount": 18
+    },
+    {
+      "name": "page-masthead",
+      "component": "PageMasthead",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/page-masthead",
+      "source": "src/patterns/page-masthead.tsx",
+      "rules": "agent/rules/patterns__page-masthead.md",
+      "exports": [
+        "PageMasthead"
+      ],
+      "summary": "A masthead is content, not chrome. It states what today is and what is in it; PageBand states where you are and what you can do. That is why Home mounts a masthead and no band, and why a surface that already carries a lineage band does n...",
+      "ruleCount": 10,
+      "search": [
+        "masthead",
+        "page",
+        "band",
+        "count",
+        "row",
+        "chrome",
+        "control",
+        "lane",
+        "may",
+        "reading",
+        "surface",
+        "title"
+      ],
+      "note": "The rules themselves are `PAGE_MASTHEAD_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern.",
+      "propCount": 4
+    },
+    {
+      "name": "posture-control",
+      "component": "PostureControl",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/posture-control",
+      "source": "src/patterns/posture-control.tsx",
+      "rules": "agent/rules/patterns__posture-control.md",
+      "exports": [
+        "PostureControl"
+      ],
+      "summary": "The sanctioned agent toggle is this segmented Tabs control in the sidebar. A floating duplicate in a global header is forbidden (`APP_SHELL_RULES`).",
+      "ruleCount": 6,
+      "search": [
+        "control",
+        "posture",
+        "agent",
+        "segmented",
+        "home",
+        "tabs",
+        "primitive",
+        "board",
+        "decision",
+        "family",
+        "implemented",
+        "shell"
+      ],
+      "note": "Segmented Home / Agent switch — every Core 5 surface board. Decision: `surface-decisions-2026-08-10.md` §2. Implemented with the Tabs primitive (same segmented family as ToggleGroup). ⌘J still toggles Agent.",
+      "propCount": 5
+    },
+    {
+      "name": "provider-action",
+      "component": "ProviderAction",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/provider-action",
+      "source": "src/patterns/provider-action.tsx",
+      "rules": "agent/rules/patterns__provider-action.md",
+      "exports": [
+        "ProviderAction"
+      ],
+      "summary": "A provider hop is a compact outline control with the shipped ProviderLogo and a verb. Do not draw a second local Salesforce or LinkedIn button.",
+      "ruleCount": 3,
+      "search": [
+        "provider",
+        "action",
+        "hop",
+        "browser",
+        "compact",
+        "control",
+        "href",
+        "https",
+        "local",
+        "outline",
+        "server",
+        "url"
+      ],
+      "note": "An outbound provider hop is a compact outline control with that provider's logo and a verb. Alerts, Accounts peeks, and Inbox use this instead of a second button-plus-icon local. The href is a server https URL. The browser never invents one from an id.",
+      "propCount": 3
+    },
+    {
+      "name": "provider-mark",
+      "component": "ProviderMark",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/provider-mark",
+      "source": "src/patterns/provider-mark.tsx",
+      "rules": "agent/rules/patterns__provider-mark.md",
+      "exports": [
+        "ProviderMark"
+      ],
+      "summary": "Provider identity is a real brand mark in an IconWell, not an initial tile and not a bare SVG. Inbox rows, tool activity, receipts, and thread-rail HoverCard previews name the channel with this module. The thread-rail row itself does not...",
+      "ruleCount": 4,
+      "search": [
+        "mark",
+        "provider",
+        "brand",
+        "logo",
+        "iconwell",
+        "mono",
+        "bare",
+        "colour",
+        "inside",
+        "module",
+        "native",
+        "sanctioned"
+      ],
+      "note": "The rules themselves are `PROVIDER_MARK_RULES` below, not this comment. Second sanctioned brand module beside `ui/logo.tsx`. Always native brand colour inside `IconWell` — never mono, never a bare logo (`surface-decisions` §5, updated 2026-08-10).",
+      "propCount": 4
+    },
+    {
+      "name": "queue-row",
+      "component": "QueueRow",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/queue-row",
+      "source": "src/patterns/queue-row.tsx",
+      "rules": "agent/rules/patterns__queue-row.md",
+      "exports": [
+        "QueueList",
+        "QueueRow"
+      ],
+      "summary": "Lanes are fixed-width so the columns line up down the queue: 16px checkbox, 10px state dot, the flexible identity, 110px badge, 100px meta, 28px action. A lane that sizes itself to its contents makes every row a different shape, and a re...",
+      "ruleCount": 11,
+      "search": [
+        "row",
+        "queue",
+        "list",
+        "action",
+        "array",
+        "below",
+        "beside",
+        "builder",
+        "button",
+        "columns",
+        "comment",
+        "design"
+      ],
+      "note": "The rules themselves are `QUEUE_ROW_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the row a builder reads in the gallery and the row this file draws are the same strings.",
+      "propCount": 17
+    },
+    {
+      "name": "receipt",
+      "component": "Receipt",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/receipt",
+      "source": "src/patterns/receipt.tsx",
+      "rules": "agent/rules/patterns__receipt.md",
+      "exports": [
+        "Receipt"
+      ],
+      "summary": "Receipt is the terminal step of CopyGrammar: Object → State → Evidence → Action → Receipt. Render inline under the action and keep it inspectable.",
+      "ruleCount": 7,
+      "search": [
+        "receipt",
+        "figure",
+        "optional",
+        "changeset",
+        "chrome",
+        "family",
+        "panel",
+        "approvalartifact",
+        "body",
+        "copygrammar",
+        "evidence",
+        "frame"
+      ],
+      "note": "Artifact-tier confirmation after a decision (CopyGrammar terminal). Stacked Frame like ApprovalArtifact: chrome header → optional figure → body (ChangeSet). An optional 24px mark names the result family without adding another row. Title leads; figure is label-scale mono only here. Diff evidence is a quiet ChangeSet subcard — never Frame-in-Frame.",
+      "propCount": 10
+    },
+    {
+      "name": "record-header",
+      "component": "RecordHeader",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/record-header",
+      "source": "src/patterns/record-header.tsx",
+      "rules": "agent/rules/patterns__record-header.md",
+      "exports": [
+        "RecordFact",
+        "RecordHeader",
+        "RecordHop",
+        "RecordInlineEdit"
+      ],
+      "summary": "RecordHeader is object identity inside the work pane — title, status, and quiet meta. It is not a PageBand and must not host a second band of filters.",
+      "ruleCount": 10,
+      "search": [
+        "record",
+        "header",
+        "hop",
+        "fact",
+        "title",
+        "edit",
+        "identity",
+        "inline",
+        "status",
+        "meta",
+        "object",
+        "pageband"
+      ],
+      "note": "Shared Accounts + Campaigns object chrome (CORE 03/04): identity, status, quiet meta — not a second PageBand. Title leads; supporting lines sit on a real gap, not gap-none + mt hacks.",
+      "propCount": 23
+    },
+    {
+      "name": "review-band",
+      "component": "ReviewBand",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/review-band",
+      "source": "src/patterns/review-band.tsx",
+      "rules": "agent/rules/patterns__review-band.md",
+      "exports": [
+        "ReviewBand"
+      ],
+      "summary": "A review band presents one object to act on. It is not a list row, not a New-this-week card, and not a contained PageSection. Suggested play is a titled flat section; this band is the object inside it (`PAGE_SECTION_RULES`).",
+      "ruleCount": 6,
+      "search": [
+        "band",
+        "review",
+        "stack",
+        "gap",
+        "actions",
+        "array",
+        "below",
+        "beside",
+        "comment",
+        "design",
+        "inside",
+        "live"
+      ],
+      "note": "The rules themselves are `REVIEW_BAND_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern.",
+      "propCount": 10
+    },
+    {
+      "name": "schema-cell",
+      "component": "SchemaCell",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/schema-cell",
+      "source": "src/patterns/schema-cell.tsx",
+      "rules": "agent/rules/patterns__schema-cell.md",
+      "exports": [
+        "SchemaCellPreview",
+        "SchemaCount",
+        "SchemaDate",
+        "SchemaEnum",
+        "SchemaHeader",
+        "SchemaLink",
+        "SchemaMoney",
+        "SchemaSet",
+        "SchemaText",
+        "splitSchemaSet"
+      ],
+      "summary": "A cell has a schema type, and the type picks the chrome. Surfaces do not restyle the same field two ways.",
+      "ruleCount": 8,
+      "search": [
+        "schema",
+        "cell",
+        "enum",
+        "count",
+        "date",
+        "header",
+        "label",
+        "link",
+        "money",
+        "preview",
+        "split",
+        "text"
+      ],
+      "note": "The rules themselves are `SCHEMA_CELL_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern.",
+      "propCount": 0
+    },
+    {
+      "name": "setting-section",
+      "component": "SettingSection",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/setting-section",
+      "source": "src/patterns/setting-section.tsx",
+      "rules": "agent/rules/patterns__setting-section.md",
+      "exports": [
+        "SettingRow",
+        "SettingSection"
+      ],
+      "summary": "A row is one setting: a label, at most a one line description beneath it, and exactly ONE control opposite. Two controls in a lane are two settings that have not been split yet, and a description that needs a second line is a section, no...",
+      "ruleCount": 13,
+      "search": [
+        "setting",
+        "row",
+        "section",
+        "save",
+        "anatomy",
+        "settings",
+        "button",
+        "page",
+        "acknowledgement",
+        "array",
+        "because",
+        "below"
+      ],
+      "note": "The rules themselves are `SETTING_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the anatomy a builder reads in the gallery and the anatomy this file imposes are the same strings.",
+      "propCount": 12
+    },
+    {
+      "name": "sidebar-nav",
+      "component": "SidebarNav",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/sidebar-nav",
+      "source": "src/patterns/sidebar-nav.tsx",
+      "rules": "agent/rules/patterns__sidebar-nav.md",
+      "exports": [
+        "SidebarNav",
+        "SidebarNavChild",
+        "SidebarNavCluster",
+        "SidebarNavGroup",
+        "SidebarNavItem"
+      ],
+      "summary": "Selection is a fill, ink and weight. Never a border, never a shadow, never a left bar. A selected row is the same height in the same place with `bg-selected` behind it, at `text-ink` on the medium step, so the rail does not reflow and no...",
+      "ruleCount": 11,
+      "search": [
+        "nav",
+        "sidebar",
+        "child",
+        "cluster",
+        "group",
+        "item",
+        "radius",
+        "row",
+        "half",
+        "selected",
+        "array",
+        "below"
+      ],
+      "note": "The rules themselves are `SIDEBAR_NAV_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the nav a builder reads in the gallery and the nav this file draws are the same strings.",
+      "propCount": 27
+    },
+    {
+      "name": "sidebar-tree",
+      "component": "SidebarTree",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/sidebar-tree",
+      "source": "src/patterns/sidebar-tree.tsx",
+      "rules": null,
+      "exports": [
+        "SidebarTreeGroup",
+        "SidebarTreeRow"
+      ],
+      "summary": "Rules for sidebar trees, shared by the Agent rail and memory browser. Agent folder headings use their identity icon; sections use a trailing chevron. File directories use sentence-case rows, folder icons, a trailing disclosure chevron an...",
+      "ruleCount": 0,
+      "search": [
+        "sidebar",
+        "tree",
+        "agent",
+        "chevron",
+        "disclosure",
+        "folder",
+        "group",
+        "row",
+        "rows",
+        "rung",
+        "trailing",
+        "actions"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "site-mark",
+      "component": "SiteMark",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/site-mark",
+      "source": "src/patterns/site-mark.tsx",
+      "rules": null,
+      "exports": [
+        "SiteMark"
+      ],
+      "summary": "- A link to an external site wears that site's favicon at the data rung, and nothing else. No provider wordmark, no coloured chip, no letter avatar. - The mark degrades in one direction only: favicon, then the globe glyph. A broken image...",
+      "ruleCount": 0,
+      "search": [
+        "mark",
+        "site",
+        "bullet",
+        "data",
+        "favicon",
+        "avatar",
+        "because",
+        "broken",
+        "chip",
+        "coloured",
+        "degrades",
+        "direction"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "split-view",
+      "component": "SplitView",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/split-view",
+      "source": "src/patterns/split-view.tsx",
+      "rules": "agent/rules/patterns__split-view.md",
+      "exports": [
+        "LIST_COLLAPSED_WIDTH",
+        "LIST_SIDEBAR_CHROME_CLASS",
+        "LIST_WIDTH_DEFAULT",
+        "LIST_WIDTH_MAX",
+        "LIST_WIDTH_MIN",
+        "ListSidebarChrome",
+        "ListSidebarTitle",
+        "REFERENCE_WIDTH_MAX",
+        "REFERENCE_WIDTH_MIN",
+        "SplitView"
+      ],
+      "summary": "Panes have roles, not sides. One is the work pane, where the decision happens; the other is either the reference pane (facts the decision is made against) or the list pane (the triage sidebar that picks which decision is on screen). Nami...",
+      "ruleCount": 20,
+      "search": [
+        "list",
+        "width",
+        "split",
+        "sidebar",
+        "view",
+        "reference",
+        "chrome",
+        "max",
+        "min",
+        "title",
+        "decision",
+        "class"
+      ],
+      "note": "The rules themselves are `SPLIT_VIEW_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern, so the split a builder reads in the gallery and the split this file lays out are the same strings.",
+      "propCount": 32
+    },
+    {
+      "name": "stat-readout",
+      "component": "StatReadout",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/stat-readout",
+      "source": "src/patterns/stat-readout.tsx",
+      "rules": "agent/rules/patterns__stat-readout.md",
+      "exports": [
+        "StatReadout",
+        "StatReadoutGrid"
+      ],
+      "summary": "StatReadout is the dense number pattern for record chrome, metadata columns, and compact run summaries. Six settled boards put those values in a label/value pair at 28, 40, or 66px.",
+      "ruleCount": 12,
+      "search": [
+        "readout",
+        "stat",
+        "grid",
+        "value",
+        "array",
+        "below",
+        "beside",
+        "comment",
+        "design",
+        "identical",
+        "live",
+        "mono"
+      ],
+      "note": "The rules themselves are `STAT_READOUT_RULES` below, not this comment. `/design` renders that array verbatim beside the live pattern.",
+      "propCount": 9
+    },
+    {
+      "name": "state-notice",
+      "component": "StateNotice",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/state-notice",
+      "source": "src/patterns/state-notice.tsx",
+      "rules": "agent/rules/patterns__state-notice.md",
+      "exports": [
+        "StateNotice"
+      ],
+      "summary": "This is the one shape for a thing that did not happen: a send the door refused, a job that stopped, a connection that lapsed, an import that found nothing to do. Never invent a second one per surface.",
+      "ruleCount": 9,
+      "search": [
+        "notice",
+        "state",
+        "below",
+        "clearing",
+        "comment",
+        "did",
+        "user",
+        "acting",
+        "alone",
+        "apart",
+        "attention",
+        "bad"
+      ],
+      "note": "The rules themselves are `STATE_NOTICE_RULES` below, not this comment.",
+      "propCount": 5
+    },
+    {
+      "name": "table-filters",
+      "component": "TableFilters",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/table-filters",
+      "source": "src/patterns/table-filters.tsx",
+      "rules": "agent/rules/patterns__table-filters.md",
+      "exports": [
+        "RANGE_SEPARATOR",
+        "TableFilterPills",
+        "TableFilters",
+        "VALUES_SEPARATOR",
+        "appliedScopeTabs",
+        "countFilterValues",
+        "formatFilterValue",
+        "isFilterValueSet",
+        "joinRange",
+        "joinValues",
+        "splitRange",
+        "splitValues",
+        "toggleValue"
+      ],
+      "summary": "This popover writes request state. It never filters mounted rows. The table renders the page the server returned for the current values.",
+      "ruleCount": 7,
+      "search": [
+        "filters",
+        "values",
+        "table",
+        "filter",
+        "value",
+        "range",
+        "join",
+        "separator",
+        "split",
+        "applied",
+        "count",
+        "format"
+      ],
+      "note": "The rules themselves are `TABLE_FILTERS_RULES` below, not this comment. `/design` renders FilterableTable's rules; this file is the Filters popover that composition owns. Copy the ReUI Filters command shape (c-filters-3 custom trigger, hierarchical category drill-in), re-expressed in CORE 14.",
+      "propCount": 8
+    },
+    {
+      "name": "versioned-editor",
+      "component": "VersionedEditor",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/versioned-editor",
+      "source": "src/patterns/versioned-editor.tsx",
+      "rules": "agent/rules/patterns__versioned-editor.md",
+      "exports": [
+        "PublishGate",
+        "VersionedEditor"
+      ],
+      "summary": "VersionedEditor is the third save family. Prompt changes stay browser-local until Save draft updates the one mutable team draft or Publish creates the immutable version. Local, Saving draft, Draft saved, Publishing, and Publish failed be...",
+      "ruleCount": 12,
+      "search": [
+        "editor",
+        "versioned",
+        "publish",
+        "draft",
+        "gate",
+        "versionededitor",
+        "destructive",
+        "discard",
+        "publishgate",
+        "save",
+        "actions",
+        "again"
+      ],
+      "note": "Rules for VersionedEditor + PublishGate.",
+      "propCount": 19
+    },
+    {
+      "name": "wizard-dialog",
+      "component": "WizardDialog",
+      "kind": "pattern",
+      "import": "@langchain/gtm-platform-design-system/patterns/wizard-dialog",
+      "source": "src/patterns/wizard-dialog.tsx",
+      "rules": "agent/rules/patterns__wizard-dialog.md",
+      "exports": [
+        "WizardBranchBack",
+        "WizardBranchPane",
+        "WizardDialog"
+      ],
+      "summary": "Use one Dialog, one scroll body, and one footer. A branch changes the current step; it never opens a second dialog.",
+      "ruleCount": 11,
+      "search": [
+        "wizard",
+        "dialog",
+        "branch",
+        "body",
+        "step",
+        "back",
+        "pane",
+        "compact",
+        "current",
+        "footer",
+        "scroll",
+        "steps"
+      ],
+      "note": "WizardDialog is the one in-product create flow: a compact progress trail, one scroll body, and one footer whose primary names the next commitment.",
+      "propCount": 21
+    },
+    {
+      "name": "data-grid-column-filter",
+      "component": "DataGridColumnFilter",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-column-filter",
+      "source": "src/data-grid/data-grid-column-filter.tsx",
+      "rules": null,
+      "exports": [
+        "DataGridColumnFilter"
+      ],
+      "summary": "ReUI `data-grid` column filter, vendored (free tier, no licence key) and retokenized. Source: https://reui.io/r/data-grid.json, 2026-08-05.",
+      "ruleCount": 0,
+      "search": [
+        "column",
+        "filter",
+        "data",
+        "grid",
+        "data-grid",
+        "reui",
+        "free",
+        "https",
+        "json",
+        "key",
+        "licence",
+        "source"
+      ],
+      "note": null,
+      "propCount": 3
+    },
+    {
+      "name": "data-grid-column-header",
+      "component": "DataGridColumnHeader",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-column-header",
+      "source": "src/data-grid/data-grid-column-header.tsx",
+      "rules": null,
+      "exports": [
+        "DataGridColumnHeader"
+      ],
+      "summary": "ReUI `data-grid` column header, vendored (free tier) and retokenized. Source: https://reui.io/r/data-grid.json, 2026-08-04.",
+      "ruleCount": 0,
+      "search": [
+        "column",
+        "header",
+        "data",
+        "grid",
+        "data-grid",
+        "reui",
+        "free",
+        "https",
+        "json",
+        "source",
+        "tier",
+        "vendored"
+      ],
+      "note": null,
+      "propCount": 6
+    },
+    {
+      "name": "data-grid-column-visibility",
+      "component": "DataGridColumnVisibility",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-column-visibility",
+      "source": "src/data-grid/data-grid-column-visibility.tsx",
+      "rules": null,
+      "exports": [
+        "DataGridColumnVisibility"
+      ],
+      "summary": "ReUI `data-grid` column visibility menu, vendored (free tier) and retokenized. Source: https://reui.io/r/data-grid.json, 2026-08-04.",
+      "ruleCount": 0,
+      "search": [
+        "column",
+        "visibility",
+        "data",
+        "grid",
+        "data-grid",
+        "reui",
+        "free",
+        "https",
+        "json",
+        "menu",
+        "source",
+        "tier"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "data-grid-expanded-rows",
+      "component": "DataGridExpandedRows",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-expanded-rows",
+      "source": "src/data-grid/data-grid-expanded-rows.tsx",
+      "rules": null,
+      "exports": [
+        "ExpandedRow"
+      ],
+      "summary": "Expand-as-rows paint for FilterableTable. Not vendored: the ReUI grid only ships a colspan detail slot. Child rows reuse parent leaf columns for pin and width. They are not in the TanStack row model and are not virtualized.",
+      "ruleCount": 0,
+      "search": [
+        "expanded",
+        "grid",
+        "rows",
+        "data",
+        "row",
+        "child",
+        "colspan",
+        "columns",
+        "detail",
+        "expand-as-rows",
+        "filterabletable",
+        "leaf"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "data-grid-glyphs",
+      "component": "DataGridGlyphs",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-glyphs",
+      "source": "src/data-grid/data-grid-glyphs.tsx",
+      "rules": null,
+      "exports": [
+        "ArrowDownGlyph",
+        "ArrowLeftGlyph",
+        "ArrowLeftToLineGlyph",
+        "ArrowRightGlyph",
+        "ArrowRightToLineGlyph",
+        "ArrowUpGlyph",
+        "CheckGlyph",
+        "ChevronDownGlyph",
+        "ChevronLeftGlyph",
+        "ChevronRightGlyph",
+        "ChevronsUpDownGlyph",
+        "CirclePlusGlyph",
+        "ColumnsGlyph",
+        "PinFilledGlyph",
+        "PinGlyph",
+        "PinOffGlyph"
+      ],
+      "summary": "The grid's glyph set.",
+      "ruleCount": 0,
+      "search": [
+        "glyph",
+        "arrow",
+        "chevron",
+        "down",
+        "pin",
+        "grid",
+        "line",
+        "data",
+        "glyphs",
+        "check",
+        "chevrons",
+        "circle"
+      ],
+      "note": null,
+      "propCount": 1
+    },
+    {
+      "name": "data-grid-load-more",
+      "component": "DataGridLoadMore",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-load-more",
+      "source": "src/data-grid/data-grid-load-more.tsx",
+      "rules": null,
+      "exports": [
+        "DataGridLoadMoreSentinel"
+      ],
+      "summary": null,
+      "ruleCount": 0,
+      "search": [
+        "data",
+        "grid",
+        "load",
+        "sentinel"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "data-grid-pagination",
+      "component": "DataGridPagination",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-pagination",
+      "source": "src/data-grid/data-grid-pagination.tsx",
+      "rules": null,
+      "exports": [
+        "DataGridPagination"
+      ],
+      "summary": "ReUI `data-grid` pagination, vendored (free tier) and retokenized. Source: https://reui.io/r/data-grid.json, 2026-08-04.",
+      "ruleCount": 0,
+      "search": [
+        "pagination",
+        "data",
+        "grid",
+        "data-grid",
+        "reui",
+        "free",
+        "https",
+        "json",
+        "source",
+        "tier",
+        "vendored"
+      ],
+      "note": null,
+      "propCount": 20
+    },
+    {
+      "name": "data-grid-table-virtual",
+      "component": "DataGridTableVirtual",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-table-virtual",
+      "source": "src/data-grid/data-grid-table-virtual.tsx",
+      "rules": null,
+      "exports": [
+        "DataGridTableVirtual"
+      ],
+      "summary": "ReUI `data-grid` virtual table, vendored (free tier) and retokenized. Source: https://reui.io/r/data-grid.json, 2026-08-04. See data-grid-table.tsx for the shadcn -> CORE 14 class map, and web/reference/VENDORED.md for provenance.",
+      "ruleCount": 0,
+      "search": [
+        "table",
+        "virtual",
+        "data",
+        "grid",
+        "data-grid",
+        "reui",
+        "vendored",
+        "class",
+        "data-grid-table",
+        "free",
+        "https",
+        "json"
+      ],
+      "note": null,
+      "propCount": 26
+    },
+    {
+      "name": "data-grid-table",
+      "component": "DataGridTable",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-table",
+      "source": "src/data-grid/data-grid-table.tsx",
+      "rules": null,
+      "exports": [
+        "DataGridTable",
+        "DataGridTableBase",
+        "DataGridTableBody",
+        "DataGridTableBodyRow",
+        "DataGridTableBodyRowCell",
+        "DataGridTableBodyRowExpandded",
+        "DataGridTableBodyRowSkeleton",
+        "DataGridTableBodyRowSkeletonCell",
+        "DataGridTableEmpty",
+        "DataGridTableFillBodyCell",
+        "DataGridTableFillHeadCell",
+        "DataGridTableFoot",
+        "DataGridTableFootRow",
+        "DataGridTableFootRowCell",
+        "DataGridTableHead",
+        "DataGridTableHeadRow",
+        "DataGridTableHeadRowCell",
+        "DataGridTableHeadRowCellResize",
+        "DataGridTableHeadRows",
+        "DataGridTableHeader",
+        "DataGridTableLoader",
+        "DataGridTableRenderedRow",
+        "DataGridTableRowExpand",
+        "DataGridTableRowPin",
+        "DataGridTableRowSelect",
+        "DataGridTableRowSelectAll",
+        "DataGridTableRowSpacer",
+        "DataGridTableServerGrouped",
+        "DataGridTableViewport",
+        "getDataGridScrollAreaViewport",
+        "getDataGridTableMergedHeaderGroups",
+        "getDataGridTableResolvedRows",
+        "getDataGridTableRowSections",
+        "getDataGridTreeIndentStyle",
+        "getPinningStyles",
+        "hasDataGridTableRightPinnedColumns"
+      ],
+      "summary": "ReUI `data-grid` table, vendored (free tier, no licence key) and retokenized.",
+      "ruleCount": 0,
+      "search": [
+        "data",
+        "grid",
+        "table",
+        "row",
+        "body",
+        "cell",
+        "get",
+        "head",
+        "foot",
+        "fill",
+        "header",
+        "rows"
+      ],
+      "note": null,
+      "propCount": 0
+    },
+    {
+      "name": "data-grid",
+      "component": "DataGrid",
+      "kind": "primitive",
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid",
+      "source": "src/data-grid/data-grid.tsx",
+      "rules": null,
+      "exports": [
+        "DataGrid",
+        "DataGridContainer",
+        "DataGridProvider",
+        "getColumnHeaderLabel",
+        "useDataGrid"
+      ],
+      "summary": "ReUI `data-grid` core, vendored (free tier, no licence key) and retokenized.",
+      "ruleCount": 0,
+      "search": [
+        "data",
+        "grid",
+        "column",
+        "container",
+        "get",
+        "header",
+        "label",
+        "provider",
+        "data-grid",
+        "free",
+        "key",
+        "licence"
+      ],
+      "note": null,
+      "propCount": 29
+    }
+  ]
+}

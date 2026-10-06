@@ -15,7 +15,7 @@ import type { PullRequestSearchResult } from "@/lib/api"
 import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearch"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DesktopLegacyLocalThread } from "@/desktop"
-import { Kbd } from "@/components/ui/kbd"
+import { Kbd } from "@langchain/gtm-platform-design-system/ui/kbd"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { useLegacyLocalThreads } from "@/features/agents/lib/legacyLocal"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
@@ -59,7 +59,7 @@ type PaletteResult =
 
 function ShortcutHint({ shortcut }: { shortcut: string }) {
   const label = useShortcutLabel(shortcut)
-  return <Kbd className="ml-auto bg-background/70">{label}</Kbd>
+  return <Kbd className="ml-auto bg-canvas/70">{label}</Kbd>
 }
 
 function commandMatches(command: AppCommand, query: string): boolean {
@@ -292,7 +292,7 @@ export function AppCommandPalette({
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/45 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
         <Dialog.Popup
-          className="fixed top-[18%] left-1/2 z-50 flex max-h-[min(34rem,70vh)] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+          className="fixed top-[18%] left-1/2 z-50 flex max-h-[min(34rem,70vh)] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-control border border-line bg-panel text-ink shadow-overlay outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
           data-hotkeys="ignore"
         >
           <Dialog.Title className="sr-only">
@@ -301,14 +301,14 @@ export function AppCommandPalette({
           <Dialog.Description className="sr-only">
             Search commands, threads, and pull request titles and descriptions.
           </Dialog.Description>
-          <div className="flex items-center gap-2 border-b border-border px-4">
-            <Search className="size-4 shrink-0 text-muted-foreground" />
+          <div className="flex items-center gap-2 border-b border-line px-4">
+            <Search className="size-4 shrink-0 text-ink-subtle" />
             <input
               autoFocus
               aria-activedescendant={results[activeIndex]?.id}
               aria-autocomplete="list"
               aria-controls="app-command-results"
-              className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="h-12 min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-ink-subtle"
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={onInputKeyDown}
               placeholder="Search commands, threads, and pull requests…"
@@ -323,23 +323,23 @@ export function AppCommandPalette({
             role="listbox"
           >
             {showLoading ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
+              <div className="flex items-center justify-center gap-2 py-10 text-meta text-ink-subtle">
                 <LoaderCircle className="size-4 animate-spin" />
                 Searching threads and pull requests…
               </div>
             ) : showError ? (
-              <p className="py-10 text-center text-xs text-destructive">
+              <p className="py-10 text-center text-label text-risk">
                 Thread search is unavailable.
               </p>
             ) : results.length === 0 ? (
-              <p className="py-10 text-center text-xs text-muted-foreground">
+              <p className="py-10 text-center text-meta text-ink-subtle">
                 No commands, threads, or pull requests found.
               </p>
             ) : (
               <>
                 {resultGroups.map(([group, groupResults]) => (
                   <div aria-label={group} key={group} role="group">
-                    <div className="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                    <div className="px-3 pt-2 pb-1 text-meta font-semibold tracking-wide text-ink-subtle uppercase">
                       {group}
                     </div>
                     {groupResults.map((result) => {
@@ -358,10 +358,10 @@ export function AppCommandPalette({
                         <button
                           aria-selected={index === activeIndex}
                           className={cn(
-                            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm",
+                            "flex w-full items-center gap-3 rounded-compact px-3 py-2 text-left text-body",
                             index === activeIndex
-                              ? "bg-accent text-accent-foreground"
-                              : "text-foreground"
+                              ? "bg-hover text-ink"
+                              : "text-ink"
                           )}
                           id={result.id}
                           key={result.id}
@@ -370,11 +370,11 @@ export function AppCommandPalette({
                           role="option"
                           type="button"
                         >
-                          <Icon className="size-4 shrink-0 text-muted-foreground" />
+                          <Icon className="size-4 shrink-0 text-ink-subtle" />
                           <span className="min-w-0 flex-1 truncate">
                             {result.label}
                             {result.kind === "pull-request" && (
-                              <span className="ml-2 text-xs text-muted-foreground">
+                              <span className="ml-2 text-meta text-ink-subtle">
                                 {result.pr.repo} #{result.pr.number} ·{" "}
                                 {result.pr.state}
                               </span>
@@ -390,7 +390,7 @@ export function AppCommandPalette({
                 ))}
                 {pullRequests.hasNextPage && !query.trim().startsWith(">") && (
                   <button
-                    className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    className="flex w-full items-center justify-center gap-2 rounded-compact px-3 py-2 text-meta text-ink-subtle hover:bg-hover hover:text-ink"
                     disabled={pullRequests.isFetchingNextPage}
                     onClick={() => void pullRequests.fetchNextPage()}
                     type="button"
@@ -400,7 +400,7 @@ export function AppCommandPalette({
                 )}
                 {cloudThreads.hasNextPage && (
                   <button
-                    className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    className="flex w-full items-center justify-center gap-2 rounded-compact px-3 py-2 text-meta text-ink-subtle hover:bg-hover hover:text-ink"
                     disabled={cloudThreads.isFetchingNextPage}
                     onClick={() => void cloudThreads.fetchNextPage()}
                     type="button"
@@ -416,7 +416,7 @@ export function AppCommandPalette({
             {query.trim() &&
               !query.trim().startsWith(">") &&
               pullRequests.isError && (
-                <p role="alert" className="px-3 py-2 text-xs text-destructive">
+                <p role="alert" className="px-3 py-2 text-label text-risk">
                   Pull request search is unavailable.
                 </p>
               )}

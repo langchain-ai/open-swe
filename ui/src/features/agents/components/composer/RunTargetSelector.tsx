@@ -17,18 +17,7 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import {
-  Menu,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuItem,
-  MenuPopup,
-  MenuSeparator,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
-  MenuTrigger,
-} from "@/components/ui/menu"
+import { DropdownMenu, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem, DropdownMenuContent, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 
 export type RunTarget = "cloud" | "local"
@@ -42,26 +31,26 @@ export function RunTargetSelector({
 }) {
   const Icon = value === "local" ? Laptop : Cloud
   return (
-    <Menu>
-      <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80">
         <Icon className="size-3.5 shrink-0" />
         <span>{value === "local" ? "This Mac" : "Cloud"}</span>
         <ComposerControlChevron />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-44" sideOffset={7}>
-        <MenuGroup>
-          <MenuGroupLabel>Work in</MenuGroupLabel>
-          <MenuItem onClick={() => onChange("local")}>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-44" sideOffset={7}>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Work in</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => onChange("local")}>
             <Laptop />
             This Mac{value === "local" && <Check className="ml-auto" />}
-          </MenuItem>
-          <MenuItem onClick={() => onChange("cloud")}>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onChange("cloud")}>
             <Cloud />
             Cloud{value === "cloud" && <Check className="ml-auto" />}
-          </MenuItem>
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -86,10 +75,10 @@ export function LocalRepoSelector({
 }) {
   const selectedRepo = repos.find((repo) => repo.cwd === selectedRepoPath)
   return (
-    <Menu>
-      <MenuTrigger
+    <DropdownMenu>
+      <DropdownMenuTrigger
         className={cn(
-          "flex max-w-[260px] items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80",
+          "flex max-w-[260px] items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80",
           triggerClassName
         )}
         title={selectedRepo?.cwd}
@@ -97,15 +86,15 @@ export function LocalRepoSelector({
         <FolderOpen className="size-3.5 shrink-0" />
         <span className="truncate">{selectedRepo?.name ?? placeholder}</span>
         <ComposerControlChevron />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-64" side={side} sideOffset={7}>
-        <MenuGroup>
-          <MenuGroupLabel>Repositories</MenuGroupLabel>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64" side={side} sideOffset={7}>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Repositories</DropdownMenuLabel>
           {repos.length === 0 && (
-            <MenuItem disabled>No repositories added</MenuItem>
+            <DropdownMenuItem disabled>No repositories added</DropdownMenuItem>
           )}
           {repos.map((repo) => (
-            <MenuItem
+            <DropdownMenuItem
               key={repo.cwd}
               onClick={() => onSelectRepo(repo.cwd)}
               title={repo.cwd}
@@ -113,25 +102,25 @@ export function LocalRepoSelector({
               <FolderOpen />
               <span className="min-w-0 flex-1 truncate">{repo.name}</span>
               {selectedRepoPath === repo.cwd && <Check className="ml-auto" />}
-            </MenuItem>
+            </DropdownMenuItem>
           ))}
-        </MenuGroup>
-        <MenuSeparator />
-        <MenuGroup>
-          <MenuItem onClick={onAddRepo}>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={onAddRepo}>
             <FolderPlus />
             Add repository…
-          </MenuItem>
+          </DropdownMenuItem>
           {repos.length > 0 && (
-            <MenuSub>
-              <MenuSubTrigger>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
                 <Trash2 />
                 Remove repository…
-              </MenuSubTrigger>
-              <MenuSubPopup className="w-64">
-                <MenuGroup>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-64">
+                <DropdownMenuGroup>
                   {repos.map((repo) => (
-                    <MenuItem
+                    <DropdownMenuItem
                       key={repo.cwd}
                       onClick={() => onRemoveRepo(repo.cwd)}
                       title={repo.cwd}
@@ -139,15 +128,15 @@ export function LocalRepoSelector({
                     >
                       <FolderOpen />
                       <span className="truncate">{repo.name}</span>
-                    </MenuItem>
+                    </DropdownMenuItem>
                   ))}
-                </MenuGroup>
-              </MenuSubPopup>
-            </MenuSub>
+                </DropdownMenuGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
           )}
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -166,34 +155,34 @@ export function LocalWorkspaceSelector({
   const label = value === "worktree" ? worktreeLabel : "Current checkout"
   if (!onChange)
     return (
-      <span className="flex items-center gap-1 text-muted-foreground">
+      <span className="flex items-center gap-1 text-ink-subtle">
         <Icon className="size-3.5 shrink-0" />
         {label}
       </span>
     )
   return (
-    <Menu>
-      <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80">
         <Icon className="size-3.5 shrink-0" />
         <span>{label}</span>
         <ComposerControlChevron />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-52" sideOffset={7}>
-        <MenuGroup>
-          <MenuGroupLabel>Workspace</MenuGroupLabel>
-          <MenuItem onClick={() => onChange("local")}>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52" sideOffset={7}>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Workspace</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => onChange("local")}>
             <Folder />
             Current checkout
             {value === "local" && <Check className="ml-auto" />}
-          </MenuItem>
-          <MenuItem onClick={() => onChange("worktree")}>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onChange("worktree")}>
             <FolderGit2 />
             New worktree
             {value === "worktree" && <Check className="ml-auto" />}
-          </MenuItem>
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -249,26 +238,26 @@ export function LocalBranchSelector({
           if (!open) onRefresh()
           setOpen((value) => !value)
         }}
-        className="flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
+        className="flex max-w-[260px] cursor-pointer items-center gap-1 text-ink-subtle transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
       >
         <GitBranch className="size-3.5 shrink-0" />
         <span className="truncate">{selectedBranch ?? "No branch"}</span>
         <ComposerControlChevron />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded-lg bg-popover text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10">
-          <div className="border-b border-border">
+        <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded-compact bg-panel text-label text-ink shadow-popup ring-1 ring-ink/10">
+          <div className="border-b border-line">
             <input
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search refs..."
-              className="w-full bg-transparent px-3 py-2 text-foreground outline-none placeholder:text-muted-foreground"
+              className="w-full bg-transparent px-3 py-2 text-ink outline-none placeholder:text-ink-subtle"
             />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-1">
             {filtered.length === 0 ? (
-              <div className="px-2 py-1.5 text-muted-foreground">
+              <div className="px-2 py-1.5 text-ink-subtle">
                 No refs found.
               </div>
             ) : (
@@ -278,15 +267,15 @@ export function LocalBranchSelector({
                   type="button"
                   onClick={() => select(ref.name)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                    "flex w-full items-center gap-2 rounded-badge px-2 py-1.5 text-left transition-colors hover:bg-hover hover:text-ink",
                     ref.name === selectedBranch
-                      ? "text-foreground"
-                      : "text-muted-foreground"
+                      ? "text-ink"
+                      : "text-ink-subtle"
                   )}
                 >
                   <span className="min-w-0 flex-1 truncate">{ref.name}</span>
                   {badge(ref) && (
-                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                    <span className="shrink-0 text-meta text-ink-subtle/60">
                       {badge(ref)}
                     </span>
                   )}

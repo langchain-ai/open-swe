@@ -1,68 +1,115 @@
-import { Link, Navigate } from "@tanstack/react-router"
-import { ArrowLeftIcon, CaretRightIcon } from "@phosphor-icons/react"
+import { Navigate, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
+import { AppShell as ShellPattern } from "@langchain/gtm-platform-design-system/patterns/app-shell"
+import { PageBand } from "@langchain/gtm-platform-design-system/patterns/page-band"
+import { PageFrame } from "@langchain/gtm-platform-design-system/patterns/page-frame"
+import { PageMasthead } from "@langchain/gtm-platform-design-system/patterns/page-masthead"
+import { Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 
 import type { SessionUser } from "@/lib/api"
-import { AppSidebar } from "@/components/AppSidebar"
-import { Skeleton } from "@/components/ui/skeleton"
+import { SettingsNav } from "@/components/SettingsNav"
+import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { AppRailSettingsBrand } from "@/components/rail/AppRailBrand"
+import { useRailCollapsed } from "@/components/rail/useRailCollapsed"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+
+/**
+ * The route's measure. `reading` is one 768px column (forms, settings);
+ * `work` is 1280 for a readable list; `wide` drops the cap for grids that
+ * scroll inside themselves.
+ */
+export type AppShellWidth = "reading" | "work" | "wide"
 
 interface AppShellProps {
   user: SessionUser
   title: string
-  action?: ReactNode
   description?: string
+  /** The page's one header control. */
+  action?: ReactNode
+  /** An object route: the band names the parent and goes back to it. */
   backTo?: { to: string; label: string }
-  className?: string
+  contentWidth?: AppShellWidth
   children: ReactNode
 }
 
+function PageHeader({
+  title,
+  description,
+  action,
+}: Pick<AppShellProps, "title" | "description" | "action">) {
+  return (
+    <Inline gap="lg" justify="between" align="start" wrap>
+      <PageMasthead title={title} description={description} />
+      {action}
+    </Inline>
+  )
+}
+
+/** The settings and workspace shell: scoped settings rail, one measure, one page header. */
 export function AppShell({
   user,
   title,
-  action,
   description,
+  action,
   backTo,
-  className,
+  contentWidth = "reading",
   children,
 }: AppShellProps) {
+  const rail = useRailCollapsed()
+  const navigate = useNavigate()
+  const railProps = {
+    sidebar: <SettingsNav user={user} collapsed={rail.collapsed} />,
+    railHeader: (
+      <AppRailSettingsBrand
+        collapsed={rail.collapsed}
+        onToggleCollapsed={rail.toggle}
+      />
+    ),
+    railFooter: <SidebarUserMenu user={user} collapsed={rail.collapsed} />,
+    railCollapsed: rail.collapsed,
+  }
+
+  const page =
+    contentWidth === "reading" ? (
+      <PageFrame
+        title={title}
+        description={description}
+        actions={action}
+      >
+        {children}
+      </PageFrame>
+    ) : (
+      <Stack gap="xl" className="py-6">
+        <PageHeader title={title} description={description} action={action} />
+        {children}
+      </Stack>
+    )
+
   return (
-    <div className="flex h-svh overflow-hidden bg-background text-foreground">
-      <AppSidebar user={user} />
-      <main className="relative flex-1 overflow-y-auto">
-        <div
-          className={cn(
-            "mx-auto max-w-3xl px-4 pt-14 pb-16 sm:px-8 sm:py-12",
-            className
-          )}
+    <div className="h-svh">
+      {backTo ? (
+        <ShellPattern
+          mode="lineage"
+          contentWidth={contentWidth}
+          band={
+            <PageBand
+              variant="lineage"
+              lineage={[{ label: backTo.label, href: backTo.to }, { label: title }]}
+              backLabel={backTo.label}
+              onBack={() => void navigate({ to: backTo.to })}
+            />
+          }
+          {...railProps}
         >
-          {backTo && (
-            <Link
-              to={backTo.to}
-              className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeftIcon className="size-3.5" />
-              {backTo.label}
-            </Link>
-          )}
-          <header className="mb-10 flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h1 className="font-heading text-xl font-medium tracking-tight">
-                {title}
-              </h1>
-              {description && (
-                <p className="mt-1.5 max-w-2xl text-xs text-muted-foreground">
-                  {description}
-                </p>
-              )}
-            </div>
-            {action}
-          </header>
-          <div className="space-y-10">{children}</div>
-        </div>
-      </main>
+          {page}
+        </ShellPattern>
+      ) : (
+        <ShellPattern mode="flat" contentWidth={contentWidth} {...railProps}>
+          {page}
+        </ShellPattern>
+      )}
     </div>
   )
 }
@@ -81,8 +128,11 @@ export function SettingsPage({
   const session = useSession()
   if (session.isLoading) {
     return (
-      <main className="p-6">
-        <Skeleton className="h-40 w-full" />
+      <main className="flex h-svh bg-desk">
+        <div className="w-61.5 shrink-0 bg-sidebar" />
+        <div className="flex-1 bg-shell p-6">
+          <Skeleton className="mx-auto h-40 w-full max-w-reading" />
+        </div>
       </main>
     )
   }
@@ -92,146 +142,5 @@ export function SettingsPage({
     <AppShell user={session.data} {...props}>
       {typeof children === "function" ? children(session.data) : children}
     </AppShell>
-  )
-}
-
-interface SettingsSectionProps {
-  id?: string
-  title: ReactNode
-  description?: string
-  action?: ReactNode
-  children?: ReactNode
-}
-
-/** A titled group of rows rendered as a single card. */
-export function SettingsSection({
-  id,
-  title,
-  description,
-  action,
-  children,
-}: SettingsSectionProps) {
-  return (
-    <section id={id} className="space-y-3">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-sm font-medium text-foreground">{title}</h2>
-          {description && (
-            <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-              {description}
-            </p>
-          )}
-        </div>
-        {action}
-      </div>
-      {children && (
-        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-          {children}
-        </div>
-      )}
-    </section>
-  )
-}
-
-interface SettingsRowProps {
-  label: string
-  description?: ReactNode
-  control: ReactNode
-  htmlFor?: string
-  comingSoon?: boolean
-  /** A short tag after the label, such as where a value comes from. */
-  badge?: string
-  badgeClassName?: string
-}
-
-/** Label + description on the left, a single control on the right. */
-export function SettingsRow({
-  label,
-  description,
-  control,
-  htmlFor,
-  comingSoon,
-  badge,
-  badgeClassName,
-}: SettingsRowProps) {
-  return (
-    <div className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
-      <label className="flex flex-col gap-1" htmlFor={htmlFor}>
-        <span className="flex items-center gap-2">
-          <span
-            className={cn(
-              "text-sm/none font-medium",
-              comingSoon ? "text-muted-foreground" : "text-foreground"
-            )}
-          >
-            {label}
-          </span>
-          {(comingSoon || badge) && (
-            <span
-              className={cn(
-                "rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground",
-                !comingSoon && badgeClassName
-              )}
-            >
-              {comingSoon ? "Coming soon" : badge}
-            </span>
-          )}
-        </span>
-        {description && (
-          <span className="text-xs/relaxed text-muted-foreground">
-            {description}
-          </span>
-        )}
-      </label>
-      <div className={cn("sm:shrink-0", comingSoon && "opacity-50")}>
-        {control}
-      </div>
-    </div>
-  )
-}
-
-/** A row that navigates to another settings page. */
-export function SettingsNavRow({
-  to,
-  params,
-  label,
-  description,
-}: {
-  to: string
-  params?: Record<string, string>
-  label: string
-  description?: string
-}) {
-  return (
-    <Link
-      to={to}
-      params={params}
-      className="flex items-center justify-between gap-8 px-4 py-3.5 transition-colors hover:bg-muted/40"
-    >
-      <div className="flex flex-col gap-1">
-        <span className="text-sm/none font-medium text-foreground">
-          {label}
-        </span>
-        {description && (
-          <span className="text-xs/relaxed text-muted-foreground">
-            {description}
-          </span>
-        )}
-      </div>
-      <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-    </Link>
-  )
-}
-
-/** Full-width row for controls that need the whole card (editors, lists). */
-export function SettingsPanel({
-  children,
-  className,
-}: {
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <div className={cn("flex flex-col gap-3 p-4", className)}>{children}</div>
   )
 }

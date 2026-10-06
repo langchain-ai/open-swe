@@ -70,7 +70,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
 
   return (
     <div
-      className="dropdown-glass absolute bottom-full left-0 z-50 mb-2 w-full max-w-md overflow-hidden rounded-xl"
+      className="dropdown-glass absolute bottom-full left-0 z-50 mb-2 w-full max-w-md overflow-hidden rounded-control"
       role="listbox"
       aria-label={
         triggerKind === "path"
@@ -88,10 +88,10 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
             <button
               aria-selected={activeItemId === item.id}
               className={cn(
-                "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs/relaxed select-none",
+                "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-label select-none",
                 activeItemId === item.id
-                  ? "bg-accent text-accent-foreground"
-                  : "text-foreground"
+                  ? "bg-hover text-ink"
+                  : "text-ink"
               )}
               data-composer-item-id={item.id}
               key={item.id}
@@ -106,21 +106,21 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
               type="button"
             >
               {item.type === "path" ? (
-                <FileIcon className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <FileIcon className="size-3.5 shrink-0 text-ink-subtle/80" />
               ) : item.type === "slack-channel" ? (
-                <Hash className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <Hash className="size-3.5 shrink-0 text-ink-subtle/80" />
               ) : (
-                <Bot className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <Bot className="size-3.5 shrink-0 text-ink-subtle/80" />
               )}
               <span className="shrink-0 font-medium">{item.label}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+              <span className="min-w-0 flex-1 truncate text-ink-subtle/70">
                 {item.description}
               </span>
             </button>
           ))}
         </div>
       ) : (
-        <p className="px-4 py-3 text-xs text-muted-foreground/70">
+        <p className="px-4 py-3 text-meta text-ink-subtle/70">
           {emptyStateText ??
             (triggerKind === "path"
               ? "No matching files."

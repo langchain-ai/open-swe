@@ -12,7 +12,7 @@ import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
@@ -66,11 +66,11 @@ function ThreadRepoIndicator({
         onBlur={() => setOpen(false)}
         aria-label={`Repository: ${repoName}`}
         data-no-drag=""
-        className="flex size-7 shrink-0 items-center justify-center text-muted-foreground"
+        className="flex size-7 shrink-0 items-center justify-center text-ink-subtle"
       >
         <Folder className="size-4" />
       </TooltipTrigger>
-      <TooltipPopup>{repoName}</TooltipPopup>
+      <TooltipContent>{repoName}</TooltipContent>
     </Tooltip>
   )
 }
@@ -236,7 +236,7 @@ export function AgentThreadHeader({
   const header = (
     <header
       data-desktop-drag-region=""
-      className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
+      className="relative z-10 h-11 shrink-0 border-b border-line/60 bg-canvas/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-canvas/60 after:to-transparent"
     >
       <div
         className={cn(
@@ -246,7 +246,7 @@ export function AgentThreadHeader({
         )}
       >
         {title && (
-          <div className="flex min-w-0 items-center gap-1 text-sm font-medium">
+          <div className="flex min-w-0 items-center gap-1 text-body font-medium">
             {(thread || localThread) && (
               <ThreadRepoIndicator thread={thread} localThread={localThread} />
             )}
@@ -256,7 +256,7 @@ export function AgentThreadHeader({
                 onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
-                className="min-w-0 rounded-md bg-muted px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="min-w-0 rounded-badge bg-muted px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 style={{ width: editorWidth }}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -282,7 +282,7 @@ export function AgentThreadHeader({
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="min-w-0 truncate rounded-badge px-2 py-1 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
                 onClick={startRename}
               >
                 {savingTitle ?? title}
@@ -297,7 +297,7 @@ export function AgentThreadHeader({
                 <Menu.Trigger
                   aria-label="Thread actions"
                   data-no-drag=""
-                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-badge text-ink-subtle hover:bg-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
                 >
                   <DotsThreeIcon className="size-5" weight="bold" />
                 </Menu.Trigger>
@@ -311,7 +311,7 @@ export function AgentThreadHeader({
                       finalFocus={() =>
                         editingRef.current ? false : undefined
                       }
-                      className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
+                      className="min-w-[10rem] overflow-hidden rounded-badge border border-line bg-panel p-1 text-ink shadow-popup outline-none"
                     >
                       {menuItems}
                     </Menu.Popup>
@@ -322,7 +322,7 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          <span className="text-xs text-muted-foreground">{target}</span>
+          <span className="text-meta text-ink-subtle">{target}</span>
           {!localThread && visibilityMenu}
         </div>
       </div>
@@ -339,7 +339,7 @@ export function AgentThreadHeader({
           <ContextMenu.Positioner className="z-50 outline-none">
             <ContextMenu.Popup
               finalFocus={() => (editingRef.current ? false : undefined)}
-              className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
+              className="min-w-[10rem] overflow-hidden rounded-badge border border-line bg-panel p-1 text-ink shadow-popup outline-none"
             >
               {menuItems}
             </ContextMenu.Popup>

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 
 import { SettingsRow } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import type { ProfileUpdate } from "@/lib/api"
 import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
 

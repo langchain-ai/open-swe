@@ -26,13 +26,13 @@ export function AboutSection({ user }: { user: SessionUser }) {
         <SettingsRow
           label="Open SWE Desktop"
           control={
-            <span className="text-xs text-muted-foreground">
+            <span className="text-meta text-ink-subtle">
               Version {version}
             </span>
           }
         />
       ) : null}
-      <div className="space-y-2 p-4 text-xs break-words text-muted-foreground">
+      <div className="space-y-2 p-4 text-meta break-words text-ink-subtle">
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
         </p>
@@ -121,12 +121,12 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
               {new Date(bundle.built_at).toLocaleString()}
             </time>
             {differs ? (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-attention">
                 {" "}
                 — different from the bundle the backend reports serving.
               </span>
             ) : buildInfo?.dashboard.served && !comparable ? (
-              <span className="text-muted-foreground">
+              <span className="text-ink-subtle">
                 {" "}
                 — comparison with the backend-served bundle unavailable.
               </span>

@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 
-import { Input } from "@/components/ui/input"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { parsePullRequestReference } from "@/features/reviews/search"
 
 /** Jumps to the review of a pasted GitHub pull request link. */

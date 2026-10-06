@@ -8,7 +8,7 @@ import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import type { MessagesProps } from "./types"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
@@ -35,7 +35,7 @@ function QueuedMessages({
         return (
           <div
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[14px] text-foreground shadow-sm"
+            className="ml-auto max-w-[85%] rounded-panel border border-dashed border-line bg-hover/40 px-3 py-2 text-body text-ink shadow-control"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
           >
@@ -45,11 +45,11 @@ function QueuedMessages({
               </div>
             )}
             {imageCount > 0 && (
-              <div className="mt-1 text-xs text-muted-foreground">
+              <div className="mt-1 text-meta text-ink-subtle">
                 {imageCount} image{imageCount === 1 ? "" : "s"} attached
               </div>
             )}
-            <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="mt-2 flex items-center gap-3 text-meta text-ink-subtle">
               <span
                 className="inline-flex h-6 items-center gap-1"
                 title={statusLabel}
@@ -57,14 +57,14 @@ function QueuedMessages({
               >
                 <Clock className="size-3.5" aria-hidden />
                 Queued
-                <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
+                <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-ink/60" />
               </span>
               {(onSteer || onRemove) && message.mine !== false && (
                 <div className="ml-auto flex items-center gap-0.5">
                   {onSteer && (
                     <button
                       type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                      className="flex size-6 items-center justify-center rounded-badge hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onSteer(message.id)}
                       disabled={message.pending}
@@ -78,7 +78,7 @@ function QueuedMessages({
                   {onRemove && (
                     <button
                       type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                      className="flex size-6 items-center justify-center rounded-badge hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onRemove(message.id)}
                       disabled={message.pending}
@@ -177,7 +177,7 @@ export const Messages = memo(function MessagesComponent({
           ref={scrollRef}
           // Gutter on both edges: the centered column keeps its position when the
           // scrollbar appears, so it stays aligned with the composer below it.
-          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-5 text-[14px] leading-[1.6] antialiased"
+          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-5 text-body leading-[1.6] antialiased"
         >
           <div
             ref={contentRef}
@@ -192,7 +192,7 @@ export const Messages = memo(function MessagesComponent({
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-3 w-full py-1.5 text-center text-xs text-muted-foreground hover:text-foreground disabled:cursor-default"
+                className="mb-3 w-full py-1.5 text-center text-meta text-ink-subtle hover:text-ink disabled:cursor-default"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
@@ -269,7 +269,7 @@ export const Messages = memo(function MessagesComponent({
             type="button"
             onClick={scrollToBottom}
             aria-label="Scroll to bottom"
-            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-ink-subtle transition-colors hover:text-ink"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
           >
             <ChevronDown className="size-3.5" />

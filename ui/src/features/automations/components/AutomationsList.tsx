@@ -13,8 +13,8 @@ import {
 import type { AgentSchedule } from "@/features/agents/lib/types"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
-import { buttonVariants } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { describeTriggers } from "@/features/automations/lib/triggers"
 import {
   agentMutationKeys,
@@ -60,30 +60,30 @@ export function AutomationsList({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        <h1 className="text-base font-medium text-foreground">Automations</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <h1 className="text-title font-medium text-ink">Automations</h1>
+        <p className="mt-1 text-meta text-ink-subtle">
           Run Open SWE on a schedule or on GitHub, Slack, and Linear events.
           Each run starts a fresh agent thread.{" "}
           {!canManage && "Workspace admins manage automation setup."}
         </p>
         {canManage && (
-          <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+          <p className="mt-3 rounded-compact border border-line bg-panel px-3 py-2 text-meta text-ink-subtle">
             Automations can also be listed and managed through Open SWE. Start a
             new thread, turn on Admin next to the model picker, then ask the
             agent to make the change.
           </p>
         )}
-        <div className="mt-4 flex w-fit rounded-md border border-border bg-card p-0.5">
+        <div className="mt-4 flex w-fit rounded-badge border border-line bg-panel p-0.5">
           {(["overview", "runs"] as const).map((value) => (
             <button
               key={value}
               type="button"
               onClick={() => onTabChange(value)}
               className={cn(
-                "rounded px-3 py-1 text-xs capitalize transition-colors",
+                "rounded-tick px-3 py-1 text-label capitalize transition-colors",
                 tab === value
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-hover text-ink"
+                  : "text-ink-subtle hover:text-ink"
               )}
             >
               {value}
@@ -109,7 +109,7 @@ export function AutomationsList({
             </div>
 
             <div className="mt-8 flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-meta font-medium text-ink-subtle">
                 {total} {total === 1 ? "automation" : "automations"}
               </span>
               {canManage && (
@@ -123,8 +123,8 @@ export function AutomationsList({
             <div className="mt-3">
               {schedulesQuery.isLoading ? (
                 <div className="space-y-2">
-                  <Skeleton className="h-16 w-full rounded-xl" />
-                  <Skeleton className="h-16 w-full rounded-xl" />
+                  <Skeleton className="h-16 w-full rounded-control" />
+                  <Skeleton className="h-16 w-full rounded-control" />
                 </div>
               ) : total === 0 ? (
                 <EmptyState canManage={canManage} />
@@ -159,12 +159,12 @@ function StatCard({
   highlight?: boolean
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground/70">{label}</div>
+    <div className="rounded-control border border-line bg-panel px-4 py-3">
+      <div className="text-meta text-ink-subtle/70">{label}</div>
       <div
         className={cn(
-          "mt-1 text-lg font-medium",
-          highlight ? "text-destructive" : "text-foreground"
+          "mt-1 text-title font-medium",
+          highlight ? "text-risk" : "text-ink"
         )}
       >
         {value}
@@ -175,14 +175,14 @@ function StatCard({
 
 function EmptyState({ canManage }: { canManage: boolean }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center">
-      <div className="rounded-full bg-accent p-3 text-muted-foreground">
+    <div className="flex flex-col items-center justify-center rounded-control border border-dashed border-line bg-panel px-6 py-14 text-center">
+      <div className="rounded-full bg-hover p-3 text-ink-subtle">
         <LightningIcon className="size-5" />
       </div>
-      <h3 className="mt-4 text-sm font-medium text-foreground">
+      <h3 className="mt-4 text-body font-medium text-ink">
         No automations yet
       </h3>
-      <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+      <p className="mt-1 max-w-sm text-meta text-ink-subtle">
         Run Open SWE on a schedule or on GitHub, Slack, and Linear events —
         review code, triage new issues, or investigate an alert.
       </p>
@@ -244,7 +244,7 @@ function AutomationRow({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/70">
+    <div className="flex items-center gap-3 rounded-control border border-line bg-panel px-4 py-3 transition-colors hover:border-ink-subtle/70">
       <Link
         to="/agents/automations/$scheduleId"
         params={{ scheduleId: schedule.id }}
@@ -253,24 +253,24 @@ function AutomationRow({
         <span
           className={cn(
             "size-2 shrink-0 rounded-full",
-            schedule.enabled ? "bg-success" : "bg-border"
+            schedule.enabled ? "bg-positive" : "bg-line"
           )}
         />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-medium text-foreground">
+            <span className="truncate text-body font-medium text-ink">
               {schedule.name}
             </span>
             {schedule.lastError && (
               <WarningCircleIcon
-                className="size-3.5 shrink-0 text-destructive"
+                className="size-3.5 shrink-0 text-risk"
                 aria-label="Last run failed"
               >
                 <title>Last run failed</title>
               </WarningCircleIcon>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ink-subtle/70">
             <span className="flex items-center gap-1">
               <ClockIcon className="size-3.5" />
               {describeTriggers(schedule)}
@@ -290,7 +290,7 @@ function AutomationRow({
           to="/agents/$threadId"
           params={{ threadId: schedule.lastThreadId }}
           aria-label="Open latest automation run"
-          className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+          className="shrink-0 rounded-badge p-1.5 text-ink-subtle/70 transition-colors hover:bg-hover hover:text-ink"
         >
           <ArrowSquareOutIcon className="size-4" />
         </Link>
@@ -302,7 +302,7 @@ function AutomationRow({
             onClick={onTest}
             disabled={isTesting || isToggling}
             aria-label="Test automation"
-            className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            className="flex shrink-0 items-center gap-1 rounded-badge border border-line px-2 py-1 text-meta text-ink-subtle transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
           >
             <LightningIcon className="size-3.5" />
             {isTesting ? "Starting…" : "Test"}
@@ -314,7 +314,7 @@ function AutomationRow({
             aria-label={
               schedule.enabled ? "Pause automation" : "Resume automation"
             }
-            className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            className="shrink-0 rounded-badge p-1.5 text-ink-subtle/70 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
           >
             {schedule.enabled ? (
               <PauseIcon className="size-4" />

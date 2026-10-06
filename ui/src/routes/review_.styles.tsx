@@ -11,7 +11,7 @@ export const Route = createFileRoute("/review_/styles")({
       title="Review styles"
       description="Per-repository review style guides and approval policies. Run analysis to learn a style guide from past pull request feedback."
     >
-      <div className="rounded-lg border border-border bg-card">
+      <div className="rounded-compact border border-line bg-panel">
         <ReviewStylesPanel />
       </div>
     </SettingsPage>

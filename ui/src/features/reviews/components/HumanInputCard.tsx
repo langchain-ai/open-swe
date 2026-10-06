@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils"
 
 export function HumanInputText({ summary }: { summary: string }) {
   return (
-    <p className="text-sm whitespace-pre-wrap text-foreground">{summary}</p>
+    <p className="text-body whitespace-pre-wrap text-ink">{summary}</p>
   )
 }
 
@@ -21,9 +21,9 @@ export function HumanInputCard({
   return (
     <section
       aria-label="Human input"
-      className={cn("rounded-lg border border-border bg-card p-4", className)}
+      className={cn("rounded-compact border border-line bg-panel p-4", className)}
     >
-      <h3 className="mb-2.5 text-xs font-medium text-foreground">
+      <h3 className="mb-2.5 text-label font-medium text-ink">
         Human input
       </h3>
       <HumanInputText summary={summary} />

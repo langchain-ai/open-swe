@@ -26,7 +26,7 @@
     "ui/dist/**",
     "ui/public/**",
     "ui/src/routeTree.gen.ts",
-    "ui/src/components/ui/**",
+    "gtm-platform-design-system/**",
     "ui/src/features/agents/experiments/**",
     "desktop/build/**"
   ],

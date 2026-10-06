@@ -9,8 +9,8 @@ import { GitPullRequestIcon } from "@phosphor-icons/react"
 import type { ReviewSummary } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -34,14 +34,14 @@ export const Route = createFileRoute("/agents/reviews/")({
 function statusBadge(review: ReviewSummary) {
   if (review.status === "running") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+      <span className="inline-flex items-center gap-1.5 text-meta text-ink-subtle">
+        <span className="size-1.5 animate-pulse rounded-full bg-attention" />
         Reviewing
       </span>
     )
   }
   if (review.status === "error") {
-    return <span className="text-xs text-destructive">Failed</span>
+    return <span className="text-label text-risk">Failed</span>
   }
   return null
 }
@@ -103,7 +103,7 @@ function ReviewsPage() {
           )}
         >
           <div className="flex items-center gap-3">
-            <h1 className="font-heading text-base font-medium text-foreground">
+            <h1 className="text-title font-medium text-ink">
               Pull Requests
             </h1>
             <div className="flex items-center gap-1">
@@ -125,10 +125,10 @@ function ReviewsPage() {
                   onPointerEnter={() => prefetch(value, 0)}
                   onFocus={() => prefetch(value, 0)}
                   className={cn(
-                    "rounded-md px-2.5 py-1 text-xs transition-colors",
+                    "rounded-badge px-2.5 py-1 text-label transition-colors",
                     mine === value
-                      ? "bg-sidebar-row-hover font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-sidebar-row-hover"
+                      ? "bg-hover font-medium text-ink"
+                      : "text-ink-subtle hover:bg-hover"
                   )}
                 >
                   {label}
@@ -137,13 +137,13 @@ function ReviewsPage() {
             </div>
             <OpenPullRequestInput />
             <ReviewBookmarklet />
-            <span className="hidden text-xs text-muted-foreground lg:inline">
+            <span className="hidden text-meta text-ink-subtle lg:inline">
               Drag to your bookmarks bar
             </span>
             {!mine && (
               <Button
                 className="ml-auto"
-                size="sm"
+                size="compact"
                 variant="outline"
                 disabled={reviews.isFetching}
                 onClick={() => void reviews.refetch()}
@@ -164,12 +164,12 @@ function ReviewsPage() {
           ) : (
             <div
               aria-busy={reviews.isFetching}
-              className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-card"
+              className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-compact border border-line bg-panel"
             >
               {reviews.isFetching && reviews.data && (
                 <p
                   role="status"
-                  className="border-b border-border px-4 py-3 text-xs text-muted-foreground"
+                  className="border-b border-line px-4 py-3 text-meta text-ink-subtle"
                 >
                   Loading page {page + 1}…
                 </p>
@@ -180,12 +180,12 @@ function ReviewsPage() {
                 </div>
               )}
               {reviews.error && (
-                <p className="px-4 py-3 text-xs text-destructive">
+                <p className="px-4 py-3 text-label text-risk">
                   {reviews.error.message}
                 </p>
               )}
               {reviews.data && items.length === 0 && (
-                <p className="px-4 py-3 text-xs text-muted-foreground">
+                <p className="px-4 py-3 text-meta text-ink-subtle">
                   {mine
                     ? "No reviews on your PRs yet. Switch to All to see every review you have access to."
                     : "No reviews yet. Enable repositories under Open SWE Review settings and open a PR."}
@@ -193,19 +193,19 @@ function ReviewsPage() {
               )}
               <div
                 className={cn(
-                  "divide-y divide-border",
+                  "divide-y divide-line",
                   reviews.isPlaceholderData && "opacity-50"
                 )}
               >
                 {items.map((review) => (
                   <div
                     key={review.thread_id}
-                    className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-sidebar-row-hover"
+                    className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-hover"
                   >
                     <div className="flex min-w-0 items-center gap-3">
-                      <GitPullRequestIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <GitPullRequestIcon className="size-4 shrink-0 text-ink-subtle" />
                       <div className="min-w-0">
-                        <div className="truncate text-xs font-medium text-foreground">
+                        <div className="truncate text-label font-medium text-ink">
                           {review.title}
                         </div>
                         <PullRequestLinks
@@ -213,7 +213,7 @@ function ReviewsPage() {
                           number={review.number}
                           title={review.title}
                         />
-                        <div className="mt-0.5 text-xs text-muted-foreground">
+                        <div className="mt-0.5 text-meta text-ink-subtle">
                           {review.owner}/{review.repo}#{review.number}
                           {review.author && !mine && (
                             <span className="ml-2">by {review.author}</span>
@@ -221,7 +221,7 @@ function ReviewsPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-3 text-xs">
+                    <div className="flex shrink-0 items-center gap-3 text-label">
                       {statusBadge(review)}
                       <ReviewCounts counts={review.counts} />
                     </div>
@@ -229,11 +229,11 @@ function ReviewsPage() {
                 ))}
               </div>
               {(page > 0 || reviews.data?.has_more) && (
-                <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
-                  <span className="text-muted-foreground">Page {page + 1}</span>
+                <div className="flex items-center justify-between gap-4 border-t border-line px-4 py-2 text-label">
+                  <span className="text-ink-subtle">Page {page + 1}</span>
                   <div className="flex items-center gap-2">
                     <Button
-                      size="sm"
+                      size="compact"
                       variant="outline"
                       disabled={page === 0 || reviews.isFetching}
                       onPointerEnter={() => prefetch(mine, page - 1)}
@@ -246,7 +246,7 @@ function ReviewsPage() {
                       Prev
                     </Button>
                     <Button
-                      size="sm"
+                      size="compact"
                       variant="outline"
                       disabled={!reviews.data?.has_more || reviews.isFetching}
                       onPointerEnter={() => prefetch(mine, page + 1)}

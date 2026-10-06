@@ -3,10 +3,10 @@ import { InfoIcon } from "@phosphor-icons/react"
 import { useMutation } from "@tanstack/react-query"
 
 import { SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { api, type JsonValue, type WorkspaceRecord } from "@/lib/api"
 
 function FieldHelp({
@@ -21,12 +21,12 @@ function FieldHelp({
       <TooltipTrigger
         render={<span role="button" tabIndex={0} />}
         aria-label={`About ${label.toLowerCase()}`}
-        className="ml-1 inline-flex align-middle text-muted-foreground hover:text-foreground"
+        className="ml-1 inline-flex align-middle text-ink-subtle hover:text-ink"
         onClick={(event) => event.preventDefault()}
       >
         <InfoIcon aria-hidden="true" className="size-3.5" />
       </TooltipTrigger>
-      <TooltipPopup className="max-w-80">{description}</TooltipPopup>
+      <TooltipContent className="max-w-80">{description}</TooltipContent>
     </Tooltip>
   )
 }
@@ -105,7 +105,7 @@ export function WorkspaceProxySection({
               aria-controls={`proxy-${tab}`}
               id={`proxy-tab-${tab}`}
               variant={view === tab ? "secondary" : "ghost"}
-              size="sm"
+              size="compact"
               onClick={() => setView(tab)}
             >
               {tab === "form" ? "Rules" : "JSON"}
@@ -119,7 +119,7 @@ export function WorkspaceProxySection({
         >
           {view === "json" ? (
             <>
-              <label htmlFor="workspace-proxy-config" className="text-sm">
+              <label htmlFor="workspace-proxy-config" className="text-body">
                 Proxy configuration (JSON)
                 <FieldHelp
                   label="Proxy configuration (JSON)"
@@ -129,7 +129,7 @@ export function WorkspaceProxySection({
               <Textarea
                 id="workspace-proxy-config"
                 aria-label="Proxy configuration (JSON)"
-                className="min-h-64 font-mono text-xs"
+                className="min-h-64 font-mono text-label"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 disabled={!canEdit || save.isPending}
@@ -138,7 +138,7 @@ export function WorkspaceProxySection({
               />
             </>
           ) : parseError ? (
-            <p role="alert" className="text-xs text-destructive">
+            <p role="alert" className="text-label text-risk">
               {parseError} Fix the configuration in the JSON tab to use the
               form.
             </p>
@@ -148,7 +148,7 @@ export function WorkspaceProxySection({
               className="space-y-4"
             >
               {rules.length === 0 && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-ink-subtle">
                   No custom proxy rules configured.
                 </p>
               )}
@@ -175,14 +175,14 @@ export function WorkspaceProxySection({
                 return (
                   <div
                     key={index}
-                    className="space-y-3 rounded-md border border-border p-3"
+                    className="space-y-3 rounded-badge border border-line p-3"
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">
+                      <span className="text-body font-medium">
                         Rule {index + 1}
                       </span>
                       <Button
-                        size="sm"
+                        size="compact"
                         variant="ghost"
                         onClick={() =>
                           changeRules(
@@ -193,7 +193,7 @@ export function WorkspaceProxySection({
                         Remove rule {index + 1}
                       </Button>
                     </div>
-                    <label className="block space-y-1 text-xs">
+                    <label className="block space-y-1 text-label">
                       Rule name
                       <FieldHelp
                         label="Rule name"
@@ -210,7 +210,7 @@ export function WorkspaceProxySection({
                         }
                       />
                     </label>
-                    <label className="block space-y-1 text-xs">
+                    <label className="block space-y-1 text-label">
                       Matching hosts
                       <FieldHelp
                         label="Matching hosts"
@@ -233,7 +233,7 @@ export function WorkspaceProxySection({
                         }
                       />
                     </label>
-                    <div className="text-xs font-medium">Headers</div>
+                    <div className="text-label font-medium">Headers</div>
                     {headers.map((header, position) => {
                       if (
                         !header ||
@@ -257,7 +257,7 @@ export function WorkspaceProxySection({
                           key={position}
                           className="flex flex-wrap items-end gap-2"
                         >
-                          <label className="min-w-32 flex-1 space-y-1 text-xs">
+                          <label className="min-w-32 flex-1 space-y-1 text-label">
                             Header name
                             <FieldHelp
                               label="Header name"
@@ -275,7 +275,7 @@ export function WorkspaceProxySection({
                               }
                             />
                           </label>
-                          <label className="min-w-32 flex-1 space-y-1 text-xs">
+                          <label className="min-w-32 flex-1 space-y-1 text-label">
                             Header value
                             <FieldHelp
                               label="Header value"
@@ -292,14 +292,14 @@ export function WorkspaceProxySection({
                               }
                             />
                           </label>
-                          <label className="space-y-1 text-xs">
+                          <label className="space-y-1 text-label">
                             Type
                             <FieldHelp
                               label="Type"
                               description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Open SWE still persists this workspace configuration: opaque is not a way to store secrets here."
                             />
                             <select
-                              className="block h-9 rounded-md border border-input bg-background px-2"
+                              className="block h-9 rounded-badge border border-line-strong bg-canvas px-2"
                               value={
                                 typeof header.type === "string"
                                   ? header.type
@@ -314,7 +314,7 @@ export function WorkspaceProxySection({
                             </select>
                           </label>
                           <Button
-                            size="sm"
+                            size="compact"
                             variant="ghost"
                             aria-label={`Remove header ${position + 1} from rule ${index + 1}`}
                             onClick={() =>
@@ -332,7 +332,7 @@ export function WorkspaceProxySection({
                       )
                     })}
                     <Button
-                      size="sm"
+                      size="compact"
                       variant="outline"
                       onClick={() =>
                         changeRule(index, {
@@ -346,12 +346,12 @@ export function WorkspaceProxySection({
                     >
                       Add header
                     </Button>
-                    <div className="text-xs font-medium">
+                    <div className="text-label font-medium">
                       Environment variables
                     </div>
                     {Object.entries(env).map(([name, value], position) => (
                       <div key={position} className="flex items-end gap-2">
-                        <label className="flex-1 space-y-1 text-xs">
+                        <label className="flex-1 space-y-1 text-label">
                           Variable name
                           <FieldHelp
                             label="Variable name"
@@ -373,7 +373,7 @@ export function WorkspaceProxySection({
                             }
                           />
                         </label>
-                        <label className="flex-1 space-y-1 text-xs">
+                        <label className="flex-1 space-y-1 text-label">
                           Variable value
                           <FieldHelp
                             label="Variable value"
@@ -393,7 +393,7 @@ export function WorkspaceProxySection({
                           />
                         </label>
                         <Button
-                          size="sm"
+                          size="compact"
                           variant="ghost"
                           aria-label={`Remove variable ${position + 1} from rule ${index + 1}`}
                           onClick={() =>
@@ -412,7 +412,7 @@ export function WorkspaceProxySection({
                       </div>
                     ))}
                     <Button
-                      size="sm"
+                      size="compact"
                       variant="outline"
                       onClick={() => {
                         let name = "NEW_VARIABLE"
@@ -429,7 +429,7 @@ export function WorkspaceProxySection({
                 )
               })}
               <Button
-                size="sm"
+                size="compact"
                 variant="outline"
                 onClick={() =>
                   changeRules([
@@ -443,7 +443,7 @@ export function WorkspaceProxySection({
             </fieldset>
           )}
         </div>
-        <p id="workspace-proxy-help" className="text-xs text-muted-foreground">
+        <p id="workspace-proxy-help" className="text-meta text-ink-subtle">
           Use rules with name, match_hosts, headers (name, type, value), and
           env_vars. Headers match hosts; environment variables are sandbox-wide.
           Do not enter secrets or authentication credentials. Authorization,
@@ -451,9 +451,9 @@ export function WorkspaceProxySection({
           {" {} "}to clear custom proxy settings; other sandbox create
           parameters are preserved.
         </p>
-        <details className="text-xs text-muted-foreground">
+        <details className="text-meta text-ink-subtle">
           <summary className="cursor-pointer">Example configuration</summary>
-          <pre className="mt-2 overflow-auto rounded-md bg-muted p-3">
+          <pre className="mt-2 overflow-auto rounded-badge bg-muted p-3">
             {JSON.stringify(
               {
                 rules: [
@@ -477,7 +477,7 @@ export function WorkspaceProxySection({
           </pre>
         </details>
         {save.error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-label text-risk">
             {save.error.message}
           </p>
         )}
@@ -485,7 +485,7 @@ export function WorkspaceProxySection({
           <div className="flex justify-end gap-2">
             {dirty && (
               <Button
-                size="sm"
+                size="compact"
                 variant="ghost"
                 disabled={save.isPending}
                 onClick={() => setDraft(original)}
@@ -494,7 +494,7 @@ export function WorkspaceProxySection({
               </Button>
             )}
             <Button
-              size="sm"
+              size="compact"
               disabled={!dirty || save.isPending}
               onClick={() => save.mutate()}
             >

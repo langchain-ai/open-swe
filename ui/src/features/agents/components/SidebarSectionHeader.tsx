@@ -5,7 +5,7 @@ import {
 } from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 
-import { Menu, MenuPopup, MenuTrigger } from "@/components/ui/menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 
 /**
@@ -34,7 +34,7 @@ export function SidebarSectionHeader({
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left text-[13px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+        className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left text-label font-medium text-ink-subtle/70 transition-colors hover:text-ink"
       >
         <span className="min-w-0 truncate">{label}</span>
         <Caret
@@ -60,18 +60,18 @@ export function SidebarSectionMenu({
   children: ReactNode
 }) {
   return (
-    <Menu>
-      <MenuTrigger
+    <DropdownMenu>
+      <DropdownMenuTrigger
         aria-label={label}
         title={label}
-        className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground data-popup-open:opacity-100"
+        className="flex size-5 items-center justify-center rounded-tick text-ink-subtle/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-hover hover:text-ink data-popup-open:opacity-100"
       >
         <DotsThreeIcon className="size-4" />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-56" sideOffset={4}>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56" sideOffset={4}>
         {children}
-      </MenuPopup>
-    </Menu>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -90,7 +90,7 @@ export function SidebarSectionAction({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground"
+      className="flex size-5 items-center justify-center rounded-tick text-ink-subtle/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-hover hover:text-ink"
     >
       {icon}
     </button>

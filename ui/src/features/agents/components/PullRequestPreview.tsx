@@ -6,7 +6,7 @@ import type {
   AgentPullRequest,
   AgentPullRequestHealth,
 } from "@/features/agents/lib/types"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 
 interface PullRequestPreviewContextValue {
   pullRequests: Map<string, AgentPullRequest>
@@ -113,12 +113,11 @@ export function PreviewablePullRequestLink({
           </a>
         }
       />
-      <TooltipPopup
-        variant="glass"
+      <TooltipContent
         side="top"
         align="start"
         sideOffset={8}
-        className="rounded-xl p-3 shadow-2xl"
+        className="rounded-control p-3 shadow-overlay"
       >
         <PullRequestHoverCard
           pullRequest={pullRequest}
@@ -127,7 +126,7 @@ export function PreviewablePullRequestLink({
           )}
           healthUnavailable={previews.healthUnavailable}
         />
-      </TooltipPopup>
+      </TooltipContent>
     </Tooltip>
   )
 }

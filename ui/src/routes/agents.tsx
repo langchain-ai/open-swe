@@ -11,7 +11,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -107,7 +107,7 @@ function AgentsLayout() {
 
   if (session.isLoading) {
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-background p-6">
+      <main className="agents-ui flex h-svh items-center justify-center bg-canvas p-6">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )

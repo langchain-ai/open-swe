@@ -16,8 +16,8 @@ import {
 import { SettingsSection } from "@/components/AppShell"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
 import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import {
   useWorkspaceOptions,
   workspaceOptionKeys,
@@ -107,17 +107,17 @@ function GeneralSection({
         workspaces={workspaces}
         channelLabel={channelLabel}
       />
-      <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3.5">
         {rebuildStatus}
         {error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-label text-risk">
             {error}
           </p>
         )}
         <div className="ml-auto flex gap-2">
           {dirty && (
             <Button
-              size="sm"
+              size="compact"
               variant="ghost"
               disabled={saving}
               onClick={() => setDraft(draftFromWorkspace(record))}
@@ -126,7 +126,7 @@ function GeneralSection({
             </Button>
           )}
           <Button
-            size="sm"
+            size="compact"
             disabled={!dirty || saving || !draft.name.trim()}
             onClick={() => void save()}
           >
@@ -193,7 +193,7 @@ export function WorkspaceSettingsPanel({
   if (record.isLoading) return <Skeleton className="h-64 w-full" />
   if (record.isError || !record.data) {
     return (
-      <p role="alert" className="text-sm text-destructive">
+      <p role="alert" className="text-body text-risk">
         {record.error instanceof Error
           ? record.error.message
           : "Could not load this workspace."}
@@ -249,7 +249,7 @@ export function WorkspaceSettingsPanel({
           record.data.refresh_status === "refreshing" ? (
             <p
               role="status"
-              className="flex min-w-48 flex-1 items-center gap-2 text-xs text-muted-foreground"
+              className="flex min-w-48 flex-1 items-center gap-2 text-meta text-ink-subtle"
             >
               <CircleNotchIcon
                 aria-hidden="true"
@@ -263,7 +263,7 @@ export function WorkspaceSettingsPanel({
           ) : awaitingRepositoryRebuild(record.data) ? (
             <p
               role="alert"
-              className="min-w-48 flex-1 text-xs text-destructive"
+              className="min-w-48 flex-1 text-label text-risk"
             >
               Repositories saved, but the image {buildAction.toLowerCase()}{" "}
               could not be confirmed. Check the sandbox image status or retry{" "}
@@ -274,7 +274,7 @@ export function WorkspaceSettingsPanel({
               role={
                 record.data.refresh_status === "failed" ? "alert" : "status"
               }
-              className="min-w-48 flex-1 text-xs text-muted-foreground"
+              className="min-w-48 flex-1 text-meta text-ink-subtle"
             >
               {record.data.refresh_status === "failed"
                 ? `Image ${buildAction.toLowerCase()} failed. ${record.data.refresh_error ?? (record.data.snapshot_id ? "The previous image is still in use." : "No image is available yet.")}`
@@ -319,7 +319,7 @@ export function WorkspaceSettingsPanel({
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
           action={
             <Button
-              size="sm"
+              size="compact"
               variant="destructive"
               aria-label={`Delete ${record.data.name}`}
               onClick={() => setDeleting(true)}

@@ -27,13 +27,13 @@ function Attachment() {
   )
   const image = attachment.content?.find((part) => part.type === "image")
   return (
-    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-xl border border-border p-2 text-xs">
+    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-control border border-line p-2 text-label">
       {(file || image?.image) && (
         <img
           ref={previewRef}
           src={image?.image}
           alt={attachment.name}
-          className="size-12 rounded object-cover"
+          className="size-12 rounded-tick object-cover"
         />
       )}
       <span>{attachment.name}</span>
@@ -98,7 +98,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
 
   return (
     <ComposerPrimitive.Root className="w-full">
-      <ComposerPrimitive.AttachmentDropzone className="rounded-3xl border border-border bg-card p-3 shadow-xs focus-within:border-muted-foreground/40 data-[dragging=true]:border-primary">
+      <ComposerPrimitive.AttachmentDropzone className="rounded-shell border border-line bg-panel p-3 shadow-control focus-within:border-ink-subtle/40 data-[dragging=true]:border-primary">
         <div className="flex flex-wrap gap-2 empty:hidden">
           <ComposerPrimitive.Attachments>
             {() => <Attachment />}
@@ -114,7 +114,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                 : "Send a message…"
           }
           rows={2}
-          className="max-h-48 min-h-14 w-full resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none"
+          className="max-h-48 min-h-14 w-full resize-none bg-transparent px-2 py-2 text-body leading-6 outline-none"
         />
         <div className="flex flex-wrap items-center gap-2">
           <ComposerPrimitive.AddAttachment
@@ -137,7 +137,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             }
             disabled={disabled}
             requireImageSupport={hasAttachments}
-            triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+            triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-meta text-ink-subtle hover:bg-muted"
           />
           {!thread && (
             <>
@@ -153,7 +153,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                     repo_explicitly_none: !event.target.value,
                   })
                 }
-                className="max-w-40 bg-transparent text-xs"
+                className="max-w-40 bg-transparent text-label"
               >
                 <option value="">No repository</option>
                 {repos.data?.repositories.map((repo) => (
@@ -173,7 +173,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                   onChange={(event) =>
                     update({ environment: event.target.value })
                   }
-                  className="max-w-32 bg-transparent text-xs"
+                  className="max-w-32 bg-transparent text-label"
                 >
                   {workspaces.map((workspace) => (
                     <option key={workspace.slug} value={workspace.slug}>
@@ -188,14 +188,14 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             {running ? (
               <ComposerPrimitive.Cancel
                 aria-label="Stop run"
-                className="rounded-full bg-primary p-2.5 text-primary-foreground disabled:opacity-40"
+                className="rounded-full bg-primary p-2.5 text-primary-ink disabled:opacity-40"
               >
                 <Square className="size-3.5 fill-current" />
               </ComposerPrimitive.Cancel>
             ) : (
               <ComposerPrimitive.Send
                 aria-label="Send message"
-                className="rounded-full bg-primary p-2.5 text-primary-foreground disabled:opacity-30"
+                className="rounded-full bg-primary p-2.5 text-primary-ink disabled:opacity-30"
               >
                 <ArrowUp className="size-4" />
               </ComposerPrimitive.Send>

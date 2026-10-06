@@ -3,15 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react"
 import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import {
   useScopedSettings,
@@ -58,13 +52,13 @@ export function TierRow({
       label={label}
       description={description}
       badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
-      badgeClassName={!inherits ? "text-destructive" : undefined}
+      badgeClassName={!inherits ? "text-risk" : undefined}
       control={
         <div className="flex items-center gap-2">
           {control}
           {scoped && !inherits && (
             <Button
-              size="sm"
+              size="compact"
               variant="ghost"
               onClick={() => settings.reset(...fields)}
               aria-label={`Reset ${label} to the instance value`}
@@ -96,7 +90,7 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
       title="LLM Gateway"
       description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. Requires the gateway (private beta) enabled for your organization."
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-line">
         <TierRow
           settings={settings}
           fields={["gateway_enabled"]}
@@ -154,7 +148,7 @@ export function DefaultRepoSection({
           : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
       }
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-line">
         <TierRow
           settings={settings}
           fields={["default_repo"]}
@@ -169,7 +163,7 @@ export function DefaultRepoSection({
                 onRepoChange={(repo) => settings.save({ default_repo: repo })}
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                triggerClassName="h-7 w-full max-w-none rounded-badge border border-line-strong bg-line-strong/20 px-2 py-1.5 text-label text-ink transition-colors hover:opacity-100"
                 dropdownClassName="w-56"
                 disabled={!settings.data}
               />
@@ -262,7 +256,7 @@ export function ModelDefaultsSection({
           : "Models for runs in every workspace that does not override them. Each user's Agent settings override the agent defaults."
       }
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-line">
         <TierRow
           settings={settings}
           fields={["model_routing_enabled"]}

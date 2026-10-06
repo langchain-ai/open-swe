@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
 import { SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import {
   useScopedSettings,
   type SettingsScope,
@@ -58,7 +58,7 @@ export function ReviewSettings({
       >
         <div className="flex flex-col gap-2 p-4">
           {scoped && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-ink-subtle">
               {guidelinesInherited
                 ? "Inherited from the instance."
                 : "Overridden for this workspace."}
@@ -66,7 +66,7 @@ export function ReviewSettings({
           )}
           <Textarea
             aria-label="Review guidelines"
-            className="min-h-[200px] w-full font-mono text-xs"
+            className="min-h-[200px] w-full font-mono text-label"
             value={guidelinesDraft}
             onChange={(e) => setGuidelinesDraft(e.target.value)}
             placeholder="e.g. Always flag missing input validation on new API endpoints. Prefer structured logging over print statements."
@@ -75,7 +75,7 @@ export function ReviewSettings({
           {canEdit && (
             <div className="flex items-center gap-2">
               <Button
-                size="sm"
+                size="compact"
                 disabled={!editable || !guidelinesDirty}
                 onClick={() =>
                   settings.save({ org_guidelines: trimmedGuidelines || null })
@@ -85,7 +85,7 @@ export function ReviewSettings({
               </Button>
               {scoped && !guidelinesInherited && (
                 <Button
-                  size="sm"
+                  size="compact"
                   variant="ghost"
                   disabled={!editable}
                   onClick={() => settings.reset("org_guidelines")}
@@ -94,7 +94,7 @@ export function ReviewSettings({
                 </Button>
               )}
               {guidelinesDirty && (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-meta text-ink-subtle">
                   Unsaved changes
                 </span>
               )}
@@ -104,7 +104,7 @@ export function ReviewSettings({
       </SettingsSection>
 
       <SettingsSection title="Review configuration">
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-line">
           <TierRow
             settings={settings}
             fields={["review_draft_prs"]}
@@ -130,7 +130,7 @@ export function ReviewSettings({
       </SettingsSection>
 
       {!canEdit && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-meta text-ink-subtle">
           These settings are read-only. Ask a workspace admin to change them.
         </p>
       )}

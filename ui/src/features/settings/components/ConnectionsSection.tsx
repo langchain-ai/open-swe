@@ -9,7 +9,7 @@ import type {
   SessionUser,
 } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { api, connectLangSmith, connectService } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
@@ -18,10 +18,10 @@ function StatusPill({ connected }: { connected: boolean }) {
   return (
     <span
       className={cn(
-        "rounded-full px-2 py-0.5 text-[10px] font-medium",
+        "rounded-full px-2 py-0.5 text-meta font-medium",
         connected
           ? "bg-primary/10 text-primary"
-          : "bg-muted text-muted-foreground"
+          : "bg-muted text-ink-subtle"
       )}
     >
       {connected ? "Connected" : "Not connected"}
@@ -60,7 +60,7 @@ function SlackRow({ user }: { user: SessionUser }) {
           <StatusPill connected={connected} />
           {user.slack_oauth_enabled ? (
             <Button
-              size="sm"
+              size="compact"
               variant={connected ? "outline" : "default"}
               onClick={connect}
               disabled={connecting}
@@ -73,7 +73,7 @@ function SlackRow({ user }: { user: SessionUser }) {
                   : "Connect"}
             </Button>
           ) : (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-meta text-ink-subtle">
               Sign in with Slack unavailable
             </span>
           )}
@@ -125,14 +125,14 @@ function NotionRow() {
           {connected ? (
             <Button
               variant="outline"
-              size="sm"
+              size="compact"
               onClick={() => disconnect.mutate()}
             >
               Disconnect
             </Button>
           ) : (
             <Button
-              size="sm"
+              size="compact"
               onClick={connect}
               disabled={connecting || creds.isLoading}
             >
@@ -210,7 +210,7 @@ function LangSmithRow() {
           {connected ? (
             <Button
               variant="outline"
-              size="sm"
+              size="compact"
               onClick={() => disconnect.mutate()}
               disabled={disconnect.isPending}
             >

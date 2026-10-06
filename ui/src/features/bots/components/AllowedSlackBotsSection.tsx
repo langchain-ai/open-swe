@@ -2,15 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Robot, MagnifyingGlass } from "@phosphor-icons/react"
 import { useState } from "react"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Popover,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
+import { Avatar, AvatarFallback, AvatarImage } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@langchain/gtm-platform-design-system/ui/popover"
 import { api } from "@/lib/api"
 import type { AllowedSlackBot } from "@/lib/api"
 
@@ -92,10 +87,10 @@ export function AllowedSlackBotsSection({
     <div aria-labelledby="allowed-slack-bots-heading" className="p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h3 id="allowed-slack-bots-heading" className="text-sm font-medium">
+          <h3 id="allowed-slack-bots-heading" className="text-body font-medium">
             Enabled bots
           </h3>
-          <p className="text-xs/relaxed text-muted-foreground">
+          <p className="text-meta text-ink-subtle">
             Let trusted Slack bots start a task by mentioning Open SWE.
           </p>
         </div>
@@ -112,12 +107,12 @@ export function AllowedSlackBotsSection({
         >
           <PopoverTrigger
             render={
-              <Button size="sm" variant="outline" disabled={unavailable} />
+              <Button size="compact" variant="outline" disabled={unavailable} />
             }
           >
             <Plus size={14} /> Add bot
           </PopoverTrigger>
-          <PopoverPopup align="end" className="w-80 p-0">
+          <PopoverContent align="end" className="w-80 p-0">
             <PopoverTitle className="px-3 pt-3 pb-2">
               Add a Slack bot
             </PopoverTitle>
@@ -131,7 +126,7 @@ export function AllowedSlackBotsSection({
               >
                 <label
                   htmlFor="allowed-slack-bot-id"
-                  className="text-xs text-muted-foreground"
+                  className="text-meta text-ink-subtle"
                 >
                   Slack bot ID
                 </label>
@@ -144,7 +139,7 @@ export function AllowedSlackBotsSection({
                 />
                 <Button
                   type="submit"
-                  size="sm"
+                  size="compact"
                   disabled={!botId.trim() || unavailable}
                 >
                   {add.isPending ? "Verifying…" : "Allow bot"}
@@ -154,7 +149,7 @@ export function AllowedSlackBotsSection({
               <>
                 <div className="relative mx-3 mb-2">
                   <MagnifyingGlass
-                    className="pointer-events-none absolute top-2.5 left-2.5 text-muted-foreground"
+                    className="pointer-events-none absolute top-2.5 left-2.5 text-ink-subtle"
                     size={14}
                   />
                   <Input
@@ -170,17 +165,17 @@ export function AllowedSlackBotsSection({
                   aria-label="Slack bots"
                 >
                   {directory.isPending && (
-                    <p className="p-3 text-xs text-muted-foreground">
+                    <p className="p-3 text-meta text-ink-subtle">
                       Loading Slack bots…
                     </p>
                   )}
                   {directory.error && (
                     <div className="space-y-2 p-3">
-                      <p role="alert" className="text-xs text-destructive">
+                      <p role="alert" className="text-label text-risk">
                         {directory.error.message}
                       </p>
                       <Button
-                        size="sm"
+                        size="compact"
                         variant="outline"
                         disabled={directory.isFetching}
                         onClick={() => void directory.refetch()}
@@ -190,7 +185,7 @@ export function AllowedSlackBotsSection({
                     </div>
                   )}
                   {matches?.length === 0 && (
-                    <p className="p-3 text-xs text-muted-foreground">
+                    <p className="p-3 text-meta text-ink-subtle">
                       No matching bots found.
                     </p>
                   )}
@@ -211,7 +206,7 @@ export function AllowedSlackBotsSection({
                             : `Allow ${bot.name}`
                         }
                         onClick={() => allow(bot.user_id)}
-                        className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring enabled:hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full items-center gap-2.5 rounded-badge px-2 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-primary enabled:hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Avatar size="sm">
                           <AvatarImage src={bot.image_url} alt="" />
@@ -221,16 +216,16 @@ export function AllowedSlackBotsSection({
                         </Avatar>
                         <span className="min-w-0 flex-1">
                           <span
-                            className="block truncate text-xs font-medium"
+                            className="block truncate text-label font-medium"
                             title={bot.name}
                           >
                             {bot.name}
                           </span>
-                          <span className="block text-[11px] text-muted-foreground">
+                          <span className="block text-meta text-ink-subtle">
                             {bot.bot_id}
                           </span>
                         </span>
-                        <span className="px-2 text-xs" aria-hidden="true">
+                        <span className="px-2 text-label" aria-hidden="true">
                           {allowed
                             ? "Allowed"
                             : add.isPending &&
@@ -245,16 +240,16 @@ export function AllowedSlackBotsSection({
               </>
             )}
             {add.error && (
-              <p role="alert" className="px-3 pb-3 text-xs text-destructive">
+              <p role="alert" className="px-3 pb-3 text-label text-risk">
                 {add.error.message}
               </p>
             )}
             <div className="border-t px-3 py-2">
               <Button
                 type="button"
-                variant="link"
-                size="sm"
-                className="h-auto p-0 text-xs text-muted-foreground"
+                variant="ghost"
+                size="compact"
+                className="h-auto p-0 text-meta text-ink-subtle"
                 disabled={pending}
                 onClick={() => {
                   setManual(!manual)
@@ -264,32 +259,32 @@ export function AllowedSlackBotsSection({
                 {manual ? "Browse Slack bots" : "Enter bot ID manually"}
               </Button>
             </div>
-          </PopoverPopup>
+          </PopoverContent>
         </Popover>
       </div>
       {bots.error && (
-        <p role="alert" className="mt-3 text-xs text-destructive">
+        <p role="alert" className="mt-3 text-label text-risk">
           {bots.error.message}
         </p>
       )}
       {bots.isPending && (
-        <p className="py-6 text-xs text-muted-foreground">
+        <p className="py-6 text-meta text-ink-subtle">
           Loading allowed bots…
         </p>
       )}
       {bots.data?.length === 0 && (
-        <div className="mt-4 flex items-center gap-3 rounded-lg border border-dashed px-4 py-5">
-          <Robot size={22} className="shrink-0 text-muted-foreground" />
+        <div className="mt-4 flex items-center gap-3 rounded-compact border border-dashed px-4 py-5">
+          <Robot size={22} className="shrink-0 text-ink-subtle" />
           <div className="space-y-1">
-            <p className="text-xs font-medium">No Slack bots are allowed.</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-label font-medium">No Slack bots are allowed.</p>
+            <p className="text-meta text-ink-subtle">
               Add a bot from your Slack workspace to get started.
             </p>
           </div>
         </div>
       )}
       {!!bots.data?.length && (
-        <ul className="mt-4 divide-y rounded-lg border">
+        <ul className="mt-4 divide-y rounded-compact border">
           {bots.data.map((bot) => (
             <li
               key={`${bot.team_id}:${bot.bot_id}`}
@@ -298,7 +293,7 @@ export function AllowedSlackBotsSection({
               <button
                 type="button"
                 onClick={() => onBotChange?.(`${bot.team_id}:${bot.bot_id}`)}
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-1 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-badge py-1 text-left hover:bg-hover focus-visible:outline-2 focus-visible:outline-primary"
                 disabled={!onBotChange}
               >
                 <Avatar>
@@ -308,16 +303,16 @@ export function AllowedSlackBotsSection({
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium" title={bot.name}>
+                  <p className="truncate text-body font-medium" title={bot.name}>
                     {bot.name}
                   </p>
-                  <p className="text-xs text-muted-foreground">{bot.bot_id}</p>
+                  <p className="text-meta text-ink-subtle">{bot.bot_id}</p>
                 </div>
-                <span className="text-xs text-success">Enabled</span>
+                <span className="text-label text-positive">Enabled</span>
                 {onBotChange && <span aria-hidden="true">→</span>}
               </button>
               <Button
-                size="sm"
+                size="compact"
                 variant="ghost"
                 aria-label={`Remove ${bot.name}`}
                 disabled={pending}
@@ -332,7 +327,7 @@ export function AllowedSlackBotsSection({
           ))}
         </ul>
       )}
-      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+      <div className="mt-3 flex items-center justify-between gap-3 text-meta text-ink-subtle">
         <span>
           {bots.data
             ? `${bots.data.length} ${bots.data.length === 1 ? "bot" : "bots"} allowed`
@@ -342,7 +337,7 @@ export function AllowedSlackBotsSection({
           <Robot size={13} /> Runs as Open SWE
         </span>
       </div>
-      <p className="mt-2 text-xs/relaxed text-muted-foreground">
+      <p className="mt-2 text-meta text-ink-subtle">
         Uses the Open SWE GitHub App’s repository access. Bots can only continue
         tasks they started.
       </p>

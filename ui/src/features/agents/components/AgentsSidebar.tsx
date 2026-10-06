@@ -44,18 +44,7 @@ import {
   SidebarSectionHeader,
   SidebarSectionMenu,
 } from "@/features/agents/components/SidebarSectionHeader"
-import {
-  MenuCheckboxItem,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuItem,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
-} from "@/components/ui/menu"
+import { DropdownMenuCheckboxItem, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
 import {
   SidebarCollapseButton,
   SidebarFrame,
@@ -105,8 +94,8 @@ import {
   sidebarRepoOptions,
   sortSidebarThreads,
 } from "@/features/agents/lib/sidebarThreads"
-import { Skeleton } from "@/components/ui/skeleton"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { TooltipProvider } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import {
   useAppCommandControls,
   useRegisterAppCommands,
@@ -563,77 +552,77 @@ export function AgentsSidebar({
   // Repositories and Recents share one menu: both control the same list.
   const removeProjectItems = isDesktop && localRepos.length > 0 && (
     <>
-      <MenuSeparator />
-      <MenuSub>
-        <MenuSubTrigger>
+      <DropdownMenuSeparator />
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
           <TrashIcon />
           Remove repository…
-        </MenuSubTrigger>
-        <MenuSubPopup className="w-56">
-          <MenuGroup>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="w-56">
+          <DropdownMenuGroup>
             {localRepos.map((repo) => (
-              <MenuItem
+              <DropdownMenuItem
                 key={repo.cwd}
                 onClick={() => void removeLocalRepo(repo.cwd)}
                 variant="destructive"
               >
                 <TrashIcon />
                 <span className="min-w-0 truncate">{repo.name}</span>
-              </MenuItem>
+              </DropdownMenuItem>
             ))}
-          </MenuGroup>
-        </MenuSubPopup>
-      </MenuSub>
+          </DropdownMenuGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
     </>
   )
 
   const viewMenuItems = (
     <>
-      <MenuGroup>
-        <MenuGroupLabel>Organize sidebar</MenuGroupLabel>
-        <MenuRadioGroup
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>Organize sidebar</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
           value={prefs.organize}
           onValueChange={(value) =>
             setView({ organize: value as OrganizeMode })
           }
         >
-          <MenuRadioItem value="workspace">Workspaces</MenuRadioItem>
-          <MenuRadioItem value="repo">By repository</MenuRadioItem>
-          <MenuRadioItem value="list">In one list</MenuRadioItem>
-        </MenuRadioGroup>
-      </MenuGroup>
-      <MenuGroup>
-        <MenuGroupLabel>Sort chats by</MenuGroupLabel>
-        <MenuRadioGroup
+          <DropdownMenuRadioItem value="workspace">Workspaces</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="repo">By repository</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="list">In one list</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuGroup>
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>Sort chats by</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
           value={prefs.sortChats}
           onValueChange={(value) => setView({ sortChats: value as ChatSort })}
         >
-          <MenuRadioItem value="created">Created</MenuRadioItem>
-          <MenuRadioItem value="updated">Last updated</MenuRadioItem>
-        </MenuRadioGroup>
-      </MenuGroup>
-      <MenuSeparator />
-      <MenuGroup>
-        <MenuCheckboxItem
+          <DropdownMenuRadioItem value="created">Created</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="updated">Last updated</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuGroup>
+        <DropdownMenuCheckboxItem
           checked={prefs.filters.includeResolved}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, includeResolved: checked })
           }
         >
           Show archived
-        </MenuCheckboxItem>
-        <MenuCheckboxItem
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
           checked={prefs.filters.includeAutomations}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, includeAutomations: checked })
           }
         >
           Show automations
-        </MenuCheckboxItem>
-        <MenuCheckboxItem checked={prefs.compact} onCheckedChange={setCompact}>
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem checked={prefs.compact} onCheckedChange={setCompact}>
           Compact rows
-        </MenuCheckboxItem>
-      </MenuGroup>
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuGroup>
     </>
   )
 
@@ -709,7 +698,7 @@ export function AgentsSidebar({
     recents.length === 0
 
   return (
-    <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
+    <SidebarFrame {...layout} className="border-r border-line bg-sidebar">
       <div
         className={cn(
           "flex items-center justify-between px-4 pb-4",
@@ -718,7 +707,7 @@ export function AgentsSidebar({
       >
         <Link
           to="/my-settings"
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
+          className="flex items-center gap-2 text-body font-medium tracking-tightish text-ink"
         >
           <img
             src={`${import.meta.env.BASE_URL}logo-mark.png`}
@@ -736,7 +725,7 @@ export function AgentsSidebar({
               layout.closeOnMobile()
               openPalette()
             }}
-            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex size-6 items-center justify-center rounded-tick text-ink-subtle hover:bg-hover hover:text-ink"
           >
             <MagnifyingGlassIcon className="size-4" />
           </button>
@@ -748,7 +737,7 @@ export function AgentsSidebar({
         <Link
           to={chat.home}
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
+          className="flex w-full items-center gap-2.5 rounded-badge px-2.5 py-1.5 text-body font-medium text-ink transition-colors hover:bg-hover"
         >
           <NotePencilIcon className="size-4" />
           New Thread
@@ -770,10 +759,10 @@ export function AgentsSidebar({
                 : undefined
             }
             className={cn(
-              "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover",
+              "flex w-full items-center gap-2.5 rounded-badge px-2.5 py-1.5 text-body font-medium text-ink transition-colors hover:bg-hover",
               !!concierge.data?.thread_id &&
                 activeThreadId === concierge.data.thread_id &&
-                "bg-sidebar-row-active"
+                "bg-selected"
             )}
           >
             <ChatCircleIcon className="size-4" />
@@ -786,13 +775,13 @@ export function AgentsSidebar({
         <div className="relative flex min-h-0 flex-1 flex-col">
           {scrollEdges.top && (
             <>
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-px bg-line" />
               <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
             </>
           )}
           {scrollEdges.bottom && (
             <>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-px bg-line" />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
             </>
           )}
@@ -818,8 +807,8 @@ export function AgentsSidebar({
                     )}
                     onClick={layout.closeOnMobile}
                     className={cn(
-                      "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover",
-                      active && "bg-sidebar-row-hover font-medium"
+                      "flex items-center gap-2.5 rounded-badge px-2.5 py-1.5 text-body text-ink transition-colors hover:bg-hover",
+                      active && "bg-hover font-medium"
                     )}
                   >
                     <Icon className="size-4" />
@@ -848,7 +837,7 @@ export function AgentsSidebar({
               />
             )}
             {sourcesLoading && allItems.length > 0 && (
-              <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+              <div className="flex items-center gap-1.5 px-2.5 py-2 text-meta text-ink-subtle/70">
                 <CircleNotchIcon className="size-3.5 animate-spin" />
                 Loading threads…
               </div>
@@ -864,22 +853,22 @@ export function AgentsSidebar({
                   onToggleCollapsed={() => toggleSectionCollapsed("pinned")}
                   menu={
                     <SidebarSectionMenu label="Pinned options">
-                      <MenuGroup>
-                        <MenuGroupLabel>Sort pinned by</MenuGroupLabel>
-                        <MenuRadioGroup
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel>Sort pinned by</DropdownMenuLabel>
+                        <DropdownMenuRadioGroup
                           value={prefs.sortPinned}
                           onValueChange={(value) =>
                             setView({ sortPinned: value as PinnedSort })
                           }
                         >
-                          <MenuRadioItem value="updated">
+                          <DropdownMenuRadioItem value="updated">
                             Last updated
-                          </MenuRadioItem>
-                          <MenuRadioItem value="manual">
+                          </DropdownMenuRadioItem>
+                          <DropdownMenuRadioItem value="manual">
                             Manual order
-                          </MenuRadioItem>
-                        </MenuRadioGroup>
-                      </MenuGroup>
+                          </DropdownMenuRadioItem>
+                        </DropdownMenuRadioGroup>
+                      </DropdownMenuGroup>
                     </SidebarSectionMenu>
                   }
                 />
@@ -988,7 +977,7 @@ export function AgentsSidebar({
               </section>
             )}
             {isEmpty && !cloudError && !localThreads.isError && (
-              <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
+              <p className="px-2.5 py-6 text-center text-meta text-ink-subtle/70">
                 {hasActiveFilters(prefs.filters)
                   ? "No threads match these filters."
                   : "No threads yet."}
@@ -1005,7 +994,7 @@ export function AgentsSidebar({
           ) : (
             <Link
               to="/login"
-              className="flex w-full items-center justify-center rounded-md border border-border px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent"
+              className="flex w-full items-center justify-center rounded-badge border border-line px-2 py-1.5 text-label font-medium hover:bg-hover"
             >
               Sign in for cloud mode
             </Link>
@@ -1022,7 +1011,7 @@ export function AgentsSidebar({
             }
             disabled={updateInstalling}
             onClick={() => void installUpdate()}
-            className="flex h-8 shrink-0 items-center justify-center gap-2 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            className="flex h-8 shrink-0 items-center justify-center gap-2 rounded-full bg-primary px-3 text-label font-medium text-primary-ink hover:bg-primary/90 disabled:opacity-60"
           >
             {updateInstalling ? (
               <>
@@ -1066,7 +1055,7 @@ function WorkspaceGroupSection({
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="group/workspace flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[13px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+        className="group/workspace flex w-full items-center gap-1.5 rounded-badge px-2 py-1 text-left text-label font-medium text-ink-subtle/70 transition-colors hover:text-ink"
       >
         <StackIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
@@ -1167,7 +1156,7 @@ function RepoGroup({
 
   return (
     <div className="mb-1">
-      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover">
+      <div className="group/folder flex items-center gap-1.5 rounded-badge pr-1 pl-2 text-body text-ink transition-colors hover:bg-hover">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -1182,7 +1171,7 @@ function RepoGroup({
           aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
           title={pinned ? "Unpin repository" : "Pin repository"}
           onClick={onTogglePin}
-          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+          className="hidden size-5 shrink-0 items-center justify-center rounded-tick text-ink-subtle/80 group-hover/folder:flex hover:bg-hover hover:text-ink"
         >
           {pinned ? (
             <PushPinSlashIcon className="size-3.5" />
@@ -1195,7 +1184,7 @@ function RepoGroup({
           aria-label={`Compose message in ${group.label}`}
           title="Compose message"
           onClick={onCompose}
-          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+          className="hidden size-5 shrink-0 items-center justify-center rounded-tick text-ink-subtle/80 group-hover/folder:flex hover:bg-hover hover:text-ink"
         >
           <NotePencilIcon className="size-3.5" />
         </button>
@@ -1204,13 +1193,13 @@ function RepoGroup({
         <>
           {shown.map((item) => renderRow(item, pullRequestFor(item)))}
           {shown.length === 0 && loading && (
-            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/70">
+            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-label text-ink-subtle/70">
               <CircleNotchIcon className="size-3.5 animate-spin" />
               Loading chats…
             </div>
           )}
           {shown.length === 0 && !loading && !repo.isError && (
-            <p className="py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/60">
+            <p className="py-1 pr-2.5 pl-6 text-label text-ink-subtle/60">
               No chats
             </p>
           )}
@@ -1218,7 +1207,7 @@ function RepoGroup({
             <button
               type="button"
               onClick={() => void repo.refetch()}
-              className="w-full py-1 pr-2.5 pl-6 text-left text-[13px] text-destructive"
+              className="w-full py-1 pr-2.5 pl-6 text-left text-label text-risk"
             >
               Retry loading chats
             </button>
@@ -1232,7 +1221,7 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+              className="flex w-full items-center gap-1.5 rounded-compact py-1 pr-2.5 pl-6 text-left text-label text-ink-subtle/70 transition-colors hover:text-ink disabled:cursor-wait disabled:opacity-60"
             >
               {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
               {loading ? "Loading…" : "Show more"}
@@ -1262,7 +1251,7 @@ function ThreadListSkeleton({ compact = false }: { compact?: boolean }) {
       {groups.map((widths, groupIndex) => (
         <div key={groupIndex} className={compact ? "mb-2" : "mb-3"} aria-hidden>
           <div className="flex items-center gap-1 px-2 py-1">
-            <Skeleton className="h-2 w-16 rounded-sm" />
+            <Skeleton className="h-2 w-16 rounded-tick" />
           </div>
           {widths.map((width, rowIndex) => (
             <div
@@ -1290,11 +1279,11 @@ function ThreadSourceError({
   onRetry: () => void
 }) {
   return (
-    <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 px-2.5 py-2 text-meta text-ink-subtle">
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <button
         type="button"
-        className="shrink-0 font-medium text-foreground hover:underline"
+        className="shrink-0 font-medium text-ink hover:underline"
         onClick={onRetry}
       >
         Retry
@@ -1341,7 +1330,7 @@ function LoadMoreThreadsOnScroll({
       onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] text-muted-foreground/70"
+      className="flex w-full items-center justify-center gap-1.5 py-2 text-label text-ink-subtle/70"
     >
       {loading ? (
         <CircleNotchIcon className="size-3.5 animate-spin" />
@@ -1448,14 +1437,14 @@ export function AgentsShell({
 
   return (
     <SidebarLayoutProvider value={layout}>
-      <div className="agents-ui flex h-svh overflow-hidden bg-background">
+      <div className="agents-ui flex h-svh overflow-hidden bg-canvas">
         <AgentsSidebar
           user={user}
           activeThreadId={activeThreadId}
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
-        <main className="relative flex min-w-0 flex-1 overflow-hidden bg-background">
+        <main className="relative flex min-w-0 flex-1 overflow-hidden bg-canvas">
           {children}
         </main>
       </div>

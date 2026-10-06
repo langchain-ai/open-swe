@@ -6,7 +6,7 @@ import { getReviewConversation } from "@/features/reviews/lib/conversationApi"
 import { rangeLabel } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import {
   Card,
   CardContent,
@@ -15,7 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
 /** A line comment the chat drafted; the user adds it to their pending review or discards it. */
 export function ProposedCommentCard({
@@ -125,7 +125,7 @@ export function ProposedCommentCard({
       </CardHeader>
       <CardContent>
         {outcome ? (
-          <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+          <p className="line-clamp-3 whitespace-pre-wrap text-ink-subtle">
             {body}
           </p>
         ) : (
@@ -142,7 +142,7 @@ export function ProposedCommentCard({
         {outcome ? null : (
           <>
             <Button
-              size="sm"
+              size="compact"
               variant="ghost"
               disabled={post.isPending}
               onClick={() => drafts.settle(id, { state: "discarded" })}
@@ -150,7 +150,7 @@ export function ProposedCommentCard({
               Discard
             </Button>
             <Button
-              size="sm"
+              size="compact"
               disabled={post.isPending || !body.trim()}
               onClick={addToReview}
             >

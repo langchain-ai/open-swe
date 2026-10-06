@@ -30,6 +30,7 @@
     "ui/dev-dist/**",
     "ui/dist/**",
     "desktop/build/**",
+    "gtm-platform-design-system/**",
     "ui/src/routeTree.gen.ts"
   ]
 }

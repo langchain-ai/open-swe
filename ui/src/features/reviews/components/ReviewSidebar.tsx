@@ -13,7 +13,7 @@ import type {
   GitStatusEntry,
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
@@ -64,10 +64,10 @@ function OverviewRow({
       aria-current={active ? "true" : undefined}
       onClick={onSelect}
       className={cn(
-        "flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left text-xs leading-5 transition-colors",
+        "flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left text-label leading-5 transition-colors",
         active
-          ? "border-primary bg-sidebar-row-hover font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-sidebar-row-hover"
+          ? "border-primary bg-hover font-medium text-ink"
+          : "border-transparent text-ink-subtle hover:bg-hover"
       )}
     >
       Overview
@@ -82,7 +82,7 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col pb-2">
       <div className="px-4 py-1">
-        <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+        <span className="text-meta font-medium tracking-wide text-ink-subtle/70 uppercase">
           {data.title}
         </span>
       </div>
@@ -134,7 +134,7 @@ function ReviewViewTabs({
     <div
       role="tablist"
       aria-label="Sidebar view"
-      className="mx-3 mb-1 flex border-b border-border"
+      className="mx-3 mb-1 flex border-b border-line"
     >
       <ReviewViewTab
         active={view === "ai"}
@@ -176,16 +176,16 @@ function ReviewViewTab({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-label transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none",
         active
-          ? "border-primary font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground"
+          ? "border-primary font-medium text-ink"
+          : "border-transparent text-ink-subtle hover:text-ink"
       )}
     >
       {children}
       {label}
       {count !== null && (
-        <span className="text-[11px] text-muted-foreground/70 tabular-nums">
+        <span className="text-meta text-ink-subtle/70 tabular-nums">
           {count}
         </span>
       )}
@@ -225,7 +225,7 @@ export function renderInlineCode(text: string): Array<ReactNode> {
       return (
         <code
           key={i}
-          className="rounded bg-accent px-1 py-0.5 font-mono text-[0.9em] text-primary"
+          className="rounded-tick bg-hover px-1 py-0.5 font-mono text-[0.9em] text-primary"
         >
           {part.slice(1, -1)}
         </code>
@@ -273,17 +273,17 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       className={cn(
         "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
         active
-          ? "border-primary bg-sidebar-row-hover"
-          : "border-transparent hover:bg-sidebar-row-hover"
+          ? "border-primary bg-hover"
+          : "border-transparent hover:bg-hover"
       )}
     >
-      <span className="mt-px shrink-0 text-[11px] font-medium text-muted-foreground/70 tabular-nums">
+      <span className="mt-px shrink-0 text-meta font-medium text-ink-subtle/70 tabular-nums">
         {group.index}.
       </span>
       <span
         className={cn(
-          "min-w-0 text-xs leading-5",
-          active ? "font-medium text-foreground" : "text-muted-foreground"
+          "min-w-0 text-label leading-5",
+          active ? "font-medium text-ink" : "text-ink-subtle"
         )}
       >
         {title}
@@ -354,7 +354,7 @@ function ReviewFileTreeExplorer({
             ...treeThemeStyle(),
             // Must stay opaque: the tree's truncation marker ("…") paints
             // this color behind itself to hide the overflowing filename.
-            "--trees-theme-sidebar-bg": "var(--sidebar)",
+            "--trees-theme-sidebar-bg": "var(--gtm-sidebar)",
           } as React.CSSProperties
         }
       />

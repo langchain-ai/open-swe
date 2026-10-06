@@ -16,9 +16,10 @@ import appCss from "../styles.css?url"
 import type { QueryClient } from "@tanstack/react-query"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
-import { Toaster } from "@/components/ui/sonner"
+import { Toaster } from "@langchain/gtm-platform-design-system/ui/sonner"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
+import { DesignSystemHost } from "@/components/DesignSystemHost"
 import { PageTracking } from "@/lib/PageTracking"
 import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
 import { THEME_COLOR } from "@/lib/theme"
@@ -40,7 +41,7 @@ function PerfHudMount() {
   )
 }
 
-const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
+const themeInitScript = `(function(){try{var t=localStorage.getItem("open-swe-theme");var d=t==="dark"||((!t||t==="system")&&window.matchMedia("(prefers-color-scheme: dark)").matches);var r=document.documentElement;r.dataset.theme=d?"dark":"light";r.classList.toggle("dark",d);r.style.colorScheme=d?"dark":"light";}catch(e){}})();`
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient
@@ -75,9 +76,9 @@ export const Route = createRootRouteWithContext<{
     ],
   }),
   notFoundComponent: () => (
-    <main className="container mx-auto p-4 pt-16">
-      <h1 className="text-2xl font-medium">404</h1>
-      <p className="text-muted-foreground">
+    <main className="mx-auto max-w-reading px-4 pt-16 lg:px-6">
+      <h1 className="text-page font-semibold tracking-tightish">404</h1>
+      <p className="text-ink-subtle">
         The requested page could not be found.
       </p>
     </main>
@@ -107,6 +108,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             <div aria-hidden data-desktop-drag-strip="" />
           )}
         <ThemeSync />
+        <DesignSystemHost>
         <Toaster position="bottom-right" closeButton />
         <QueryClientProvider client={queryClient}>
           <PageTracking />
@@ -129,6 +131,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             </>
           )}
         </QueryClientProvider>
+        </DesignSystemHost>
         <Scripts />
       </body>
     </html>

@@ -198,7 +198,7 @@ const COMPONENTS: Components = {
       src={typeof src === "string" ? src : undefined}
       alt={alt ?? ""}
       loading="lazy"
-      className="border border-border/60"
+      className="border border-line/60"
     />
   ),
   a: ({
@@ -243,7 +243,7 @@ class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   render(): ReactNode {
     if (this.state.failed) {
       return (
-        <pre className="font-sans [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-foreground">
+        <pre className="font-sans [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-ink">
           {this.props.content}
         </pre>
       )
@@ -270,7 +270,7 @@ export const Markdown = memo(function Markdown({
   }, [transformImageUrl])
 
   return (
-    <div className="chat-markdown max-w-full min-w-0 text-[14px] leading-[1.6] [overflow-wrap:anywhere] break-words text-foreground">
+    <div className="chat-markdown max-w-full min-w-0 text-body leading-[1.6] [overflow-wrap:anywhere] break-words text-ink">
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}

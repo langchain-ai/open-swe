@@ -3,8 +3,8 @@ import { ThumbsDown, ThumbsUp } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import { agentsApi } from "@/features/agents/lib/api"
 import type {
   ThreadFeedbackRating,
@@ -23,14 +23,14 @@ const ratings: Array<{
     label: "Good",
     icon: ThumbsUp,
     className:
-      "border-success/40 bg-success/10 text-success-foreground hover:bg-success/20 hover:text-success-foreground dark:bg-success/10",
+      "border-positive/40 bg-positive-bg text-positive hover:bg-positive-bg hover:text-positive",
   },
   {
     value: "bad",
     label: "Bad",
     icon: ThumbsDown,
     className:
-      "border-destructive/40 bg-destructive/10 text-destructive-foreground hover:bg-destructive/20 hover:text-destructive-foreground dark:bg-destructive/10",
+      "border-risk/40 bg-risk-bg text-risk hover:bg-risk-bg hover:text-risk",
   },
 ]
 
@@ -123,7 +123,7 @@ export function ThreadFeedbackCard({
     return (
       <div
         role="status"
-        className="mt-4 rounded-lg bg-card px-4 py-3 text-sm text-muted-foreground"
+        className="mt-4 rounded-compact bg-panel px-4 py-3 text-body text-ink-subtle"
       >
         Thanks for your feedback.
       </div>
@@ -134,7 +134,7 @@ export function ThreadFeedbackCard({
     <form
       aria-label="Thread feedback"
       className={cn(
-        "mt-4 rounded-lg bg-card p-4",
+        "mt-4 rounded-compact bg-panel p-4",
         showComment
           ? "space-y-3"
           : "flex flex-wrap items-center justify-between gap-x-6 gap-y-3"
@@ -145,11 +145,11 @@ export function ThreadFeedbackCard({
         mutation.mutate({ action: "comment", comment: comment.trim() })
       }}
     >
-      <p className="text-sm font-medium">
+      <p className="text-body font-medium">
         {showComment ? "How could Open SWE do better?" : "How did Open SWE do?"}
       </p>
       {showComment ? (
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        <label className="flex flex-col gap-1.5 text-meta text-ink-subtle">
           Comment (optional)
           <Textarea
             autoFocus
@@ -158,7 +158,7 @@ export function ThreadFeedbackCard({
             maxLength={3000}
             disabled={mutation.isPending}
             placeholder="What could be better?"
-            className="min-h-20 border-foreground/20 bg-background text-sm"
+            className="min-h-20 border-ink/20 bg-canvas text-body"
           />
         </label>
       ) : (
@@ -172,8 +172,8 @@ export function ThreadFeedbackCard({
               key={option.value}
               type="button"
               variant="outline"
-              size="lg"
-              className={cn("px-3 text-sm", option.className)}
+              size="control"
+              className={cn("px-3 text-body", option.className)}
               disabled={mutation.isPending}
               onClick={() => mutation.mutate({ rating: option.value })}
             >
@@ -183,9 +183,9 @@ export function ThreadFeedbackCard({
           ))}
           <Button
             type="button"
-            size="lg"
+            size="control"
             variant="ghost"
-            className="text-muted-foreground"
+            className="text-ink-subtle"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate({ action: "dismiss" })}
           >
@@ -197,14 +197,14 @@ export function ThreadFeedbackCard({
         <div className="flex items-center gap-2">
           <Button
             type="submit"
-            size="sm"
+            size="compact"
             disabled={!comment.trim() || mutation.isPending}
           >
             {mutation.isPending ? "Saving…" : "Submit comment"}
           </Button>
           <Button
             type="button"
-            size="sm"
+            size="compact"
             variant="ghost"
             disabled={mutation.isPending}
             onClick={() => {

@@ -26,7 +26,7 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertAction, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
@@ -108,7 +108,7 @@ function CodeChannelLink({ url }: { url?: string | null }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="mb-2 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="mb-2 flex w-fit items-center gap-1.5 rounded-badge px-2 py-1 text-meta text-ink-subtle transition-colors hover:bg-hover hover:text-ink"
     >
       <IoLogoSlack className="size-3.5" />
       Open in Slack
@@ -681,7 +681,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                     href={thread.traceUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-md px-2 py-1 text-xs font-medium text-destructive-foreground underline underline-offset-2 hover:bg-destructive/8"
+                    className="rounded-badge px-2 py-1 text-label font-medium text-risk underline underline-offset-2 hover:bg-risk-bg"
                   >
                     Open trace
                   </a>
@@ -712,7 +712,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 <button
                   type="button"
                   onClick={() => setDismissedWarning(workspaceWarningKey)}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="rounded-badge px-2 py-1 text-meta font-medium text-ink-subtle hover:bg-hover hover:text-ink"
                 >
                   Dismiss
                 </button>
@@ -809,7 +809,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                           </AlertDescription>
                         </Alert>
                       ) : (
-                        <p className="text-xs text-muted-foreground/70">
+                        <p className="text-meta text-ink-subtle/70">
                           This thread has no messages yet.
                         </p>
                       )}

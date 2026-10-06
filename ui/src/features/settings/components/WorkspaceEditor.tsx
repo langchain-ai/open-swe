@@ -1,9 +1,9 @@
 import { QuestionIcon } from "@phosphor-icons/react"
 
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
-import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
 import { type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
@@ -31,7 +31,7 @@ export function Chips({
       {values.map((value) => {
         const href = hrefFor?.(value) ?? null
         const className =
-          "rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+          "rounded-full border border-line px-2 py-0.5 text-meta text-ink-subtle"
         if (!href)
           return (
             <span key={value} className={className}>
@@ -44,7 +44,7 @@ export function Chips({
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className={`${className} hover:border-foreground/30 hover:text-foreground`}
+            className={`${className} hover:border-ink/30 hover:text-ink`}
           >
             {labelFor?.(value) ?? value}
           </a>
@@ -97,7 +97,7 @@ function SlackChannelRows({
 }) {
   const kitchen = new Set(draft.kitchenChannelIds)
   return (
-    <ul className="w-full divide-y divide-border rounded-md border border-border">
+    <ul className="w-full divide-y divide-line rounded-badge border border-line">
       {draft.slackChannelIds.map((id) => (
         <li
           key={id}
@@ -107,11 +107,11 @@ function SlackChannelRows({
             href={slackChannelHref(id)}
             target="_blank"
             rel="noopener noreferrer"
-            className="truncate text-xs hover:underline"
+            className="truncate text-label hover:underline"
           >
             {channelLabel(id)}
           </a>
-          <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+          <label className="flex shrink-0 items-center gap-2 text-meta text-ink-subtle">
             Kitchen
             <Switch
               aria-label={`Kitchen mode for ${channelLabel(id)}`}
@@ -146,8 +146,8 @@ export function WorkspaceEditor({
   channelLabel: (id: string) => string
 }) {
   return (
-    <div className="space-y-3 border-t border-border px-4 py-3.5">
-      <label className="block text-sm">
+    <div className="space-y-3 border-t border-line px-4 py-3.5">
+      <label className="block text-body">
         Name
         <Input
           aria-label="Workspace name"
@@ -155,24 +155,24 @@ export function WorkspaceEditor({
           onChange={(e) => onChange({ ...draft, name: e.target.value })}
         />
       </label>
-      <div className="text-sm">
+      <div className="text-body">
         <span className="inline-flex items-center gap-1.5">
           Bound repositories
           <Tooltip>
             <TooltipTrigger
               aria-label="About workspace repositories"
-              className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="rounded-full text-ink-subtle transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               type="button"
             >
               <QuestionIcon size={15} weight="fill" />
             </TooltipTrigger>
-            <TooltipPopup className="max-w-72">
+            <TooltipContent className="max-w-72">
               Threads in any workspace can use any repository the GitHub App can
               access. Binding a repository routes its GitHub issues, pull
               requests, Linear tickets, and automations to this workspace and
               preloads it into this workspace&apos;s sandbox image. A repository
               is bound to one workspace.
-            </TooltipPopup>
+            </TooltipContent>
           </Tooltip>
         </span>
         <div
@@ -183,7 +183,7 @@ export function WorkspaceEditor({
           {draft.repos.length > 0 ? (
             <Chips values={draft.repos} hrefFor={githubRepoHref} />
           ) : (
-            <span className="text-xs text-muted-foreground">None yet</span>
+            <span className="text-meta text-ink-subtle">None yet</span>
           )}
           <RepositoryPicker
             selected={draft.repos}
@@ -193,22 +193,22 @@ export function WorkspaceEditor({
           />
         </div>
       </div>
-      <div className="text-sm">
+      <div className="text-body">
         <span className="inline-flex items-center gap-1.5">
           Slack channels
           <Tooltip>
             <TooltipTrigger
               aria-label="About kitchen channels"
-              className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="rounded-full text-ink-subtle transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               type="button"
             >
               <QuestionIcon size={15} weight="fill" />
             </TooltipTrigger>
-            <TooltipPopup className="max-w-72">
+            <TooltipContent className="max-w-72">
               Mentions in these channels start runs in this workspace. Turn on
               Kitchen for a channel to let every top-level message start a
               thread and replies continue it without mentioning Open SWE.
-            </TooltipPopup>
+            </TooltipContent>
           </Tooltip>
         </span>
         <div
@@ -223,7 +223,7 @@ export function WorkspaceEditor({
               channelLabel={channelLabel}
             />
           ) : (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-meta text-ink-subtle">
               None yet. Add a channel to turn on Kitchen mode for it.
             </span>
           )}
@@ -243,7 +243,7 @@ export function WorkspaceEditor({
           />
         </div>
       </div>
-      <label className="block text-sm">
+      <label className="block text-body">
         Instructions
         <SlackChannelTextarea
           aria-label="Instructions"
@@ -254,9 +254,9 @@ export function WorkspaceEditor({
       </label>
       {workspaceSlug === null && (
         <>
-          <div className="text-sm">
+          <div className="text-body">
             <div>Setup script (optional)</div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-ink-subtle">
               Builds the image from the base snapshot immediately after creation
               and nightly. Without a setup script, no image is built.
             </p>
@@ -268,9 +268,9 @@ export function WorkspaceEditor({
               description="Edit the shell script, then create the workspace to save it and start building the image."
             />
           </div>
-          <div className="text-sm">
+          <div className="text-body">
             <div>Update script (optional)</div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-ink-subtle">
               Runs after setup and refreshes the current image while it is in
               use.
             </p>

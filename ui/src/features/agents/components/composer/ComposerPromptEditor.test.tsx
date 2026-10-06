@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { SkillPromptText } from "../SkillBadge"
 import { ComposerPromptEditor } from "./ComposerPromptEditor"
 import type { ComposerPromptEditorHandle } from "./ComposerPromptEditor"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@langchain/gtm-platform-design-system/ui/tooltip"
 
 afterEach(() => cleanup())
 

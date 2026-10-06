@@ -13,7 +13,7 @@ import {
   reviewChatQuery,
 } from "@/features/agents/lib/queries"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -127,28 +127,28 @@ function ReviewDetailPage() {
   if (!session.data) return <RequireLogin />
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas text-ink">
       <header
         data-desktop-drag-region=""
         className={cn(
-          "flex h-12 shrink-0 items-center gap-3 border-b border-border pr-4 text-xs",
+          "flex h-12 shrink-0 items-center gap-3 border-b border-line pr-4 text-label",
           // Clear room for the fixed collapse toggle when the sidebar is hidden.
           sidebarCollapsed ? (isDesktop ? "pl-32" : "pl-14") : "pl-4"
         )}
       >
         <Link
           to="/agents/reviews"
-          className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1.5 text-ink-subtle hover:text-ink"
         >
           <ArrowLeftIcon className="size-3.5" />
           Reviews
         </Link>
-        <span className="text-muted-foreground">/</span>
+        <span className="text-ink-subtle">/</span>
         <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
-          <GitPullRequestIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <GitPullRequestIcon className="size-3.5 shrink-0 text-ink-subtle" />
           <span className="truncate font-medium">
             {owner}/{repo}
-            <span className="ml-1.5 font-normal text-muted-foreground">
+            <span className="ml-1.5 font-normal text-ink-subtle">
               #{number}
             </span>
             {detail.data ? ` ${detail.data.pr.title}` : ""}
@@ -168,7 +168,7 @@ function ReviewDetailPage() {
       </header>
 
       {detail.error ? (
-        <div className="p-6 text-xs text-destructive">
+        <div className="p-6 text-label text-risk">
           {detail.error.message}
         </div>
       ) : !detail.data ? (

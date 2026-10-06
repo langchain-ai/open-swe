@@ -21,7 +21,7 @@ import {
   type UsageLeaderboardPayload,
   type UsageLeaderboardRow,
 } from "@/lib/api"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { makeQueryClient } from "@/lib/query"
 
 import { UsageAnalytics, UsageDateRange } from "./usage"

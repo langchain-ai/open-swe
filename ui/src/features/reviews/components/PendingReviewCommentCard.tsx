@@ -3,9 +3,9 @@ import { useState } from "react"
 import type { PendingReviewComment } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 
 /** A comment in the viewer's pending review, shown on its line until the review is submitted. */
 export function PendingReviewCommentCard({
@@ -33,13 +33,13 @@ export function PendingReviewCommentCard({
   }
   return (
     <div className="px-2 py-1 font-sans" data-testid="pending-review-comment">
-      <div className="rounded-md border border-border bg-card px-3 py-2 text-xs">
+      <div className="rounded-badge border border-line bg-panel px-3 py-2 text-label">
         <div className="mb-1.5 flex items-center gap-2">
           <Badge variant="outline">Pending</Badge>
           <div className="ml-auto flex items-center gap-1">
             {!editing && (
               <Button
-                size="sm"
+                size="compact"
                 variant="ghost"
                 disabled={busy}
                 onClick={() => {
@@ -51,7 +51,7 @@ export function PendingReviewCommentCard({
               </Button>
             )}
             <Button
-              size="sm"
+              size="compact"
               variant="ghost"
               disabled={busy}
               onClick={() => pending.remove.mutate(comment.id)}
@@ -75,19 +75,19 @@ export function PendingReviewCommentCard({
                 }
               }}
               rows={3}
-              className="resize-y text-xs"
+              className="resize-y text-label"
               autoFocus
             />
             <div className="mt-2 flex justify-end gap-2">
               <Button
-                size="sm"
+                size="compact"
                 variant="outline"
                 disabled={busy}
                 onClick={() => setEditing(false)}
               >
                 Cancel
               </Button>
-              <Button size="sm" disabled={busy || !body.trim()} onClick={save}>
+              <Button size="compact" disabled={busy || !body.trim()} onClick={save}>
                 {pending.update.isPending ? "Saving…" : "Save"}
               </Button>
             </div>

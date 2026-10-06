@@ -56,21 +56,21 @@ export function ReasoningBlock({
         disabled={isLive}
       >
         {isLive ? (
-          <span className="shimmer-text text-[13px]">Thinking...</span>
+          <span className="shimmer-text text-label">Thinking...</span>
         ) : (
           <>
             <ChevronRight
-              className={`size-3 shrink-0 text-muted-foreground/65 transition-transform ${expanded ? "rotate-90" : ""}`}
+              className={`size-3 shrink-0 text-ink-subtle/65 transition-transform ${expanded ? "rotate-90" : ""}`}
               aria-hidden
             />
-            <span className="text-[13px] text-muted-foreground">
+            <span className="text-label text-ink-subtle">
               {reasoningLabel(elapsedMs)}
             </span>
           </>
         )}
       </button>
       {expanded && trimmed && (
-        <div className="ms-1 mt-1 border-s border-border/45 ps-3 text-[13px] leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+        <div className="ms-1 mt-1 border-s border-line/45 ps-3 text-label leading-5 break-words whitespace-pre-wrap text-ink-subtle">
           {trimmed}
         </div>
       )}

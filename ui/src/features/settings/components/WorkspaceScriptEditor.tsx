@@ -1,34 +1,22 @@
 import Editor from "@monaco-editor/react"
 
-import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogClose,
-  DialogDescription,
-  DialogPopup,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import {
-  Popover,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Dialog, DialogClose, DialogDescription, DialogContent, DialogTitle, DialogTrigger } from "@langchain/gtm-platform-design-system/ui/dialog"
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@langchain/gtm-platform-design-system/ui/popover"
 import { useResolvedTheme } from "@/lib/theme"
 
 function WorkspaceReposPopover({ repos }: { repos: string[] }) {
   return (
     <Popover>
-      <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+      <PopoverTrigger className="cursor-pointer rounded-tick font-mono underline decoration-dotted underline-offset-4 hover:text-ink focus-visible:outline-2 focus-visible:outline-primary">
         OPENSWE_WORKSPACE_REPOS
       </PopoverTrigger>
-      <PopoverPopup align="start" className="w-96 max-w-[calc(100vw-2rem)]">
+      <PopoverContent align="start" className="w-96 max-w-[calc(100vw-2rem)]">
         <PopoverTitle>Expanded value</PopoverTitle>
-        <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap">
+        <pre className="mt-2 max-h-60 overflow-auto rounded-badge bg-muted p-3 font-mono text-label break-all whitespace-pre-wrap">
           <code>{`OPENSWE_WORKSPACE_REPOS="${repos.join(" ")}"`}</code>
         </pre>
-      </PopoverPopup>
+      </PopoverContent>
     </Popover>
   )
 }
@@ -52,20 +40,20 @@ export function WorkspaceScriptEditor({
   return (
     <Dialog>
       <div className="mt-2 flex items-center gap-2">
-        <DialogTrigger render={<Button size="sm" variant="outline" />}>
+        <DialogTrigger render={<Button size="compact" variant="outline" />}>
           Edit {label.toLowerCase()}
         </DialogTrigger>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-meta text-ink-subtle">
           {lines
             ? `${lines} ${lines === 1 ? "line" : "lines"}`
             : "Not configured"}
         </span>
       </div>
-      <DialogPopup className="max-w-4xl">
-        <div className="space-y-2 border-b border-border p-4">
+      <DialogContent className="max-w-4xl">
+        <div className="space-y-2 border-b border-line p-4">
           <DialogTitle>{label}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-ink-subtle">
             Bound repositories are available in{" "}
             <WorkspaceReposPopover repos={repos} /> to preload; runs clone any
             other repository on demand.
@@ -89,10 +77,10 @@ export function WorkspaceScriptEditor({
             }}
           />
         </div>
-        <div className="flex justify-end border-t border-border p-3">
-          <DialogClose render={<Button size="sm" />}>Done</DialogClose>
+        <div className="flex justify-end border-t border-line p-3">
+          <DialogClose render={<Button size="compact" />}>Done</DialogClose>
         </div>
-      </DialogPopup>
+      </DialogContent>
     </Dialog>
   )
 }

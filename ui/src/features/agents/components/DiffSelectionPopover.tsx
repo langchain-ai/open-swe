@@ -1,9 +1,9 @@
 import type { ComponentProps, ReactNode } from "react"
 
-import { Popover, PopoverPopup } from "@/components/ui/popover"
+import { Popover, PopoverContent } from "@langchain/gtm-platform-design-system/ui/popover"
 import type { DiffLineSelection } from "@/features/agents/utils/diffSelection"
 
-// Pierre renders lines in a shadow root, which `contains` doesn't cross.
+// Pierre renders lines in a shadow-control root, which `contains` doesn't cross.
 function isInDiff(selection: DiffLineSelection, node: Node) {
   const root = node.getRootNode()
   const host = root instanceof ShadowRoot ? root.host : node
@@ -19,7 +19,7 @@ export function DiffSelectionPopover({
 }: {
   selection: DiffLineSelection
   open?: boolean
-  initialFocus?: ComponentProps<typeof PopoverPopup>["initialFocus"]
+  initialFocus?: ComponentProps<typeof PopoverContent>["initialFocus"]
   className?: string
   children: ReactNode
 }) {
@@ -34,7 +34,7 @@ export function DiffSelectionPopover({
         selection.close()
       }}
     >
-      <PopoverPopup
+      <PopoverContent
         anchor={selection.anchor}
         side="bottom"
         align="start"
@@ -42,7 +42,7 @@ export function DiffSelectionPopover({
         className={className}
       >
         {children}
-      </PopoverPopup>
+      </PopoverContent>
     </Popover>
   )
 }

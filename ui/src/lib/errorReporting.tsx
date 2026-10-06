@@ -59,7 +59,7 @@ export function ErrorToastBody({
             )
           )}
       </span>
-      <span className="font-mono text-[11px] opacity-70">ID {id}</span>
+      <span className="font-mono text-meta opacity-70">ID {id}</span>
     </span>
   )
 }

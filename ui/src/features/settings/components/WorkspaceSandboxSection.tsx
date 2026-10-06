@@ -2,8 +2,8 @@ import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { api, type WorkspaceRecord } from "@/lib/api"
 
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
@@ -121,7 +121,7 @@ export function WorkspaceSandboxSection({
         label="Image"
         description={record.status_message ?? record.snapshot_name ?? undefined}
         control={
-          <span className="text-xs text-muted-foreground">
+          <span className="text-meta text-ink-subtle">
             {record.inherit_default_sandbox
               ? "Inherited from default"
               : SNAPSHOT_LABEL[status]}
@@ -132,13 +132,13 @@ export function WorkspaceSandboxSection({
         label="Base snapshot"
         description="Set when the image is published from an admin thread."
         control={
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="font-mono text-meta text-ink-subtle">
             {record.base_snapshot_id ?? "instance default"}
           </span>
         }
       />
-      <div className="space-y-3 border-b border-border px-4 py-3.5">
-        <p className="text-xs text-muted-foreground">
+      <div className="space-y-3 border-b border-line px-4 py-3.5">
+        <p className="text-meta text-ink-subtle">
           Applies to new sandboxes and image builders, not existing threads.
           Leave sizes blank to inherit deployment defaults. If only CPU or
           memory is set, the sandbox service chooses the other.
@@ -154,7 +154,7 @@ export function WorkspaceSandboxSection({
             },
             { label: "Disk (GiB)", value: disk, set: setDisk, step: "any" },
           ].map(({ label, value, set, step }) => (
-            <label key={label} className="text-sm">
+            <label key={label} className="text-body">
               {label}
               <Input
                 aria-label={label}
@@ -169,14 +169,14 @@ export function WorkspaceSandboxSection({
           ))}
         </div>
         {configuration.error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-label text-risk">
             {configuration.error.message}
           </p>
         )}
         <div className="flex justify-end gap-2">
           {configurationDirty && (
             <Button
-              size="sm"
+              size="compact"
               variant="ghost"
               disabled={configuration.isPending}
               onClick={() => {
@@ -190,7 +190,7 @@ export function WorkspaceSandboxSection({
             </Button>
           )}
           <Button
-            size="sm"
+            size="compact"
             disabled={!configurationDirty || configuration.isPending}
             onClick={() => configuration.mutate()}
           >
@@ -199,9 +199,9 @@ export function WorkspaceSandboxSection({
         </div>
       </div>
       <div className="space-y-3 px-4 py-3.5">
-        <div className="text-sm">
+        <div className="text-body">
           <div>Setup script</div>
-          <span className="mt-0.5 block text-xs text-muted-foreground">
+          <span className="mt-0.5 block text-meta text-ink-subtle">
             Runs on the base snapshot to build the image.
           </span>
           <WorkspaceScriptEditor
@@ -211,9 +211,9 @@ export function WorkspaceSandboxSection({
             onChange={setSetupScript}
           />
         </div>
-        <div className="text-sm">
+        <div className="text-body">
           <div>Update script</div>
-          <span className="mt-0.5 block text-xs text-muted-foreground">
+          <span className="mt-0.5 block text-meta text-ink-subtle">
             Runs on the current image to bring it up to date.
           </span>
           <WorkspaceScriptEditor
@@ -224,18 +224,18 @@ export function WorkspaceSandboxSection({
           />
         </div>
         {save.error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-label text-risk">
             {save.error.message}
           </p>
         )}
         {rebuild.isSuccess && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-ink-subtle">
             {buildAction} started; the image state above follows its progress.
           </p>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Button
-            size="sm"
+            size="compact"
             variant="outline"
             disabled={
               rebuild.isPending ||
@@ -250,7 +250,7 @@ export function WorkspaceSandboxSection({
           <div className="flex gap-2">
             {dirty && (
               <Button
-                size="sm"
+                size="compact"
                 variant="ghost"
                 disabled={save.isPending}
                 onClick={() => {
@@ -262,7 +262,7 @@ export function WorkspaceSandboxSection({
               </Button>
             )}
             <Button
-              size="sm"
+              size="compact"
               disabled={!dirty || save.isPending}
               onClick={() => save.mutate()}
             >

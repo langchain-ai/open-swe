@@ -10,12 +10,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useState } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
+import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
+import { Avatar, AvatarFallback, AvatarImage } from "@langchain/gtm-platform-design-system/ui/avatar"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import {
   getReviewConversation,
@@ -48,25 +48,25 @@ const REVIEW_STATE_STYLES: Record<ConversationReviewState, StateStyle> = {
     verb: "approved these changes",
     icon: <CheckCircleIcon weight="fill" />,
     className:
-      "bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+      "bg-positive-bg text-positive",
   },
   CHANGES_REQUESTED: {
     label: "Changes requested",
     verb: "requested changes",
     icon: <XCircleIcon weight="fill" />,
-    className: "bg-destructive/10 text-destructive dark:bg-destructive/20",
+    className: "bg-risk-bg text-risk",
   },
   COMMENTED: {
     label: "Commented",
     verb: "reviewed",
     icon: <EyeIcon />,
-    className: "bg-muted text-muted-foreground",
+    className: "bg-muted text-ink-subtle",
   },
   DISMISSED: {
     label: "Dismissed",
     verb: "left a review that was dismissed",
     icon: <ProhibitIcon />,
-    className: "bg-muted text-muted-foreground line-through",
+    className: "bg-muted text-ink-subtle line-through",
   },
 }
 
@@ -95,7 +95,7 @@ function Timestamp({ value, href }: { value: string; href: string }) {
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="text-muted-foreground hover:text-foreground hover:underline"
+      className="text-ink-subtle hover:text-ink hover:underline"
     >
       <time
         dateTime={value}
@@ -123,16 +123,16 @@ function TimelineEntry({
   return (
     <li className="flex gap-3">
       <AuthorAvatar author={item.author} />
-      <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-border">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-muted/40 px-3 py-2 text-xs">
-          <span className="font-medium text-foreground">{login}</span>
-          <span className="text-muted-foreground">
+      <div className="min-w-0 flex-1 overflow-hidden rounded-badge border border-line">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line bg-muted/40 px-3 py-2 text-label">
+          <span className="font-medium text-ink">{login}</span>
+          <span className="text-ink-subtle">
             {style ? style.verb : "commented"}
           </span>
           <Timestamp value={item.created_at} href={item.html_url} />
           <span className="ml-auto flex items-center gap-2">
             {review && review.inline_comment_count > 0 ? (
-              <span className="flex items-center gap-1 text-muted-foreground">
+              <span className="flex items-center gap-1 text-ink-subtle">
                 <ChatCircleIcon />
                 {review.inline_comment_count}{" "}
                 {review.inline_comment_count === 1
@@ -151,14 +151,14 @@ function TimelineEntry({
               target="_blank"
               rel="noreferrer"
               aria-label="Open on GitHub"
-              className="text-muted-foreground hover:text-foreground"
+              className="text-ink-subtle hover:text-ink"
             >
               <ArrowSquareOutIcon />
             </a>
           </span>
         </div>
         {hasBody ? (
-          <div className="px-3 py-2 text-sm">
+          <div className="px-3 py-2 text-body">
             <Markdown
               content={item.body}
               transformImageUrl={transformImageUrl}
@@ -226,24 +226,24 @@ function CommentBox({
         className="min-h-24"
       />
       {mutation.isError ? (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-label text-risk">
           {mutation.error.message}
         </p>
       ) : null}
       <div className="flex items-center justify-end gap-2">
-        <span className="text-xs text-muted-foreground">
+        <span className="text-meta text-ink-subtle">
           Cmd/Ctrl + Enter to comment
         </span>
         <Button
           type="button"
-          size="sm"
+          size="compact"
           variant="ghost"
           onClick={onClose}
           disabled={mutation.isPending}
         >
           Cancel
         </Button>
-        <Button type="submit" size="sm" disabled={!canSubmit}>
+        <Button type="submit" size="compact" disabled={!canSubmit}>
           {mutation.isPending ? "Commenting…" : "Comment"}
         </Button>
       </div>
@@ -283,7 +283,7 @@ export function ReviewConversation({
     )
   } else if (query.data.items.length === 0) {
     timeline = (
-      <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+      <div className="flex flex-col items-center gap-2 rounded-badge border border-dashed border-line px-4 py-8 text-center text-body text-ink-subtle">
         <ChatCircleIcon className="size-5" />
         No comments or reviews yet.
       </div>
@@ -308,11 +308,11 @@ export function ReviewConversation({
       className={cn("flex flex-col gap-3", className)}
     >
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">Conversation</h2>
+        <h2 className="text-body font-medium">Conversation</h2>
         {!composing && (
           <Button
             type="button"
-            size="sm"
+            size="compact"
             variant="outline"
             onClick={() => setComposing(true)}
           >

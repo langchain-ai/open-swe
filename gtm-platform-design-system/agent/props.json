@@ -1,0 +1,5045 @@
+{
+  "package": "@langchain/gtm-platform-design-system",
+  "title": "The GTM Platform internal design system",
+  "author": "Amal Irgashev",
+  "version": "0.1.0",
+  "note": "Signatures per component. The index is agent/index.json; the rules file for a component repeats its table in prose.",
+  "components": {
+    "AiChatInput": {
+      "import": "@langchain/gtm-platform-design-system/ui/ai-chat-input",
+      "props": {
+        "PromptInput": [
+          {
+            "name": "onSubmit",
+            "required": false,
+            "type": "("
+          },
+          {
+            "name": "value",
+            "required": true,
+            "type": "string,"
+          },
+          {
+            "name": "meta",
+            "required": true,
+            "type": "{ model: string; effort: string; attachments: File[] }"
+          },
+          {
+            "name": "placeholder",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "models",
+            "required": false,
+            "type": "string[]"
+          },
+          {
+            "name": "efforts",
+            "required": false,
+            "type": "string[]"
+          },
+          {
+            "name": "defaultValue",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "value",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "onChange",
+            "required": false,
+            "type": "(value: string) => void"
+          },
+          {
+            "name": "maxAttachments",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "enableVoice",
+            "required": false,
+            "type": "boolean",
+            "doc": "When false (default), mic is decorative-only and never calls getUserMedia."
+          }
+        ]
+      }
+    },
+    "Alert": {
+      "import": "@langchain/gtm-platform-design-system/ui/alert",
+      "props": {
+        "Alert": [
+          {
+            "name": "tone",
+            "required": false,
+            "type": "AlertTone",
+            "doc": "Which of the five state pairs this message belongs to."
+          },
+          {
+            "name": "icon",
+            "required": false,
+            "type": "Glyph",
+            "doc": "Optional leading glyph; rendered through `<Icon>` at the 16px slot."
+          }
+        ]
+      }
+    },
+    "Avatar": {
+      "import": "@langchain/gtm-platform-design-system/ui/avatar",
+      "props": {
+        "Avatar": [
+          {
+            "name": "name",
+            "required": true,
+            "type": "string",
+            "doc": "The person. Labels the avatar, derives the initials, and seeds the tone."
+          },
+          {
+            "name": "size",
+            "required": false,
+            "type": "AvatarSize",
+            "doc": "Ladder slot: 24 conversation / 32 row / 48 identity block."
+          },
+          {
+            "name": "src",
+            "required": false,
+            "type": "string",
+            "doc": "Optional portrait; falls back to the initials if it fails to load."
+          },
+          {
+            "name": "tone",
+            "required": false,
+            "type": "AvatarTone",
+            "doc": "Pins the fill instead of hashing it, for surfaces that read tint as status."
+          }
+        ]
+      }
+    },
+    "Badge": {
+      "import": "@langchain/gtm-platform-design-system/ui/badge",
+      "props": {
+        "Variant": [
+          {
+            "name": "variants",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "tier",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "quiet",
+            "required": true,
+            "type": "\"h-badge rounded-badge px-1.5\","
+          },
+          {
+            "name": "notable",
+            "required": true,
+            "type": "\"h-badge rounded-badge px-1.5 bg-transparent\","
+          },
+          {
+            "name": "plain",
+            "required": true,
+            "type": "\"h-badge rounded-badge px-1.5 border-transparent bg-transparent\","
+          },
+          {
+            "name": "tone",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "positive",
+            "required": true,
+            "type": "\"\","
+          },
+          {
+            "name": "attention",
+            "required": true,
+            "type": "\"\","
+          },
+          {
+            "name": "risk",
+            "required": true,
+            "type": "\"\","
+          },
+          {
+            "name": "info",
+            "required": true,
+            "type": "\"\","
+          },
+          {
+            "name": "neutral",
+            "required": true,
+            "type": "\"\","
+          },
+          {
+            "name": "compoundVariants",
+            "required": true,
+            "type": "["
+          },
+          {
+            "name": "tier",
+            "required": true,
+            "type": "\"quiet\","
+          },
+          {
+            "name": "tone",
+            "required": true,
+            "type": "\"positive\","
+          },
+          {
+            "name": "class",
+            "required": true,
+            "type": "\"border-positive/20 bg-positive-bg text-positive\","
+          },
+          {
+            "name": "tier",
+            "required": true,
+            "type": "\"quiet\","
+          },
+          {
+            "name": "tone",
+            "required": true,
+            "type": "\"attention\","
+          },
+          {
+            "name": "class",
+            "required": true,
+            "type": "\"border-attention/20 bg-attention-bg text-attention\","
+          },
+          {
+            "name": "tier",
+            "required": true,
+            "type": "\"quiet\","
+          },
+          {
+            "name": "tone",
+            "required": true,
+            "type": "\"risk\","
+          },
+          {
+            "name": "class",
+            "required": true,
+            "type": "\"border-risk/20 bg-risk-bg text-risk\","
+          },
+          {
+            "name": "tier",
+            "required": true,
+            "type": "\"quiet\","
+          },
+          {
+            "name": "tone",
+            "required": true,
+            "type": "\"info\","
+          },
+          {
+            "name": "class",
+            "required": true,
+            "type": "\"border-info/20 bg-info-bg text-info\","
+          }
+        ]
+      }
+    },
+    "Box": {
+      "import": "@langchain/gtm-platform-design-system/ui/box",
+      "props": {
+        "Surface": [
+          {
+            "name": "padding",
+            "required": false,
+            "type": "SpaceStep",
+            "doc": "Inner spacing, 4/8/12/16/24/32."
+          },
+          {
+            "name": "bg",
+            "required": false,
+            "type": "SurfaceFill",
+            "doc": "Surface fill; the only fills app code can express."
+          },
+          {
+            "name": "ink",
+            "required": false,
+            "type": "InkTone",
+            "doc": "Text colour for the subtree; the only inks app code can express."
+          },
+          {
+            "name": "radius",
+            "required": false,
+            "type": "RadiusStep",
+            "doc": "Radius ladder step, 6/8/10/12/14."
+          },
+          {
+            "name": "border",
+            "required": false,
+            "type": "BorderWeight",
+            "doc": "Hairline weight; both weights draw a 1px border."
+          }
+        ],
+        "Flex": [
+          {
+            "name": "gap",
+            "required": false,
+            "type": "SpaceStep"
+          },
+          {
+            "name": "align",
+            "required": false,
+            "type": "AlignItems"
+          },
+          {
+            "name": "justify",
+            "required": false,
+            "type": "JustifyContent"
+          },
+          {
+            "name": "grow",
+            "required": false,
+            "type": "boolean",
+            "doc": "Take the remaining main-axis space (flex-1)."
+          }
+        ],
+        "Inline": [
+          {
+            "name": "wrap",
+            "required": false,
+            "type": "boolean",
+            "doc": "Allow items to wrap onto more than one line."
+          }
+        ]
+      }
+    },
+    "Button": {
+      "import": "@langchain/gtm-platform-design-system/ui/button",
+      "props": {
+        "Variant": [
+          {
+            "name": "variants",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "variant",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "ghost",
+            "required": true,
+            "type": "\"text-ink hover:bg-hover aria-expanded:bg-hover\","
+          },
+          {
+            "name": "size",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "control",
+            "required": true,
+            "type": "\"h-control rounded-control px-3 text-label\","
+          },
+          {
+            "name": "compact",
+            "required": true,
+            "type": "\"h-control-sm rounded-compact px-2.5 text-label\","
+          },
+          {
+            "name": "sm",
+            "required": true,
+            "type": "\"h-control-sm rounded-compact px-2.5 text-label\","
+          },
+          {
+            "name": "icon",
+            "required": true,
+            "type": "\"h-control w-control rounded-control\","
+          },
+          {
+            "name": "icon-sm",
+            "required": true,
+            "type": "\"h-control-sm w-control-sm rounded-compact\","
+          },
+          {
+            "name": "defaultVariants",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "variant",
+            "required": true,
+            "type": "\"primary\","
+          },
+          {
+            "name": "size",
+            "required": true,
+            "type": "\"control\","
+          },
+          {
+            "name": "loading",
+            "required": false,
+            "type": "boolean",
+            "doc": "Work is in flight: the control locks, announces itself busy, and spins."
+          }
+        ]
+      }
+    },
+    "CheckboxGroup": {
+      "import": "@langchain/gtm-platform-design-system/ui/checkbox-group",
+      "props": {
+        "CheckboxGroup": [
+          {
+            "name": "label",
+            "required": false,
+            "type": "string",
+            "doc": "Names the group above its rows."
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string",
+            "doc": "One line under the label, measure-capped."
+          },
+          {
+            "name": "allValues",
+            "required": false,
+            "type": "readonly string[]",
+            "doc": "Every item value, in order. Only a select-all row needs it."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          }
+        ],
+        "CheckboxGroupItem": [
+          {
+            "name": "value",
+            "required": true,
+            "type": "string",
+            "doc": "The value this row contributes to the group."
+          },
+          {
+            "name": "name",
+            "required": false,
+            "type": "string",
+            "doc": "Submitted with a form; defaults to the value."
+          },
+          {
+            "name": "disabled",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          }
+        ],
+        "CheckboxGroupSelectAll": [
+          {
+            "name": "disabled",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          }
+        ]
+      }
+    },
+    "Combobox": {
+      "import": "@langchain/gtm-platform-design-system/ui/combobox",
+      "props": {
+        "Combobox": [
+          {
+            "name": "value",
+            "required": false,
+            "type": "string",
+            "doc": "The selected option's value. Omit for an empty picker."
+          },
+          {
+            "name": "onValueChange",
+            "required": false,
+            "type": "(value: string) => void"
+          },
+          {
+            "name": "open",
+            "required": false,
+            "type": "boolean",
+            "doc": "Controlled popup state. Omit and the picker owns it."
+          },
+          {
+            "name": "onOpenChange",
+            "required": false,
+            "type": "(open: boolean) => void"
+          },
+          {
+            "name": "children",
+            "required": false,
+            "type": "React.ReactNode"
+          }
+        ],
+        "ComboboxTrigger": [
+          {
+            "name": "placeholder",
+            "required": false,
+            "type": "string",
+            "doc": "Shown, quietly, while nothing is selected."
+          }
+        ],
+        "ComboboxItem": [
+          {
+            "name": "value",
+            "required": true,
+            "type": "string",
+            "doc": "The value published to `onValueChange`. Never the label."
+          }
+        ]
+      }
+    },
+    "Command": {
+      "import": "@langchain/gtm-platform-design-system/ui/command",
+      "props": {
+        "CommandList": [
+          {
+            "name": "viewportClassName",
+            "required": false,
+            "type": "string",
+            "doc": "Classes for the scrolling box. The height bound lives here, not on the list."
+          }
+        ]
+      }
+    },
+    "ConversationNavigator": {
+      "import": "@langchain/gtm-platform-design-system/ui/conversation-navigator",
+      "props": {
+        "ConversationNavigator": [
+          {
+            "name": "items",
+            "required": true,
+            "type": "readonly ConversationNavigatorItem[]"
+          },
+          {
+            "name": "activeId",
+            "required": false,
+            "type": "string | null"
+          },
+          {
+            "name": "onNavigate",
+            "required": true,
+            "type": "(id: string, input: ConversationNavigationInput) => void"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "DatePicker": {
+      "import": "@langchain/gtm-platform-design-system/ui/date-picker",
+      "props": {
+        "DatePickerBase": [
+          {
+            "name": "placeholder",
+            "required": false,
+            "type": "string",
+            "doc": "Shown, quietly, while nothing is picked."
+          },
+          {
+            "name": "disabled",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "open",
+            "required": false,
+            "type": "boolean",
+            "doc": "Controlled popup state. Omit and the picker owns it."
+          },
+          {
+            "name": "onOpenChange",
+            "required": false,
+            "type": "(open: boolean) => void"
+          },
+          {
+            "name": "id",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "aria-describedby",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "aria-invalid",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "aria-label",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "aria-required",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "SingleDatePicker": [
+          {
+            "name": "mode",
+            "required": false,
+            "type": "\"single\""
+          },
+          {
+            "name": "value",
+            "required": false,
+            "type": "Date"
+          },
+          {
+            "name": "onValueChange",
+            "required": false,
+            "type": "(value: Date | undefined) => void"
+          }
+        ],
+        "RangeDatePicker": [
+          {
+            "name": "mode",
+            "required": true,
+            "type": "\"range\""
+          },
+          {
+            "name": "value",
+            "required": false,
+            "type": "DateRange"
+          },
+          {
+            "name": "onValueChange",
+            "required": false,
+            "type": "(value: DateRange | undefined) => void"
+          }
+        ]
+      }
+    },
+    "Elevated": {
+      "import": "@langchain/gtm-platform-design-system/ui/elevated",
+      "props": {
+        "Elevated": [
+          {
+            "name": "offset",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "shadowLevel",
+            "required": false,
+            "type": "number"
+          }
+        ]
+      }
+    },
+    "FadeText": {
+      "import": "@langchain/gtm-platform-design-system/ui/fade-text",
+      "props": {
+        "FadeText": [
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "lines",
+            "required": false,
+            "type": "FadeTextLines",
+            "doc": "Meta-rung lines. Two is the preview."
+          },
+          {
+            "name": "render",
+            "required": false,
+            "type": "ReactElement",
+            "doc": "Defaults to a paragraph. A card button must pass a span."
+          }
+        ]
+      }
+    },
+    "Frame": {
+      "import": "@langchain/gtm-platform-design-system/ui/frame",
+      "props": {
+        "Variant": [
+          {
+            "name": "variants",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "variant",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "spacing",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "sm",
+            "required": true,
+            "type": "\"[--frame-panel-pad:--spacing(2)] [--frame-panel-gap:--spacing(1)]\","
+          },
+          {
+            "name": "lg",
+            "required": true,
+            "type": "\"[--frame-panel-pad:--spacing(4)] [--frame-panel-gap:--spacing(3)]\","
+          },
+          {
+            "name": "stacked",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "true",
+            "required": true,
+            "type": "["
+          },
+          {
+            "name": "false",
+            "required": true,
+            "type": "\"\","
+          },
+          {
+            "name": "dense",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "true",
+            "required": true,
+            "type": "["
+          },
+          {
+            "name": "false",
+            "required": true,
+            "type": "\"\","
+          },
+          {
+            "name": "compoundVariants",
+            "required": true,
+            "type": "["
+          },
+          {
+            "name": "stacked",
+            "required": true,
+            "type": "true,"
+          },
+          {
+            "name": "dense",
+            "required": true,
+            "type": "true,"
+          },
+          {
+            "name": "class",
+            "required": true,
+            "type": "["
+          },
+          {
+            "name": "defaultVariants",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "variant",
+            "required": true,
+            "type": "\"default\","
+          },
+          {
+            "name": "spacing",
+            "required": true,
+            "type": "\"default\","
+          },
+          {
+            "name": "stacked",
+            "required": true,
+            "type": "false,"
+          },
+          {
+            "name": "dense",
+            "required": true,
+            "type": "false,"
+          }
+        ],
+        "FramePanel": [
+          {
+            "name": "fit",
+            "required": false,
+            "type": "boolean",
+            "doc": "Size the panel to its content instead of letting it fill the frame."
+          },
+          {
+            "name": "chrome",
+            "required": false,
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "GroupRow": {
+      "import": "@langchain/gtm-platform-design-system/ui/group-row",
+      "props": {
+        "GroupRowContent": [
+          {
+            "name": "count",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "depth",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "expanded",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "onToggle",
+            "required": true,
+            "type": "() => void"
+          },
+          {
+            "name": "compact",
+            "required": false,
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "IconWell": {
+      "import": "@langchain/gtm-platform-design-system/ui/icon-well",
+      "props": {
+        "IconWell": [
+          {
+            "name": "label",
+            "required": false,
+            "type": "string",
+            "doc": "Accessible name when the well stands alone."
+          }
+        ]
+      }
+    },
+    "Icon": {
+      "import": "@langchain/gtm-platform-design-system/ui/icon",
+      "props": {
+        "Icon": [
+          {
+            "name": "icon",
+            "required": true,
+            "type": "Glyph",
+            "doc": "A glyph from `./glyphs`, passed as a reference."
+          },
+          {
+            "name": "size",
+            "required": false,
+            "type": "IconSize",
+            "doc": "Ladder slot: 14 / 16 / 20 / 24."
+          },
+          {
+            "name": "label",
+            "required": false,
+            "type": "string",
+            "doc": "Set only when the icon carries meaning on its own; otherwise it is decorative."
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string",
+            "doc": "Colour only (`text-ink-subtle`); geometry comes from `size`."
+          }
+        ]
+      }
+    },
+    "InputCopy": {
+      "import": "@langchain/gtm-platform-design-system/ui/input-copy",
+      "props": {
+        "InputCopy": [
+          {
+            "name": "value",
+            "required": true,
+            "type": "string",
+            "doc": "The value shown and copied. Read-only by construction."
+          },
+          {
+            "name": "label",
+            "required": false,
+            "type": "string",
+            "doc": "Names the field above it, and the copy button through it."
+          },
+          {
+            "name": "onCopy",
+            "required": false,
+            "type": "() => void",
+            "doc": "Fired only when the value actually reached the clipboard."
+          },
+          {
+            "name": "disabled",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "MarkdownEditor": {
+      "import": "@langchain/gtm-platform-design-system/ui/markdown-editor",
+      "props": {
+        "MarkdownEditor": [
+          {
+            "name": "value",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "onChange",
+            "required": true,
+            "type": "(value: string) => void"
+          },
+          {
+            "name": "onBlur",
+            "required": false,
+            "type": "() => void"
+          },
+          {
+            "name": "disabled",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "placeholder",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "maxLength",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "invalid",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "describedBy",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "aria-label",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "aria-describedby",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "aria-invalid",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "aria-required",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "flush",
+            "required": false,
+            "type": "boolean",
+            "doc": "Remove nested field chrome when the editor already sits in a Frame panel."
+          },
+          {
+            "name": "attached",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "size",
+            "required": false,
+            "type": "\"field\" | \"document\"",
+            "doc": "`document` is the writing surface for a prompt step. `field` is a compact slot."
+          }
+        ]
+      }
+    },
+    "MentionChip": {
+      "import": "@langchain/gtm-platform-design-system/ui/mention-chip",
+      "props": {
+        "MentionChip": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Primary label on the pill."
+          },
+          {
+            "name": "kindLabel",
+            "required": true,
+            "type": "string",
+            "doc": "Kind heading shown in the peek (Accounts, Campaigns, …)."
+          },
+          {
+            "name": "icon",
+            "required": true,
+            "type": "Glyph"
+          },
+          {
+            "name": "tone",
+            "required": false,
+            "type": "BadgeTone"
+          },
+          {
+            "name": "variant",
+            "required": false,
+            "type": "MentionChipVariant"
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "id",
+            "required": false,
+            "type": "string",
+            "doc": "Stable id for tests / keys."
+          },
+          {
+            "name": "peek",
+            "required": false,
+            "type": "boolean",
+            "doc": "Show the hover peek. Default true."
+          },
+          {
+            "name": "onRemove",
+            "required": false,
+            "type": "() => void",
+            "doc": "When set, an × appears to dismiss the chip."
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "OrbGlyph": {
+      "import": "@langchain/gtm-platform-design-system/ui/orb-glyph",
+      "props": {
+        "OrbGlyph": [
+          {
+            "name": "title",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "titleId",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Orb": {
+      "import": "@langchain/gtm-platform-design-system/ui/orb",
+      "props": {
+        "Orb": [
+          {
+            "name": "activity",
+            "required": false,
+            "type": "OrbActivity",
+            "doc": "What the agent is doing. The map, not the call site, picks the animation."
+          },
+          {
+            "name": "size",
+            "required": false,
+            "type": "OrbRung",
+            "doc": "`inline` beside text (20px), `avatar` standing alone (64px)."
+          },
+          {
+            "name": "label",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string",
+            "doc": "Placement only. The orb owns its own geometry and has no colour to set."
+          }
+        ],
+        "OrbStatus": [
+          {
+            "name": "activity",
+            "required": false,
+            "type": "OrbActivity",
+            "doc": "What the agent is doing. Also picks the default caption."
+          },
+          {
+            "name": "size",
+            "required": false,
+            "type": "OrbRung",
+            "doc": "`inline` beside the verb (thread), `avatar` for a standalone mark."
+          },
+          {
+            "name": "caption",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "data-testid",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Popover": {
+      "import": "@langchain/gtm-platform-design-system/ui/popover",
+      "props": {
+        "PopoverContent": [
+          {
+            "name": "inset",
+            "required": false,
+            "type": "PopoverInset"
+          },
+          {
+            "name": "scrollable",
+            "required": false,
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "Progress": {
+      "import": "@langchain/gtm-platform-design-system/ui/progress",
+      "props": {
+        "Progress": [
+          {
+            "name": "value",
+            "required": false,
+            "type": "number",
+            "doc": "How far along, from 0 to `max`. Clamped; ignored when indeterminate."
+          },
+          {
+            "name": "max",
+            "required": false,
+            "type": "number",
+            "doc": "The top of the range. Defaults to a percentage."
+          },
+          {
+            "name": "indeterminate",
+            "required": false,
+            "type": "boolean",
+            "doc": "Work is running with no known extent."
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "What is progressing; announced, since a bar has no text of its own."
+          }
+        ]
+      }
+    },
+    "ProviderLogos": {
+      "import": "@langchain/gtm-platform-design-system/ui/provider-logos",
+      "props": {
+        "ProviderLogo": [
+          {
+            "name": "provider",
+            "required": true,
+            "type": "ProviderLogoId"
+          },
+          {
+            "name": "branded",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "title",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "MailProviderLogo": [
+          {
+            "name": "provider",
+            "required": true,
+            "type": "MailProviderLogoId"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "title",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "PushpinGlyph": {
+      "import": "@langchain/gtm-platform-design-system/ui/pushpin-glyph",
+      "props": {
+        "PushPin": [
+          {
+            "name": "title",
+            "required": false,
+            "type": "string; titleId?: string }"
+          }
+        ]
+      }
+    },
+    "ScrollArea": {
+      "import": "@langchain/gtm-platform-design-system/ui/scroll-area",
+      "props": {
+        "ScrollBar": [
+          {
+            "name": "reveal",
+            "required": false,
+            "type": "ScrollbarReveal",
+            "doc": "`always` pins the thumb visible; the track stays invisible either way."
+          }
+        ],
+        "ScrollArea": [
+          {
+            "name": "viewportClassName",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "viewportRef",
+            "required": false,
+            "type": "Ref<HTMLDivElement>",
+            "doc": "The scrolling element, for a consumer that reads scroll offsets itself."
+          },
+          {
+            "name": "recoveryKey",
+            "required": false,
+            "type": "string",
+            "doc": "Stable product region identity; transient popups do not opt in."
+          },
+          {
+            "name": "scrollbars",
+            "required": false,
+            "type": "ScrollbarReveal",
+            "doc": "`hover` (default) or the standing thumb wide data may opt into."
+          },
+          {
+            "name": "overflow",
+            "required": false,
+            "type": "ScrollAreaOverflow",
+            "doc": "Axes that may scroll. Default `both`."
+          }
+        ]
+      }
+    },
+    "ScrollFadeContainer": {
+      "import": "@langchain/gtm-platform-design-system/ui/scroll-fade-container",
+      "props": {
+        "ScrollFadeContainer": [
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "style",
+            "required": false,
+            "type": "React.CSSProperties"
+          },
+          {
+            "name": "fadeSize",
+            "required": false,
+            "type": "FadeSize"
+          },
+          {
+            "name": "disabled",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "fadeBg",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "SearchInput": {
+      "import": "@langchain/gtm-platform-design-system/ui/search-input",
+      "props": {
+        "SearchInput": [
+          {
+            "name": "size",
+            "required": false,
+            "type": "SearchInputSize",
+            "doc": "Placement picks the size: `compact` inside a frame, `control` in a toolbar."
+          },
+          {
+            "name": "value",
+            "required": true,
+            "type": "string",
+            "doc": "The query. Controlled: this field holds no state of its own."
+          },
+          {
+            "name": "onValueChange",
+            "required": true,
+            "type": "(value: string) => void"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "shortcut",
+            "required": false,
+            "type": "string",
+            "doc": "One key to draw as a hint while the field is empty, e.g. \"/\"."
+          }
+        ]
+      }
+    },
+    "Select": {
+      "import": "@langchain/gtm-platform-design-system/ui/select",
+      "props": {
+        "Variant": [
+          {
+            "name": "variants",
+            "required": true,
+            "type": "{",
+            "doc": "The one close Base UI reports that is a confirmation rather than a dismissal."
+          },
+          {
+            "name": "size",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "control",
+            "required": true,
+            "type": "\"h-control rounded-control\","
+          },
+          {
+            "name": "compact",
+            "required": true,
+            "type": "\"h-control-sm rounded-compact\","
+          },
+          {
+            "name": "defaultVariants",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "size",
+            "required": true,
+            "type": "\"control\","
+          }
+        ]
+      }
+    },
+    "Shortcut": {
+      "import": "@langchain/gtm-platform-design-system/ui/shortcut",
+      "props": {
+        "Shortcut": [
+          {
+            "name": "keys",
+            "required": true,
+            "type": "readonly ShortcutKey[]"
+          },
+          {
+            "name": "apple",
+            "required": false,
+            "type": "boolean",
+            "doc": "Force Apple (⌘) or not. Omit to detect. Tests pass this."
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Sidebar": {
+      "import": "@langchain/gtm-platform-design-system/ui/sidebar",
+      "props": {
+        "SidebarContext": [
+          {
+            "name": "state",
+            "required": true,
+            "type": "\"expanded\" | \"collapsed\""
+          },
+          {
+            "name": "open",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "setOpen",
+            "required": true,
+            "type": "(open: boolean) => void"
+          },
+          {
+            "name": "openMobile",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "setOpenMobile",
+            "required": true,
+            "type": "(open: boolean) => void"
+          },
+          {
+            "name": "isMobile",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "toggleSidebar",
+            "required": true,
+            "type": "() => void"
+          }
+        ]
+      }
+    },
+    "Slider": {
+      "import": "@langchain/gtm-platform-design-system/ui/slider",
+      "props": {
+        "Variant": [
+          {
+            "name": "variants",
+            "required": true,
+            "type": "{",
+            "doc": "How many step dots may be drawn before the rail turns into a comb."
+          },
+          {
+            "name": "size",
+            "required": true,
+            "type": "{"
+          },
+          {
+            "name": "compact",
+            "required": true,
+            "type": "\"h-control-sm\","
+          },
+          {
+            "name": "control",
+            "required": true,
+            "type": "\"h-control\","
+          },
+          {
+            "name": "defaultVariants",
+            "required": true,
+            "type": "{ size: \"control\" },"
+          }
+        ],
+        "Slider": [
+          {
+            "name": "label",
+            "required": false,
+            "type": "string",
+            "doc": "Names the slider above the rail. Omit it and pass `thumbLabels` instead."
+          },
+          {
+            "name": "showValue",
+            "required": false,
+            "type": "boolean",
+            "doc": "Shows the value opposite the label, in the mono face."
+          },
+          {
+            "name": "editable",
+            "required": false,
+            "type": "boolean",
+            "doc": "Turns the readout into a number field on click. Single-value sliders only."
+          },
+          {
+            "name": "showSteps",
+            "required": false,
+            "type": "boolean",
+            "doc": "Draws a notch at every step, up to 24 of them."
+          },
+          {
+            "name": "formatValue",
+            "required": false,
+            "type": "(value: number) => string",
+            "doc": "Units, currency, days: whatever makes the number mean something."
+          },
+          {
+            "name": "thumbLabels",
+            "required": false,
+            "type": "readonly string[]",
+            "doc": "One accessible name per thumb. A range needs two (\"From\", \"To\")."
+          }
+        ]
+      }
+    },
+    "Sonner": {
+      "import": "@langchain/gtm-platform-design-system/ui/sonner",
+      "props": {
+        "Toaster": [
+          {
+            "name": "--normal-bg",
+            "required": true,
+            "type": "\"var(--gtm-panel)\","
+          },
+          {
+            "name": "--normal-text",
+            "required": true,
+            "type": "\"var(--gtm-ink)\","
+          },
+          {
+            "name": "--normal-border",
+            "required": true,
+            "type": "\"var(--gtm-line-strong)\","
+          },
+          {
+            "name": "--border-radius",
+            "required": true,
+            "type": "\"var(--radius-panel, 12px)\","
+          }
+        ]
+      }
+    },
+    "SpinnerGlyph": {
+      "import": "@langchain/gtm-platform-design-system/ui/spinner-glyph",
+      "props": {
+        "SpinnerGlyph": [
+          {
+            "name": "title",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "titleId",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Spinner": {
+      "import": "@langchain/gtm-platform-design-system/ui/spinner",
+      "props": {
+        "StatusLabel": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "The word showing now. Driven by state, never by a timer."
+          },
+          {
+            "name": "reserve",
+            "required": false,
+            "type": "readonly string[]"
+          },
+          {
+            "name": "pending",
+            "required": false,
+            "type": "boolean",
+            "doc": "True while the work behind the label is in flight."
+          }
+        ],
+        "Spinner": [
+          {
+            "name": "size",
+            "required": false,
+            "type": "IconSize",
+            "doc": "Ladder slot: 14 / 16 / 20 / 24."
+          },
+          {
+            "name": "label",
+            "required": false,
+            "type": "string",
+            "doc": "Set only when the spinner is the only sign that work is running."
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string",
+            "doc": "Colour only (`text-ink-subtle`); geometry comes from `size`."
+          }
+        ]
+      }
+    },
+    "Table": {
+      "import": "@langchain/gtm-platform-design-system/ui/table",
+      "props": {
+        "Table": [
+          {
+            "name": "container",
+            "required": false,
+            "type": "boolean",
+            "doc": "False hands overflow back to the consumer; see the note at the container."
+          },
+          {
+            "name": "scrollbars",
+            "required": false,
+            "type": "TableScrollbars"
+          }
+        ]
+      }
+    },
+    "AgentThreadRail": {
+      "import": "@langchain/gtm-platform-design-system/patterns/agent-thread-rail",
+      "props": {
+        "AgentThreadRail": [
+          {
+            "name": "onDropThread",
+            "required": false,
+            "type": "(id: string, target: ThreadRailDropTarget) => void",
+            "doc": "One principal-scoped label update for a completed thread drag."
+          },
+          {
+            "name": "groups",
+            "required": true,
+            "type": "readonly ThreadRailGroup[]"
+          },
+          {
+            "name": "features",
+            "required": false,
+            "type": "readonly ThreadRailFeature[]"
+          },
+          {
+            "name": "leading",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Rail chrome above features — typically PostureBar."
+          },
+          {
+            "name": "compact",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "search",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "onSearchChange",
+            "required": false,
+            "type": "(value: string) => void"
+          },
+          {
+            "name": "onSelectThread",
+            "required": false,
+            "type": "(id: string) => void"
+          },
+          {
+            "name": "onPrefetchThread",
+            "required": false,
+            "type": "(id: string) => void"
+          },
+          {
+            "name": "groupBy",
+            "required": false,
+            "type": "ThreadRailGroupBy",
+            "doc": "Grouping owned by the Group control — not Tabs."
+          },
+          {
+            "name": "onGroupByChange",
+            "required": false,
+            "type": "(next: ThreadRailGroupBy) => void"
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "type": "ThreadRailSort"
+          },
+          {
+            "name": "onSortChange",
+            "required": false,
+            "type": "(next: ThreadRailSort) => void"
+          },
+          {
+            "name": "filter",
+            "required": false,
+            "type": "ThreadRailFilter"
+          },
+          {
+            "name": "onFilterChange",
+            "required": false,
+            "type": "(next: ThreadRailFilter) => void"
+          },
+          {
+            "name": "collapsedGroupIds",
+            "required": false,
+            "type": "readonly string[]"
+          },
+          {
+            "name": "onCollapsedGroupIdsChange",
+            "required": false,
+            "type": "(ids: readonly string[]) => void"
+          },
+          {
+            "name": "projects",
+            "required": false,
+            "type": "readonly ThreadRailProject[]"
+          },
+          {
+            "name": "onPinThread",
+            "required": false,
+            "type": "(id: string, pinned: boolean) => void"
+          },
+          {
+            "name": "onMarkThreadRead",
+            "required": false,
+            "type": "(id: string) => void"
+          },
+          {
+            "name": "onMarkThreadUnread",
+            "required": false,
+            "type": "(id: string) => void"
+          },
+          {
+            "name": "onArchiveThread",
+            "required": false,
+            "type": "(id: string) => void"
+          },
+          {
+            "name": "onRenameThread",
+            "required": false,
+            "type": "(id: string) => void"
+          },
+          {
+            "name": "onDeleteThread",
+            "required": false,
+            "type": "(id: string) => void"
+          }
+        ]
+      }
+    },
+    "AgentThread": {
+      "import": "@langchain/gtm-platform-design-system/patterns/agent-thread",
+      "props": {
+        "AgentThread": [
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "AgentThreadDivider": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "AgentInterpretation": [
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "AgentTurn": [
+          {
+            "name": "name",
+            "required": false,
+            "type": "string",
+            "doc": "Accessible label for the agent's turn."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          }
+        ],
+        "UserTurnCopy": [
+          {
+            "name": "children",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "text",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "displayText",
+            "required": false,
+            "type": "string",
+            "doc": "Visible prose and compact pill labels, when different from the full copy text."
+          }
+        ],
+        "UserTurnMessageDialog": [
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "onOpenChange",
+            "required": true,
+            "type": "(open: boolean) => void"
+          },
+          {
+            "name": "open",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "text",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "UserTurn": [
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "copyText",
+            "required": false,
+            "type": "string",
+            "doc": "Source string for the hover copy. String children supply it."
+          }
+        ]
+      }
+    },
+    "AppRailPreview": {
+      "import": "@langchain/gtm-platform-design-system/patterns/app-rail-preview",
+      "props": {
+        "AppRailPreview": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "destination",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "icon",
+            "required": true,
+            "type": "Glyph"
+          },
+          {
+            "name": "items",
+            "required": true,
+            "type": "readonly AppRailPreviewItem[]"
+          },
+          {
+            "name": "emptyMessage",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "loading",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "onNavigate",
+            "required": true,
+            "type": "(href: string) => void"
+          }
+        ]
+      }
+    },
+    "AppShell": {
+      "import": "@langchain/gtm-platform-design-system/patterns/app-shell",
+      "props": {
+        "AppShellBase": [
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "contentWidth",
+            "required": false,
+            "type": "AppShellContentWidth"
+          },
+          {
+            "name": "contentScroll",
+            "required": false,
+            "type": "AppShellContentScroll"
+          },
+          {
+            "name": "chrome",
+            "required": false,
+            "type": "AppShellChrome"
+          }
+        ],
+        "NavigationRail": [
+          {
+            "name": "sidebar",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Destinations (normally SidebarNav). Omit to mount no rail."
+          },
+          {
+            "name": "railHeader",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Brand row: logo + name + collapse. Pinned above the scroll."
+          },
+          {
+            "name": "railFooter",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Identity foot. Pinned below the scroll — person chrome, not a nav list."
+          },
+          {
+            "name": "railCollapsed",
+            "required": false,
+            "type": "boolean",
+            "doc": "Narrow the rail to the 48px icon width. Focus mode ignores this."
+          }
+        ],
+        "FlatShell": [
+          {
+            "name": "mode",
+            "required": true,
+            "type": "\"flat\""
+          },
+          {
+            "name": "header",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "dock",
+            "required": false,
+            "type": "ReactNode"
+          }
+        ],
+        "LineageShell": [
+          {
+            "name": "mode",
+            "required": true,
+            "type": "\"lineage\""
+          },
+          {
+            "name": "band",
+            "required": true,
+            "type": "ReactNode"
+          }
+        ],
+        "FocusShell": [
+          {
+            "name": "mode",
+            "required": true,
+            "type": "\"focus\""
+          },
+          {
+            "name": "threadRail",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "band",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "railHeader",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "railFooter",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Same identity / settings foot as the product rail, pinned under the list."
+          },
+          {
+            "name": "railCollapsed",
+            "required": false,
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "CapacityMetric": {
+      "import": "@langchain/gtm-platform-design-system/patterns/capacity-metric",
+      "props": {
+        "CapacityMeter": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Accessible metric and window label."
+          },
+          {
+            "name": "remaining",
+            "required": true,
+            "type": "number",
+            "doc": "Remaining capacity. Clamped only for meter presentation."
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "type": "number",
+            "doc": "Maximum capacity for the displayed window."
+          },
+          {
+            "name": "tone",
+            "required": false,
+            "type": "CapacityTone",
+            "doc": "Optional semantic tone override."
+          }
+        ],
+        "CapacityMetric": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string",
+            "doc": "Clear metric name."
+          },
+          {
+            "name": "icon",
+            "required": true,
+            "type": "Glyph",
+            "doc": "Product glyph shown in the standard icon well."
+          },
+          {
+            "name": "remaining",
+            "required": false,
+            "type": "number",
+            "doc": "Remaining capacity, omitted only when unavailable."
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "type": "number",
+            "doc": "Maximum capacity for the primary window, omitted only when unavailable."
+          },
+          {
+            "name": "meterLabel",
+            "required": false,
+            "type": "string",
+            "doc": "Accessible metric and window label for the meter."
+          },
+          {
+            "name": "detail",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Optional next-available time when capacity is zero."
+          },
+          {
+            "name": "unavailable",
+            "required": false,
+            "type": "boolean",
+            "doc": "Explicitly marks this reading unavailable."
+          },
+          {
+            "name": "tone",
+            "required": false,
+            "type": "CapacityTone",
+            "doc": "Optional semantic tone override."
+          }
+        ],
+        "CapacityMetricGrid": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Accessible name for the capacity set."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "Repeated CapacityMetric elements."
+          },
+          {
+            "name": "columns",
+            "required": false,
+            "type": "1 | 2"
+          }
+        ]
+      }
+    },
+    "ChangeFeed": {
+      "import": "@langchain/gtm-platform-design-system/patterns/change-feed",
+      "props": {
+        "ChangeFeed": [
+          {
+            "name": "items",
+            "required": true,
+            "type": "readonly ChangeFeedItem[]"
+          },
+          {
+            "name": "collapsedCount",
+            "required": false,
+            "type": "number",
+            "doc": "Rows rendered on the page; View more reveals the rest in the same list."
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "ListContinuation": [
+          {
+            "name": "expanded",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "onToggle",
+            "required": true,
+            "type": "() => void"
+          },
+          {
+            "name": "testId",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "ChoiceCards": {
+      "import": "@langchain/gtm-platform-design-system/patterns/choice-cards",
+      "props": {
+        "ChoiceCards": [
+          {
+            "name": "describedBy",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "labelledBy",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "onChange",
+            "required": true,
+            "type": "(value: Value) => void"
+          },
+          {
+            "name": "options",
+            "required": true,
+            "type": "readonly ChoiceCardOption<Value>[]"
+          },
+          {
+            "name": "parse",
+            "required": true,
+            "type": "(value: string) => value is Value"
+          },
+          {
+            "name": "value",
+            "required": true,
+            "type": "Value | null"
+          }
+        ]
+      }
+    },
+    "ComingUpCalendar": {
+      "import": "@langchain/gtm-platform-design-system/patterns/coming-up-calendar",
+      "props": {
+        "ComingUpCalendar": [
+          {
+            "name": "meetings",
+            "required": true,
+            "type": "readonly ComingUpMeeting[]"
+          },
+          {
+            "name": "now",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "onOpen",
+            "required": true,
+            "type": "(meeting: ComingUpMeeting) => void"
+          },
+          {
+            "name": "mode",
+            "required": false,
+            "type": "ComingUpMode",
+            "doc": "Controlled from the section header. Default is the list."
+          },
+          {
+            "name": "defaultRange",
+            "required": false,
+            "type": "ComingUpRange",
+            "doc": "First range when Calendar is opened. Tests may start on month."
+          }
+        ]
+      }
+    },
+    "ConfirmableAction": {
+      "import": "@langchain/gtm-platform-design-system/patterns/confirmable-action",
+      "props": {
+        "ConfirmableAction": [
+          {
+            "name": "default",
+            "required": true,
+            "type": "{"
+          }
+        ]
+      }
+    },
+    "ConversationRow": {
+      "import": "@langchain/gtm-platform-design-system/patterns/conversation-row",
+      "props": {
+        "ConversationRow": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "contact",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "account",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "accountKind",
+            "required": false,
+            "type": "\"account\" | \"activity\""
+          },
+          {
+            "name": "meta",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "statusBadge",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "provider",
+            "required": false,
+            "type": "ProviderId"
+          },
+          {
+            "name": "unread",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "selected",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "onOpen",
+            "required": false,
+            "type": "() => void"
+          }
+        ]
+      }
+    },
+    "DataScopeSelect": {
+      "import": "@langchain/gtm-platform-design-system/patterns/data-scope-select",
+      "props": {
+        "DataScopeSelect": [
+          {
+            "name": "value",
+            "required": true,
+            "type": "DataScope"
+          },
+          {
+            "name": "onValueChange",
+            "required": true,
+            "type": "(scope: DataScope) => void"
+          },
+          {
+            "name": "myLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "allLabel",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "DecisionRow": {
+      "import": "@langchain/gtm-platform-design-system/patterns/decision-row",
+      "props": {
+        "DecisionList": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Names the queue. \"Needs your decision\"."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "`DecisionRow` elements, in the order the server ranked them."
+          }
+        ],
+        "DecisionRow": [
+          {
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "object",
+            "required": true,
+            "type": "string",
+            "doc": "Object name — account, campaign, contact."
+          },
+          {
+            "name": "reason",
+            "required": true,
+            "type": "string",
+            "doc": "Agent ranking reason (required)."
+          },
+          {
+            "name": "meta",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "badge",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "provider",
+            "required": false,
+            "type": "ProviderId"
+          },
+          {
+            "name": "unread",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "selected",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "href",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "onOpen",
+            "required": false,
+            "type": "() => void"
+          }
+        ]
+      }
+    },
+    "DiffRow": {
+      "import": "@langchain/gtm-platform-design-system/patterns/diff-row",
+      "props": {
+        "DiffRow": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "before",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "after",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "layout",
+            "required": false,
+            "type": "\"chip\" | \"block\""
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "ChangeSetSection": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string",
+            "doc": "Caps subsection label, e.g. \"Opportunity\" or \"Timing\"."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "ChangeSet": [
+          {
+            "name": "title",
+            "required": false,
+            "type": "string",
+            "doc": "Optional card label above the rows, e.g. \"Changes\"."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "EmptyState": {
+      "import": "@langchain/gtm-platform-design-system/patterns/empty-state",
+      "props": {
+        "EmptyState": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "icon",
+            "required": false,
+            "type": "Glyph"
+          },
+          {
+            "name": "media",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "action",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Recovery controls — omit when the surface already owns the next step."
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "FilterableTable": {
+      "import": "@langchain/gtm-platform-design-system/patterns/filterable-table",
+      "props": {
+        "FilterableTable": [
+          {
+            "name": "columns",
+            "required": true,
+            "type": "ColumnDef<TData, unknown>[]"
+          },
+          {
+            "name": "data",
+            "required": true,
+            "type": "TData[]"
+          },
+          {
+            "name": "getRowId",
+            "required": true,
+            "type": "(row: TData, index: number) => string",
+            "doc": "Stable server id per row. Never the array index."
+          },
+          {
+            "name": "title",
+            "required": false,
+            "type": "FilterableTableTitle",
+            "doc": "The section's name, first on the toolbar row. For a table that is its section's whole body."
+          },
+          {
+            "name": "tabs",
+            "required": false,
+            "type": "FilterableTableTabs",
+            "doc": "Quick filters as a segmented tab strip, left of search."
+          },
+          {
+            "name": "search",
+            "required": false,
+            "type": "FilterableTableSearch",
+            "doc": "Omit for a table with no search field."
+          },
+          {
+            "name": "onReset",
+            "required": false,
+            "type": "() => void",
+            "doc": "One URL update clears all filters and search, preserving grouping and sorting."
+          },
+          {
+            "name": "serverSorting",
+            "required": false,
+            "type": "{",
+            "doc": "Only these columns can order the complete server result before pagination."
+          },
+          {
+            "name": "value",
+            "required": true,
+            "type": "SortingState"
+          },
+          {
+            "name": "columnIds",
+            "required": true,
+            "type": "readonly string[]"
+          },
+          {
+            "name": "onChange",
+            "required": true,
+            "type": "(value: SortingState) => void"
+          },
+          {
+            "name": "facets",
+            "required": false,
+            "type": "readonly FilterableTableFacet[]",
+            "doc": "Faceted multi selects, left to right after the search field. Small client tables only."
+          },
+          {
+            "name": "scopes",
+            "required": false,
+            "type": "readonly FilterableTableScope[]",
+            "doc": "Server scopes as leftover dropdowns. New surfaces use `filters`."
+          },
+          {
+            "name": "filters",
+            "required": false,
+            "type": "FilterableTableFilters",
+            "doc": "Command popover of column filters. Writes request state; does not filter mounted rows."
+          },
+          {
+            "name": "groupBy",
+            "required": false,
+            "type": "FilterableTableGroupBy",
+            "doc": "Puts Group by on the right with Filters. Omit to leave the table flat."
+          },
+          {
+            "name": "serverGrouping",
+            "required": false,
+            "type": "FilterableTableServerGrouping",
+            "doc": "Exact server group summaries plus the rows loaded for the one expanded group."
+          },
+          {
+            "name": "gallery",
+            "required": false,
+            "type": "{",
+            "doc": "Alternate layout of a catalog, sharing this toolbar and server-paged rows."
+          },
+          {
+            "name": "view",
+            "required": true,
+            "type": "\"table\" | \"gallery\""
+          },
+          {
+            "name": "onViewChange",
+            "required": true,
+            "type": "(view: \"table\" | \"gallery\") => void"
+          },
+          {
+            "name": "renderItem",
+            "required": true,
+            "type": "(item: TData) => ReactNode"
+          },
+          {
+            "name": "actions",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Surface action after Columns, aligned to the fixed toolbar's right edge."
+          },
+          {
+            "name": "fill",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "infinite",
+            "required": false,
+            "type": "FilterableTableInfinite"
+          },
+          {
+            "name": "cursorPagination",
+            "required": false,
+            "type": "FilterableTableCursorPagination"
+          }
+        ],
+        "FilterableTableGroupRow": [
+          {
+            "name": "count",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "expanded",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "onToggle",
+            "required": true,
+            "type": "() => void"
+          },
+          {
+            "name": "testId",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "FilterableTableGroupTag": [
+          {
+            "name": "icon",
+            "required": false,
+            "type": "Glyph"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "FormField": {
+      "import": "@langchain/gtm-platform-design-system/patterns/form-field",
+      "props": {
+        "FormField": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "control",
+            "required": true,
+            "type": "ReactElement<Record<string, unknown>>"
+          },
+          {
+            "name": "help",
+            "required": false,
+            "type": "string",
+            "doc": "The field's permanent explanation, under the control."
+          },
+          {
+            "name": "error",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "required",
+            "required": false,
+            "type": "boolean",
+            "doc": "Marks the label and sets aria-required. Native validation stays off."
+          }
+        ],
+        "FormSection": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "titleId",
+            "required": false,
+            "type": "string",
+            "doc": "Optional id on the title span, so a control inside can point at it."
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string",
+            "doc": "One or two lines of context for the group, above the first field."
+          },
+          {
+            "name": "descriptionId",
+            "required": false,
+            "type": "string",
+            "doc": "Optional id on the description, so a control inside can point at it."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "FormField children, at the one gap."
+          }
+        ]
+      }
+    },
+    "InputRequest": {
+      "import": "@langchain/gtm-platform-design-system/patterns/input-request",
+      "props": {
+        "InputQuestionField": [
+          {
+            "name": "question",
+            "required": true,
+            "type": "InputRequestQuestion"
+          },
+          {
+            "name": "value",
+            "required": false,
+            "type": "InputRequestAnswer"
+          },
+          {
+            "name": "error",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "onValueChange",
+            "required": true,
+            "type": "(value: InputRequestAnswer) => void"
+          },
+          {
+            "name": "onUploadFiles",
+            "required": false,
+            "type": "(files: readonly File[]) => Promise<readonly string[]>"
+          },
+          {
+            "name": "onUploadStateChange",
+            "required": false,
+            "type": "(questionId: string, uploading: boolean) => void"
+          }
+        ],
+        "InputRequestComposer": [
+          {
+            "name": "request",
+            "required": true,
+            "type": "InputRequestSpec"
+          },
+          {
+            "name": "answers",
+            "required": true,
+            "type": "InputRequestAnswers"
+          },
+          {
+            "name": "onAnswerChange",
+            "required": true,
+            "type": "(questionId: string, value: InputRequestAnswer) => void"
+          },
+          {
+            "name": "onSubmit",
+            "required": true,
+            "type": "(answers: InputRequestAnswers) => Promise<void>"
+          },
+          {
+            "name": "onSaveProgress",
+            "required": false,
+            "type": "(answers: InputRequestAnswers) => Promise<void>"
+          },
+          {
+            "name": "onCancel",
+            "required": false,
+            "type": "() => void"
+          },
+          {
+            "name": "onAskQuestion",
+            "required": false,
+            "type": "(answers: InputRequestAnswers) => void",
+            "doc": "Sets the form aside so the person can ask a question; the host saves and hides it."
+          },
+          {
+            "name": "step",
+            "required": false,
+            "type": "number",
+            "doc": "The current section, when the host keeps it across the form being set aside."
+          },
+          {
+            "name": "onStepChange",
+            "required": false,
+            "type": "(step: number) => void"
+          },
+          {
+            "name": "submitting",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "completeLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "displayTitle",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "onUploadFiles",
+            "required": false,
+            "type": "(files: readonly File[]) => Promise<readonly string[]>"
+          }
+        ],
+        "InputRequestReceipt": [
+          {
+            "name": "state",
+            "required": true,
+            "type": "InputRequestReceiptState"
+          },
+          {
+            "name": "title",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "summary",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "answeredCount",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "answers",
+            "required": false,
+            "type": "readonly InputRequestReceiptAnswer[]"
+          },
+          {
+            "name": "review",
+            "required": false,
+            "type": "InputRequestReceiptReview"
+          }
+        ]
+      }
+    },
+    "MetricCard": {
+      "import": "@langchain/gtm-platform-design-system/patterns/metric-card",
+      "props": {
+        "MetricCard": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string",
+            "doc": "Clear metric name. Rendered as the card heading."
+          },
+          {
+            "name": "value",
+            "required": true,
+            "type": "string | number",
+            "doc": "Preformatted value. Formatting remains with the data owner."
+          },
+          {
+            "name": "detail",
+            "required": false,
+            "type": "string",
+            "doc": "Window, coverage, or certainty for this specific reading. Omit when the info slot carries it."
+          },
+          {
+            "name": "icon",
+            "required": true,
+            "type": "Glyph",
+            "doc": "Product glyph shown in the standard IconWell."
+          },
+          {
+            "name": "info",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Provenance disclosure trigger, end of the title band. See rule 7."
+          },
+          {
+            "name": "sparkline",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Word-sized trend of the same stored series, beside the value. See rule 8."
+          },
+          {
+            "name": "onDrill",
+            "required": false,
+            "type": "() => void",
+            "doc": "Makes the whole card open its own series at full resolution. See rule 9."
+          },
+          {
+            "name": "drillLabel",
+            "required": false,
+            "type": "string",
+            "doc": "Accessible name for the drill trigger. Names the series, not the gesture."
+          },
+          {
+            "name": "onOpen",
+            "required": false,
+            "type": "() => void",
+            "doc": "Makes a card with no sparkline open the collection its value counts. See rule 10."
+          },
+          {
+            "name": "openLabel",
+            "required": false,
+            "type": "string",
+            "doc": "Accessible name for the open trigger. Names the collection, not the gesture."
+          },
+          {
+            "name": "emphasis",
+            "required": false,
+            "type": "\"title\" | \"display\"",
+            "doc": "How large the value is set: the title rung by default, the display rung for a page's key numbers."
+          }
+        ],
+        "MetricCardGrid": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Accessible name for the metric set."
+          },
+          {
+            "name": "columns",
+            "required": false,
+            "type": "keyof typeof GRID_COLUMNS_CLASS",
+            "doc": "Peak column count. The grid still collapses on a narrower container."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "Repeated MetricCard elements."
+          }
+        ]
+      }
+    },
+    "OnboardingDialog": {
+      "import": "@langchain/gtm-platform-design-system/patterns/onboarding-dialog",
+      "props": {
+        "OnboardingDialog": [
+          {
+            "name": "open",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "onOpenChange",
+            "required": true,
+            "type": "(open: boolean) => void"
+          },
+          {
+            "name": "eyebrow",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "steps",
+            "required": true,
+            "type": "readonly OnboardingStep[]"
+          },
+          {
+            "name": "step",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "onStepChange",
+            "required": true,
+            "type": "(step: number) => void"
+          },
+          {
+            "name": "onComplete",
+            "required": true,
+            "type": "() => void"
+          },
+          {
+            "name": "completeLabel",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "skipLabel",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "OverflowTabs": {
+      "import": "@langchain/gtm-platform-design-system/patterns/overflow-tabs",
+      "props": {
+        "OverflowTabs": [
+          {
+            "name": "items",
+            "required": true,
+            "type": "readonly OverflowTabItem[]"
+          },
+          {
+            "name": "value",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "onValueChange",
+            "required": true,
+            "type": "(next: string) => void"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Accessible name for the visible tablist."
+          },
+          {
+            "name": "overflowLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "variant",
+            "required": false,
+            "type": "OverflowTabsVariant"
+          },
+          {
+            "name": "icons",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "maxVisible",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "PageBand": {
+      "import": "@langchain/gtm-platform-design-system/patterns/page-band",
+      "props": {
+        "PageBandLineage": [
+          {
+            "name": "variant",
+            "required": true,
+            "type": "\"lineage\""
+          },
+          {
+            "name": "lineage",
+            "required": true,
+            "type": "readonly LineageCrumb[]",
+            "doc": "Root first; the last entry is the object the route is on."
+          },
+          {
+            "name": "onBack",
+            "required": false,
+            "type": "() => void",
+            "doc": "Where back goes. Omit only when the route genuinely has no parent."
+          },
+          {
+            "name": "backLabel",
+            "required": false,
+            "type": "string",
+            "doc": "Spoken by the back control; name the destination, not the direction."
+          },
+          {
+            "name": "action",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "The one action that belongs to this object. Not a toolbar."
+          }
+        ],
+        "PageBandToolbar": [
+          {
+            "name": "variant",
+            "required": true,
+            "type": "\"toolbar\""
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "Verbs fused with filters, left to right, all at the control rung."
+          },
+          {
+            "name": "edge",
+            "required": false,
+            "type": "\"line\" | \"none\""
+          }
+        ]
+      }
+    },
+    "PageFrame": {
+      "import": "@langchain/gtm-platform-design-system/patterns/page-frame",
+      "props": {
+        "PageSection": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "icon",
+            "required": false,
+            "type": "Glyph",
+            "doc": "Decorative. The heading text stays the accessible name."
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string",
+            "doc": "One or two lines at most; longer belongs in the section's body."
+          },
+          {
+            "name": "actions",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Section level controls, trailing the heading."
+          },
+          {
+            "name": "contained",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "inset",
+            "required": false,
+            "type": "PageSectionInset"
+          },
+          {
+            "name": "flush",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "headerPlacement",
+            "required": false,
+            "type": "PageSectionHeaderPlacement"
+          },
+          {
+            "name": "id",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          }
+        ],
+        "PageFrame": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string",
+            "doc": "One line. A second line means it wanted to be a section."
+          },
+          {
+            "name": "hideTitle",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "actions",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Header trailing controls; at most one primary on the surface."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "The page's sections, in the order they should appear."
+          },
+          {
+            "name": "dangerZone",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Destructive controls. Rendered last, after children, always."
+          },
+          {
+            "name": "dangerTitle",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "dangerDescription",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "PageMasthead": {
+      "import": "@langchain/gtm-platform-design-system/patterns/page-masthead",
+      "props": {
+        "PageMasthead": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string",
+            "doc": "The page's one `text-page` element. Nothing else on the route may take it."
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string",
+            "doc": "One line, two rungs down. Longer is a section."
+          },
+          {
+            "name": "icon",
+            "required": false,
+            "type": "Glyph",
+            "doc": "Feature glyph on the title row. Orientation, not a verb."
+          },
+          {
+            "name": "counts",
+            "required": false,
+            "type": "readonly PageMastheadCount[]",
+            "doc": "Readings of the page's contents. Rendered Quiet, never Urgent."
+          }
+        ]
+      }
+    },
+    "PostureControl": {
+      "import": "@langchain/gtm-platform-design-system/patterns/posture-control",
+      "props": {
+        "PostureControl": [
+          {
+            "name": "value",
+            "required": true,
+            "type": "Posture"
+          },
+          {
+            "name": "onChange",
+            "required": true,
+            "type": "(next: Posture) => void"
+          },
+          {
+            "name": "agentAttention",
+            "required": false,
+            "type": "boolean",
+            "doc": "Show the 6px unread dot on the Agent segment."
+          },
+          {
+            "name": "collapsed",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "ProviderAction": {
+      "import": "@langchain/gtm-platform-design-system/patterns/provider-action",
+      "props": {
+        "ProviderAction": [
+          {
+            "name": "href",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "provider",
+            "required": true,
+            "type": "ProviderLogoId"
+          }
+        ]
+      }
+    },
+    "ProviderMark": {
+      "import": "@langchain/gtm-platform-design-system/patterns/provider-mark",
+      "props": {
+        "ProviderMark": [
+          {
+            "name": "provider",
+            "required": true,
+            "type": "ProviderId"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "label",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "data-testid",
+            "required": false,
+            "type": "string",
+            "doc": "Test hook forwarded to the well."
+          }
+        ]
+      }
+    },
+    "QueueRow": {
+      "import": "@langchain/gtm-platform-design-system/patterns/queue-row",
+      "props": {
+        "QueueRow": [
+          {
+            "name": "primary",
+            "required": true,
+            "type": "string",
+            "doc": "The thing the row is about: an account, a person, a campaign target."
+          },
+          {
+            "name": "secondary",
+            "required": false,
+            "type": "string",
+            "doc": "The qualifier that identifies it: channel, owner, stage. Never truncated."
+          },
+          {
+            "name": "summary",
+            "required": false,
+            "type": "string",
+            "doc": "The reason this row is in the queue. This is what gives way when space runs out."
+          },
+          {
+            "name": "density",
+            "required": false,
+            "type": "QueueRowDensity",
+            "doc": "40px for scanning volume, 44px when each row carries an identity and a reason."
+          },
+          {
+            "name": "unread",
+            "required": false,
+            "type": "boolean",
+            "doc": "Weight plus the dot. Never a colour on its own."
+          },
+          {
+            "name": "selected",
+            "required": false,
+            "type": "boolean",
+            "doc": "The fill and `aria-selected`. One row per queue wears it."
+          },
+          {
+            "name": "onSelect",
+            "required": false,
+            "type": "() => void",
+            "doc": "Activation: click, Enter, or Space."
+          },
+          {
+            "name": "selectable",
+            "required": false,
+            "type": "boolean",
+            "doc": "Mounts the checkbox lane. Pass it to every row in a queue or to none of them."
+          },
+          {
+            "name": "checked",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "onCheckedChange",
+            "required": false,
+            "type": "(checked: boolean) => void"
+          },
+          {
+            "name": "checkboxLabel",
+            "required": false,
+            "type": "string",
+            "doc": "Spoken by the checkbox; name the row, not the act (\"Select Bosch\")."
+          },
+          {
+            "name": "state",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "One `Badge`. The lane is reserved whether or not this row has a state."
+          },
+          {
+            "name": "meta",
+            "required": false,
+            "type": "string",
+            "doc": "The trailing timestamp or count. One lane, fixed width, right aligned."
+          },
+          {
+            "name": "action",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "The one action, an icon `Button`. Revealed on hover and on focus."
+          }
+        ],
+        "QueueList": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Names the queue. \"Alerts\", \"Inbox\", \"Campaign exceptions\"."
+          },
+          {
+            "name": "multiSelect",
+            "required": false,
+            "type": "boolean",
+            "doc": "True when the rows carry checkboxes, so more than one row can be selected."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "`QueueRow` elements, in the order the product ranks them."
+          }
+        ]
+      }
+    },
+    "Receipt": {
+      "import": "@langchain/gtm-platform-design-system/patterns/receipt",
+      "props": {
+        "Receipt": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "titleClassName",
+            "required": false,
+            "type": "string",
+            "doc": "Semantic type-rung override for conversation-scale outcomes."
+          },
+          {
+            "name": "summary",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "heroValue",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "heroLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "children",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "mark",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Optional 24px IconWell or ProviderMark naming the result family."
+          },
+          {
+            "name": "meta",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "spacing",
+            "required": false,
+            "type": "\"sm\" | \"default\" | \"lg\"",
+            "doc": "Panel padding rung. Agent-thread receipts use sm; full artifacts default."
+          }
+        ]
+      }
+    },
+    "RecordHeader": {
+      "import": "@langchain/gtm-platform-design-system/patterns/record-header",
+      "props": {
+        "RecordInlineEdit": [
+          {
+            "name": "error",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "kind",
+            "required": true,
+            "type": "RecordInlineEditKind"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "onCancel",
+            "required": true,
+            "type": "() => void"
+          },
+          {
+            "name": "onChange",
+            "required": true,
+            "type": "(value: string) => void"
+          },
+          {
+            "name": "onCommit",
+            "required": true,
+            "type": "() => void"
+          },
+          {
+            "name": "placeholder",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "value",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "RecordHeader": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "subtitle",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "meta",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "actions",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "mark",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "RecordFact": [
+          {
+            "name": "icon",
+            "required": true,
+            "type": "Glyph"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "value",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "copyable",
+            "required": false,
+            "type": "boolean",
+            "doc": "Hover and focus reveal Copy in the value lane. String values only."
+          },
+          {
+            "name": "expandable",
+            "required": false,
+            "type": "boolean",
+            "doc": "Long copy expands in the value lane. String values only."
+          },
+          {
+            "name": "edit",
+            "required": false,
+            "type": "Omit<RecordInlineEditProps, \"kind\">",
+            "doc": "Mounts only after the fact expands. Collapsed copy stays text."
+          }
+        ],
+        "RecordHop": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "onClick",
+            "required": true,
+            "type": "() => void"
+          }
+        ]
+      }
+    },
+    "ReviewBand": {
+      "import": "@langchain/gtm-platform-design-system/patterns/review-band",
+      "props": {
+        "ReviewBand": [
+          {
+            "name": "actions",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Trailing verbs. Compact controls. Never composed into the title row."
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "Prose. Always painted as `text-body`."
+          },
+          {
+            "name": "descriptionId",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "mark",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Leading IconWell or brand mark. Omit when the section title already named the kind."
+          },
+          {
+            "name": "meta",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Facts under the copy: time, campaign, targets. Always `text-meta`."
+          },
+          {
+            "name": "render",
+            "required": false,
+            "type": "ReactElement",
+            "doc": "Swap the root for a button or link when the whole band is the control."
+          },
+          {
+            "name": "title",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "titleClassName",
+            "required": false,
+            "type": "string",
+            "doc": "Semantic type-rung override for conversation-scale objects."
+          },
+          {
+            "name": "titleId",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "SettingSection": {
+      "import": "@langchain/gtm-platform-design-system/patterns/setting-section",
+      "props": {
+        "SettingRow": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string",
+            "doc": "One line. Two lines means this wanted to be a section."
+          },
+          {
+            "name": "badge",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Rides inline with the label. Never in the control lane."
+          },
+          {
+            "name": "density",
+            "required": false,
+            "type": "\"default\" | \"compact\""
+          },
+          {
+            "name": "onSave",
+            "required": false,
+            "type": "(value: SettingValue) => Promise<void>"
+          },
+          {
+            "name": "control",
+            "required": true,
+            "type": "(slot: SettingControlSlot) => ReactNode",
+            "doc": "The row's ONE control, given the row's id, save callback, and aria wiring."
+          }
+        ],
+        "SettingSection": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "required": false,
+            "type": "string",
+            "doc": "One or two lines at most; longer belongs in the rows themselves."
+          },
+          {
+            "name": "actions",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Section level controls, trailing the heading."
+          },
+          {
+            "name": "contained",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "id",
+            "required": false,
+            "type": "string",
+            "doc": "Anchor id for the settings scoped rail. Forwarded to PageSection."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "SettingRow children, in the order the ticket lists them."
+          }
+        ]
+      }
+    },
+    "SidebarNav": {
+      "import": "@langchain/gtm-platform-design-system/patterns/sidebar-nav",
+      "props": {
+        "SidebarNavRow": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "href",
+            "required": false,
+            "type": "string",
+            "doc": "Renders an anchor; without it the row is a button."
+          },
+          {
+            "name": "onSelect",
+            "required": false,
+            "type": "() => void"
+          },
+          {
+            "name": "selected",
+            "required": false,
+            "type": "boolean",
+            "doc": "The fill, the ink and the weight, and `aria-current`. One row per rail."
+          },
+          {
+            "name": "count",
+            "required": false,
+            "type": "number",
+            "doc": "Unread or open work behind this destination. Zero is not a count."
+          },
+          {
+            "name": "countOverflow",
+            "required": false,
+            "type": "boolean",
+            "doc": "The source has more work than the bounded count can publish."
+          },
+          {
+            "name": "attentionDot",
+            "required": false,
+            "type": "boolean",
+            "doc": "New content since acknowledgement. Mutually exclusive with count."
+          }
+        ],
+        "SidebarNavChild": [
+          {
+            "name": "icon",
+            "required": false,
+            "type": "Glyph",
+            "doc": "Optional 16px mark for the destination; spine still owns nesting."
+          }
+        ],
+        "SidebarNavItem": [
+          {
+            "name": "icon",
+            "required": true,
+            "type": "Glyph",
+            "doc": "Parents carry icons; the prop is required so no rail grows two lanes."
+          },
+          {
+            "name": "children",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "SidebarNavChild rows under an optional disclosure."
+          },
+          {
+            "name": "compact",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "preview",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Context card for the icon-only row. Expanded destinations show their labels directly."
+          },
+          {
+            "name": "onPreviewOpenChange",
+            "required": false,
+            "type": "(open: boolean) => void",
+            "doc": "Lets the host start and stop a shared, lazy preview read."
+          },
+          {
+            "name": "open",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "onOpenChange",
+            "required": false,
+            "type": "(open: boolean) => void"
+          }
+        ],
+        "SidebarNavGroup": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "The category name. A group is not a destination, so it takes no href."
+          },
+          {
+            "name": "count",
+            "required": false,
+            "type": "number",
+            "doc": "How many rows are inside it. Zero is not a count."
+          },
+          {
+            "name": "open",
+            "required": true,
+            "type": "boolean",
+            "doc": "Controlled: whoever owns the URL owns which groups are open."
+          },
+          {
+            "name": "onOpenChange",
+            "required": true,
+            "type": "(open: boolean) => void"
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "SidebarNavChild rows, revealed by the disclosure."
+          }
+        ],
+        "SidebarNavSection": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "The family name. A section is not a destination."
+          }
+        ],
+        "SidebarNavCluster": [
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "label",
+            "required": false,
+            "type": "string | null",
+            "doc": "Optional family name rendered as SidebarNavSection."
+          },
+          {
+            "name": "divider",
+            "required": false,
+            "type": "boolean",
+            "doc": "Hairline above a role-gated family after daily work."
+          }
+        ],
+        "SidebarNav": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Names the landmark. \"Primary\" on the app rail."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "SidebarNavItem, SidebarNavGroup, or SidebarNavCluster rows."
+          },
+          {
+            "name": "flush",
+            "required": false,
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "SplitView": {
+      "import": "@langchain/gtm-platform-design-system/patterns/split-view",
+      "props": {
+        "SplitViewBase": [
+          {
+            "name": "workPane",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "Where the decision happens. Keeps its width in every posture."
+          },
+          {
+            "name": "workLabel",
+            "required": true,
+            "type": "string",
+            "doc": "Names the work landmark, e.g. \"Thread\"."
+          },
+          {
+            "name": "posture",
+            "required": false,
+            "type": "SplitViewPosture",
+            "doc": "`docked` is the 420px agent dock case: the yielding pane narrows."
+          },
+          {
+            "name": "workScroll",
+            "required": false,
+            "type": "\"pane\" | \"contained\""
+          }
+        ],
+        "SplitViewReference": [
+          {
+            "name": "referencePane",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "What the decision is made against. This is the pane that yields."
+          },
+          {
+            "name": "referenceLabel",
+            "required": true,
+            "type": "string",
+            "doc": "Names the reference landmark, e.g. \"Account context\"."
+          },
+          {
+            "name": "referenceHidden",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "referenceSeam",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "referenceWidth",
+            "required": false,
+            "type": "SplitViewReferenceWidth"
+          },
+          {
+            "name": "referenceScroll",
+            "required": false,
+            "type": "\"pane\" | \"contained\""
+          },
+          {
+            "name": "listPane",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "listLabel",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "listCollapsed",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "onListCollapsedChange",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "referenceResizable",
+            "required": false,
+            "type": "boolean",
+            "doc": "Drag the leading seam to resize the open rail (clamped 280–640)."
+          },
+          {
+            "name": "listResizable",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "listWidth",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "onListWidthChange",
+            "required": false,
+            "type": "never"
+          }
+        ],
+        "SplitViewList": [
+          {
+            "name": "listPane",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "listLabel",
+            "required": true,
+            "type": "string",
+            "doc": "Names the list landmark, e.g. \"Inbox conversations\"."
+          },
+          {
+            "name": "referencePane",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "referenceLabel",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "referenceHidden",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "referenceSeam",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "referenceWidth",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "referenceScroll",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "referenceResizable",
+            "required": false,
+            "type": "never"
+          },
+          {
+            "name": "listCollapsed",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "onListCollapsedChange",
+            "required": false,
+            "type": "(collapsed: boolean) => void"
+          },
+          {
+            "name": "listResizable",
+            "required": false,
+            "type": "boolean",
+            "doc": "Drag the seam to resize the open list width (clamped 200–520)."
+          },
+          {
+            "name": "listWidth",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "onListWidthChange",
+            "required": false,
+            "type": "(width: number) => void"
+          }
+        ]
+      }
+    },
+    "StatReadout": {
+      "import": "@langchain/gtm-platform-design-system/patterns/stat-readout",
+      "props": {
+        "StatReadout": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "The metric, as a noun. \"Open pipeline\", \"Replies this week\"."
+          },
+          {
+            "name": "value",
+            "required": false,
+            "type": "string | number | null",
+            "doc": "Pre-formatted by the data layer. Null, undefined, or \"\" renders the em-dash."
+          },
+          {
+            "name": "shape",
+            "required": false,
+            "type": "StatReadoutShape",
+            "doc": "28px rail row, 40px key/value row, or 66px grid cell."
+          },
+          {
+            "name": "tone",
+            "required": false,
+            "type": "StatTone",
+            "doc": "Colours the value only."
+          },
+          {
+            "name": "delta",
+            "required": false,
+            "type": "StatDelta",
+            "doc": "Sign glyph plus tone. Never colour alone."
+          },
+          {
+            "name": "provisional",
+            "required": false,
+            "type": "boolean | string"
+          }
+        ],
+        "StatReadoutGrid": [
+          {
+            "name": "label",
+            "required": true,
+            "type": "string",
+            "doc": "Names the group for assistive tech. \"Run snapshot\", \"Account totals\"."
+          },
+          {
+            "name": "columns",
+            "required": false,
+            "type": "keyof typeof GRID_COLUMNS_CLASS",
+            "doc": "2, 3, or 4. The boards draw 4; wider than that is a table."
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode",
+            "doc": "`StatReadout` elements on the `cell` shape."
+          }
+        ]
+      }
+    },
+    "StateNotice": {
+      "import": "@langchain/gtm-platform-design-system/patterns/state-notice",
+      "props": {
+        "StateNotice": [
+          {
+            "name": "title",
+            "required": true,
+            "type": "string",
+            "doc": "What happened, in the user's words: \"This address is on the do-not-email list\"."
+          },
+          {
+            "name": "description",
+            "required": true,
+            "type": "string",
+            "doc": "One sentence of evidence and what it means for their work. It does not repeat the title."
+          },
+          {
+            "name": "icon",
+            "required": true,
+            "type": "Glyph"
+          },
+          {
+            "name": "tone",
+            "required": true,
+            "type": "StateNoticeTone",
+            "doc": "Who clears it: RISK nobody here, ATTENTION a person, INFO time."
+          },
+          {
+            "name": "action",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "The one thing the user can do about it here, or nothing."
+          }
+        ]
+      }
+    },
+    "TableFilters": {
+      "import": "@langchain/gtm-platform-design-system/patterns/table-filters",
+      "props": {
+        "TableFilters": [
+          {
+            "name": "fields",
+            "required": true,
+            "type": "readonly TableFilterField[]"
+          },
+          {
+            "name": "values",
+            "required": true,
+            "type": "TableFilterValues"
+          },
+          {
+            "name": "onChange",
+            "required": true,
+            "type": "(id: string, value: string | undefined) => void"
+          },
+          {
+            "name": "onClear",
+            "required": false,
+            "type": "() => void"
+          },
+          {
+            "name": "trigger",
+            "required": false,
+            "type": "\"button\" | \"icon\"",
+            "doc": "Outline labeled trigger on a table toolbar. Icon-only on a list chrome."
+          },
+          {
+            "name": "tabs",
+            "required": false,
+            "type": "TableFilterTabs",
+            "doc": "My / All lives here, not as a column in the list."
+          },
+          {
+            "name": "catalog",
+            "required": false,
+            "type": "TableFilterCatalog",
+            "doc": "Account search + roster list under the tabs."
+          },
+          {
+            "name": "catalogs",
+            "required": false,
+            "type": "Readonly<Record<string, TableFilterCatalog>>",
+            "doc": "Independent remote catalogs for surfaces with more than one relationship filter."
+          }
+        ]
+      }
+    },
+    "VersionedEditor": {
+      "import": "@langchain/gtm-platform-design-system/patterns/versioned-editor",
+      "props": {
+        "VersionedEditor": [
+          {
+            "name": "versionLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "leading",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Replaces the static version title when the surface owns a picker."
+          },
+          {
+            "name": "draftBadge",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "toolbar",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "collapsed",
+            "required": false,
+            "type": "boolean",
+            "doc": "Same card, shorter body. The full prompt uses the expanded body."
+          },
+          {
+            "name": "onChromeToggle",
+            "required": false,
+            "type": "() => void",
+            "doc": "Click empty chrome to expand or collapse. Interactive children stop this."
+          },
+          {
+            "name": "diff",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "ChangeSet / DiffRow comparison against live, revealed by the toolbar."
+          },
+          {
+            "name": "gate",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Optional PublishGate rendered as the stacked footer panel."
+          }
+        ],
+        "PublishGate": [
+          {
+            "name": "versionLabel",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "summary",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "onPublish",
+            "required": false,
+            "type": "() => void"
+          },
+          {
+            "name": "disabled",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "loading",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "onDiscard",
+            "required": false,
+            "type": "() => void | Promise<void>",
+            "doc": "Destructive: always routed through ConfirmableAction, never a bare click."
+          },
+          {
+            "name": "dryRun",
+            "required": false,
+            "type": "ReactNode",
+            "doc": "Reserved slot for the dry-run fast-follow. Quiet action, never a primary."
+          },
+          {
+            "name": "secondary",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "WizardDialog": {
+      "import": "@langchain/gtm-platform-design-system/patterns/wizard-dialog",
+      "props": {
+        "WizardDialog": [
+          {
+            "name": "open",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "onOpenChange",
+            "required": true,
+            "type": "(open: boolean) => void"
+          },
+          {
+            "name": "title",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "steps",
+            "required": true,
+            "type": "readonly WizardStep[]"
+          },
+          {
+            "name": "step",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "onStepChange",
+            "required": true,
+            "type": "(step: number) => void"
+          },
+          {
+            "name": "onSubmit",
+            "required": true,
+            "type": "() => Promise<void>"
+          },
+          {
+            "name": "validateStep",
+            "required": false,
+            "type": "(step: number) => boolean"
+          },
+          {
+            "name": "canContinue",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "submitting",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "completeLabel",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "layout",
+            "required": false,
+            "type": "WizardLayout"
+          },
+          {
+            "name": "progressLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "cancelAction",
+            "required": false,
+            "type": "WizardCancelAction"
+          },
+          {
+            "name": "secondaryAction",
+            "required": false,
+            "type": "WizardSecondaryAction"
+          },
+          {
+            "name": "onDiscard",
+            "required": false,
+            "type": "() => void"
+          },
+          {
+            "name": "recover",
+            "required": false,
+            "type": "{"
+          },
+          {
+            "name": "label",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "onRecover",
+            "required": true,
+            "type": "() => void"
+          },
+          {
+            "name": "children",
+            "required": true,
+            "type": "ReactNode"
+          }
+        ]
+      }
+    },
+    "DataGridColumnFilter": {
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-column-filter",
+      "props": {
+        "DataGridColumnFilter": [
+          {
+            "name": "column",
+            "required": false,
+            "type": "Column<TData, TValue>"
+          },
+          {
+            "name": "title",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "options",
+            "required": true,
+            "type": "DataGridColumnFilterOption[]"
+          }
+        ]
+      }
+    },
+    "DataGridColumnHeader": {
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-column-header",
+      "props": {
+        "DataGridColumnHeader": [
+          {
+            "name": "column",
+            "required": true,
+            "type": "Column<TData, TValue>"
+          },
+          {
+            "name": "title",
+            "required": false,
+            "type": "string",
+            "doc": "When omitted, uses `column.columnDef.meta.headerTitle`, then a string `columnDef.header`, then `column.id`."
+          },
+          {
+            "name": "icon",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "pinnable",
+            "required": false,
+            "type": "boolean",
+            "doc": "Reserved; pin controls are gated by tableLayout.columnsPinnable + column.getCanPin()."
+          },
+          {
+            "name": "filter",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "visibility",
+            "required": false,
+            "type": "boolean"
+          }
+        ]
+      }
+    },
+    "DataGridGlyphs": {
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-glyphs",
+      "props": {
+        "Glyph": [
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "DataGridPagination": {
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-pagination",
+      "props": {
+        "DataGridPagination": [
+          {
+            "name": "sizes",
+            "required": false,
+            "type": "number[]"
+          },
+          {
+            "name": "sizesInfo",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "sizesLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "sizesDescription",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "sizesSkeleton",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "more",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "moreLimit",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "info",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "infoSkeleton",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "rowsPerPageLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "previousPageLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "nextPageLabel",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "ellipsisText",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "showSizes",
+            "required": false,
+            "type": "boolean",
+            "doc": "Hide the page-size picker (cursor-paged lists: the server owns the size)."
+          },
+          {
+            "name": "showPageNumbers",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "canPreviousPage",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "canNextPage",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "onPreviousPage",
+            "required": false,
+            "type": "() => void"
+          },
+          {
+            "name": "onNextPage",
+            "required": false,
+            "type": "() => void"
+          }
+        ]
+      }
+    },
+    "DataGridTableVirtual": {
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid-table-virtual",
+      "props": {
+        "DataGridTableVirtual": [
+          {
+            "name": "height",
+            "required": false,
+            "type": "number | string"
+          },
+          {
+            "name": "estimateSize",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "overscan",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "scrollBehavior",
+            "required": false,
+            "type": "ScrollBehavior",
+            "doc": "Scroll animation used when revealing a controlled target row."
+          },
+          {
+            "name": "scrollToRowAlign",
+            "required": false,
+            "type": "DataGridTableVirtualScrollAlignment",
+            "doc": "Alignment used when revealing a controlled target row. Defaults to auto."
+          },
+          {
+            "name": "scrollToRowIndex",
+            "required": false,
+            "type": "number",
+            "doc": "Index within the center (non-pinned) row section to reveal."
+          },
+          {
+            "name": "footerContent",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "renderHeader",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "onFetchMore",
+            "required": false,
+            "type": "() => void"
+          },
+          {
+            "name": "isFetchingMore",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "hasMore",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "fetchMoreOffset",
+            "required": false,
+            "type": "number"
+          },
+          {
+            "name": "virtualizerOptions",
+            "required": false,
+            "type": "DataGridTableVirtualizerOptions<TData>"
+          }
+        ],
+        "VirtualBody": [
+          {
+            "name": "table",
+            "required": true,
+            "type": "Table<TData>"
+          },
+          {
+            "name": "topRows",
+            "required": true,
+            "type": "Row<TData>[]"
+          },
+          {
+            "name": "centerRows",
+            "required": true,
+            "type": "Row<TData>[]"
+          },
+          {
+            "name": "bottomRows",
+            "required": true,
+            "type": "Row<TData>[]"
+          },
+          {
+            "name": "virtualItems",
+            "required": true,
+            "type": "VirtualItem[]"
+          },
+          {
+            "name": "totalSize",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "isVirtualizationEnabled",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "isInfiniteMode",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "isFetchingMore",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "hasMore",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "loadingMoreMessage",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "allRowsLoadedMessage",
+            "required": true,
+            "type": "ReactNode"
+          },
+          {
+            "name": "measureRowRef",
+            "required": false,
+            "type": "(element: HTMLTableRowElement | null) => void"
+          }
+        ]
+      }
+    },
+    "DataGrid": {
+      "import": "@langchain/gtm-platform-design-system/data-grid/data-grid",
+      "props": {
+        "DataGrid": [
+          {
+            "name": "className",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "table",
+            "required": false,
+            "type": "Table<TData>"
+          },
+          {
+            "name": "recordCount",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "children",
+            "required": false,
+            "type": "ReactNode"
+          },
+          {
+            "name": "onRowClick",
+            "required": false,
+            "type": "(row: TData) => void"
+          },
+          {
+            "name": "isRowClickable",
+            "required": false,
+            "type": "(row: TData) => boolean",
+            "doc": "Narrows row click affordance when only some leaf kinds are interactive."
+          },
+          {
+            "name": "isRowFresh",
+            "required": false,
+            "type": "(row: TData) => boolean",
+            "doc": "Tints the rows a live list just received or changed, for one paint."
+          },
+          {
+            "name": "selectedRowId",
+            "required": false,
+            "type": "string",
+            "doc": "Marks the leaf whose inspector is open. Group rows never match."
+          },
+          {
+            "name": "isLoading",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "loadingMode",
+            "required": false,
+            "type": "\"skeleton\" | \"spinner\""
+          },
+          {
+            "name": "loadingMessage",
+            "required": false,
+            "type": "ReactNode | string"
+          },
+          {
+            "name": "fetchingMoreMessage",
+            "required": false,
+            "type": "ReactNode | string"
+          },
+          {
+            "name": "allRowsLoadedMessage",
+            "required": false,
+            "type": "ReactNode | string"
+          },
+          {
+            "name": "emptyMessage",
+            "required": false,
+            "type": "ReactNode | string"
+          },
+          {
+            "name": "tableLayout",
+            "required": false,
+            "type": "{"
+          },
+          {
+            "name": "dense",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "cellBorder",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "rowBorder",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "rowRounded",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "stripped",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "headerBackground",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "footerBackground",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "headerBorder",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "headerSticky",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "DataGridContext": [
+          {
+            "name": "props",
+            "required": true,
+            "type": "DataGridProps<TData>"
+          },
+          {
+            "name": "table",
+            "required": true,
+            "type": "Table<TData>"
+          },
+          {
+            "name": "recordCount",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "name": "isLoading",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "autoSize",
+            "required": false,
+            "type": "DataGridAutoSizeController"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -4,7 +4,7 @@ import {
   SlackChannelRow,
   slackChannelMatches,
 } from "@/components/SlackChannelCombobox"
-import { Textarea } from "@/components/ui/textarea"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import {
   detectSlackChannelTrigger,
   slackChannelReference,
@@ -130,7 +130,7 @@ export function SlackChannelTextarea({
         <div
           role="listbox"
           aria-label="Slack channels"
-          className="absolute top-full left-0 z-50 mt-1 w-full max-w-sm overflow-hidden rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+          className="absolute top-full left-0 z-50 mt-1 w-full max-w-sm overflow-hidden rounded-compact bg-panel p-1 text-ink shadow-popup ring-1 ring-ink/10"
         >
           {matches.map((channel) => (
             <button
@@ -139,8 +139,8 @@ export function SlackChannelTextarea({
               role="option"
               aria-selected={channel.id === active?.id}
               className={cn(
-                "relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-left text-xs/relaxed select-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-                channel.id === active?.id && "bg-accent text-accent-foreground"
+                "relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-badge px-2 py-1 text-left text-label select-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+                channel.id === active?.id && "bg-hover text-ink"
               )}
               // Keep focus in the textarea so the caret the insertion anchors to survives.
               onMouseDown={(event) => event.preventDefault()}

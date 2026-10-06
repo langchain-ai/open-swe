@@ -32,12 +32,15 @@ export function resolveTheme(theme: Theme): ResolvedTheme {
   return theme
 }
 
-/** Browser chrome colour per resolved theme, mirroring `--background`. */
-export const THEME_COLOR = { light: "#fcfcfc", dark: "#0a0a0a" } as const
+/** Browser chrome colour per resolved theme, mirroring the design system's `--gtm-desk`. */
+export const THEME_COLOR = { light: "#ecebe8", dark: "#131313" } as const
 
 function applyTheme(resolved: ResolvedTheme) {
   if (typeof document === "undefined") return
   const root = document.documentElement
+  // The design system's tokens key on `data-theme`; `.dark` still drives the
+  // `dark:` variant for vendored editors (Monaco, Pierre) that read it.
+  root.dataset["theme"] = resolved
   root.classList.toggle("dark", resolved === "dark")
   root.style.colorScheme = resolved
   document

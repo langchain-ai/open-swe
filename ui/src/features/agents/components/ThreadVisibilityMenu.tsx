@@ -1,12 +1,6 @@
 import { CaretDownIcon, GlobeIcon, LockIcon } from "@phosphor-icons/react"
 
-import {
-  Menu,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuTrigger,
-} from "@/components/ui/menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@langchain/gtm-platform-design-system/ui/dropdown-menu"
 import type { ThreadVisibility } from "@/lib/api"
 
 const OPTIONS: Record<
@@ -31,20 +25,20 @@ export function ThreadVisibilityMenu({
 }) {
   const current = OPTIONS[value]
   return (
-    <Menu>
-      <MenuTrigger
+    <DropdownMenu>
+      <DropdownMenuTrigger
         aria-label="Thread visibility"
         aria-busy={busy}
         disabled={busy}
         data-no-drag=""
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2 text-xs text-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-badge border border-line/60 px-2 text-label text-ink transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none disabled:opacity-60"
       >
         <current.Icon className="size-3.5" />
         {current.label}
-        <CaretDownIcon className="size-3 text-muted-foreground" />
-      </MenuTrigger>
-      <MenuPopup align="end" className="min-w-36">
-        <MenuRadioGroup
+        <CaretDownIcon className="size-3 text-ink-subtle" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-36">
+        <DropdownMenuRadioGroup
           value={value}
           onValueChange={(next) => {
             if (next !== value) onChange(next as ThreadVisibility)
@@ -53,21 +47,21 @@ export function ThreadVisibilityMenu({
           {ORDER.map((option) => {
             const { label, Icon } = OPTIONS[option]
             return (
-              <MenuRadioItem
+              <DropdownMenuRadioItem
                 key={option}
                 value={option}
                 disabled={disabledValues.includes(option)}
                 closeOnClick
               >
                 <span className="inline-flex items-center gap-2">
-                  <Icon className="size-3.5 text-muted-foreground" />
+                  <Icon className="size-3.5 text-ink-subtle" />
                   {label}
                 </span>
-              </MenuRadioItem>
+              </DropdownMenuRadioItem>
             )
           })}
-        </MenuRadioGroup>
-      </MenuPopup>
-    </Menu>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

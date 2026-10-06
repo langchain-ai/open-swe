@@ -18,7 +18,7 @@ import { ToolResultBody } from "./ToolResultBody"
 import type { KeyboardEvent, ReactNode } from "react"
 
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
 
@@ -62,9 +62,9 @@ function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
             />
           }
         >
-          <X className="block size-3 shrink-0 text-destructive" aria-hidden />
+          <X className="block size-3 shrink-0 text-risk" aria-hidden />
         </TooltipTrigger>
-        <TooltipPopup>Failed</TooltipPopup>
+        <TooltipContent>Failed</TooltipContent>
       </Tooltip>
     )
   }
@@ -77,7 +77,7 @@ function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
         >
           <Check className="block size-3 shrink-0 stroke-current" aria-hidden />
         </TooltipTrigger>
-        <TooltipPopup>Completed</TooltipPopup>
+        <TooltipContent>Completed</TooltipContent>
       </Tooltip>
     )
   }
@@ -89,9 +89,9 @@ function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
       >
         <span className="block size-1.5 shrink-0 animate-status-pulse rounded-full bg-current" />
       </TooltipTrigger>
-      <TooltipPopup>
+      <TooltipContent>
         {status === "pending" ? "Waiting" : "Running"}
-      </TooltipPopup>
+      </TooltipContent>
     </Tooltip>
   )
 }
@@ -196,9 +196,9 @@ export function WorkEntryRow({
   return (
     <div
       className={cn(
-        "group/entry flex flex-col rounded-md px-0.5 py-0.5 transition-colors",
+        "group/entry flex flex-col rounded-badge px-0.5 py-0.5 transition-colors",
         activate &&
-          "cursor-pointer hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none focus-visible:ring-inset"
+          "cursor-pointer hover:bg-hover/20 focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:outline-none focus-visible:ring-inset"
       )}
       {...rowToggleProps}
     >
@@ -207,10 +207,10 @@ export function WorkEntryRow({
           className={cn(
             "flex size-5 shrink-0 items-center justify-center",
             isError
-              ? "text-destructive"
+              ? "text-risk"
               : entry.tone === "thinking"
-                ? "text-foreground/92"
-                : "text-muted-foreground/65"
+                ? "text-ink/92"
+                : "text-ink-subtle/65"
           )}
         >
           <WorkEntryIcon
@@ -221,16 +221,16 @@ export function WorkEntryRow({
 
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-[13px] leading-5">
+            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-label leading-5">
               <span
                 className={cn(
                   "shrink-0 truncate font-medium",
                   isError
-                    ? "text-destructive"
+                    ? "text-risk"
                     : entry.status === "pending" ||
                         entry.status === "in_progress"
                       ? "shimmer-text"
-                      : "text-foreground/82"
+                      : "text-ink/82"
                 )}
               >
                 {entry.heading}
@@ -240,27 +240,27 @@ export function WorkEntryRow({
                   <Tooltip>
                     <TooltipTrigger
                       render={
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate text-ink-subtle" />
                       }
                     >
                       {entry.preview}
                     </TooltipTrigger>
-                    <TooltipPopup className="max-w-md break-all">
+                    <TooltipContent className="max-w-md break-all">
                       {entry.previewTooltip}
-                    </TooltipPopup>
+                    </TooltipContent>
                   </Tooltip>
                 ) : (
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate text-ink-subtle">
                     {entry.preview}
                   </span>
                 ))}
               {entry.diffStats && (
-                <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground tabular-nums">
-                  <span className="transition-colors group-focus-within/entry:text-success-foreground group-hover/entry:text-success-foreground">
+                <span className="flex shrink-0 items-center gap-1 font-mono text-meta text-ink-subtle tabular-nums">
+                  <span className="transition-colors group-focus-within/entry:text-positive group-hover/entry:text-positive">
                     +{entry.diffStats.additions}
                   </span>
                   <span aria-hidden>/</span>
-                  <span className="transition-colors group-focus-within/entry:text-destructive group-hover/entry:text-destructive">
+                  <span className="transition-colors group-focus-within/entry:text-risk group-hover/entry:text-risk">
                     -{entry.diffStats.deletions}
                   </span>
                 </span>
@@ -268,10 +268,10 @@ export function WorkEntryRow({
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
+          <div className="flex shrink-0 items-center gap-1 text-ink-subtle">
             {trailing}
             {hoverTimestamp && (
-              <time className="text-[10px] tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
+              <time className="text-meta tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
                 {hoverTimestamp}
               </time>
             )}
@@ -298,7 +298,7 @@ export function WorkEntryRow({
 
       {expanded && canExpand && (
         <div
-          className="ms-7 mt-1 cursor-default border-s border-border/45 ps-3 pt-0.5"
+          className="ms-7 mt-1 cursor-default border-s border-line/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
@@ -308,7 +308,7 @@ export function WorkEntryRow({
               (detailText != null ? (
                 <ToolResultBody value={detailText} />
               ) : (
-                <p className="text-[12px] text-muted-foreground">
+                <p className="text-meta text-ink-subtle">
                   {loadError ?? "Loading output…"}
                 </p>
               )))}

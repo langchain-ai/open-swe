@@ -1,6 +1,6 @@
 import { ArrowUpRight, CircleAlert, LoaderCircle, Radar } from "lucide-react"
 import type { ReactNode } from "react"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@/lib/utils"
 import { ApiError } from "@/lib/api"
 import type { IncidentReport, IncidentView, Timestamp } from "./api"
@@ -36,16 +36,16 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-meta font-medium",
         {
-          "border-info/20 bg-info/5 text-info-foreground": [
+          "border-info/20 bg-info/5 text-info": [
             "pending",
             "watching",
             "investigating",
           ].includes(status),
-          "border-warning/20 bg-warning/5 text-warning-foreground":
+          "border-attention/20 bg-attention-bg text-attention":
             status === "needs_attention",
-          "border-border bg-muted text-muted-foreground": [
+          "border-line bg-muted text-ink-subtle": [
             "paused",
             "completed",
           ].includes(status),
@@ -67,7 +67,7 @@ export function LoadingState() {
   return (
     <div
       role="status"
-      className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground"
+      className="flex items-center justify-center gap-2 py-24 text-body text-ink-subtle"
     >
       <LoaderCircle className="size-4 animate-spin" />
       Loading incidents…
@@ -85,14 +85,14 @@ export function ErrorState({
   return (
     <div
       role="alert"
-      className="rounded-xl border border-destructive/20 bg-destructive/5 p-5"
+      className="rounded-control border border-risk/20 bg-risk-bg p-5"
     >
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <CircleAlert className="size-4 text-destructive" />
+      <div className="flex items-center gap-2 text-body font-medium">
+        <CircleAlert className="size-4 text-risk" />
         Unable to load Incidents
       </div>
-      <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
-      <Button variant="outline" size="sm" className="mt-4" onClick={retry}>
+      <p className="mt-2 text-body text-ink-subtle">{error.message}</p>
+      <Button variant="outline" size="compact" className="mt-4" onClick={retry}>
         Try again
       </Button>
     </div>
@@ -143,7 +143,7 @@ export function CitedText({
             <ExternalLink
               key={source.id}
               href={source.url}
-              className="mx-0.5 text-[10px] font-medium text-info-foreground [&_svg]:hidden"
+              className="mx-0.5 text-meta font-medium text-info [&_svg]:hidden"
             >
               <span
                 aria-label={`Evidence ${evidenceIndex + 1}: ${source.source}`}
@@ -155,7 +155,7 @@ export function CitedText({
         })}
       </sup>
     ) : part.startsWith("[") && !citationPreview(part) ? (
-      <span key={index} className="text-xs text-muted-foreground">
+      <span key={index} className="text-meta text-ink-subtle">
         [source unavailable]
       </span>
     ) : (
@@ -180,7 +180,7 @@ export function IncidentsMark({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex size-9 items-center justify-center rounded-xl border border-info/20 bg-info/5 text-info-foreground",
+        "flex size-9 items-center justify-center rounded-control border border-info/20 bg-info/5 text-info",
         className
       )}
     >

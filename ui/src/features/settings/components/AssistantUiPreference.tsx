@@ -1,5 +1,5 @@
 import { SettingsRow } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import {
   useExperimentalAssistantUi,
   useOptions,
@@ -56,7 +56,7 @@ export function AssistantUiPreference() {
         }
       />
       {(profile.error || options.error) && (
-        <p role="alert" className="px-4 py-2 text-xs text-destructive">
+        <p role="alert" className="px-4 py-2 text-label text-risk">
           Could not load the conversation preference. Please try again.
         </p>
       )}

@@ -11,7 +11,7 @@ export const Route = createFileRoute("/agents_/instructions")({
       title="Repository instructions"
       description="Per-repository instructions added to the agent's system prompt for runs in that repository."
     >
-      <div className="rounded-lg border border-border bg-card">
+      <div className="rounded-compact border border-line bg-panel">
         <AgentInstructionsPanel />
       </div>
     </SettingsPage>

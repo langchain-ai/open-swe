@@ -1,9 +1,9 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import { Button } from "@/components/ui/button"
-import { MultiSelect } from "@/components/ui/multi-select"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { MultiSelect } from "@/components/MultiSelect"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { expiresInBrowser } from "@/lib/query"
@@ -266,7 +266,7 @@ export function MyPullRequests({
               }
             />
             {!railed && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1 text-meta text-ink-subtle">
                 Sort
                 {sortOptions.map(([label, key]) => (
                   <button
@@ -275,10 +275,10 @@ export function MyPullRequests({
                     aria-pressed={sort === key}
                     onClick={() => toggleSort(key)}
                     className={cn(
-                      "inline-flex items-center gap-1 rounded-md border px-2 py-1",
+                      "inline-flex items-center gap-1 rounded-badge border px-2 py-1",
                       sort === key
-                        ? "border-border bg-muted text-foreground"
-                        : "border-transparent hover:text-foreground"
+                        ? "border-line bg-muted text-ink"
+                        : "border-transparent hover:text-ink"
                     )}
                   >
                     {label}
@@ -292,7 +292,7 @@ export function MyPullRequests({
             {!railed && (
               <span
                 aria-live="polite"
-                className="text-xs whitespace-nowrap text-muted-foreground"
+                className="text-meta whitespace-nowrap text-ink-subtle"
               >
                 {refreshing
                   ? "Refreshing from GitHub…"
@@ -302,7 +302,7 @@ export function MyPullRequests({
               </span>
             )}
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={query.isFetching}
               onClick={() => {
@@ -335,7 +335,7 @@ export function MyPullRequests({
             </Button>
           </div>
           {query.error && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-body text-risk">
               {latest &&
                 (query.isFetchNextPageError
                   ? "Could not load more PRs; showing the pages loaded so far. "
@@ -344,7 +344,7 @@ export function MyPullRequests({
             </p>
           )}
           {search.trim() && descriptionSearch.isError && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-body text-risk">
               Title and description search is unavailable; showing repository,
               title, and PR number matches only.
             </p>
@@ -354,7 +354,7 @@ export function MyPullRequests({
           ) : incomplete ? (
             <p
               role="status"
-              className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-amber-700 dark:text-amber-400"
+              className="rounded-compact border border-line bg-panel px-4 py-12 text-center text-label text-attention"
             >
               GitHub&rsquo;s pull request search timed out, and the partial
               answer it returned would have hidden most of your PRs. Filter by
@@ -364,7 +364,7 @@ export function MyPullRequests({
             latest && (
               <>
                 {visible.length === 0 ? (
-                  <p className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
+                  <p className="rounded-compact border border-line bg-panel px-4 py-12 text-center text-meta text-ink-subtle">
                     {detailsLoading ||
                     query.isFetchingNextPage ||
                     descriptionSearch.isSearching
@@ -388,7 +388,7 @@ export function MyPullRequests({
                     {card}
                   </PullRequestList>
                 )}
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="flex items-center gap-3 text-meta text-ink-subtle">
                   <span>
                     {visible.length} of {filtered.length}
                     {query.hasNextPage ? "+" : ""} PRs

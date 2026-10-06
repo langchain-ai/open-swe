@@ -1,14 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
 import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
@@ -115,7 +109,7 @@ export function GitSettings() {
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
                 disabled={!ready}
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                triggerClassName="h-7 w-full max-w-none rounded-badge border border-line-strong bg-line-strong/20 px-2 py-1.5 text-label text-ink transition-colors hover:opacity-100"
                 dropdownClassName="w-56"
               />
             </div>

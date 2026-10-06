@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 
-import { Sheet, SheetPopup } from "@/components/ui/sheet"
+import { Sheet, SheetContent } from "@langchain/gtm-platform-design-system/ui/sheet"
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
 
 export function RightPanelSheet(props: {
@@ -15,14 +15,14 @@ export function RightPanelSheet(props: {
         if (!open) props.onClose()
       }}
     >
-      <SheetPopup
+      <SheetContent
         side="right"
         showCloseButton={false}
         keepMounted
         className={RIGHT_PANEL_SHEET_CLASS_NAME}
       >
         {props.children}
-      </SheetPopup>
+      </SheetContent>
     </Sheet>
   )
 }

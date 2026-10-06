@@ -123,10 +123,10 @@ import {
   useDiffOptions,
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
-import { Button, IconButton } from "@/components/ui/button"
-import { Sheet, SheetPopup } from "@/components/ui/sheet"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Sheet, SheetContent } from "@langchain/gtm-platform-design-system/ui/sheet"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
@@ -372,15 +372,15 @@ function sumStats(files: Array<ResolvedGroupFile>) {
 }
 
 const GROUP_STYLES = {
-  bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
+  bug: { label: "Bug", className: "text-risk", Icon: BugBeetleIcon },
   investigate: {
     label: "Investigate",
-    className: "text-amber-500",
+    className: "text-attention",
     Icon: FlagIcon,
   },
   informational: {
     label: "Informational",
-    className: "text-muted-foreground",
+    className: "text-ink-subtle",
     Icon: InfoIcon,
   },
 } as const
@@ -1361,17 +1361,17 @@ function ReviewBodyInner({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="relative flex min-h-0 min-w-0 flex-1">
           {!embedded && (
-            <div className="hidden w-72 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
+            <div className="hidden w-72 shrink-0 flex-col border-r border-line bg-sidebar lg:flex">
               <ReviewSidebarPanel data={sidebarData} />
             </div>
           )}
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {embedded && (
-              <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-3">
+              <div className="flex h-9 shrink-0 items-center justify-end border-b border-line px-3">
                 <button
                   type="button"
                   onClick={onExpand}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 rounded-badge border border-line px-2 py-1 text-meta text-ink-subtle transition-colors hover:text-ink"
                 >
                   <ArrowSquareOutIcon className="size-3" />
                   Open full review
@@ -1431,8 +1431,8 @@ function ReviewBodyInner({
                 )}
                 <div
                   className={cn(
-                    "mt-4 rounded-lg border border-border p-4",
-                    embedded ? "bg-card" : "bg-card"
+                    "mt-4 rounded-compact border border-line p-4",
+                    embedded ? "bg-panel" : "bg-panel"
                   )}
                 >
                   {detail.pr.body ? (
@@ -1441,7 +1441,7 @@ function ReviewBodyInner({
                       transformImageUrl={transformPrImage}
                     />
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-meta text-ink-subtle">
                       This PR has no description.
                     </p>
                   )}
@@ -1461,7 +1461,7 @@ function ReviewBodyInner({
 
                 <div className="mt-6">
                   <div className="mb-2 flex items-center justify-between gap-3">
-                    <h2 className="text-sm font-medium">Changes</h2>
+                    <h2 className="text-body font-medium">Changes</h2>
                     <div className="flex items-center gap-3">
                       {detail.walkthrough && (
                         <ScoutThreadLink
@@ -1469,7 +1469,7 @@ function ReviewBodyInner({
                         />
                       )}
                       {linesLeft !== null && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-meta text-ink-subtle">
                           {linesLeft === 0
                             ? "All lines reviewed"
                             : `${linesLeft} lines left`}
@@ -1487,14 +1487,14 @@ function ReviewBodyInner({
                     </div>
                   </div>
                   {diffFiles && diffFiles.length < detail.pr.changed_files && (
-                    <p className="mb-2 text-xs text-muted-foreground">
+                    <p className="mb-2 text-meta text-ink-subtle">
                       Showing {diffFiles.length} of {detail.pr.changed_files}{" "}
                       changed files.{" "}
                       <a
                         href={`${detail.url}/files`}
                         target="_blank"
                         rel="noreferrer"
-                        className="underline underline-offset-2 hover:text-foreground"
+                        className="underline underline-offset-2 hover:text-ink"
                       >
                         See every file on GitHub
                       </a>
@@ -1503,7 +1503,7 @@ function ReviewBodyInner({
                   {!diffFiles ? (
                     <Skeleton className="h-64 w-full" />
                   ) : diffFiles.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-meta text-ink-subtle">
                       No diff available.
                     </p>
                   ) : view === "ai" && groupedView ? (
@@ -1545,16 +1545,16 @@ function ReviewBodyInner({
               {!sidePanelOpen && (
                 <Button
                   variant="outline"
-                  className="fixed right-4 bottom-4 z-30 shadow-md"
+                  className="fixed right-4 bottom-4 z-30 shadow-popup"
                   onClick={() => setSidePanelOpen(true)}
                 >
                   <ChatCircleIcon />
                   Info &amp; chat
                 </Button>
               )}
-              <SheetPopup side="right" keepMounted>
+              <SheetContent side="right" keepMounted>
                 {sidePanel("sheet")}
-              </SheetPopup>
+              </SheetContent>
             </Sheet>
           ))}
       </div>
@@ -1565,12 +1565,12 @@ function ReviewBodyInner({
 function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   const { recent } = progress
   return (
-    <div className="mt-2 text-xs text-muted-foreground">
+    <div className="mt-2 text-meta text-ink-subtle">
       <p>
         {progress.steps} step{progress.steps === 1 ? "" : "s"} committed
       </p>
       {recent.length > 0 && (
-        <ol className="mt-1 space-y-0.5 font-mono text-[11px]">
+        <ol className="mt-1 space-y-0.5 font-mono text-meta">
           {recent.map((action, index) => {
             const current = progress.running && index === recent.length - 1
             return (
@@ -1578,7 +1578,7 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
                 key={index}
                 className={cn(
                   "flex min-w-0 gap-2",
-                  current && "text-foreground"
+                  current && "text-ink"
                 )}
               >
                 <span className="shrink-0">
@@ -1614,7 +1614,7 @@ function ScoutThreadLink({
       to="/agents/$threadId"
       params={{ threadId }}
       className={cn(
-        "inline-block text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline",
+        "inline-block text-meta text-ink-subtle underline-offset-2 hover:text-ink hover:underline",
         className
       )}
     >
@@ -1673,13 +1673,13 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
     detail.walkthrough_scout_thread_id,
   ])
   return (
-    <div className="mt-4 flex items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
+    <div className="mt-4 flex items-center gap-4 rounded-compact border border-primary/40 bg-primary/5 p-4">
       <ListNumbersIcon className="size-6 shrink-0 text-primary" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">
+        <p className="text-body font-medium">
           {running ? "Building the walkthrough…" : "Read this PR step by step"}
         </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p className="mt-0.5 text-meta text-ink-subtle">
           {running
             ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
@@ -1688,7 +1688,7 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
           <ScoutProgressPreview progress={detail.walkthrough_progress} />
         )}
         {failureSummary && (
-          <p className="mt-1.5 text-xs break-words text-destructive">
+          <p className="mt-1.5 text-label break-words text-risk">
             Last attempt failed: {failureSummary}
           </p>
         )}
@@ -1699,7 +1699,7 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
           />
         )}
       </div>
-      <Button size="lg" onClick={() => scout.mutate(detail)} disabled={running}>
+      <Button size="control" onClick={() => scout.mutate(detail)} disabled={running}>
         {running ? (
           <CircleNotchIcon className="animate-spin" />
         ) : (
@@ -1719,7 +1719,7 @@ function DiffStyleToggle({
   onChange: (value: DiffStyle) => void
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+    <div className="flex items-center gap-0.5 rounded-badge border border-line p-0.5">
       <DiffStyleButton
         active={value === "unified"}
         label="Unified view"
@@ -1757,8 +1757,8 @@ function DiffStyleButton({
       aria-pressed={active}
       title={label}
       className={cn(
-        "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
-        active ? "bg-muted text-foreground" : "hover:text-foreground"
+        "flex size-5 items-center justify-center rounded-tick text-ink-subtle transition-colors",
+        active ? "bg-muted text-ink" : "hover:text-ink"
       )}
     >
       {children}
@@ -1793,22 +1793,22 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
   )
   return (
     <>
-      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-border bg-background">
-        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-accent text-[11px] font-medium text-muted-foreground">
+      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-line bg-canvas">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-tick bg-hover text-meta font-medium text-ink-subtle">
           {group.index}
         </span>
-        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
-        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
+        <h3 className="min-w-0 flex-1 truncate text-body font-medium">{title}</h3>
+        <span className="flex shrink-0 items-center gap-1.5 font-mono text-meta">
           {group.additions > 0 && (
-            <span className="text-emerald-500">+{group.additions}</span>
+            <span className="text-positive">+{group.additions}</span>
           )}
           {group.deletions > 0 && (
-            <span className="text-red-500">-{group.deletions}</span>
+            <span className="text-risk">-{group.deletions}</span>
           )}
         </span>
       </div>
       {summary && (
-        <div className="text-xs text-muted-foreground">
+        <div className="text-meta text-ink-subtle">
           <Markdown content={summary} />
         </div>
       )}
@@ -2088,12 +2088,12 @@ const FileDiffCard = memo(function FileDiffCard({
   return (
     <div
       ref={sectionRef}
-      className="scroll-mt-4 overflow-clip rounded-lg border border-border"
+      className="scroll-mt-4 overflow-clip rounded-compact border border-line"
     >
       <div
         className={cn(
           // accent is translucent; the background underlay keeps code from showing through.
-          "sticky z-[5] flex items-center gap-2 bg-[linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--background),var(--background))] px-3 py-2 text-xs",
+          "sticky z-[5] flex items-center gap-2 bg-[linear-gradient(var(--gtm-hover),var(--gtm-hover)),linear-gradient(var(--gtm-canvas),var(--gtm-canvas))] px-3 py-2 text-label",
           belowStepHeader ? "top-9" : "top-0"
         )}
       >
@@ -2110,17 +2110,17 @@ const FileDiffCard = memo(function FileDiffCard({
           />
           <span className="font-mono font-medium">{file.path}</span>
         </button>
-        <span className="flex items-center gap-1.5 font-mono text-[11px]">
-          <span className="text-emerald-500">+{additions}</span>
-          <span className="text-red-500">-{deletions}</span>
+        <span className="flex items-center gap-1.5 font-mono text-meta">
+          <span className="text-positive">+{additions}</span>
+          <span className="text-risk">-{deletions}</span>
         </span>
         {findings.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-amber-500">
+          <span className="inline-flex items-center gap-1 text-meta text-attention">
             <FlagIcon className="size-3" />
             {findings.length}
           </span>
         )}
-        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-meta text-ink-subtle">
           Mark as viewed
           <button
             type="button"
@@ -2128,8 +2128,8 @@ const FileDiffCard = memo(function FileDiffCard({
             aria-checked={viewed}
             onClick={() => onToggleViewed(file.path)}
             className={cn(
-              "flex size-4 items-center justify-center rounded border border-border",
-              viewed && "bg-foreground text-background"
+              "flex size-4 items-center justify-center rounded-tick border border-line",
+              viewed && "bg-ink text-canvas"
             )}
           >
             {viewed && <CheckIcon className="size-3" />}
@@ -2138,13 +2138,13 @@ const FileDiffCard = memo(function FileDiffCard({
       </div>
       {expanded &&
         (file.unrenderable || file.patch === null ? (
-          <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
+          <div className="bg-panel p-4 text-center text-meta text-ink-subtle/70">
             Binary or large file — diff not shown.
           </div>
         ) : (
           <div
             {...lineSelection.wrapperProps}
-            className="overflow-x-auto bg-card font-mono text-[11px] leading-5"
+            className="overflow-x-auto bg-panel font-mono text-meta leading-5"
           >
             {fileDiff ? (
               <FileDiff<ReviewAnnotation>
@@ -2175,16 +2175,16 @@ const FileDiffCard = memo(function FileDiffCard({
         selection={lineSelection}
         open={lineSelection.committed?.source === "text" && !commentDraftRange}
         initialFocus={false}
-        className="rounded-md p-0"
+        className="rounded-badge p-0"
       >
         <button
           type="button"
           data-add-to-chat
           onClick={addSelectionToChat}
-          className="inline-flex items-center gap-1.5 px-2 py-1 font-sans text-[11px] font-medium"
+          className="inline-flex items-center gap-1.5 px-2 py-1 font-sans text-meta font-medium"
         >
           Add to Chat
-          <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
+          <kbd className="rounded-tick border border-line px-1 text-meta text-ink-subtle">
             ⌘L
           </kbd>
         </button>
@@ -2353,33 +2353,33 @@ function CommentComposer({
   }
   const tabClass = (active: boolean) =>
     cn(
-      "rounded px-2 py-0.5 text-[11px]",
+      "rounded-tick px-2 py-0.5 text-meta",
       active
-        ? "bg-accent font-medium text-foreground"
-        : "text-muted-foreground hover:text-foreground"
+        ? "bg-hover font-medium text-ink"
+        : "text-ink-subtle hover:text-ink"
     )
   return (
     <div className="px-2 py-1 font-sans">
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
-          <ChatCircleIcon className="size-3 text-muted-foreground" />
+      <div className="overflow-hidden rounded-badge border border-line bg-panel">
+        <div className="flex items-center gap-1.5 border-b border-line px-2 py-1 text-meta">
+          <ChatCircleIcon className="size-3 text-ink-subtle" />
           <span className="font-medium">
             Add a comment on line {commentRangeLabel(range)}
           </span>
-          <IconButton
+          <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="icon-sm"
             aria-label="Close comment"
             className="ml-auto"
             onClick={onClose}
           >
             <XIcon />
-          </IconButton>
+          </Button>
         </div>
         {
           <>
-            <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
+            <div className="flex items-center gap-1 border-b border-line px-1.5 py-1">
               <button
                 type="button"
                 onClick={() => setMode("write")}
@@ -2401,10 +2401,10 @@ function CommentComposer({
                   {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
                     <Fragment key={group[0]?.action ?? groupIndex}>
                       {groupIndex > 0 && (
-                        <span className="mx-0.5 h-4 w-px bg-border" />
+                        <span className="mx-0.5 h-4 w-px bg-line" />
                       )}
                       {group.map(({ action, label, Icon }) => (
-                        <IconButton
+                        <Button
                           key={action}
                           type="button"
                           variant="ghost"
@@ -2415,7 +2415,7 @@ function CommentComposer({
                           onClick={() => applyAction(action)}
                         >
                           <Icon className="size-4" />
-                        </IconButton>
+                        </Button>
                       ))}
                     </Fragment>
                   ))}
@@ -2442,21 +2442,21 @@ function CommentComposer({
                   }}
                   placeholder="Leave a comment…"
                   rows={3}
-                  className="resize-y text-xs"
+                  className="resize-y text-label"
                 />
               ) : (
-                <div className="min-h-16 rounded-md border border-input bg-input/20 px-2 py-2 text-xs">
+                <div className="min-h-16 rounded-badge border border-line-strong bg-line-strong/20 px-2 py-2 text-label">
                   {value.trim() ? (
                     <Markdown content={value} />
                   ) : (
-                    <span className="text-muted-foreground">
+                    <span className="text-ink-subtle">
                       Nothing to preview
                     </span>
                   )}
                 </div>
               )}
               {mutation.isError && (
-                <p className="mt-1.5 text-[11px] text-destructive">
+                <p className="mt-1.5 text-meta text-risk">
                   {mutation.error instanceof Error
                     ? mutation.error.message
                     : "Failed to add the comment"}
@@ -2466,7 +2466,7 @@ function CommentComposer({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  className="rounded-tick border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink"
                 >
                   Cancel
                 </button>
@@ -2474,7 +2474,7 @@ function CommentComposer({
                   type="button"
                   onClick={submit}
                   disabled={!value.trim() || mutation.isPending}
-                  className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+                  className="rounded-tick bg-ink px-2 py-1 text-meta font-medium text-canvas disabled:opacity-50"
                 >
                   {mutation.isPending ? "Adding…" : "Add review comment"}
                 </button>
@@ -2570,8 +2570,8 @@ function InlineComment({
       ref={(node) => registerAnnotation(`comment:${comment.id}`, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
+      <div className="overflow-hidden rounded-badge border border-line bg-panel">
+        <div className="flex items-center gap-1.5 border-b border-line px-2 py-1 text-meta">
           {comment.author_avatar_url ? (
             <img
               src={comment.author_avatar_url}
@@ -2583,22 +2583,22 @@ function InlineComment({
           )}
           <span className="font-medium">{comment.author}</span>
           {comment.line !== null && (
-            <span className="font-mono text-muted-foreground">
+            <span className="font-mono text-ink-subtle">
               {sideLabel}
               {comment.line}
             </span>
           )}
           <div className="ml-auto flex items-center gap-0.5">
             {editable && !editing && (
-              <IconButton
+              <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 aria-label="Edit comment"
                 onClick={() => setEditing(true)}
               >
                 <PencilSimpleIcon />
-              </IconButton>
+              </Button>
             )}
             <a
               href={comment.html_url}
@@ -2606,19 +2606,19 @@ function InlineComment({
               rel="noreferrer"
               aria-label="View on GitHub"
               title="View on GitHub"
-              className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+              className="inline-flex size-5 items-center justify-center rounded-tick text-ink-subtle hover:text-ink"
             >
               <IoLogoGithub className="size-3" />
             </a>
-            <IconButton
+            <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-sm"
               aria-label="Close comment"
               onClick={onClose}
             >
               <XIcon />
-            </IconButton>
+            </Button>
           </div>
         </div>
         {editing ? (
@@ -2636,14 +2636,14 @@ function InlineComment({
                 }
               }}
               rows={3}
-              className="resize-y text-xs"
+              className="resize-y text-label"
               autoFocus
             />
             <div className="mt-2 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={cancel}
-                className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                className="rounded-tick border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink"
               >
                 Cancel
               </button>
@@ -2653,14 +2653,14 @@ function InlineComment({
                 disabled={
                   !draft.trim() || draft.trim() === body || mutation.isPending
                 }
-                className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+                className="rounded-tick bg-ink px-2 py-1 text-meta font-medium text-canvas disabled:opacity-50"
               >
                 {mutation.isPending ? "Saving…" : "Save"}
               </button>
             </div>
           </div>
         ) : (
-          <div className="px-3 py-2.5 text-xs text-muted-foreground">
+          <div className="px-3 py-2.5 text-meta text-ink-subtle">
             <Markdown content={body} />
           </div>
         )}
@@ -2684,26 +2684,26 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
       ref={(node) => registerAnnotation(finding.id, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-border bg-card">
+      <div className="overflow-hidden rounded-badge border border-line bg-panel">
         <button
           type="button"
           onClick={() => toggle(finding)}
           aria-expanded={expanded}
           aria-label={`${expanded ? "Collapse" : "Expand"} finding: ${finding.title}`}
-          className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px]"
+          className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-meta"
         >
           <Icon className={cn("size-3 shrink-0", style.className)} />
           <span className={cn("font-medium", style.className)}>
             {style.label}
           </span>
-          <span className="min-w-0 flex-1 truncate text-foreground">
+          <span className="min-w-0 flex-1 truncate text-ink">
             {finding.title}
           </span>
           {finding.outdated && <Badgeish>Outdated</Badgeish>}
           {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
           <CaretDownIcon
             className={cn(
-              "size-3 shrink-0 text-muted-foreground transition-transform",
+              "size-3 shrink-0 text-ink-subtle transition-transform",
               !expanded && "-rotate-90"
             )}
           />
@@ -2739,12 +2739,12 @@ function FindingDetails({
   }
 
   return (
-    <div className="border-t border-border px-3 py-2.5 font-sans">
-      <div className="text-xs text-muted-foreground">
+    <div className="border-t border-line px-3 py-2.5 font-sans">
+      <div className="text-meta text-ink-subtle">
         <Markdown content={finding.description} />
       </div>
       {finding.resolution_note && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        <p className="mt-2 text-meta text-ink-subtle">
           Resolution: {finding.resolution_note}
         </p>
       )}
@@ -2752,7 +2752,7 @@ function FindingDetails({
         <button
           type="button"
           onClick={copy}
-          className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1.5 rounded-tick border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink"
         >
           <CopyIcon className="size-3" />
           {copied ? "Copied" : "Copy"}
@@ -2762,7 +2762,7 @@ function FindingDetails({
             href={githubUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-tick border border-line px-2 py-1 text-meta text-ink-subtle hover:text-ink"
           >
             <IoLogoGithub className="size-3" />
             View on GitHub
@@ -2775,7 +2775,7 @@ function FindingDetails({
 
 function Badgeish({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground capitalize">
+    <span className="rounded-tick border border-line px-1.5 py-0.5 text-meta text-ink-subtle capitalize">
       {children}
     </span>
   )
@@ -2862,8 +2862,8 @@ function ReviewPanelResizeHandle({
       className={cn(
         "absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize touch-none select-none",
         "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
-        "hover:after:bg-border",
-        dragging && "after:bg-border"
+        "hover:after:bg-line",
+        dragging && "after:bg-line"
       )}
     />
   )
@@ -2943,10 +2943,10 @@ function SidePanel({
       <aside
         className={cn(
           "flex h-full w-full flex-col overflow-y-auto",
-          layout === "inline" && "border-l border-border"
+          layout === "inline" && "border-l border-line"
         )}
       >
-        <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-1 border-b border-line px-3 py-2">
           {(
             [
               ["info", "Info"],
@@ -2958,10 +2958,10 @@ function SidePanel({
               type="button"
               onClick={() => onTabChange(id)}
               className={cn(
-                "rounded-md px-2.5 py-1 text-xs transition-colors",
+                "rounded-badge px-2.5 py-1 text-label transition-colors",
                 tab === id
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-muted/50"
+                  ? "bg-muted font-medium text-ink"
+                  : "text-ink-subtle hover:bg-muted/50"
               )}
             >
               {label}
@@ -2977,9 +2977,9 @@ function SidePanel({
             reviewed={detail.status === "idle"}
           />
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-line">
             <section className="px-3 py-3">
-              <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center justify-between text-label">
                 <span className="font-medium">
                   {detail.status === "running"
                     ? "PR analysis in progress"
@@ -2993,13 +2993,13 @@ function SidePanel({
                   type="button"
                   onClick={() => reReview.mutate(detail)}
                   disabled={reReview.isPending || detail.status === "running"}
-                  className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-tick border border-line px-1.5 py-0.5 text-meta text-ink-subtle hover:text-ink disabled:opacity-50"
                 >
                   <ArrowClockwiseIcon className="size-3" />
                   {detail.status === "none" ? "Review" : "Re-review"}
                 </button>
               </div>
-              <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+              <div className="mt-2 space-y-1 text-meta text-ink-subtle">
                 <div>
                   {detail.status === "none"
                     ? "Head commit"
@@ -3008,7 +3008,7 @@ function SidePanel({
                 </div>
                 {detail.watch && <div>Watching for new pushes</div>}
                 {detail.status === "error" && detail.review_error && (
-                  <div className="break-words text-destructive">
+                  <div className="break-words text-risk">
                     {detail.review_error}
                   </div>
                 )}
@@ -3048,7 +3048,7 @@ function SidePanel({
                   <button
                     type="button"
                     onClick={onMarkAllRead}
-                    className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                    className="rounded-tick border border-line px-1.5 py-0.5 text-meta text-ink-subtle hover:text-ink"
                   >
                     Mark all as read
                   </button>
@@ -3063,15 +3063,15 @@ function SidePanel({
             />
             <PeopleSection title="Assignees" people={detail.pr.assignees} />
             <section className="px-3 py-3">
-              <h3 className="mb-2 text-xs font-medium">Labels</h3>
+              <h3 className="mb-2 text-label font-medium">Labels</h3>
               {detail.pr.labels.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">None</p>
+                <p className="text-meta text-ink-subtle">None</p>
               ) : (
                 <div className="flex flex-wrap gap-1">
                   {detail.pr.labels.map((label) => (
                     <span
                       key={label.name}
-                      className="rounded-full border border-border px-2 py-0.5 text-[11px]"
+                      className="rounded-full border border-line px-2 py-0.5 text-meta"
                     >
                       {label.name}
                     </span>
@@ -3110,7 +3110,7 @@ function FindingSection({
   const [collapsed, setCollapsed] = useState(false)
   return (
     <section className="px-3 py-3">
-      <div className="mb-2 flex items-center justify-between text-xs">
+      <div className="mb-2 flex items-center justify-between text-label">
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
@@ -3120,7 +3120,7 @@ function FindingSection({
           {label}
           <CaretDownIcon
             className={cn(
-              "size-3 text-muted-foreground transition-transform",
+              "size-3 text-ink-subtle transition-transform",
               collapsed && "-rotate-90"
             )}
           />
@@ -3129,7 +3129,7 @@ function FindingSection({
       </div>
       {!collapsed &&
         (findings.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">{emptyLabel}</p>
+          <p className="text-meta text-ink-subtle">{emptyLabel}</p>
         ) : (
           <div className="space-y-0.5">
             {findings.map((finding) => {
@@ -3143,8 +3143,8 @@ function FindingSection({
                 <div
                   key={finding.id}
                   className={cn(
-                    "rounded-md border border-transparent transition-colors hover:border-border hover:bg-muted/40",
-                    expanded && "border-border bg-muted/40",
+                    "rounded-badge border border-transparent transition-colors hover:border-line hover:bg-muted/40",
+                    expanded && "border-line bg-muted/40",
                     muted && !expanded && "opacity-50"
                   )}
                 >
@@ -3154,7 +3154,7 @@ function FindingSection({
                     aria-expanded={anchored ? undefined : expanded}
                     className="block w-full px-2 py-1.5 text-left"
                   >
-                    <span className="flex items-start gap-1.5 text-xs">
+                    <span className="flex items-start gap-1.5 text-label">
                       <Icon
                         className={cn(
                           "mt-0.5 size-3.5 shrink-0",
@@ -3162,10 +3162,10 @@ function FindingSection({
                         )}
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="line-clamp-1 font-medium text-foreground">
+                        <span className="line-clamp-1 font-medium text-ink">
                           {finding.title || finding.description}
                         </span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-meta text-ink-subtle">
                           <span className={style.className}>{style.label}</span>
                           <span className="truncate font-mono">
                             {findingAnchorLabel(finding)}
@@ -3182,7 +3182,7 @@ function FindingSection({
                       {!anchored && (
                         <CaretDownIcon
                           className={cn(
-                            "mt-0.5 size-3 shrink-0 text-muted-foreground transition-transform",
+                            "mt-0.5 size-3 shrink-0 text-ink-subtle transition-transform",
                             !expanded && "-rotate-90"
                           )}
                         />
@@ -3204,9 +3204,9 @@ function FindingSection({
 function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
   return (
     <section className="px-3 py-3">
-      <h3 className="mb-2 text-xs font-medium">Checks</h3>
+      <h3 className="mb-2 text-label font-medium">Checks</h3>
       {checks.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">No checks reported.</p>
+        <p className="text-meta text-ink-subtle">No checks reported.</p>
       ) : (
         <div className="max-h-56 space-y-1 overflow-y-auto">
           {checks.map((check, index) =>
@@ -3216,7 +3216,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
                 href={check.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                className="flex items-center gap-1.5 text-meta text-ink-subtle hover:text-ink"
               >
                 <CheckStatusIcon check={check} />
                 <span className="truncate">{check.name}</span>
@@ -3224,7 +3224,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
             ) : (
               <span
                 key={`${check.name}-${index}`}
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                className="flex items-center gap-1.5 text-meta text-ink-subtle"
               >
                 <CheckStatusIcon check={check} />
                 <span className="truncate">{check.name}</span>
@@ -3240,16 +3240,16 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
 function CheckStatusIcon({ check }: { check: ReviewCheckRun }) {
   if (check.status !== "completed") {
     return (
-      <CircleIcon className="size-3.5 shrink-0 animate-pulse text-amber-500" />
+      <CircleIcon className="size-3.5 shrink-0 animate-pulse text-attention" />
     )
   }
   if (check.conclusion === "success" || check.conclusion === "neutral") {
-    return <CheckCircleIcon className="size-3.5 shrink-0 text-emerald-500" />
+    return <CheckCircleIcon className="size-3.5 shrink-0 text-positive" />
   }
   if (check.conclusion === "skipped") {
-    return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
+    return <CircleIcon className="size-3.5 shrink-0 text-ink-subtle" />
   }
-  return <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
+  return <XCircleIcon className="size-3.5 shrink-0 text-risk" />
 }
 
 function PeopleSection({
@@ -3261,15 +3261,15 @@ function PeopleSection({
 }) {
   return (
     <section className="px-3 py-3">
-      <h3 className="mb-2 text-xs font-medium">{title}</h3>
+      <h3 className="mb-2 text-label font-medium">{title}</h3>
       {people.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">None</p>
+        <p className="text-meta text-ink-subtle">None</p>
       ) : (
         <div className="space-y-1">
           {people.map((person) => (
             <div
               key={person.login}
-              className="flex items-center gap-2 text-[11px]"
+              className="flex items-center gap-2 text-meta"
             >
               {person.avatar_url ? (
                 <img

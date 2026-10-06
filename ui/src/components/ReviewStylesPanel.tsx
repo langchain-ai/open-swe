@@ -2,27 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
 import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "@/components/ui/combobox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@langchain/gtm-platform-design-system/ui/combobox"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Label } from "@langchain/gtm-platform-design-system/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -227,7 +214,7 @@ export function ReviewStylesPanel() {
   return (
     <div className="flex flex-col gap-6 p-4">
       {githubReauth && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <div className="rounded-badge border border-risk/40 bg-risk-bg px-3 py-2 text-label text-risk">
           Your GitHub connection expired.{" "}
           <a
             href={loginUrl()}
@@ -256,7 +243,7 @@ export function ReviewStylesPanel() {
               className="sm:flex-1"
             />
             <Button
-              size="sm"
+              size="compact"
               className="shrink-0 sm:w-auto"
               disabled={!canAdd || createStyle.isPending}
               onClick={handleAdd}
@@ -284,7 +271,7 @@ export function ReviewStylesPanel() {
                         {r.full_name}
                       </span>
                       {r.private && (
-                        <span className="ml-auto text-[10px] text-muted-foreground">
+                        <span className="ml-auto text-meta text-ink-subtle">
                           private
                         </span>
                       )}
@@ -297,9 +284,9 @@ export function ReviewStylesPanel() {
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs font-medium text-foreground">Repositories</p>
+          <p className="text-label font-medium text-ink">Repositories</p>
           {(styles.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-ink-subtle">
               No repositories yet.
             </p>
           ) : (
@@ -308,10 +295,10 @@ export function ReviewStylesPanel() {
                 <li key={s.full_name}>
                   <button
                     type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
+                    className={`inline-flex max-w-full items-center gap-2 rounded-badge border px-2.5 py-1.5 text-left text-label transition-colors hover:bg-muted ${
                       selected === s.full_name
                         ? "border-primary bg-muted font-medium"
-                        : "border-border"
+                        : "border-line"
                     }`}
                     onClick={() => setSelected(s.full_name)}
                   >
@@ -330,46 +317,46 @@ export function ReviewStylesPanel() {
         </div>
       </section>
 
-      <div className="border-t border-border" />
+      <div className="border-t border-line" />
 
       <section className="space-y-3">
         {!selected || !active ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-ink-subtle">
             Select a repository above to view or edit its review style prompt.
           </p>
         ) : (
           <>
-            <p className="text-sm font-medium text-foreground">
+            <p className="text-body font-medium text-ink">
               {active.full_name}
             </p>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-label">
               <Badge variant={statusVariant(active.status)}>
                 {active.status}
               </Badge>
               {active.top_reviewers.length > 0 && (
-                <span className="text-muted-foreground">
+                <span className="text-ink-subtle">
                   Reviewers: {active.top_reviewers.join(", ")}
                 </span>
               )}
               {active.prs_sampled > 0 && (
-                <span className="text-muted-foreground">
+                <span className="text-ink-subtle">
                   {active.prs_sampled} PRs · {active.reviews_sampled} reviews
                   sampled
                 </span>
               )}
             </div>
             {active.analysis_summary && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-ink-subtle">
                 {active.analysis_summary}
               </p>
             )}
             {active.error && (
-              <p className="text-xs text-destructive">{active.error}</p>
+              <p className="text-label text-risk">{active.error}</p>
             )}
             <div className="flex flex-wrap gap-2">
               <Button
-                size="sm"
-                variant="secondary"
+                size="compact"
+                variant="outline"
                 disabled={active.status === "running" || analyze.isPending}
                 onClick={() => {
                   void analyze
@@ -381,7 +368,7 @@ export function ReviewStylesPanel() {
               </Button>
               {active.status === "running" && (
                 <Button
-                  size="sm"
+                  size="compact"
                   variant="outline"
                   disabled={cancelAnalysis.isPending}
                   onClick={() => cancelAnalysis.mutate(active.full_name)}
@@ -390,7 +377,7 @@ export function ReviewStylesPanel() {
                 </Button>
               )}
               <Button
-                size="sm"
+                size="compact"
                 disabled={!draftPrompt.trim() || savePrompt.isPending}
                 onClick={() =>
                   savePrompt.mutate({
@@ -402,7 +389,7 @@ export function ReviewStylesPanel() {
                 Save prompt
               </Button>
               <Button
-                size="sm"
+                size="compact"
                 variant="destructive"
                 disabled={
                   removeStyle.isPending ||
@@ -423,7 +410,7 @@ export function ReviewStylesPanel() {
               </Button>
             </div>
             <Textarea
-              className="min-h-[320px] w-full font-mono text-xs"
+              className="min-h-[320px] w-full font-mono text-label"
               value={draftPrompt}
               onChange={(e) => setDraftPrompt(e.target.value)}
               placeholder={
@@ -434,7 +421,7 @@ export function ReviewStylesPanel() {
               disabled={active.status === "running"}
             />
             <Label htmlFor="repo-approval-mode">Approval mode</Label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-ink-subtle">
               Criteria come from <code>.open-swe/APPROVALS.md</code> in the
               repository, read from each pull request&apos;s base branch. Dry
               run posts the assessment without approving; Approve submits a
@@ -463,7 +450,7 @@ export function ReviewStylesPanel() {
               </SelectContent>
             </Select>
             {approvalsFile.data && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-ink-subtle">
                 {approvalsFile.data.found ? (
                   <>
                     <code>.open-swe/APPROVALS.md</code> found on the default

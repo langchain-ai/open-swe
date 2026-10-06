@@ -2,9 +2,9 @@ import { useState, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { SettingsSection } from "@/components/AppShell"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import {
   slackChannelHref,
   slackChannelLabel,
@@ -51,10 +51,10 @@ function refreshLabel(
 }
 
 const REFRESH_CLASS: Record<WorkspaceRefreshStatus, string> = {
-  never: "text-muted-foreground",
-  refreshing: "text-muted-foreground",
-  success: "text-muted-foreground",
-  failed: "text-destructive",
+  never: "text-ink-subtle",
+  refreshing: "text-ink-subtle",
+  success: "text-ink-subtle",
+  failed: "text-risk",
 }
 
 function refreshedAt(timestamp: string | null | undefined): string | null {
@@ -70,9 +70,9 @@ const STEP_MARK: Record<WorkspaceRefreshStep["status"], string> = {
 }
 
 const STEP_CLASS: Record<WorkspaceRefreshStep["status"], string> = {
-  running: "border-border text-foreground",
-  success: "border-border text-muted-foreground",
-  failed: "border-destructive/40 text-destructive",
+  running: "border-line text-ink",
+  success: "border-line text-ink-subtle",
+  failed: "border-risk/40 text-risk",
 }
 
 // A rebuild runs for minutes to an hour; which stage it reached is the only
@@ -83,7 +83,7 @@ function RefreshSteps({ steps }: { steps: Array<WorkspaceRefreshStep> }) {
       {steps.map((step) => (
         <span
           key={step.label}
-          className={`rounded-full border px-2 py-0.5 text-[11px] ${STEP_CLASS[step.status]}`}
+          className={`rounded-full border px-2 py-0.5 text-meta ${STEP_CLASS[step.status]}`}
         >
           {STEP_MARK[step.status]} {step.label}
           {step.exit_code ? ` (exit ${step.exit_code})` : ""}
@@ -116,17 +116,17 @@ function WorkspaceRow({
     <div data-workspace-row className="flex flex-col gap-2 px-4 py-3.5">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
         <div className="flex flex-col gap-1">
-          <span className="flex items-center gap-2 text-sm/none font-medium text-foreground">
+          <span className="flex items-center gap-2 text-body font-medium text-ink">
             {workspace.name}
             {isDefault && <Badge variant="secondary">Default</Badge>}
           </span>
-          <span className="text-xs/relaxed text-muted-foreground">
+          <span className="text-meta text-ink-subtle">
             {detail}
           </span>
         </div>
         <div className="flex items-center gap-3 sm:shrink-0">
           <span
-            className={`text-xs ${REFRESH_CLASS[status]}`}
+            className={`text-label ${REFRESH_CLASS[status]}`}
             title={
               status !== "refreshing" && when && workspace.refresh_finished_at
                 ? new Date(workspace.refresh_finished_at).toLocaleString(
@@ -154,16 +154,16 @@ function WorkspaceRow({
       />
       {steps.length > 0 && <RefreshSteps steps={steps} />}
       {workspace.refresh_error && (
-        <p className="text-xs/relaxed text-destructive">
+        <p className="text-label text-risk">
           {workspace.refresh_error}
         </p>
       )}
       {/* The API omits the log for non-admins; this guard is defence in depth
           for a `bash -x` trace that can carry expanded credentials. */}
       {isAdmin && log && (
-        <details className="text-xs text-muted-foreground">
+        <details className="text-meta text-ink-subtle">
           <summary className="cursor-pointer select-none">Refresh log</summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
+          <pre className="mt-2 max-h-64 overflow-auto rounded-badge border border-line bg-muted/40 p-3 text-meta leading-relaxed whitespace-pre-wrap">
             {log}
           </pre>
         </details>
@@ -236,11 +236,11 @@ export function WorkspacesSection({
           <Skeleton className="h-8 w-full" />
         </div>
       ) : workspaces.isError ? (
-        <p className="px-4 py-3.5 text-xs text-destructive">
+        <p className="px-4 py-3.5 text-label text-risk">
           Could not load workspaces.
         </p>
       ) : !options || options.workspaces.length === 0 ? (
-        <p className="px-4 py-3.5 text-xs text-muted-foreground">
+        <p className="px-4 py-3.5 text-meta text-ink-subtle">
           No workspaces are configured.
         </p>
       ) : (
@@ -266,15 +266,15 @@ export function WorkspacesSection({
               workspaces={options?.workspaces ?? []}
               channelLabel={channelLabel}
             />
-            <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+            <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3.5">
               {createError && (
-                <p role="alert" className="text-xs text-destructive">
+                <p role="alert" className="text-label text-risk">
                   {createError}
                 </p>
               )}
               <div className="ml-auto flex gap-2">
                 <Button
-                  size="sm"
+                  size="compact"
                   variant="ghost"
                   disabled={creating}
                   onClick={() => {
@@ -288,7 +288,7 @@ export function WorkspacesSection({
                     : "Close"}
                 </Button>
                 <Button
-                  size="sm"
+                  size="compact"
                   disabled={creating || !createDraft.name.trim()}
                   onClick={() => void create()}
                 >
@@ -299,7 +299,7 @@ export function WorkspacesSection({
           </div>
         ) : (
           <div className="px-4 py-3.5">
-            <Button size="sm" onClick={() => setAdding(true)}>
+            <Button size="compact" onClick={() => setAdding(true)}>
               Add workspace
             </Button>
           </div>

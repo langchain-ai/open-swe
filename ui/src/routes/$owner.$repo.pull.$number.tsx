@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from "react"
 import { ArrowSquareOutIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 
-import { buttonVariants } from "@/components/ui/button"
+import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
 import {
   Card,
   CardContent,
@@ -12,7 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -157,23 +157,23 @@ function ReviewLinkCard({
   onRetry?: () => void
 }) {
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background p-6 text-foreground">
+    <main className="flex min-h-svh items-center justify-center bg-canvas p-6 text-ink">
       <Card className="w-full max-w-lg">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl">
-            <GitPullRequestIcon className="size-5 text-muted-foreground" />
+          <CardTitle className="flex items-center gap-2 text-page">
+            <GitPullRequestIcon className="size-5 text-ink-subtle" />
             {title}
           </CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+          <div className="rounded-compact border border-line bg-muted/40 p-3 text-body">
             <div className="font-medium">
               {owner}/{repo} #{number}
             </div>
             <a
               href={githubPrUrl}
-              className="mt-1 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              className="mt-1 inline-flex items-center gap-1 text-ink-subtle hover:text-ink"
             >
               View on GitHub
               <ArrowSquareOutIcon className="size-3.5" />

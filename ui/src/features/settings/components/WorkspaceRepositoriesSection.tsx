@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { SettingsSection } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
+import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import { api } from "@/lib/api"
 import type { RepositorySettings } from "@/lib/api"
 import { optimisticUpdate, usePendingVariables } from "@/lib/optimistic"
@@ -63,7 +63,7 @@ export function WorkspaceRepositoriesSection({
       description="What each of this workspace's repositories may do on its own. A repository allowed to start threads can do so from a GitHub Actions workflow, using the token the workflow issues itself, with no stored secret. Threads it starts belong to this workspace and to no person."
     >
       {rows.length === 0 ? (
-        <p className="px-4 py-3.5 text-xs text-muted-foreground">
+        <p className="px-4 py-3.5 text-meta text-ink-subtle">
           {repositories.isPending
             ? "Loading…"
             : "Bind a repository to this workspace first."}
@@ -75,10 +75,10 @@ export function WorkspaceRepositoriesSection({
               key={row.repo}
               className="flex items-center justify-between gap-4 px-4 py-3"
             >
-              <span className="font-mono text-xs text-foreground">
+              <span className="font-mono text-label text-ink">
                 {row.repo}
               </span>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <label className="flex items-center gap-2 text-meta text-ink-subtle">
                 Can start threads
                 <Switch
                   aria-label={`Let ${row.repo} start threads`}

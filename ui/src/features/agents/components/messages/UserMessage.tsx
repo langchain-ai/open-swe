@@ -55,7 +55,7 @@ export function UserMessage({ message }: { message: Message }) {
             onClick={() => setExpanded((value) => !value)}
             aria-expanded={expanded}
             data-testid="system-message-toggle"
-            className="flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/30"
+            className="flex items-center gap-1.5 rounded-full border border-line bg-muted/50 px-2.5 py-1 text-meta text-ink-subtle transition-colors hover:bg-hover/30"
           >
             {expanded ? (
               <ChevronDown className="size-3" />
@@ -64,7 +64,7 @@ export function UserMessage({ message }: { message: Message }) {
             )}
             <span>{message.structuredSenderName || "Context"}</span>
             {message.structuredSenderNote && (
-              <span className="text-muted-foreground/70">
+              <span className="text-ink-subtle/70">
                 · {message.structuredSenderNote}
               </span>
             )}
@@ -73,7 +73,7 @@ export function UserMessage({ message }: { message: Message }) {
           (message.structuredSenderName ||
             isSlack ||
             message.structuredSenderIsBot) && (
-            <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
+            <div className="mb-1 flex items-center gap-1 px-1 text-meta font-medium text-ink-subtle">
               {isSlack && (
                 <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
               )}
@@ -89,7 +89,7 @@ export function UserMessage({ message }: { message: Message }) {
                 <span>{message.structuredSenderName}</span>
               )}
               {message.structuredSenderNote && (
-                <span className="font-normal text-muted-foreground/70">
+                <span className="font-normal text-ink-subtle/70">
                   {" · "}
                   {message.structuredSenderNote}
                 </span>
@@ -99,8 +99,8 @@ export function UserMessage({ message }: { message: Message }) {
         )}
         {(!isSystem || expanded) && hasBody && (
           <div
-            className={`relative overflow-hidden rounded-2xl p-3 ${
-              isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
+            className={`relative overflow-hidden rounded-panel p-3 ${
+              isSystem ? "mt-1 border border-line bg-muted/50" : "bg-hover"
             }`}
           >
             {excerpts.map((excerpt, i) => (
@@ -116,7 +116,7 @@ export function UserMessage({ message }: { message: Message }) {
                 {images.map((img, i) => (
                   <div
                     key={i}
-                    className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                    className="overflow-hidden rounded-compact border border-line/80 bg-canvas/70"
                   >
                     <MessageImage
                       chunk={img}
@@ -129,7 +129,7 @@ export function UserMessage({ message }: { message: Message }) {
             {text && (
               <div
                 ref={textRef}
-                className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground ${
+                className={`text-body leading-[1.6] break-words whitespace-pre-wrap text-ink ${
                   !expanded ? "overflow-hidden" : ""
                 }`}
                 style={
@@ -149,7 +149,7 @@ export function UserMessage({ message }: { message: Message }) {
                 onClick={() => setExpanded((value) => !value)}
                 aria-expanded={expanded}
                 data-testid="user-message-show-more"
-                className="mt-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+                className="mt-1 text-label text-ink-subtle transition-colors hover:text-ink"
               >
                 {expanded ? "Show less" : "Show more"}
               </button>
@@ -158,10 +158,10 @@ export function UserMessage({ message }: { message: Message }) {
         )}
         {message.deliveryStatus && (
           <div
-            className={`mt-1 pr-1 text-right text-[11px] ${
+            className={`mt-1 pr-1 text-right text-meta ${
               message.deliveryStatus === "failed"
-                ? "text-destructive"
-                : "text-muted-foreground"
+                ? "text-risk"
+                : "text-ink-subtle"
             }`}
           >
             {message.deliveryStatus !== "failed" ? (

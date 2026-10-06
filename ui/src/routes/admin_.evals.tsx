@@ -9,16 +9,10 @@ import type {
   ReviewerEvalStatus,
 } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { ModelPairControl } from "@/features/settings/components/WorkspaceSettingsSections"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
@@ -112,7 +106,7 @@ function ReviewerEvalRunConfigSection() {
       description="Defaults to the previous run's config. Each run boots a sandbox at the deployed commit."
       action={
         <Button
-          size="sm"
+          size="compact"
           disabled={disabled}
           onClick={() => value && start.mutate(value)}
         >
@@ -259,7 +253,7 @@ function progressLabel(data: ReviewerEvalStatus): string | null {
 function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
   if (!data) {
     return (
-      <div className="p-4 text-xs text-muted-foreground">
+      <div className="p-4 text-meta text-ink-subtle">
         Loading reviewer eval status…
       </div>
     )
@@ -267,7 +261,7 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
 
   const config = data.config_snapshot
   return (
-    <div className="grid gap-2 p-4 text-xs text-muted-foreground sm:grid-cols-2">
+    <div className="grid gap-2 p-4 text-meta text-ink-subtle sm:grid-cols-2">
       <StatusLine label="Status" value={data.status} strong />
       <StatusLine label="Progress" value={progressLabel(data)} />
       <StatusLine
@@ -303,12 +297,12 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
           href={data.experiment_url}
           target="_blank"
           rel="noreferrer"
-          className="underline hover:text-foreground"
+          className="underline hover:text-ink"
         >
           View experiment in LangSmith
         </a>
       )}
-      {data.error && <span className="text-destructive">{data.error}</span>}
+      {data.error && <span className="text-risk">{data.error}</span>}
     </div>
   )
 }
@@ -325,7 +319,7 @@ function StatusLine({
   return (
     <span>
       {label}:{" "}
-      <span className={strong ? "font-medium text-foreground" : ""}>
+      <span className={strong ? "font-medium text-ink" : ""}>
         {value || "—"}
       </span>
     </span>
@@ -361,14 +355,14 @@ function ReviewerEvalLogs() {
       action={
         <div className="flex items-center gap-2">
           <Button
-            size="sm"
+            size="compact"
             variant="outline"
             onClick={() => void copyLogs()}
             disabled={!logTail}
           >
             {copied ? "Copied" : "Copy logs"}
           </Button>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="flex items-center gap-1.5 text-meta text-ink-subtle">
             <input
               type="checkbox"
               checked={follow}
@@ -389,12 +383,12 @@ function ReviewerEvalLogs() {
                 el.scrollHeight - el.scrollTop - el.clientHeight < 24
               setFollow(atBottom)
             }}
-            className="max-h-[28rem] overflow-auto rounded-md bg-muted/50 p-3 font-mono text-xs break-words whitespace-pre-wrap text-foreground"
+            className="max-h-[28rem] overflow-auto rounded-badge bg-muted/50 p-3 font-mono text-label break-words whitespace-pre-wrap text-ink"
           >
             {logTail}
           </pre>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-ink-subtle">
             {running
               ? "Waiting for output…"
               : "No output yet. Launch a reviewer eval to see logs here."}

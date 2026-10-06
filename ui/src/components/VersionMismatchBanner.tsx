@@ -17,7 +17,7 @@ export function VersionMismatchBanner() {
   return (
     <div
       role="status"
-      className="version-mismatch-banner flex h-10 shrink-0 items-center justify-center gap-2 border-b border-amber-300 bg-amber-100 px-3 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+      className="version-mismatch-banner flex h-10 shrink-0 items-center justify-center gap-2 border-b border-attention/30 bg-attention-bg px-3 text-label text-attention"
     >
       <span className="truncate">
         Frontend version differs from the deployed backend.

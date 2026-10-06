@@ -7,7 +7,7 @@ import {
   useWorkflowApprovalDecision,
   useWorkflowApprovals,
 } from "@/features/agents/lib/queries"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { usePendingVariables } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
 
@@ -61,20 +61,20 @@ export function WorkflowApprovalCard({
           <section
             key={approval.fingerprint}
             data-testid="workflow-approval-card"
-            className="rounded-xl border border-border bg-card p-4 shadow-sm"
+            className="rounded-control border border-line bg-panel p-4 shadow-control"
           >
             <div className="flex items-start gap-3">
               <ShieldCheck className="mt-0.5 size-5 shrink-0 text-primary" />
               <div className="min-w-0">
-                <p className="text-[0.68rem] font-semibold tracking-wider text-primary uppercase">
+                <p className="text-meta font-semibold tracking-wider text-primary uppercase">
                   Push paused for review
                 </p>
-                <h2 className="mt-1 text-base font-semibold text-foreground">
+                <h2 className="mt-1 text-title font-semibold text-ink">
                   {inherited
                     ? `Confirm workflow changes inherited from ${inherited}`
                     : "Confirm GitHub Actions workflow changes"}
                 </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="mt-1 text-body text-ink-subtle">
                   {inherited
                     ? `This branch now includes ${fileLabel(approval.files.length)} from merging ${inherited}. Open SWE did not author these workflow changes.`
                     : `Open SWE is ready to push ${fileLabel(approval.files.length)} in .github/workflows.`}
@@ -83,13 +83,13 @@ export function WorkflowApprovalCard({
             </div>
 
             {inherited && (
-              <div className="mt-4 flex gap-3 rounded-md border border-primary/20 bg-primary/5 p-3">
+              <div className="mt-4 flex gap-3 rounded-badge border border-primary/20 bg-primary/5 p-3">
                 <GitMerge className="mt-0.5 size-4 shrink-0 text-primary" />
                 <div>
-                  <p className="text-xs font-medium text-foreground">
+                  <p className="text-label font-medium text-ink">
                     Where these changes came from
                   </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-meta text-ink-subtle">
                     Merging {inherited} into{" "}
                     {approval.branch || "the current branch"}
                   </p>
@@ -97,13 +97,13 @@ export function WorkflowApprovalCard({
               </div>
             )}
 
-            <div className="mt-3 flex gap-3 border-l-2 border-warning-foreground bg-warning/10 p-3">
-              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
+            <div className="mt-3 flex gap-3 border-l-2 border-attention bg-attention-bg p-3">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-attention" />
               <div>
-                <p className="text-xs font-medium text-foreground">
+                <p className="text-label font-medium text-ink">
                   Why you need to confirm
                 </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-meta text-ink-subtle">
                   Workflow files control CI jobs and may access repository
                   secrets. Open SWE pauses before pushing any workflow change.
                 </p>
@@ -118,52 +118,52 @@ export function WorkflowApprovalCard({
                 Approve &amp; continue push
               </Button>
               <Button
-                variant="secondary"
+                variant="outline"
                 disabled={busy}
                 onClick={() => decide(approval, "reject")}
               >
                 Cancel push
               </Button>
             </div>
-            <p className="mt-2 text-[0.7rem] text-muted-foreground">
+            <p className="mt-2 text-meta text-ink-subtle">
               Approval resumes this exact push only. If the workflow files
               change, Open SWE will ask again.
             </p>
 
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              <div className="rounded-md border border-border bg-background p-3">
-                <p className="text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+              <div className="rounded-badge border border-line bg-canvas p-3">
+                <p className="text-meta font-medium tracking-wide text-ink-subtle uppercase">
                   What happens next
                 </p>
-                <p className="mt-1 text-xs text-foreground">
+                <p className="mt-1 text-label text-ink">
                   The paused push resumes; no other changes are approved.
                 </p>
               </div>
-              <div className="rounded-md border border-border bg-background p-3">
-                <p className="text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+              <div className="rounded-badge border border-line bg-canvas p-3">
+                <p className="text-meta font-medium tracking-wide text-ink-subtle uppercase">
                   Branch update
                 </p>
-                <p className="mt-1 font-mono text-xs text-foreground">
+                <p className="mt-1 font-mono text-label text-ink">
                   {shortSha(approval.baseSha)} → {shortSha(approval.headSha)}
                 </p>
               </div>
             </div>
 
-            <details className="mt-4 rounded-md border border-border">
-              <summary className="flex cursor-pointer items-center justify-between gap-3 p-3 text-xs font-medium text-foreground">
+            <details className="mt-4 rounded-badge border border-line">
+              <summary className="flex cursor-pointer items-center justify-between gap-3 p-3 text-label font-medium text-ink">
                 <span>Review files and diff</span>
-                <span className="font-normal text-muted-foreground">
+                <span className="font-normal text-ink-subtle">
                   {approval.diffStats.files} files
-                  <span className="ml-2 text-success-foreground">
+                  <span className="ml-2 text-positive">
                     +{approval.diffStats.additions}
                   </span>
-                  <span className="ml-2 text-destructive">
+                  <span className="ml-2 text-risk">
                     -{approval.diffStats.deletions}
                   </span>
                 </span>
               </summary>
-              <div className="border-t border-border p-3">
-                <ul className="space-y-1 text-xs text-muted-foreground">
+              <div className="border-t border-line p-3">
+                <ul className="space-y-1 text-meta text-ink-subtle">
                   {approval.files.map((file) => (
                     <li key={file} className="truncate font-mono" title={file}>
                       {file}
@@ -173,22 +173,22 @@ export function WorkflowApprovalCard({
                 {approval.diffPreview && (
                   <pre
                     className={cn(
-                      "mt-3 max-h-72 overflow-auto rounded-md border border-border",
-                      "bg-background p-3 text-[0.68rem] leading-relaxed text-foreground"
+                      "mt-3 max-h-72 overflow-auto rounded-badge border border-line",
+                      "bg-canvas p-3 text-meta leading-relaxed text-ink"
                     )}
                   >
                     {approval.diffPreview}
                   </pre>
                 )}
                 {approval.diffPreviewTruncated && (
-                  <p className="mt-2 text-[0.7rem] text-muted-foreground">
+                  <p className="mt-2 text-meta text-ink-subtle">
                     Diff preview is truncated.
                   </p>
                 )}
               </div>
             </details>
 
-            <p className="mt-3 font-mono text-[0.65rem] break-all text-muted-foreground">
+            <p className="mt-3 font-mono text-meta break-all text-ink-subtle">
               Approval ID: {approval.fingerprint}
             </p>
           </section>

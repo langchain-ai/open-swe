@@ -3,8 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { EyeIcon, EyeSlashIcon } from "@phosphor-icons/react"
 
 import { SettingsSection } from "@/components/AppShell"
-import { Button, IconButton } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { api, DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import type { MCPConnection, MCPConnectionUpdate } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
@@ -338,7 +338,7 @@ export function MCPConnectionsSection({
       className={
         draft.existing
           ? "space-y-4 border-t p-4"
-          : "space-y-4 rounded-md border p-4"
+          : "space-y-4 rounded-badge border p-4"
       }
       onSubmit={(event) => {
         event.preventDefault()
@@ -347,18 +347,18 @@ export function MCPConnectionsSection({
     >
       <fieldset disabled={busy} className="space-y-4">
         {error && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-body text-risk">
             {error}
           </p>
         )}
         {pendingImports.length > 0 && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-ink-subtle">
             {pendingImports.length} more{" "}
             {pendingImports.length === 1 ? "connection" : "connections"} to
             review after saving.
           </p>
         )}
-        <label className="block text-sm">
+        <label className="block text-body">
           Connection name
           <Input
             aria-label="Connection name"
@@ -371,12 +371,12 @@ export function MCPConnectionsSection({
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           />
-          <span className="text-xs text-muted-foreground">
+          <span className="text-meta text-ink-subtle">
             Use a lowercase name such as incident. Dots and spaces are not
             allowed.
           </span>
         </label>
-        <label className="block text-sm">
+        <label className="block text-body">
           Server URL
           <Input
             aria-label="Server URL"
@@ -387,11 +387,11 @@ export function MCPConnectionsSection({
             onChange={(e) => setDraft({ ...draft, url: e.target.value })}
           />
         </label>
-        <label className="block text-sm">
+        <label className="block text-body">
           Transport
           <select
             aria-label="Transport"
-            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+            className="mt-1 block w-full rounded-badge border bg-canvas p-2 text-body"
             value={draft.transport}
             onChange={(e) =>
               setDraft({
@@ -404,11 +404,11 @@ export function MCPConnectionsSection({
             <option value="sse">SSE</option>
           </select>
         </label>
-        <label className="block text-sm">
+        <label className="block text-body">
           Authentication
           <select
             aria-label="Authentication"
-            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+            className="mt-1 block w-full rounded-badge border bg-canvas p-2 text-body"
             value={draft.oauth ? "oauth" : "headers"}
             onChange={(event) =>
               setDraft({
@@ -446,10 +446,10 @@ export function MCPConnectionsSection({
           />
         )}
         <div className="space-y-2">
-          <p className="text-sm font-medium">
+          <p className="text-body font-medium">
             {draft.oauth ? "Additional headers" : "Authentication headers"}
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-meta text-ink-subtle">
             {draft.oauth
               ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
               : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
@@ -459,7 +459,7 @@ export function MCPConnectionsSection({
               {savedHeaders && (
                 <div className="space-y-2" data-dd-privacy="hidden">
                   {Object.entries(savedHeaders).map(([name, value]) => (
-                    <label key={name} className="block text-sm">
+                    <label key={name} className="block text-body">
                       {name}
                       <Input
                         aria-label={`Saved ${name} value`}
@@ -471,14 +471,14 @@ export function MCPConnectionsSection({
                     </label>
                   ))}
                   {Object.keys(savedHeaders).length === 0 && (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-meta text-ink-subtle">
                       No saved headers.
                     </p>
                   )}
                 </div>
               )}
               <div className="flex flex-wrap gap-2">
-                <IconButton
+                <Button
                   type="button"
                   size="icon-sm"
                   variant="outline"
@@ -502,10 +502,10 @@ export function MCPConnectionsSection({
                   ) : (
                     <EyeIcon aria-hidden="true" />
                   )}
-                </IconButton>
+                </Button>
                 <Button
                   type="button"
-                  size="sm"
+                  size="compact"
                   variant="outline"
                   onClick={() => {
                     setSavedHeaders(null)
@@ -540,7 +540,7 @@ export function MCPConnectionsSection({
                       updateHeader(index, "value", e.target.value)
                     }
                   />
-                  <IconButton
+                  <Button
                     type="button"
                     size="icon-sm"
                     variant="outline"
@@ -562,10 +562,10 @@ export function MCPConnectionsSection({
                     ) : (
                       <EyeIcon aria-hidden="true" />
                     )}
-                  </IconButton>
+                  </Button>
                   <Button
                     type="button"
-                    size="sm"
+                    size="compact"
                     variant="outline"
                     aria-label={`Remove header ${index + 1}`}
                     onClick={() =>
@@ -578,7 +578,7 @@ export function MCPConnectionsSection({
               ))}
               <Button
                 type="button"
-                size="sm"
+                size="compact"
                 variant="outline"
                 onClick={() =>
                   setHeaders([...headers, { name: "", value: "" }])
@@ -587,7 +587,7 @@ export function MCPConnectionsSection({
                 Add header
               </Button>
               {draft.existing && headers.length === 0 && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-meta text-ink-subtle">
                   Saving with no headers clears the saved authentication.
                 </p>
               )}
@@ -595,20 +595,20 @@ export function MCPConnectionsSection({
           )}
         </div>
         <div className="space-y-2">
-          <p className="text-sm font-medium">Allowed tools</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-body font-medium">Allowed tools</p>
+          <p className="text-meta text-ink-subtle">
             Discover tools, review the selection, then save. All discovered
             tools are selected by default for new connections.
           </p>
           {toolNames.length > 0 && (
             <>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-auto text-xs text-muted-foreground">
+                <span className="mr-auto text-meta text-ink-subtle">
                   {draft.allowed_tools.length} of {toolNames.length} selected
                 </span>
                 <Button
                   type="button"
-                  size="sm"
+                  size="compact"
                   variant="outline"
                   disabled={draft.allowed_tools.length === toolNames.length}
                   onClick={() =>
@@ -619,7 +619,7 @@ export function MCPConnectionsSection({
                 </Button>
                 <Button
                   type="button"
-                  size="sm"
+                  size="compact"
                   variant="outline"
                   disabled={draft.allowed_tools.length === 0}
                   onClick={() => setDraft({ ...draft, allowed_tools: [] })}
@@ -628,7 +628,7 @@ export function MCPConnectionsSection({
                 </Button>
                 <Button
                   type="button"
-                  size="sm"
+                  size="compact"
                   variant="ghost"
                   aria-expanded={toolsExpanded}
                   aria-controls={toolsId}
@@ -643,10 +643,10 @@ export function MCPConnectionsSection({
                 aria-label="Available tools"
                 tabIndex={0}
                 hidden={!toolsExpanded}
-                className="max-h-80 space-y-3 overflow-y-auto overscroll-contain rounded-md border p-3"
+                className="max-h-80 space-y-3 overflow-y-auto overscroll-contain rounded-badge border p-3"
               >
                 {toolNames.map((name) => (
-                  <label key={name} className="flex items-start gap-2 text-sm">
+                  <label key={name} className="flex items-start gap-2 text-body">
                     <input
                       type="checkbox"
                       className="mt-1 shrink-0"
@@ -665,7 +665,7 @@ export function MCPConnectionsSection({
                     />
                     <span className="min-w-0 break-words">
                       {name}
-                      <span className="block text-xs text-muted-foreground">
+                      <span className="block text-meta text-ink-subtle">
                         {toolDescriptions.get(name)}
                       </span>
                     </span>
@@ -678,7 +678,7 @@ export function MCPConnectionsSection({
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
-            size="sm"
+            size="compact"
             variant="outline"
             disabled={!draft.name || !draft.url}
             onClick={(event) => {
@@ -687,20 +687,20 @@ export function MCPConnectionsSection({
           >
             Save and discover tools
           </Button>
-          <Button type="submit" size="sm">
+          <Button type="submit" size="compact">
             Save connection
           </Button>
           {pendingImports.length > 0 && (
             <Button
               type="button"
-              size="sm"
+              size="compact"
               variant="ghost"
               onClick={finishEditing}
             >
               Skip connection
             </Button>
           )}
-          <Button type="button" size="sm" variant="ghost" onClick={closeEditor}>
+          <Button type="button" size="compact" variant="ghost" onClick={closeEditor}>
             {dirty ? "Cancel" : "Close"}
           </Button>
         </div>
@@ -712,10 +712,10 @@ export function MCPConnectionsSection({
     <SettingsSection title="MCP servers" description={description}>
       <div className="space-y-4 p-4">
         {connections.isLoading && (
-          <p className="text-sm text-muted-foreground">Loading connections…</p>
+          <p className="text-body text-ink-subtle">Loading connections…</p>
         )}
         {connections.error && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-body text-risk">
             {connections.error.message}
           </p>
         )}
@@ -724,12 +724,12 @@ export function MCPConnectionsSection({
           inherited.data.length > 0 && (
             <section
               aria-label="Inherited instance MCP connections"
-              className="rounded-md border border-dashed"
+              className="rounded-badge border border-dashed"
             >
-              <p className="px-3 pt-3 text-xs font-medium text-muted-foreground">
+              <p className="px-3 pt-3 text-meta font-medium text-ink-subtle">
                 Inherited from the instance
               </p>
-              <ul className="divide-y divide-border">
+              <ul className="divide-y divide-line">
                 {inherited.data.map((connection) => {
                   const replaced = connections.data?.some(
                     (own) => own.name === connection.name
@@ -740,18 +740,18 @@ export function MCPConnectionsSection({
                       className="flex flex-wrap items-center justify-between gap-3 p-3"
                     >
                       <div className="min-w-0">
-                        <p className="text-sm">
+                        <p className="text-body">
                           {connection.name}{" "}
-                          <span className="text-muted-foreground">
+                          <span className="text-ink-subtle">
                             · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
                             {connection.allowed_tools.length} tools
                           </span>
                         </p>
-                        <p className="text-xs break-all text-muted-foreground">
+                        <p className="text-meta break-all text-ink-subtle">
                           {connection.url}
                         </p>
                       </div>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-meta text-ink-subtle">
                         {replaced
                           ? "Replaced by this workspace's connection"
                           : "Edit under Admin"}
@@ -768,24 +768,24 @@ export function MCPConnectionsSection({
             <section
               key={connection.name}
               aria-label={`${connection.name} MCP connection`}
-              className="rounded-md border"
+              className="rounded-badge border"
             >
               <div className="flex flex-wrap items-center justify-between gap-3 p-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">
+                  <p className="text-body font-medium">
                     {connection.name}{" "}
-                    <span className="text-muted-foreground">
+                    <span className="text-ink-subtle">
                       · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
                       {connection.allowed_tools.length} tools
                     </span>
                   </p>
-                  <p className="text-xs break-all text-muted-foreground">
+                  <p className="text-meta break-all text-ink-subtle">
                     {connection.url}
                   </p>
                 </div>
                 <div className="flex gap-2">
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="outline"
                     disabled={busy}
                     onClick={() => {
@@ -799,7 +799,7 @@ export function MCPConnectionsSection({
                     {isEditing ? "Close" : "Edit"}
                   </Button>
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="outline"
                     disabled={busy || pendingRows.has(connection.name)}
                     onClick={() => {
@@ -830,7 +830,7 @@ export function MCPConnectionsSection({
                     {connection.enabled ? "Disable" : "Enable"}
                   </Button>
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="outline"
                     disabled={busy || pendingRows.has(connection.name)}
                     onClick={() =>
@@ -872,14 +872,14 @@ export function MCPConnectionsSection({
         ) : !draft ? (
           <div className="flex gap-2">
             <Button
-              size="sm"
+              size="compact"
               disabled={connections.isPending || connections.isError}
               onClick={() => edit()}
             >
               Add MCP server
             </Button>
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={connections.isPending || connections.isError}
               onClick={() => {

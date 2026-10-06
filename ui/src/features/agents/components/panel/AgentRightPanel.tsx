@@ -12,7 +12,7 @@ import type {
 } from "@/features/agents/lib/rightPanelStore"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@langchain/gtm-platform-design-system/ui/tooltip"
 import {
   TerminalActions,
   TerminalPanel,
@@ -70,13 +70,13 @@ function PanelControl(props: {
     <Tooltip>
       <TooltipTrigger
         aria-label={props.label}
-        className="rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+        className="rounded-badge p-1.5 text-ink-subtle/70 transition-colors hover:bg-hover hover:text-ink"
         onClick={props.onClick}
         type="button"
       >
         {props.children}
       </TooltipTrigger>
-      <TooltipPopup>{props.label}</TooltipPopup>
+      <TooltipContent>{props.label}</TooltipContent>
     </Tooltip>
   )
 }
@@ -267,7 +267,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         onClick={() => onCollapsedChange(false)}
         aria-label="Show panel"
         title="Show panel"
-        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-badge text-ink-subtle hover:bg-hover hover:text-ink"
       >
         <SidebarSimpleIcon className="size-4" />
       </button>

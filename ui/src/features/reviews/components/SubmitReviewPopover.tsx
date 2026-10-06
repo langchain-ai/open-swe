@@ -4,14 +4,9 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import type { PullRequestReviewEvent } from "@/lib/api"
-import { Button } from "@/components/ui/button"
-import {
-  Popover,
-  PopoverPopup,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Textarea } from "@/components/ui/textarea"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@langchain/gtm-platform-design-system/ui/popover"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
 import { api } from "@/lib/api"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
@@ -93,12 +88,12 @@ export function SubmitReviewPopover({
     >
       <PopoverTrigger
         render={
-          <Button size="sm">
+          <Button size="compact">
             Review changes
             {pendingCount > 0 && (
               <span
                 aria-label={`${pendingCount} pending comments`}
-                className="rounded-full bg-primary-foreground/20 px-1.5 text-[10px] tabular-nums"
+                className="rounded-full bg-primary-ink/20 px-1.5 text-meta tabular-nums"
               >
                 {pendingCount}
               </span>
@@ -107,16 +102,16 @@ export function SubmitReviewPopover({
           </Button>
         }
       />
-      <PopoverPopup align="end" className="w-96 max-w-[calc(100vw-2rem)]">
+      <PopoverContent align="end" className="w-96 max-w-[calc(100vw-2rem)]">
         <form
           onSubmit={(e) => {
             e.preventDefault()
             if (canSubmit) submit.mutate()
           }}
         >
-          <PopoverTitle className="text-xs">Finish your review</PopoverTitle>
+          <PopoverTitle className="text-label">Finish your review</PopoverTitle>
           {pendingCount > 0 && (
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-meta text-ink-subtle">
               {pendingCount} pending comment{pendingCount === 1 ? "" : "s"} will
               be submitted with this review.
             </p>
@@ -133,7 +128,7 @@ export function SubmitReviewPopover({
             }}
             placeholder="Leave a comment"
             rows={5}
-            className="mt-2 resize-y text-xs"
+            className="mt-2 resize-y text-label"
             disabled={submit.isPending}
             autoFocus
           />
@@ -142,7 +137,7 @@ export function SubmitReviewPopover({
             {VERDICTS.map((verdict) => (
               <label
                 key={verdict.event}
-                className="flex cursor-pointer items-start gap-2 text-xs"
+                className="flex cursor-pointer items-start gap-2 text-label"
               >
                 <input
                   type="radio"
@@ -154,10 +149,10 @@ export function SubmitReviewPopover({
                   className="mt-0.5 accent-primary"
                 />
                 <span>
-                  <span className="font-medium text-foreground">
+                  <span className="font-medium text-ink">
                     {verdict.label}
                   </span>
-                  <span className="block text-muted-foreground">
+                  <span className="block text-ink-subtle">
                     {verdict.description}
                   </span>
                 </span>
@@ -165,7 +160,7 @@ export function SubmitReviewPopover({
             ))}
           </fieldset>
           {submit.error && (
-            <p className="mt-2 text-xs break-words text-destructive">
+            <p className="mt-2 text-label break-words text-risk">
               {submit.error.message}
             </p>
           )}
@@ -173,9 +168,9 @@ export function SubmitReviewPopover({
             {pending.review && (
               <Button
                 type="button"
-                size="sm"
+                size="compact"
                 variant="ghost"
-                className="mr-auto text-destructive"
+                className="mr-auto text-risk"
                 disabled={submit.isPending || pending.discard.isPending}
                 onClick={() => pending.discard.mutate()}
               >
@@ -184,19 +179,19 @@ export function SubmitReviewPopover({
             )}
             <Button
               type="button"
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={submit.isPending}
               onClick={() => setOpen(false)}
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={!canSubmit}>
+            <Button type="submit" size="compact" disabled={!canSubmit}>
               {submit.isPending ? "Submitting…" : "Submit review"}
             </Button>
           </div>
         </form>
-      </PopoverPopup>
+      </PopoverContent>
     </Popover>
   )
 }

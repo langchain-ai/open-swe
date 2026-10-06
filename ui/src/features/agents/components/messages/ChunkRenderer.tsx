@@ -18,17 +18,17 @@ export function ChunkRenderer({
   switch (chunk.kind) {
     case "text":
       return (
-        <div className="text-foreground">
+        <div className="text-ink">
           <Markdown content={chunk.text} isLive={isMarkdownLive} />
         </div>
       )
     case "code":
       return <CodeBlock text={chunk.text} language={chunk.language} />
     case "error":
-      return <span className="text-destructive">{chunk.text}</span>
+      return <span className="text-risk">{chunk.text}</span>
     case "list":
       return (
-        <div className="ml-2 text-muted-foreground">
+        <div className="ml-2 text-ink-subtle">
           {chunk.lines.map((line, i) => (
             <div key={i}>- {line}</div>
           ))}
@@ -48,7 +48,7 @@ export function ChunkRenderer({
       return (
         <MessageImage
           chunk={chunk}
-          className="max-h-48 max-w-48 rounded border border-border"
+          className="max-h-48 max-w-48 rounded-tick border border-line"
         />
       )
   }

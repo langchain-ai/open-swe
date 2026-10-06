@@ -1,7 +1,7 @@
 import { useCallback } from "react"
 import { toast } from "sonner"
 
-import { buttonVariants } from "@/components/ui/button"
+import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@/lib/utils"
 
 /** A `javascript:` URL that opens the GitHub PR in the current tab as an Open SWE review. */
@@ -31,7 +31,7 @@ export function ReviewBookmarklet() {
         })
       }}
       className={cn(
-        buttonVariants({ variant: "outline", size: "sm" }),
+        buttonVariants({ variant: "outline", size: "compact" }),
         "cursor-grab active:cursor-grabbing"
       )}
     >

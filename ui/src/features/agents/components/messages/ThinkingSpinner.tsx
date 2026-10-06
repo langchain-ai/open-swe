@@ -16,7 +16,7 @@ export function ThinkingSpinner({
       aria-live="polite"
       aria-atomic="true"
     >
-      <span className="shimmer-text text-xs">
+      <span className="shimmer-text text-label">
         {settingUpSandbox
           ? "Agent is setting up the environment…"
           : (label ?? "Working…")}

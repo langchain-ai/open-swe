@@ -1,4 +1,4 @@
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import type { OpenPullRequest } from "@/lib/api"
 
 export function Diffstat({ pr }: { pr: OpenPullRequest }) {
@@ -10,11 +10,11 @@ export function Diffstat({ pr }: { pr: OpenPullRequest }) {
       className="min-w-24"
       aria-label={`${pr.additions} lines added, ${pr.deletions} lines deleted`}
     >
-      <div className="flex gap-2 font-mono text-xs tabular-nums">
-        <span className="text-emerald-600 dark:text-emerald-400">
+      <div className="flex gap-2 font-mono text-label tabular-nums">
+        <span className="text-positive">
           +{pr.additions.toLocaleString()}
         </span>
-        <span className="text-destructive">
+        <span className="text-risk">
           −{pr.deletions.toLocaleString()}
         </span>
       </div>
@@ -25,11 +25,11 @@ export function Diffstat({ pr }: { pr: OpenPullRequest }) {
         {total > 0 && (
           <>
             <span
-              className="bg-emerald-500"
+              className="bg-positive"
               style={{ width: `${(pr.additions / total) * 100}%` }}
             />
             <span
-              className="bg-destructive"
+              className="bg-risk"
               style={{ width: `${(pr.deletions / total) * 100}%` }}
             />
           </>

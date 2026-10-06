@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { SettingsPanel, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
 import { api, type UserInstructions } from "@/lib/api"
 
 export function PersonalInstructionsSection() {
@@ -61,7 +61,7 @@ export function PersonalInstructionsSection() {
           <Skeleton className="h-40 w-full" />
         ) : instructions.isError ? (
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs text-destructive">
+            <p className="text-label text-risk">
               Could not load your instructions:{" "}
               {instructions.error instanceof Error
                 ? instructions.error.message
@@ -69,7 +69,7 @@ export function PersonalInstructionsSection() {
               . Editing is disabled so a failed load can't overwrite them.
             </p>
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               onClick={() => void instructions.refetch()}
             >
@@ -86,19 +86,19 @@ export function PersonalInstructionsSection() {
             />
             <div className="flex flex-wrap items-center gap-2">
               <Button
-                size="sm"
+                size="compact"
                 disabled={!dirty || mutating}
                 onClick={() => save.mutate(value)}
               >
                 Save instructions
               </Button>
               {dirty && (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-meta text-ink-subtle">
                   Unsaved changes
                 </span>
               )}
               <Button
-                size="sm"
+                size="compact"
                 variant="outline"
                 className="ml-auto"
                 disabled={mutating || (!saved && !dirty)}
@@ -107,7 +107,7 @@ export function PersonalInstructionsSection() {
                 Clear
               </Button>
             </div>
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && <p className="text-label text-risk">{error}</p>}
           </>
         )}
       </SettingsPanel>

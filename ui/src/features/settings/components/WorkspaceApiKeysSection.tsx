@@ -1,9 +1,9 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Input } from "@/components/ui/input"
+import { Button } from "@langchain/gtm-platform-design-system/ui/button"
+import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
+import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { api, type WorkspaceApiKey } from "@/lib/api"
 import {
   AlertDialog,
@@ -80,37 +80,37 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
     >
       <div className="space-y-4 px-4 py-3.5">
         {keys.isPending ? (
-          <p className="text-sm text-muted-foreground">Loading API keys…</p>
+          <p className="text-body text-ink-subtle">Loading API keys…</p>
         ) : keys.isError ? (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-body text-risk">
             {keys.error.message}
           </p>
         ) : keys.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No API keys yet.</p>
+          <p className="text-body text-ink-subtle">No API keys yet.</p>
         ) : (
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-line">
             {keys.data.map((key) => (
               <li
                 key={key.id}
                 className="flex flex-wrap items-center justify-between gap-3 py-3"
               >
                 <div className="space-y-1">
-                  <p className="text-sm font-medium">
+                  <p className="text-body font-medium">
                     {key.name}{" "}
-                    <span className="font-mono text-xs text-muted-foreground">
+                    <span className="font-mono text-meta text-ink-subtle">
                       …{key.key_suffix}
                     </span>
                   </p>
                   {key.description && (
-                    <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+                    <p className="text-body break-words whitespace-pre-wrap text-ink-subtle">
                       {key.description}
                     </p>
                   )}
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-meta text-ink-subtle">
                     Created by{" "}
                     {key.created_by_name || key.created_by || "Unknown user"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-meta text-ink-subtle">
                     {key.status} · Expires{" "}
                     {new Date(key.expires_at).toLocaleString()} · Last used{" "}
                     {key.last_used_at
@@ -120,7 +120,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
                 </div>
                 {key.status === "active" && (
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="destructive"
                     disabled={busy}
                     aria-label={`Revoke ${key.name}`}
@@ -134,8 +134,8 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
           </ul>
         )}
         {secret ? (
-          <div className="space-y-3 rounded-md border border-border p-3">
-            <p className="text-sm font-medium">
+          <div className="space-y-3 rounded-badge border border-line p-3">
+            <p className="text-body font-medium">
               Copy your key now. It won’t be shown again.
             </p>
             <Input
@@ -146,7 +146,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
             />
             <div className="flex gap-2">
               <Button
-                size="sm"
+                size="compact"
                 onClick={() =>
                   void navigator.clipboard
                     .writeText(secret)
@@ -161,7 +161,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
                 {copied ? "Copied" : "Copy key"}
               </Button>
               <Button
-                size="sm"
+                size="compact"
                 variant="outline"
                 onClick={() => setSecret(null)}
               >
@@ -177,7 +177,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
               if (!busy && name.trim() && validDays) void create()
             }}
           >
-            <label className="space-y-1 text-sm">
+            <label className="space-y-1 text-body">
               Key name
               <Input
                 value={name}
@@ -187,7 +187,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
-            <label className="space-y-1 text-sm">
+            <label className="space-y-1 text-body">
               Expires in (days)
               <Input
                 type="number"
@@ -199,7 +199,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
                 onChange={(event) => setDays(event.target.value)}
               />
             </label>
-            <label className="w-full space-y-1 text-sm">
+            <label className="w-full space-y-1 text-body">
               Description (optional)
               <Textarea
                 value={description}
@@ -210,7 +210,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
             </label>
             <Button
               type="submit"
-              size="sm"
+              size="compact"
               disabled={busy || !name.trim() || !validDays}
             >
               {busy ? "Creating…" : "Create API key"}
@@ -218,7 +218,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
           </form>
         )}
         {error && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-body text-risk">
             {error}
           </p>
         )}
@@ -238,7 +238,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-body text-risk">
               {error}
             </p>
           )}

@@ -85,13 +85,13 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 
   if (!expanded) {
     return (
-      <div className="my-0.5 text-[12px] leading-5">
+      <div className="my-0.5 text-meta leading-5">
         <button
           type="button"
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
         >
-          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
+          <span className={isError ? "text-risk" : "text-ink-subtle"}>
             Edited <span className="text-primary">{fileName}</span>
           </span>
         </button>
@@ -101,36 +101,36 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 
   return (
     <div className="my-1">
-      <div className="my-0.5 mb-1.5 text-[12px] leading-5">
+      <div className="my-0.5 mb-1.5 text-meta leading-5">
         <button
           type="button"
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
         >
-          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
+          <span className={isError ? "text-risk" : "text-ink-subtle"}>
             Edited file
           </span>
-          <span className="text-[10px] text-muted-foreground/70">▾</span>
+          <span className="text-meta text-ink-subtle/70">▾</span>
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border/60 bg-muted">
+      <div className="overflow-hidden rounded-compact border border-line/60 bg-muted">
         <div className="flex items-center gap-2 px-3 py-2">
           <span
-            className={`min-w-0 flex-1 truncate text-[13px] ${isError ? "text-red-400" : "text-primary"}`}
+            className={`min-w-0 flex-1 truncate text-label ${isError ? "text-risk" : "text-primary"}`}
           >
             {filePath}
           </span>
-          <span className="flex shrink-0 items-center gap-2 text-xs">
-            <span className="text-green-400">+{additions}</span>
-            <span className="text-red-400">-{deletions}</span>
+          <span className="flex shrink-0 items-center gap-2 text-label">
+            <span className="text-positive">+{additions}</span>
+            <span className="text-risk">-{deletions}</span>
           </span>
         </div>
 
         <div
           ref={scrollRef}
           onScroll={updateScrollIndicators}
-          className="max-h-[250px] overflow-auto border-t border-border"
+          className="max-h-[250px] overflow-auto border-t border-line"
           style={{ boxShadow: edgeShadows || "none" }}
         >
           <MultiFileDiff
@@ -191,9 +191,9 @@ export const ToolExecution = memo(function ToolExecution({
 
   if (isEditOp && status === "pending" && diffData) {
     return (
-      <div className="my-1 text-[12px] leading-5">
+      <div className="my-1 text-meta leading-5">
         <DiffView diffData={diffData} />
-        <span className="text-muted-foreground/70">
+        <span className="text-ink-subtle/70">
           Waiting for approval...
         </span>
       </div>
@@ -209,8 +209,8 @@ export const ToolExecution = memo(function ToolExecution({
       repoPath
     )
     return (
-      <div className="my-0.5 text-[12px] leading-5">
-        <span className="text-yellow-400">Editing {getFileName(path)}...</span>
+      <div className="my-0.5 text-meta leading-5">
+        <span className="text-attention">Editing {getFileName(path)}...</span>
       </div>
     )
   }
@@ -222,17 +222,17 @@ export const ToolExecution = memo(function ToolExecution({
   const displayName = formatToolDisplay(title, toolKind, input, repoPath)
   const statusTextClass =
     status === "error"
-      ? "text-red-400"
+      ? "text-risk"
       : status === "in_progress" || status === "pending"
-        ? "text-yellow-400"
-        : "text-muted-foreground"
+        ? "text-attention"
+        : "text-ink-subtle"
 
   return (
-    <div className="my-0.5 text-[12px] leading-5">
+    <div className="my-0.5 text-meta leading-5">
       <div className="flex min-w-0 items-center gap-2">
         <span className={`${statusTextClass} truncate`}>{displayName}</span>
         {status === "error" && output && (
-          <span className="truncate text-red-400/80">
+          <span className="truncate text-risk">
             {output.slice(0, 80)}
           </span>
         )}
