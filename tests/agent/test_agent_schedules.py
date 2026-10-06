@@ -673,7 +673,11 @@ async def test_the_startup_import_moves_store_automations_into_postgres(
     await fake_client.store.put_item(
         schedules.SCHEDULE_RUN_STATE_NAMESPACE,
         SCHED_1,
-        {"schedule_id": SCHED_1, "last_thread_id": "thread-before"},
+        {
+            "schedule_id": SCHED_1,
+            "last_thread_id": "thread-before",
+            "last_triggered_at": "2026-09-01T09:00:00+00:00",
+        },
     )
 
     assert await schedules.import_store_automations() == 2
@@ -684,6 +688,7 @@ async def test_the_startup_import_moves_store_automations_into_postgres(
     assert first is not None and second is not None
     assert first["workspace"] == "default"
     assert first["last_thread_id"] == "thread-before"
+    assert first["last_triggered_at"] == "2026-09-01T09:00:00+00:00"
     assert first["triggers"][0]["cron_id"] == "cron_kept"
     assert second["workspace"] == "oss"
     assert first["triggers"][0]["config"]["repo"] == "langchain-ai/open-swe"

@@ -397,14 +397,22 @@ _RUN_STATE_FIELDS = (
 )
 
 
+def _timestamp(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        return datetime.fromisoformat(value)
+    return None
+
+
 async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
     """Write only run-state columns, so a launch never overwrites a concurrent edit."""
     values = {key: value for key, value in patch.items() if key in _RUN_STATE_FIELDS}
     if not values:
         return
     for key in ("last_triggered_at", "last_error_at"):
-        if isinstance(values.get(key), str):
-            values[key] = datetime.fromisoformat(values[key])
+        if key in values:
+            values[key] = _timestamp(values[key])
     assignments = ", ".join(f"{key} = :{key}" for key in values)
     async with transaction() as conn:
         await conn.execute(
@@ -820,11 +828,13 @@ async def import_store_automations() -> int:
                     "INSERT INTO automation (id, workspace_id, name, prompt, "
                     "slack_channel_id, slack_notification_mode, admin_thread, model, "
                     "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
-                    "user_email, last_thread_id, last_run_id, last_error) VALUES (:id, "
+                    "user_email, last_thread_id, last_run_id, last_triggered_at, last_error, "
+                    "last_error_at) VALUES (:id, "
                     ":workspace_id, :name, :prompt, :slack_channel_id, "
                     ":slack_notification_mode, :admin_thread, :model, :effort, :base_branch, "
                     ":branch_prefix, :enabled, :created_by, :updated_by, :user_email, "
-                    ":last_thread_id, :last_run_id, :last_error) ON CONFLICT (id) DO NOTHING "
+                    ":last_thread_id, :last_run_id, :last_triggered_at, :last_error, "
+                    ":last_error_at) ON CONFLICT (id) DO NOTHING "
                     "RETURNING 1"
                 ),
                 {
@@ -847,7 +857,9 @@ async def import_store_automations() -> int:
                     "user_email": record.get("user_email") or "",
                     "last_thread_id": state.get("last_thread_id"),
                     "last_run_id": state.get("last_run_id"),
+                    "last_triggered_at": _timestamp(state.get("last_triggered_at")),
                     "last_error": state.get("last_error"),
+                    "last_error_at": _timestamp(state.get("last_error_at")),
                 },
             )
             if inserted.first() is not None:

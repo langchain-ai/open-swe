@@ -4,7 +4,8 @@ A webhook can arrive more than once: the provider retries a delivery it thinks
 failed, and an admin can redeliver one by hand. A handler claims
 ``(scope, key)`` before acting, and only the first claim wins. A handler that
 fails before its side effect releases the claim, so the provider's retry runs.
-A claim lapses at ``expires_at`` and can then be taken again.
+A claim lapses at ``expires_at`` and can then be taken again. Each claim also
+sweeps a few lapsed ones, so the table stays about as large as the live claims.
 """
 
 from datetime import timedelta
@@ -23,11 +24,23 @@ _CLAIM = text(
     RETURNING 1
     """
 )
+_SWEEP = text(
+    """
+    DELETE FROM event_claim WHERE (scope, key) IN (
+        SELECT scope, key FROM event_claim
+        WHERE expires_at <= clock_timestamp()
+        LIMIT :limit
+        FOR UPDATE SKIP LOCKED
+    )
+    """
+)
+_SWEEP_LIMIT = 100
 
 
 async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
     """Take the claim on ``(scope, key)``; ``False`` when someone already holds it."""
     async with transaction() as conn:
+        await conn.execute(_SWEEP, {"limit": _SWEEP_LIMIT})
         result = await conn.execute(_CLAIM, {"scope": scope, "key": key, "ttl": ttl})
         return result.first() is not None
 
@@ -39,12 +52,3 @@ async def release(scope: str, key: str) -> None:
             text("DELETE FROM event_claim WHERE scope = :scope AND key = :key"),
             {"scope": scope, "key": key},
         )
-
-
-async def prune_expired() -> int:
-    """Delete lapsed claims; returns how many."""
-    async with transaction() as conn:
-        result = await conn.execute(
-            text("DELETE FROM event_claim WHERE expires_at <= clock_timestamp()")
-        )
-        return result.rowcount or 0
