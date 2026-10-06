@@ -11,7 +11,7 @@ import logging
 import re
 import uuid
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
@@ -33,6 +33,7 @@ from agent.dashboard.workspace_settings import get_workspace_settings
 from agent.database.postgres import transaction
 from agent.dispatch import create_durable_run
 from agent.github.comments import fence_github_comment_body
+from agent.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from agent.input_messages import InputMessageContext, build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
@@ -79,6 +80,7 @@ GITHUB_EVENT_DESCRIPTIONS: dict[GitHubEvent, str] = {
 }
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
+_NEW_CRON_GRACE = timedelta(minutes=5)
 
 
 def _normalize_slack_channel_id(value: str | None) -> str | None:
@@ -506,8 +508,13 @@ async def _delete_orphan_crons(automation_id: str, keep: set[str]) -> None:
             exc_info=True,
         )
         return
+    settled_before = datetime.now(UTC) - _NEW_CRON_GRACE
     for cron in crons:
         cron_id = cron.get("cron_id")
+        created_at = _timestamp(cron.get("created_at"))
+        # An edit makes its crons before it saves the triggers that own them.
+        if created_at is not None and created_at > settled_before:
+            continue
         if isinstance(cron_id, str) and cron_id not in keep:
             await _delete_cron(cron_id)
 
@@ -788,6 +795,80 @@ def _legacy_triggers(record: dict[str, Any]) -> tuple[list[TriggerConfig], str |
     return [], None
 
 
+async def _import_store_automation(
+    record: dict[str, Any], run_states: dict[str, dict[str, Any]]
+) -> bool:
+    """Copy one stored automation into PostgreSQL; ``True`` when this call inserted it."""
+    imported = False
+    schedule_id = record.get("id")
+    if not isinstance(schedule_id, str) or _uuid(schedule_id) is None:
+        logger.error("Skipping an unreadable stored automation", extra={"schedule_id": schedule_id})
+        return False
+    workspace = _record_workspace(record)
+    workspace_id = await WORKSPACES.id_for_slug(workspace)
+    triggers, cron_id = _legacy_triggers(record)
+    if workspace_id is None or not triggers:
+        logger.warning(
+            "Dropping a stored automation that cannot be imported",
+            extra={"schedule_id": schedule_id, "workspace": workspace},
+        )
+        await _delete_cron(cron_id)
+        await delete_value(SCHEDULES_NAMESPACE, schedule_id)
+        await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
+        return False
+    state = {**record, **run_states.get(schedule_id, {})}
+    async with transaction() as conn:
+        inserted = await conn.execute(
+            text(
+                "INSERT INTO automation (id, workspace_id, name, prompt, "
+                "slack_channel_id, slack_notification_mode, admin_thread, model, "
+                "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
+                "user_email, last_thread_id, last_run_id, last_triggered_at, last_error, "
+                "last_error_at) VALUES (:id, "
+                ":workspace_id, :name, :prompt, :slack_channel_id, "
+                ":slack_notification_mode, :admin_thread, :model, :effort, :base_branch, "
+                ":branch_prefix, :enabled, :created_by, :updated_by, :user_email, "
+                ":last_thread_id, :last_run_id, :last_triggered_at, :last_error, "
+                ":last_error_at) ON CONFLICT (id) DO NOTHING "
+                "RETURNING 1"
+            ),
+            {
+                "id": uuid.UUID(schedule_id),
+                "workspace_id": workspace_id,
+                "name": str(record.get("name") or _derive_name(str(record.get("prompt") or ""))),
+                "prompt": str(record.get("prompt") or ""),
+                "slack_channel_id": record.get("slack_channel_id"),
+                "slack_notification_mode": _slack_notification_mode(record),
+                "admin_thread": record.get("admin_thread") is True,
+                "model": record.get("model") or "Default",
+                "effort": record.get("effort"),
+                "base_branch": record.get("base_branch") or "main",
+                "branch_prefix": record.get("branch_prefix"),
+                "enabled": bool(record.get("enabled")),
+                "created_by": record.get("created_by") or "",
+                "updated_by": record.get("updated_by") or record.get("created_by") or "",
+                "user_email": record.get("user_email") or "",
+                "last_thread_id": state.get("last_thread_id"),
+                "last_run_id": state.get("last_run_id"),
+                "last_triggered_at": _timestamp(state.get("last_triggered_at")),
+                "last_error": state.get("last_error"),
+                "last_error_at": _timestamp(state.get("last_error_at")),
+            },
+        )
+        if inserted.first() is not None:
+            await _insert_triggers(
+                conn,
+                schedule_id,
+                triggers,
+                [uuid.uuid4() for _ in triggers],
+                [cron_id if isinstance(t, ScheduleTrigger) else None for t in triggers],
+            )
+            imported = True
+    await delete_value(SCHEDULES_NAMESPACE, schedule_id)
+    await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
+    return imported
+
+
 async def import_store_automations() -> int:
     """Copy automations still in the LangGraph Store into PostgreSQL; returns how many.
 
@@ -803,76 +884,14 @@ async def import_store_automations() -> int:
     }
     imported = 0
     for record in await search_all_values(SCHEDULES_NAMESPACE):
-        schedule_id = record.get("id")
-        if not isinstance(schedule_id, str) or _uuid(schedule_id) is None:
-            logger.error(
-                "Skipping an unreadable stored automation", extra={"schedule_id": schedule_id}
+        try:
+            imported += await _import_store_automation(record, run_states)
+        except Exception:
+            # One bad record must not keep every later one in the Store.
+            logger.exception(
+                "Could not import a stored automation; it stays in the Store",
+                extra={"schedule_id": record.get("id")},
             )
-            continue
-        workspace = _record_workspace(record)
-        workspace_id = await WORKSPACES.id_for_slug(workspace)
-        triggers, cron_id = _legacy_triggers(record)
-        if workspace_id is None or not triggers:
-            logger.warning(
-                "Dropping a stored automation that cannot be imported",
-                extra={"schedule_id": schedule_id, "workspace": workspace},
-            )
-            await _delete_cron(cron_id)
-            await delete_value(SCHEDULES_NAMESPACE, schedule_id)
-            await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
-            continue
-        state = {**record, **run_states.get(schedule_id, {})}
-        async with transaction() as conn:
-            inserted = await conn.execute(
-                text(
-                    "INSERT INTO automation (id, workspace_id, name, prompt, "
-                    "slack_channel_id, slack_notification_mode, admin_thread, model, "
-                    "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
-                    "user_email, last_thread_id, last_run_id, last_triggered_at, last_error, "
-                    "last_error_at) VALUES (:id, "
-                    ":workspace_id, :name, :prompt, :slack_channel_id, "
-                    ":slack_notification_mode, :admin_thread, :model, :effort, :base_branch, "
-                    ":branch_prefix, :enabled, :created_by, :updated_by, :user_email, "
-                    ":last_thread_id, :last_run_id, :last_triggered_at, :last_error, "
-                    ":last_error_at) ON CONFLICT (id) DO NOTHING "
-                    "RETURNING 1"
-                ),
-                {
-                    "id": uuid.UUID(schedule_id),
-                    "workspace_id": workspace_id,
-                    "name": str(
-                        record.get("name") or _derive_name(str(record.get("prompt") or ""))
-                    ),
-                    "prompt": str(record.get("prompt") or ""),
-                    "slack_channel_id": record.get("slack_channel_id"),
-                    "slack_notification_mode": _slack_notification_mode(record),
-                    "admin_thread": record.get("admin_thread") is True,
-                    "model": record.get("model") or "Default",
-                    "effort": record.get("effort"),
-                    "base_branch": record.get("base_branch") or "main",
-                    "branch_prefix": record.get("branch_prefix"),
-                    "enabled": bool(record.get("enabled")),
-                    "created_by": record.get("created_by") or "",
-                    "updated_by": record.get("updated_by") or record.get("created_by") or "",
-                    "user_email": record.get("user_email") or "",
-                    "last_thread_id": state.get("last_thread_id"),
-                    "last_run_id": state.get("last_run_id"),
-                    "last_triggered_at": _timestamp(state.get("last_triggered_at")),
-                    "last_error": state.get("last_error"),
-                    "last_error_at": _timestamp(state.get("last_error_at")),
-                },
-            )
-            if inserted.first() is not None:
-                await _insert_triggers(
-                    conn,
-                    schedule_id,
-                    triggers,
-                    [uuid.uuid4() for _ in triggers],
-                    [cron_id if isinstance(t, ScheduleTrigger) else None for t in triggers],
-                )
-                imported += 1
-        await delete_value(SCHEDULES_NAMESPACE, schedule_id)
-        await delete_value(SCHEDULE_RUN_STATE_NAMESPACE, schedule_id)
     return imported
 
 
@@ -1310,6 +1329,15 @@ async def launch_github_automations(
     events = _github_events(event_type, payload)
     if not events:
         return []
+    sender_value = payload.get("sender")
+    sender = sender_value.get("login") if isinstance(sender_value, dict) else None
+    if sender in OPEN_SWE_GITHUB_LOGINS:
+        # A run that opens or closes a pull request would otherwise trigger itself.
+        logger.info(
+            "Ignoring Open SWE's own GitHub event for automations",
+            extra={"github_delivery": delivery_id, "github_event": event_type},
+        )
+        return []
     if not delivery_id:
         logger.warning("GitHub automation delivery is missing a delivery ID")
         return []
@@ -1418,14 +1446,17 @@ async def launch_scheduled_agent_run(
         await _delete_orphan_crons(schedule_id, keep=set())
         return {"status": "missing", "schedule_id": schedule_id}
     triggers = record.get("triggers") or []
+    cron_ids = {t["cron_id"] for t in triggers if t.get("cron_id")}
+    if trigger_id is None:
+        # A cron from before trigger ids; one whose trigger was since replaced
+        # would otherwise keep firing next to the new one.
+        await _delete_orphan_crons(schedule_id, keep=cron_ids)
     schedules = [t for t in triggers if t.get("kind") == "schedule"]
     fired = next((t for t in schedules if t.get("id") == trigger_id), None) or (
         schedules[0] if schedules and trigger_id is None else None
     )
     if fired is None:
-        await _delete_orphan_crons(
-            schedule_id, keep={t["cron_id"] for t in triggers if t.get("cron_id")}
-        )
+        await _delete_orphan_crons(schedule_id, keep=cron_ids)
         return {"status": "trigger_mismatch", "schedule_id": schedule_id}
     return await _launch_agent_schedule_record(record, repo=_trigger_repo(record, fired["id"]))
 

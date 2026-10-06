@@ -3,7 +3,8 @@
 A webhook can arrive more than once: the provider retries a delivery it thinks
 failed, and an admin can redeliver one by hand. A handler claims
 ``(scope, key)`` before acting, and only the first claim wins. A handler that
-fails before its side effect releases the claim, so the provider's retry runs.
+fails before its side effect releases the claim, so a later delivery of the
+same event (a provider retry or a manual redelivery) runs.
 A claim lapses at ``expires_at`` and can then be taken again. Each claim also
 sweeps a few lapsed ones, so the table stays about as large as the live claims.
 """

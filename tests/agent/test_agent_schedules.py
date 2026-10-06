@@ -644,6 +644,41 @@ async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
     assert opening["workspace"] == "core"
 
 
+async def test_open_swe_events_do_not_trigger_automations(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            workspace="default",
+            prompt="Review the new pull request",
+            triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.opened"])],
+        ),
+    )
+    payload = {
+        "action": "opened",
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe", "private": True},
+        "pull_request": {"number": 9},
+        "sender": {"login": "open-swe[bot]"},
+    }
+
+    assert await schedules.launch_github_automations("pull_request", payload, "d-1") == []
+    assert fake_client.runs.created == []
+
+
+async def test_one_unreadable_store_automation_does_not_block_the_rest(
+    fake_client: _FakeClient, auth: None
+) -> None:
+    broken = _scheduled_record(id=SCHED_GONE, schedule="not a cron")
+    for record in (broken, _scheduled_record()):
+        await fake_client.store.put_item(schedules.SCHEDULES_NAMESPACE, record["id"], record)
+
+    assert await schedules.import_store_automations() == 1
+    assert await schedules.get_agent_schedule(SCHED_1) is not None
+    # The unreadable one stays in the Store for a fixed release to import.
+    assert (tuple(schedules.SCHEDULES_NAMESPACE), SCHED_GONE) in fake_client.store.items
+
+
 async def test_a_cron_firing_before_the_store_import_keeps_its_cron(
     fake_client: _FakeClient, auth: None
 ) -> None:

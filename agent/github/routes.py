@@ -107,7 +107,8 @@ async def github_webhook(
                 "status": "ignored",
                 "reason": f"Unsupported GitHub pull_request action: {action}",
             }
-        if action in {"opened", "closed"}:
+        # The same repository allowlist as issue automations, checked below for them.
+        if action in {"opened", "closed"} and common.is_repo_allowed(webhook_repo_config):
             background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
         if action in {"opened", "edited"} or action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(common.update_agent_thread_pr_state, payload)
