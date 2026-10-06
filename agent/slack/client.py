@@ -987,6 +987,10 @@ async def stop_slack_stream(
 
 async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) -> bool:
     """Set (or clear, with "") the animated assistant status shown under a thread."""
+    from agent.slack.dm import CONCIERGE_TS
+
+    if channel_id.startswith("D") and thread_ts == CONCIERGE_TS:
+        return True
     try:
         await _slack_stream_call(
             "assistant.threads.setStatus",
