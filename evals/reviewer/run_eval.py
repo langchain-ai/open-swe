@@ -22,6 +22,7 @@ from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
 from agent.review.eval_store import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
+from evals.reviewer.codex_target import review_pr_codex
 from evals.reviewer.costs import print_summary, record_experiment_costs
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.store_reporter import StoreReporter, is_enabled
@@ -331,6 +332,12 @@ async def main() -> None:
         choices=sorted(_VALID_SEVERITIES),
     )
     ap.add_argument(
+        "--target",
+        choices=["openswe", "codex"],
+        default="openswe",
+        help="Reviewer to evaluate: the Open SWE reviewer graph or the Codex CLI reviewer.",
+    )
+    ap.add_argument(
         "--no-cleanup",
         action="store_true",
         help="Skip deleting LangGraph threads after the experiment finishes.",
@@ -397,16 +404,19 @@ async def main() -> None:
 
     eval_error: BaseException | None = None
     try:
+        codex = args.target == "codex"
         results = await aevaluate(
-            review_pr,
+            review_pr_codex if codex else review_pr,
             data=data,
             evaluators=[judge_match],
             summary_evaluators=[aggregate_pr],
             experiment_prefix=experiment_prefix,
             max_concurrency=max_concurrency,
             num_repetitions=1,
+            metadata={"target": args.target},
         )
-        await _record_costs(results.experiment_name, reviewer_project)
+        if not codex:
+            await _record_costs(results.experiment_name, reviewer_project)
     except BaseException as exc:
         eval_error = exc
         raise

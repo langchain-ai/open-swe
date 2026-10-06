@@ -66,6 +66,22 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
+### Codex reviewer baseline
+
+`--target codex` scores `codex exec review` on the same dataset and judge. Each
+PR is checked out at its head SHA from a cached blobless clone
+(`~/.cache/openswe-codex-eval`, override with `CODEX_EVAL_CACHE_DIR`) and
+reviewed against its base SHA. Findings come from Codex's structured review
+output (P0–P3 map to critical–low). Requires the `codex` CLI on `PATH`. Model
+calls go through the LangSmith gateway when it is enabled, otherwise through
+Codex's own auth (`CODEX_API_KEY` or `codex login`). Set `CODEX_EVAL_MODEL`
+and `CODEX_EVAL_REASONING_EFFORT` to pin them; `--model-id`,
+`--reasoning-effort`, and cost collection apply only to the Open SWE target.
+
+```bash
+uv run python -m evals.reviewer.run_eval --target codex --experiment-prefix codex-review
+```
+
 ### From the dashboard (recommended for full runs)
 
 Admins start a run from **Evals** in the sidebar (`/admin/evals`): set the
