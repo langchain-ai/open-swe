@@ -380,11 +380,11 @@ def desktop_handoff_from_state(state_payload: dict[str, Any]) -> tuple[str, int]
 
 
 # Dashboard route where users manage their GitHub↔Slack link.
-PROFILE_SETTINGS_PATH = "/my-settings"
+PROFILE_SETTINGS_PATH = "/my-settings/connections"
 
 
 def build_settings_url() -> str | None:
-    """Return the dashboard Profile Settings URL, or ``None`` if not configured.
+    """Return the dashboard Connections settings URL, or ``None`` if not configured.
 
     This is a plain, token-free link: it carries no per-user identity, so it is
     safe to share in a public Slack thread. The user signs in with GitHub from

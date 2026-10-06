@@ -88,7 +88,9 @@ class CompletedReview(Base):
         author = event.pull_request.user
         if reviewer is None or reviewer.type != "User":
             return
-        if author is not None and author.id == reviewer.id:
+        if author is None or author.id == reviewer.id:
+            return
+        if await User.for_identity("github", str(author.id)) is None:
             return
         repository = f"{event.repository.owner.login}/{event.repository.name}".lower()
         extra = {

@@ -172,6 +172,30 @@
         "title": "AllowedSlackBot",
         "type": "object"
       },
+      "AllowedSlackBotEntry": {
+        "description": "What any signed-in user may see of an allowed bot: enough to name its threads.",
+        "properties": {
+          "image_url": {
+            "default": "",
+            "title": "Image Url",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name"
+        ],
+        "title": "AllowedSlackBotEntry",
+        "type": "object"
+      },
       "ApiKeyCreate": {
         "properties": {
           "description": {
@@ -7117,6 +7141,18 @@
               }
             ],
             "title": "Sandbox Openai Enabled"
+          },
+          "slack_follow_up_suggestions": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Follow Up Suggestions"
           }
         },
         "title": "WorkspaceSettingsUpdate",
@@ -15950,6 +15986,38 @@
         ]
       }
     },
+    "/dashboard/api/slack/allowed-bots/directory": {
+      "get": {
+        "description": "Names and avatars of allowed bots, for the Bots view every user can open.",
+        "operationId": "api_allowed_slack_bot_directory_dashboard_api_slack_allowed_bots_directory_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AllowedSlackBotEntry"
+                  },
+                  "title": "Response Api Allowed Slack Bot Directory Dashboard Api Slack Allowed Bots Directory Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Allowed Slack Bot Directory",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
     "/dashboard/api/slack/allowed-bots/{team_id}/{bot_id}": {
       "delete": {
         "operationId": "api_remove_allowed_slack_bot_dashboard_api_slack_allowed_bots__team_id___bot_id__delete",
@@ -16542,7 +16610,8 @@
               "enum": [
                 "all",
                 "interactive",
-                "automation"
+                "automation",
+                "bot"
               ],
               "title": "Scope",
               "type": "string"
@@ -16562,6 +16631,23 @@
                 }
               ],
               "title": "Automation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bot",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot"
             }
           },
           {

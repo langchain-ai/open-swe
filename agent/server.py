@@ -234,6 +234,7 @@ from agent.tools import (
     search_pull_requests,
     slack_add_reaction,
     slack_attach_html,
+    slack_breakout_thread,
     slack_list_channel_members,
     slack_list_channels,
     slack_move_thread,
@@ -242,7 +243,6 @@ from agent.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
-    slack_start_new_thread,
     slack_start_review_channel,
     start_thread,
     submit_thread_feedback,
@@ -335,7 +335,7 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
         "slack_start_review_channel",
     }
 )
-SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_start_new_thread"})
+SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_breakout_thread"})
 
 
 def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
@@ -552,7 +552,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_post_message",
-        "slack_start_new_thread",
+        "slack_breakout_thread",
         "slack_start_review_channel",
         "publish_workspace",
         "refresh_workspace_start",
@@ -1357,6 +1357,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
+                slack_follow_up_suggestions=_slack_concierge_run(cfg)
+                or (await cached_workspace_settings(workspace_slug(cfg))).get(
+                    "slack_follow_up_suggestions"
+                )
+                is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
                 prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
@@ -1727,7 +1732,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_post_message,
         slack_read_thread_messages,
         slack_reply,
-        slack_start_new_thread,
+        slack_breakout_thread,
         slack_start_review_channel,
     ]
     static_tools = [
@@ -1781,7 +1786,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_read_channel_messages,
         slack_read_thread_messages,
         slack_reply,
-        slack_start_new_thread,
+        slack_breakout_thread,
         slack_start_review_channel,
         submit_thread_feedback,
         suggest_task,
