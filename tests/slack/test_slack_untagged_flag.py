@@ -138,6 +138,45 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
 
 
+@pytest.mark.parametrize(
+    ("event_type", "text", "expected_status"),
+    [
+        ("message", "please ask @openswe about this", "ignored"),
+        ("message", "<@BOT> help", "accepted"),
+        ("app_mention", "help", "accepted"),
+    ],
+)
+async def test_only_slack_mentions_trigger_normal_channels(
+    event_type: str, text: str, expected_status: str
+) -> None:
+    payload = _message_payload(text, "Ev-mention")
+    payload["event"]["type"] = event_type
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+
+    assert response["status"] == expected_status
+    assert bool(background_tasks.tasks) == (expected_status == "accepted")
+
+
+async def test_a_watched_channel_message_checks_automations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_routes, "_slack_channel_watched", AsyncMock(return_value=True))
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_payload("deploy failed", "Ev-watched"))),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    # Ignored as a conversation, still checked against Slack automations.
+    assert response["status"] == "ignored"
+    assert [task for task, _ in background_tasks.tasks] == [slack_routes._launch_slack_automations]
+
+
 @pytest.mark.parametrize("reply", [False, True])
 @pytest.mark.parametrize("event_type", ["message", "app_mention"])
 async def test_kitchen_messages_preserve_explicit_mentions(

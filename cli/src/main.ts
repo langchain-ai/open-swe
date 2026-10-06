@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto"
 
 import pkg from "../package.json"
 import { ApiClient, ApiError, normalizeBackend } from "./api.ts"
-import { Bridge } from "./bridge.ts"
+import { Bridge } from "open-swe-bridge-client"
+import { toolCommand } from "./commands.ts"
 import {
   forgetSession,
   readBridgeMemory,
@@ -32,8 +33,10 @@ Usage:
   oswe logout                       Forget the session for the current backend
   oswe auth status                  Show which credential is in use and check it
   oswe run [options] [prompt...]    Start an agent bridged to this directory
-  oswe mcp                          Serve an MCP server on stdio (list_threads,
-                                    upload_session)
+  oswe mcp                          Serve an MCP server on stdio
+  oswe tools                        List all tool subcommands and JSON schemas
+  oswe tool NAME [--json <object>] Call any MCP tool (JSON stdin also accepted)
+  oswe tool NAME --help            Show a tool's description and input schema
   oswe --help | --version
 
 Run options:
@@ -197,10 +200,13 @@ async function runCommand(options: RunOptions): Promise<number> {
 
   let bridge: Bridge
   try {
-    bridge = await Bridge.open(api, {
+    bridge = await Bridge.open(api.bridges(), {
+      client: "cli",
       rootPath: root,
       label: basename(root),
       bridgeId,
+      credentialRejected: credential.rejected,
+      log: (message) => process.stderr.write(`oswe: ${message}\n`),
     })
   } catch (cause) {
     if (!(cause instanceof ApiError)) throw cause
@@ -341,6 +347,18 @@ function parseCli(argv: readonly string[]) {
 }
 
 export async function main(argv: readonly string[]): Promise<number> {
+  const first = argv[0]
+  if (first === "tool" || first === "tools") {
+    try {
+      return await toolCommand(
+        first === "tool" ? argv.slice(1) : argv,
+        pkg.version
+      )
+    } catch (cause) {
+      fail(errorMessage(cause))
+      return 1
+    }
+  }
   let parsed: ReturnType<typeof parseCli>
   try {
     parsed = parseCli(argv)

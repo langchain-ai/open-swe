@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
@@ -93,9 +93,16 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     monkeypatch, explicit, expected, email_only
 ):
     posted = _patch_slack(monkeypatch)
-    root = AsyncMock(return_value=("200.0", None))
+    root = AsyncMock(return_value="200.0")
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
+    monkeypatch.setattr(
+        breakout,
+        "dashboard_thread_url",
+        lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
+    )
+    update = AsyncMock(return_value=None)
+    monkeypatch.setattr(breakout, "update_slack_message", update)
     monkeypatch.setattr(
         breakout.common, "resolve_slack_thread_id", AsyncMock(return_value="new-thread")
     )
@@ -145,6 +152,15 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     assert root.await_args.args[1] == (
         f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE>"
     )
+    update.assert_awaited_once_with(
+        expected,
+        "200.0",
+        f"`/breakout`: {instruction} · <https://slack/p105|(source)> · <@U_ALICE> "
+        "<https://dashboard.example/agents/new-thread|Open in Web>",
+        blocks=ANY,
+        unfurl_links=False,
+        unfurl_media=False,
+    )
     posted.source_line.assert_awaited_once_with("C1", "105.0")
     posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", expected, "200.0")
     sent = mention.await_args.args[0]
@@ -154,13 +170,14 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         instruction,
         "100.0",
     )
+    assert sent.breakout_root_suffix == " · <https://slack/p105|(source)> · <@U_ALICE>"
     posted.ephemeral.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_breakout_after_mention_preserves_preceding_text_as_prior_message(monkeypatch):
     posted = _patch_slack(monkeypatch)
-    root = AsyncMock(return_value=("200.0", None))
+    root = AsyncMock(return_value="200.0")
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
     monkeypatch.setattr(

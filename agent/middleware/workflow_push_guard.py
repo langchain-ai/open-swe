@@ -526,17 +526,16 @@ async def _post_slack_approval_if_needed(
     message = _approval_slack_message(
         change, _approval_url(_thread_id(request), change.fingerprint)
     )
-    message_ts, error = await post_slack_thread_reply_with_ts(
+    await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
         message,
         blocks=build_workflow_approval_blocks(message, change.fingerprint),
         agent_thread_id=cfg.thread_id,
     )
-    if message_ts and not error:
-        thread_id = _thread_id(request)
-        if thread_id:
-            await mark_workflow_push_notified(thread_id, change.fingerprint)
+    thread_id = _thread_id(request)
+    if thread_id:
+        await mark_workflow_push_notified(thread_id, change.fingerprint)
 
 
 async def _approval_state(request: ToolCallRequest, change: WorkflowPushChange) -> str:
