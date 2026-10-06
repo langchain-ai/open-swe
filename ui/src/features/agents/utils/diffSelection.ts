@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
+import { areSelectionsEqual } from "@pierre/diffs"
 import type { SelectedLineRange, SelectionSide } from "@pierre/diffs"
 
 import { DIFF_VIRTUAL_METRICS } from "@/features/agents/utils/diffUtils"
@@ -194,11 +195,17 @@ export function useDiffLineSelection({
       if (enabled) commit("text", textRangeIn(wrapperRef.current))
     },
   }
+  const highlighted = selectedLines === undefined ? ownSelection : selectedLines
   return {
     diffOptions,
     wrapperProps,
-    selectedLines: selectedLines === undefined ? ownSelection : selectedLines,
-    committed,
+    selectedLines: highlighted,
+    // The caller can clear its highlight on its own (e.g. ⌘L adding it to
+    // chat), which ends the commit too.
+    committed:
+      committed && areSelectionsEqual(committed.range, highlighted ?? undefined)
+        ? committed
+        : null,
     anchor,
     close,
   }
