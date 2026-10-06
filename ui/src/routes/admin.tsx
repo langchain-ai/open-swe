@@ -27,7 +27,6 @@ import {
   slackManifestPlaceholdersRemain,
 } from "@/lib/slack-manifest"
 import { dashboardApiBase } from "@/lib/api-base"
-import { AllowedSlackBotsSection } from "@/features/settings/components/AllowedSlackBotsSection"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
@@ -92,9 +91,7 @@ function AdminPage() {
 
       <SlackIntegrationSection
         backendUrl={session.data.slack_base_url ?? session.data.api_base_url}
-      >
-        <AllowedSlackBotsSection />
-      </SlackIntegrationSection>
+      />
 
       <TriggerReviewSection />
 

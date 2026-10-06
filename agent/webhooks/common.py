@@ -131,7 +131,13 @@ from agent.slack.payloads import SlackChannelContext
 from agent.slack.stop import process_agent_session_stopped, process_slack_stop_reaction
 from agent.source_context import SourceContext
 from agent.threads.creation import create_thread, ensure_titled_thread
-from agent.threads.summary import thread_is_private, thread_is_promptable
+from agent.threads.summary import (
+    SLACK_BOT_TRIGGER_KIND,
+    TRIGGERING_BOT_KEY,
+    thread_is_bot_triggered,
+    thread_is_private,
+    thread_is_promptable,
+)
 from agent.threads.workflow_approval import decide_workflow_push_approval
 from agent.transcript.mirror import mirror_thread_metadata
 from agent.users import User
@@ -583,6 +589,9 @@ async def upsert_agent_thread_metadata(
         existing_dict["metadata"] if isinstance(existing_dict.get("metadata"), dict) else {}
     )
     existing_context = SourceContext.from_metadata(existing_meta)
+    # A thread a bot started stays one, whoever speaks in its Slack thread later.
+    if thread_is_bot_triggered(existing_meta):
+        metadata.pop("trigger_kind")
     if owner_type == "system" and existing_meta:
         expected_bot = source_context.slack_thread if source_context else None
         saved_bot = existing_context.slack_thread
@@ -639,6 +648,12 @@ async def upsert_agent_thread_metadata(
     ):
         metadata["visibility"] = visibility
         metadata["owner_type"] = owner_type
+        starting_bot = source_context.slack_thread if source_context else None
+        if owner_type == "system" and starting_bot and starting_bot.triggering_bot_id:
+            metadata["trigger_kind"] = SLACK_BOT_TRIGGER_KIND
+            metadata[TRIGGERING_BOT_KEY] = (
+                f"{starting_bot.team_id}:{starting_bot.triggering_bot_id}"
+            )
         if token_repositories is not None:
             metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(token_repositories)
         initiating_login = owner_login.strip() or sender_login.strip()

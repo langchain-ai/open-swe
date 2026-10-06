@@ -695,6 +695,18 @@ async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id
     assert not captured["run_create"]["kwargs"]["config"]["configurable"].get("github_login")
 
 
+async def test_bot_started_thread_stays_marked_after_a_person_replies(bot_run):
+    request, threads, _ = bot_run
+    await slack_webhooks._process_slack_mention_impl(request, None)
+    assert threads.metadata["trigger_kind"] == "slack_bot"
+    assert threads.metadata["triggering_bot"] == "T123:B123"
+    assert await webhook_common.upsert_agent_thread_metadata(
+        "mapped-thread", source="slack", user_email="alice@example.com", title=""
+    )
+    assert threads.metadata["trigger_kind"] == "slack_bot"
+    assert threads.metadata["triggering_bot"] == "T123:B123"
+
+
 @pytest.mark.parametrize("block", ["removed", "other-owner", "private", "other-bot", "store-error"])
 async def test_bot_authorization_is_checked_before_execution(
     monkeypatch, bot_run, fake_store, block
