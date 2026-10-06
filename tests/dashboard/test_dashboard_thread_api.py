@@ -828,7 +828,6 @@ async def test_task_hierarchy_pages_filters_visibility_and_idle_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
-    monkeypatch.setattr(thread_listing, "_THREADS_PAGE_SCAN_CAP", 2)
     threads = _make_threads(5, resolved_before=0)
     for thread in threads:
         cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
@@ -911,11 +910,10 @@ async def test_task_hierarchy_pages_filters_visibility_and_idle_refresh(
     assert standalone["items"][0]["taskMembership"]["coordinatorThreadId"] is None
 
 
-async def test_task_hierarchy_stops_after_enough_distinct_matching_roots(
+async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
-    monkeypatch.setattr(thread_listing, "_THREADS_PAGE_SCAN_CAP", 2)
     threads = _make_threads(12, resolved_before=0)
     for index, thread in enumerate(threads):
         cast(dict[str, object], thread["metadata"]).update(
@@ -988,6 +986,14 @@ async def test_task_hierarchy_stops_after_enough_distinct_matching_roots(
     )
     assert [item["id"] for item in newest["items"]] == ["t11"]
     assert max(offsets) == 0
+
+    monkeypatch.setattr(thread_listing, "_THREADS_PAGE_SCAN_CAP", 4)
+    offsets.clear()
+    no_matches = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, include_all=True, repo="langchain-ai/another-repo"
+    )
+    assert no_matches["items"] == []
+    assert max(offsets) < 4
 
 
 async def test_list_dashboard_threads_page_scopes_search_to_requested_participant(

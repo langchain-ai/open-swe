@@ -569,7 +569,7 @@ async def _collect_thread_candidates(
             bot=bot,
             admin_threads=admin_threads,
         )
-        while hierarchy or offset < _THREADS_PAGE_SCAN_CAP:
+        while offset < _THREADS_PAGE_SCAN_CAP:
             batch = await _search_threads_batch(
                 client,
                 metadata_filter,
