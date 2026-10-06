@@ -16,6 +16,7 @@ interface Annotation {
 export function PageAnnotations() {
   const navigate = useNavigate()
   const [active, setActive] = useState(false)
+  const [minimized, setMinimized] = useState(false)
   const [hovered, setHovered] = useState<Element | null>(null)
   const [selected, setSelected] = useState<ElementContext | null>(null)
   const [note, setNote] = useState("")
@@ -157,107 +158,120 @@ export function PageAnnotations() {
       )}
       <section
         aria-label="Page annotations"
-        className="pointer-events-auto absolute bottom-6 left-1/2 flex max-h-[75vh] w-[min(440px,calc(100vw-32px))] -translate-x-1/2 flex-col gap-3 overflow-y-auto rounded-xl border bg-background p-4 text-foreground shadow-xl"
+        className="pointer-events-auto absolute right-3 bottom-3 flex max-h-[60vh] w-[min(300px,calc(100vw-24px))] flex-col gap-2 overflow-y-auto rounded-lg border bg-background p-3 text-foreground shadow-xl"
       >
-        <div className="flex items-center justify-between">
-          <strong>Annotation mode</strong>
+        <div className="flex items-center justify-between gap-1">
+          <strong className="text-sm">Annotate · {annotations.length}</strong>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setMinimized((value) => !value)}
+          >
+            {minimized ? "Expand" : "Hide"}
+          </Button>
           <Button variant="ghost" size="sm" onClick={toggle}>
             Close
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">
-          ⌘ / Ctrl + Alt + Shift + A · Click an element to add a note. Esc
-          cancels. Scroll to explore.
-        </p>
-        {selected ? (
-          <form
-            className="flex flex-col gap-2"
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (!note.trim()) return
-              setAnnotations((items) => [
-                ...items,
-                { context: selected, note: note.trim() },
-              ])
-              setSelected(null)
-              setNote("")
-            }}
-          >
-            <code className="truncate text-xs" title={selected.selector}>
-              {selected.selector}
-            </code>
-            <textarea
-              aria-label="Annotation note"
-              autoFocus
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              placeholder="What should change here?"
-              className="min-h-20 rounded-md border bg-background p-2 text-sm"
-            />
-            <div className="flex gap-2">
-              <Button type="submit" disabled={!note.trim()}>
-                Save annotation
+        {(!minimized || selected) && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              ⌘ / Ctrl + Alt + Shift + A · Click an element to add a note. Esc
+              cancels. Scroll to explore.
+            </p>
+            {selected ? (
+              <form
+                className="flex flex-col gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  if (!note.trim()) return
+                  setAnnotations((items) => [
+                    ...items,
+                    { context: selected, note: note.trim() },
+                  ])
+                  setSelected(null)
+                  setNote("")
+                }}
+              >
+                <code className="truncate text-xs" title={selected.selector}>
+                  {selected.selector}
+                </code>
+                <textarea
+                  aria-label="Annotation note"
+                  autoFocus
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  placeholder="What should change here?"
+                  className="min-h-20 rounded-md border bg-background p-2 text-sm"
+                />
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={!note.trim()}>
+                    Save annotation
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setSelected(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <p className="text-sm">
+                {annotations.length
+                  ? `${annotations.length} annotation${annotations.length === 1 ? "" : "s"} ready`
+                  : "Select anything on this page to begin."}
+              </p>
+            )}
+            {annotations.map((annotation, index) => (
+              <div
+                key={index}
+                className="flex items-start gap-2 rounded-md border p-2 text-sm"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {index + 1}. {annotation.context.tag} ·{" "}
+                    {annotation.context.text || annotation.context.selector}
+                  </span>
+                  {annotation.note}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Remove annotation ${index + 1}`}
+                  onClick={() =>
+                    setAnnotations((items) =>
+                      items.filter((_, i) => i !== index)
+                    )
+                  }
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              Includes page URL, selector, classes, element text and React
+              component names when available. Review notes before sharing;
+              visible page text may be sensitive.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                disabled={!annotations.length || Boolean(selected)}
+                onClick={copy}
+              >
+                Copy annotations
               </Button>
               <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setSelected(null)}
+                disabled={!annotations.length || Boolean(selected)}
+                onClick={startThread}
               >
-                Cancel
+                Start new thread
               </Button>
             </div>
-          </form>
-        ) : (
-          <p className="text-sm">
-            {annotations.length
-              ? `${annotations.length} annotation${annotations.length === 1 ? "" : "s"} ready`
-              : "Select anything on this page to begin."}
-          </p>
+          </>
         )}
-        {annotations.map((annotation, index) => (
-          <div
-            key={index}
-            className="flex items-start gap-2 rounded-md border p-2 text-sm"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs text-muted-foreground">
-                {index + 1}. {annotation.context.tag} ·{" "}
-                {annotation.context.text || annotation.context.selector}
-              </span>
-              {annotation.note}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={`Remove annotation ${index + 1}`}
-              onClick={() =>
-                setAnnotations((items) => items.filter((_, i) => i !== index))
-              }
-            >
-              Remove
-            </Button>
-          </div>
-        ))}
-        <p className="text-xs text-muted-foreground">
-          Includes page URL, selector, classes, element text and React component
-          names when available. Review notes before sharing; visible page text
-          may be sensitive.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            disabled={!annotations.length || Boolean(selected)}
-            onClick={copy}
-          >
-            Copy annotations
-          </Button>
-          <Button
-            disabled={!annotations.length || Boolean(selected)}
-            onClick={startThread}
-          >
-            Start new thread
-          </Button>
-        </div>
       </section>
     </div>,
     document.body
