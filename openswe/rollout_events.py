@@ -115,8 +115,7 @@ def _instructions(sha: str) -> str:
     return (
         f"This deployment includes merge commit {sha}. "
         "The event names the target that finished syncing. "
-        "Confirm the fix and look for regressions on a staging or production target. "
-        "A development target does not need a check. "
+        "Confirm the fix and look for regressions. "
         "Cancel this subscription with listen_events after every production target "
         "expected for this change has included the commit."
     )
@@ -197,11 +196,11 @@ async def subscribe_merged_thread(
     sha: str,
     metadata: dict[str, object],
 ) -> None:
-    """Listen for release deploys that include this pull request's merge commit.
+    """Listen for deploys that include this pull request's merge commit.
 
     Best-effort: a failure here leaves the merged thread state as it was.
     ``one_shot`` stays off so the first production region does not cancel the
-    rest. Development deploys use a different event type and do not match.
+    rest.
     """
     merge_sha = sha.strip().lower()
     if not _MERGE_SHA_RE.fullmatch(merge_sha) or not configured():
