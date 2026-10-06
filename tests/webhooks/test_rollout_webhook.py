@@ -2,6 +2,7 @@
 
 import json
 import time
+from unittest.mock import AsyncMock
 
 import httpx
 import jwt
@@ -50,7 +51,10 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
     monkeypatch.setenv("ROLLOUT_OIDC_WORKFLOWS", _WORKFLOWS)
     monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
+    record = AsyncMock(return_value=True)
+    monkeypatch.setattr("agent.rollout_events.EventLog.record", record)
     api = FastAPI()
+    api.state.record = record
     api.include_router(router)
     return api
 
@@ -69,6 +73,15 @@ async def test_rollout_webhook_acknowledges_a_github_actions_token(app: FastAPI)
     response = await _post(app, body, _token())
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "target": "gcp-dev", "commits": 2}
+    args = app.state.record.await_args
+    assert args.args[2] == "deployment"
+    assert args.kwargs["event_type"] == "deployed"
+    assert args.kwargs["refs"].github_repository == _REPO
+    assert json.loads(args.args[1]) == {
+        "target": "gcp-dev",
+        "channel": "release",
+        "commits": ["a" * 40, "b" * 40],
+    }
 
 
 @pytest.mark.asyncio
@@ -151,7 +164,43 @@ async def test_rollout_webhook_rejects_a_non_utf8_body(app: FastAPI) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rollout_webhook_stores_a_lowercase_full_sha(app: FastAPI) -> None:
+    body = json.dumps({"target": " GCP-Dev ", "commits": [f"  {'A' * 40}  ", "a" * 40]}).encode()
+    response = await _post(app, body, _token())
+    assert response.status_code == 200
+    assert response.json()["commits"] == 1
+    assert json.loads(app.state.record.await_args.args[1])["commits"] == ["a" * 40]
+
+
+@pytest.mark.asyncio
+async def test_rollout_webhook_rejects_a_short_sha(app: FastAPI) -> None:
+    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 7]}).encode()
+    response = await _post(app, body, _token())
+    assert response.status_code == 400
+    app.state.record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_rollout_webhook_rejects_an_empty_commit_list(app: FastAPI) -> None:
     body = json.dumps({"target": "gcp-dev", "commits": []}).encode()
     response = await _post(app, body, _token())
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_rollout_webhook_records_a_development_deploy_separately(app: FastAPI) -> None:
+    body = json.dumps({"target": "gcp-dev", "channel": "dev", "commits": ["a" * 40]}).encode()
+    response = await _post(app, body, _token())
+    assert response.status_code == 200
+    assert app.state.record.await_args.kwargs["event_type"] == "deployed.dev"
+
+
+@pytest.mark.asyncio
+async def test_rollout_webhook_asks_for_a_retry_when_the_event_is_not_stored(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app.state.record.return_value = False
+    monkeypatch.setattr("agent.rollout_events.configured", lambda: True)
+    body = json.dumps({"target": "gcp-staging", "commits": ["a" * 40]}).encode()
+    response = await _post(app, body, _token())
+    assert response.status_code == 503
