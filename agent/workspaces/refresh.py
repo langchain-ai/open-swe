@@ -207,7 +207,9 @@ def _scripts_to_run(record: Workspace, kind: RefreshKind) -> list[tuple[str, str
     return steps
 
 
-def is_snapshot_stale(record: Workspace) -> bool:
+def is_snapshot_stale(
+    record: Workspace, *, interval_seconds: int = UPDATE_INTERVAL_SECONDS
+) -> bool:
     """Whether the image a new sandbox boots from has aged past the interval.
 
     This gates the update that runs *in the run's own sandbox*, so it keys on
@@ -220,7 +222,7 @@ def is_snapshot_stale(record: Workspace) -> bool:
     captured = _parse_iso(record.last_captured_at)
     if captured is None:
         return True
-    return (datetime.now(UTC) - captured).total_seconds() >= UPDATE_INTERVAL_SECONDS
+    return (datetime.now(UTC) - captured).total_seconds() >= interval_seconds
 
 
 def is_update_due(record: Workspace) -> bool:
