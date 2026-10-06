@@ -898,6 +898,20 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
         "octocat", hierarchy=True, resolved=False
     )
     assert [worker["id"] for worker in archived["items"][0]["taskWorkers"]] == ["t2"]
+    cast(dict[str, object], threads[3]["metadata"])["resolved"] = True
+    unresolved = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, resolved=False, limit=1
+    )
+    assert [item["id"] for item in unresolved["items"]] == ["t2"]
+    assert unresolved["hasMore"] is True
+    resolved = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, resolved=True
+    )
+    assert [item["id"] for item in resolved["items"]] == ["t3"]
+    assert [worker["id"] for worker in resolved["items"][0]["taskWorkers"]] == ["t0"]
+    all_threads = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True)
+    assert [item["id"] for item in all_threads["items"]] == ["t3", "t4"]
+    assert [worker["id"] for worker in all_threads["items"][0]["taskWorkers"]] == ["t0", "t2"]
     cast(dict[str, object], threads[3]["metadata"]).update(
         visibility="private", owner_login="someone-else"
     )

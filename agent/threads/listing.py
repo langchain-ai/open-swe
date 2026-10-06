@@ -339,6 +339,7 @@ async def _readable_threads_by_id(
     email: str | None,
     *,
     include_private: bool = True,
+    resolved: bool | None = None,
 ) -> dict[str, ThreadLike]:
     threads_by_id: dict[str, ThreadLike] = {}
     for offset in range(0, len(thread_ids), _PINNED_THREADS_BATCH_SIZE):
@@ -353,6 +354,7 @@ async def _readable_threads_by_id(
                 and thread_is_readable(metadata, login, email)
                 and not thread_is_unlisted(metadata)
                 and (include_private or metadata.get("visibility", "public") == "public")
+                and (resolved is None or _is_thread_resolved(metadata) is resolved)
             ):
                 threads_by_id[thread_id] = thread
     return threads_by_id
@@ -472,7 +474,12 @@ async def _task_hierarchy_page(
         if membership.role == "worker" and thread_id in matches
     }
     parents = await _readable_threads_by_id(
-        client, list(parent_ids), login, email, include_private=include_private
+        client,
+        list(parent_ids),
+        login,
+        email,
+        include_private=include_private,
+        resolved=resolved,
     )
     roots: dict[str, ThreadLike] = {}
     activity: dict[str, int] = {}
@@ -663,6 +670,7 @@ async def _collect_thread_candidates(
                         viewer_login or "",
                         viewer_email,
                         include_private=include_private,
+                        resolved=resolved,
                     )
                 )
                 checked_parents.update(parent_ids)
