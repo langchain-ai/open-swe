@@ -127,6 +127,7 @@ def construct_system_prompt(
     slack_ask: bool = False,
     slack_breakout: bool = False,
     slack_by_the_way: bool = False,
+    slack_follow_up_suggestions: bool = False,
     sandbox_file_downloads: bool = False,
     prefer_tools_in_sandbox: bool = False,
     continued_from_collaborative: bool = False,
@@ -173,6 +174,11 @@ def construct_system_prompt(
             "system/source-context",
             source_guidance=_render_source_guidance(
                 source, slack_context, slack_ask, slack_breakout, slack_by_the_way
+            )
+            + (
+                "\n" + prompt("system/slack-follow-up-suggestions")
+                if slack_context and slack_follow_up_suggestions
+                else ""
             ),
         ),
         default_prompt_section=_load_default_prompt(),
