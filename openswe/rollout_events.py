@@ -115,8 +115,8 @@ def _instructions(sha: str) -> str:
     return (
         f"This deployment includes merge commit {sha}. "
         "The event names the target that finished syncing. "
-        "Confirm the fix and look for regressions. "
-        "Cancel this subscription with listen_events after every production target "
+        "Confirm the fix and look for regressions on that target. "
+        "Cancel this subscription with listen_events after every target "
         "expected for this change has included the commit."
     )
 

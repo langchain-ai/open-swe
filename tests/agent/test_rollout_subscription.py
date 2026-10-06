@@ -63,7 +63,7 @@ async def test_subscribe_merged_thread_listens_for_the_merge_commit(
     assert subscription.run_config["repo"] == {"owner": "lc", "name": "repo"}
     assert subscription.run_config["pr_number"] == 7
     assert subscription.run_config["github_login"] == "octo"
-    assert "production target" in subscription.instructions
+    assert "every target" in subscription.instructions
 
 
 @pytest.mark.asyncio
