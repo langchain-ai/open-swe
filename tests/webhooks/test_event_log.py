@@ -14,6 +14,7 @@ from starlette.types import Message
 
 from agent.database import transaction
 from agent.slack import routes
+from agent.slack.channels import SlackChannel
 from agent.slack.payloads import SlackChannelContext
 from agent.webhooks import common, event_log
 from agent.webhooks.event_log import EventLog, EventRefs
@@ -159,6 +160,20 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
 
     monkeypatch.setattr(segment, "record_webhook", slow_export)
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    monkeypatch.setattr(
+        "agent.slack.channels.SlackChannel.load",
+        AsyncMock(
+            return_value=SlackChannel.from_payload(
+                {
+                    "id": "CPUBLIC",
+                    "is_channel": True,
+                    "is_private": False,
+                    "is_im": False,
+                    "is_mpim": False,
+                }
+            )
+        ),
+    )
     request = Request(
         {
             "type": "http",
@@ -177,6 +192,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
                 "slack",
                 event_type="/oswe",
                 delivery_id="trigger-1",
+                refs=EventRefs(slack_channel_id="CPUBLIC"),
             ),
             timeout=2,
         )
@@ -254,6 +270,20 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
     kind: Literal["message", "me_message", "edit", "multiple", "unknown"],
 ) -> None:
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    monkeypatch.setattr(
+        "agent.slack.channels.SlackChannel.load",
+        AsyncMock(
+            return_value=SlackChannel.from_payload(
+                {
+                    "id": "CPUBLIC",
+                    "is_channel": True,
+                    "is_private": False,
+                    "is_im": False,
+                    "is_mpim": False,
+                }
+            )
+        ),
+    )
     monkeypatch.setattr(common, "verify_slack_signature", lambda **kwargs: True)
     monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
     monkeypatch.setattr(

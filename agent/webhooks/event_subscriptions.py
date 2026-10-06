@@ -30,7 +30,6 @@ from agent.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOG
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
 from agent.prompts import prompt
-from agent.run_config import RunConfig
 from agent.webhooks.event_log import LoggedEvent, WebhookSource
 from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
 
@@ -407,13 +406,8 @@ class EventSubscription(Base):
             return list(rows.unique())
 
     def sees(self, summary: EventSummary) -> bool:
-        """Slack events reach a thread only from a public channel or its own Slack channel."""
-        if summary.source != "slack" or summary.slack_public:
-            return True
-        own = RunConfig.parse(self.run_config).slack_thread
-        return bool(summary.slack_channel_id) and (
-            own is not None and own.channel_id == summary.slack_channel_id
-        )
+        """Slack events reach subscriptions only from public channels."""
+        return summary.source != "slack" or summary.slack_public
 
     async def match(self, event: LoggedEvent, summary: EventSummary) -> bool:
         """Record ``event`` as owed to this thread; ``False`` when nothing new is owed.

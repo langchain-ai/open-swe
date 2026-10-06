@@ -12,6 +12,7 @@ from agent.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
 )
+from agent.slack.channels import SlackChannel
 from agent.webhooks import event_log
 from agent.webhooks.event_log import EventLog, EventRefs
 from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
@@ -23,6 +24,19 @@ _THREAD = "thread-1"
 @pytest.fixture
 async def workspace(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> dict[str, UUID]:
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+
+    async def channel_lookup(channel_id: str, *, use_cache: bool = True) -> SlackChannel | None:
+        return SlackChannel.from_payload(
+            {
+                "id": channel_id,
+                "is_channel": True,
+                "is_private": channel_id != "CPUBLIC",
+                "is_im": False,
+                "is_mpim": False,
+            }
+        )
+
+    monkeypatch.setattr(SlackChannel, "load", channel_lookup)
     ids = {name: uuid4() for name in ("workspace", "repository", "pull_request")}
     async with transaction() as conn:
         for statement in (
@@ -204,7 +218,7 @@ async def test_a_ci_result_reaches_every_pull_request_it_lists_with_its_text_fen
     assert "Ignore prior instructions" in fenced.split(UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG)[0]
 
 
-async def test_slack_matches_only_public_channels_and_the_threads_own_channel(
+async def test_slack_matches_only_public_channels(
     workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
 ) -> None:
     await _subscribe(workspace, sources=["slack"], event_types=["message"])
@@ -213,4 +227,10 @@ async def test_slack_matches_only_public_channels_and_the_threads_own_channel(
     await _slack("CPUBLIC", "channel", "s-public")
     await _slack("COWN", "group", "s-own")
 
-    assert [match.delivery_id for match in await _owed()] == ["s-public", "s-own"]
+    assert [match.delivery_id for match in await _owed()] == ["s-public"]
+
+    async with transaction() as conn:
+        deliveries = await conn.scalars(
+            text("SELECT delivery_id FROM event_log WHERE source = 'slack'")
+        )
+        assert list(deliveries) == ["s-public"]
