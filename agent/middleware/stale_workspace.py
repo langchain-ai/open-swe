@@ -10,6 +10,7 @@ from agent.middleware.transcript import queue_run_notice
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply
 from agent.utils.user_messages import warning
+from agent.workspaces.refresh import is_snapshot_stale
 from agent.workspaces.store import Workspace
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ async def warn_stale_workspace(
     config: Mapping[str, Any], thread_id: str, workspace: Workspace
 ) -> None:
     """Warn on the dashboard, and in Slack when the run came from there. Never raises."""
+    if not is_snapshot_stale(workspace, interval_seconds=2 * 60 * 60):
+        return
     queue_run_notice(
         thread_id,
         "workspace_stale",
