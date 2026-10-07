@@ -1,4 +1,4 @@
-from agent.dashboard.profiles import ProfileUpdate, get_profile, upsert_profile
+from openswe.dashboard.profiles import ProfileUpdate, get_profile, upsert_profile
 
 
 async def test_conversation_preference_is_personal_and_survives_other_profile_edits(fake_store):

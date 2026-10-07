@@ -3,14 +3,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal
 from unittest.mock import AsyncMock
-from urllib.parse import urlencode
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException, Request
 
-from agent.slack import routes, run_feedback
-from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
-from agent.utils.json_types import JsonObject
+from openswe.slack import run_feedback
+from openswe.slack.payloads import SlackChannelContext, SlackInteraction
+from openswe.utils.json_types import JsonObject
 
 
 def interaction(rating: Literal["up", "down"] = "up") -> SlackInteraction:
@@ -22,12 +20,8 @@ def interaction(rating: Literal["up", "down"] = "up") -> SlackInteraction:
             "message": {"ts": "2.0", "thread_ts": "1.0"},
             "actions": [
                 {
-                    "action_id": (
-                        "open_swe_run_feedback_up"
-                        if rating == "up"
-                        else "open_swe_run_feedback_down"
-                    ),
-                    "type": "button",
+                    "action_id": run_feedback.FEEDBACK_ACTION,
+                    "type": "feedback_buttons",
                     "value": json.dumps({"run_id": "run-1", "rating": rating}),
                 }
             ],
@@ -58,13 +52,6 @@ async def saved_feedback(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     save = AsyncMock(return_value=True)
     monkeypatch.setattr(run_feedback, "create_langsmith_feedback", save)
     return save
-
-
-async def test_mismatched_button_and_rating_is_ignored(saved_feedback: AsyncMock) -> None:
-    payload = interaction("up")
-    payload.actions[0].action_id = "open_swe_run_feedback_down"
-    await run_feedback.process_feedback(payload, payload.actions[0])
-    saved_feedback.assert_not_awaited()
 
 
 async def test_rerating_updates_same_feedback_on_exact_reply_run(saved_feedback: AsyncMock) -> None:
@@ -115,66 +102,3 @@ async def test_external_or_unknown_channel_cannot_be_rated(
     payload = interaction()
     await run_feedback.process_feedback(payload, payload.actions[0])
     saved_feedback.assert_not_awaited()
-
-
-@pytest.mark.parametrize("value", ["not json", "[]", "{}", '{"run_id":"run-1","rating":"bad"}'])
-async def test_malformed_selection_is_ignored(saved_feedback: AsyncMock, value: str) -> None:
-    payload = interaction()
-    await run_feedback.process_feedback(payload, SlackBlockAction(value=value))
-    saved_feedback.assert_not_awaited()
-
-
-async def test_failed_export_is_logged_without_recording_submission(
-    saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    saved_feedback.return_value = False
-    analytics = AsyncMock()
-    monkeypatch.setattr(run_feedback, "record_feedback_submission", analytics)
-    payload = interaction()
-    await run_feedback.process_feedback(payload, payload.actions[0])
-    analytics.assert_not_awaited()
-    assert "Could not save Slack reply feedback" in caplog.text
-
-
-@pytest.mark.parametrize("signed", [True, False])
-async def test_webhook_acknowledges_feedback_without_starting_agent(
-    monkeypatch: pytest.MonkeyPatch, signed: bool
-) -> None:
-    body = urlencode({"payload": interaction().model_dump_json()}).encode()
-
-    async def receive() -> dict[str, object]:
-        return {"type": "http.request", "body": body}
-
-    request = Request({"type": "http", "headers": []}, receive)
-    tasks = BackgroundTasks()
-    process = AsyncMock()
-    monkeypatch.setattr(routes.common, "verify_slack_signature", lambda **kwargs: signed)
-    monkeypatch.setattr(routes, "process_feedback", process)
-    if not signed:
-        with pytest.raises(HTTPException) as exc:
-            await routes.slack_interactivity(request, tasks)
-        assert exc.value.status_code == 401
-        assert not tasks.tasks
-        return
-
-    assert await routes.slack_interactivity(request, tasks) == {}
-    process.assert_not_awaited()
-    await tasks()
-    process.assert_awaited_once_with(interaction(), interaction().actions[0])
-
-
-async def test_web_link_button_is_acknowledged_without_starting_agent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    payload = interaction()
-    payload.actions[0].action_id = "open_swe_web_link"
-    body = urlencode({"payload": payload.model_dump_json()}).encode()
-
-    async def receive() -> dict[str, object]:
-        return {"type": "http.request", "body": body}
-
-    request = Request({"type": "http", "headers": []}, receive)
-    tasks = BackgroundTasks()
-    monkeypatch.setattr(routes.common, "verify_slack_signature", lambda **kwargs: True)
-    assert await routes.slack_interactivity(request, tasks) == {}
-    assert not tasks.tasks

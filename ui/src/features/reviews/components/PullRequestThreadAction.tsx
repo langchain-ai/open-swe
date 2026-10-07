@@ -40,11 +40,20 @@ export function PullRequestThreadAction({
   const run = useMutation({
     mutationFn: (target: OpenPullRequest) => dispatch(target),
     meta: { errorTitle: `${toasts.failed} ${pr.repo}#${pr.number}` },
+    onMutate: async (target) => {
+      const key = ["pr-thread-status", login, target.repo, target.number]
+      await queryClient.cancelQueries({ queryKey: key, exact: true })
+      const previous = queryClient.getQueryData<PullRequestThreadStatus>(key)
+      queryClient.setQueryData<PullRequestThreadStatus>(key, {
+        ...previous,
+        running: true,
+      })
+      return { key, previous }
+    },
+    onError: (_error, _target, context) => {
+      if (context) queryClient.setQueryData(context.key, context.previous)
+    },
     onSuccess: (result, target) => {
-      queryClient.setQueryData<PullRequestThreadStatus>(
-        ["pr-thread-status", login, target.repo, target.number],
-        (old) => ({ ...old, running: true })
-      )
       toast.success(
         `${result.already_running ? toasts.running : toasts.queued} ${target.repo}#${target.number}`
       )
@@ -55,7 +64,7 @@ export function PullRequestThreadAction({
       label={
         run.data?.already_running
           ? labels.running
-          : run.isSuccess
+          : run.isPending || run.isSuccess
             ? labels.queued
             : thread.data?.running
               ? labels.running
@@ -63,11 +72,9 @@ export function PullRequestThreadAction({
                 ? labels.checking
                 : thread.isError
                   ? labels.unavailable
-                  : run.isPending
-                    ? labels.queuing
-                    : run.isError
-                      ? labels.retry
-                      : labels.idle
+                  : run.isError
+                    ? labels.retry
+                    : labels.idle
       }
       disabled={
         thread.isPending ||

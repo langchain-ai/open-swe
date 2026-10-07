@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent, ReactNode } from "react"
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
-import { blockerLabel, blockerTone, statusLabels } from "../lib/status"
+import { statusDetail, statusLabels } from "../lib/status"
 import { Diffstat } from "./Diffstat"
 import {
   PullRequestActions,
@@ -45,7 +45,7 @@ export function PullRequestCard({
   compact?: boolean
   selected?: boolean
   onSelect: () => void
-  onSettled: (outcome: PullRequestOutcome) => void
+  onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
 }) {
   if (compact) {
@@ -75,11 +75,24 @@ export function PullRequestCard({
           <span className="mt-0.5 block truncate text-xs font-medium text-foreground">
             {pr.title}
           </span>
-          <span
-            className={cn("mt-0.5 block truncate text-xs", blockerTone(pr))}
-          >
-            {outcome ? outcomeLabels[outcome] : blockerLabel(pr)}
-          </span>
+          {outcome ? (
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              {outcomeLabels[outcome]}
+            </span>
+          ) : (
+            <>
+              <span className="mt-1 flex flex-wrap gap-1">
+                {statusLabels(pr).map((status) => (
+                  <StatusPill key={status} status={status} />
+                ))}
+              </span>
+              {statusDetail(pr) && (
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                  {statusDetail(pr)}
+                </span>
+              )}
+            </>
+          )}
         </span>
       </button>
     )

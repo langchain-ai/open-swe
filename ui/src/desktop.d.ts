@@ -21,7 +21,23 @@ export interface DesktopProject {
   scopeId: string
 }
 
-export interface DesktopLocalThreadSummary {
+/**
+ * What this Mac knows about one of its "This Mac" threads: the checkout the
+ * cloud agent works in, through `bridgeId`. `id` is the cloud thread id.
+ */
+export interface DesktopLocalThread {
+  id: string
+  cwd: string
+  worktreePath: string | null
+  /** Worktrees this app created for the thread, removed when it is discarded. */
+  ownedWorktrees: Array<string>
+  bridgeId: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** A thread the retired local LangGraph server ran, before "This Mac" moved to the cloud. */
+export interface DesktopLegacyLocalThread {
   id: string
   cwd: string
   worktreePath: string | null
@@ -34,7 +50,15 @@ export interface DesktopLocalThreadSummary {
   updatedAt: number
   modelId: string | null
   effort: string | null
-  pending?: DesktopLocalPromptInput | null
+  pending?: DesktopLegacyLocalPromptInput | null
+}
+
+export type DesktopLegacyLocalActivity = Record<string, "running" | "error">
+
+export interface DesktopLegacyLocalPromptInput {
+  prompt: string
+  images: Array<ImageChunk>
+  skills: Array<Skill>
 }
 
 export type DesktopWorkspaceMode = "local" | "worktree"
@@ -46,19 +70,11 @@ export interface DesktopProjectRef {
   worktreePath: string | null
 }
 
-export type DesktopLocalActivity = Record<string, "running" | "error">
-
 export interface DesktopLocalDiff {
   status: "ready" | "missing" | "error"
   truncated: boolean
   files: Array<ThreadPrDiffFile>
   repository?: { branch: string | null; pr: AgentPullRequest | null }
-}
-
-export interface DesktopLocalPromptInput {
-  prompt: string
-  images: Array<ImageChunk>
-  skills: Array<Skill>
 }
 
 export type DesktopTerminalStatus = "starting" | "running" | "exited" | "error"
@@ -182,7 +198,7 @@ declare global {
       setLocalBranch: (input: {
         threadId: string
         branch: string
-      }) => Promise<DesktopLocalThreadSummary | null>
+      }) => Promise<DesktopLocalThread | null>
       addProject: () => Promise<DesktopProject | null>
       removeProject: (cwd: string) => Promise<boolean>
       getVersion: () => Promise<string>
@@ -191,11 +207,14 @@ declare global {
       onUpdateState: (
         callback: (state: DesktopUpdateState) => void
       ) => () => void
+      onLocalThreadsChanged: (callback: () => void) => () => void
       onProjectsChanged: (
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      connectService: (provider: "slack" | "notion") => Promise<boolean>
+      connectService: (
+        provider: "slack" | "notion" | "langsmith"
+      ) => Promise<boolean>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string
@@ -207,38 +226,50 @@ declare global {
       }>
       openLocalTrace: (threadId: string) => Promise<boolean>
       signInLocalOpenAI: () => Promise<{ signedIn: boolean }>
-      startLocalThread: (
-        input: DesktopLocalPromptInput & {
-          cwd: string
-          workspaceMode?: DesktopWorkspaceMode
-          baseBranch?: string | null
-          modelId?: string
-          effort?: string
-        }
-      ) => Promise<DesktopLocalThreadSummary>
-      getLocalPrompt: (
+      getLegacyLocalPrompt: (
         threadId: string
-      ) => Promise<DesktopLocalPromptInput | null>
-      clearLocalPrompt: (
+      ) => Promise<DesktopLegacyLocalPromptInput | null>
+      clearLegacyLocalPrompt: (
         threadId: string
-      ) => Promise<DesktopLocalThreadSummary | null>
-      getLocalThread: (
+      ) => Promise<DesktopLegacyLocalThread | null>
+      getLegacyLocalThread: (
         threadId: string
-      ) => Promise<DesktopLocalThreadSummary | null>
-      listLocalThreads: () => Promise<Array<DesktopLocalThreadSummary>>
-      setAppearance: (
-        appearance: "light" | "dark" | "system"
-      ) => Promise<boolean>
-      localActivity: () => Promise<DesktopLocalActivity>
-      updateLocalThread: (input: {
+      ) => Promise<DesktopLegacyLocalThread | null>
+      listLegacyLocalThreads: () => Promise<Array<DesktopLegacyLocalThread>>
+      legacyLocalActivity: () => Promise<DesktopLegacyLocalActivity>
+      updateLegacyLocalThread: (input: {
         threadId: string
         title?: string
         viewed?: boolean
         archived?: boolean
         modelId?: string
         effort?: string
-      }) => Promise<DesktopLocalThreadSummary | null>
-      deleteLocalThread: (threadId: string) => Promise<boolean>
+      }) => Promise<DesktopLegacyLocalThread | null>
+      deleteLegacyLocalThread: (threadId: string) => Promise<boolean>
+      /**
+       * Set up a thread the renderer is about to start in the cloud: its
+       * checkout or a new worktree, and the bridge its agent runs through.
+       */
+      prepareLocalThread: (input: {
+        threadId: string
+        cwd: string
+        workspaceMode?: DesktopWorkspaceMode
+        baseBranch?: string | null
+      }) => Promise<{ bridgeId: string; repo: string | null }>
+      /** Move a cloud thread onto a new worktree here; resolves to its bridge id. */
+      takeOverThread: (input: {
+        threadId: string
+        repo: string
+      }) => Promise<string>
+      /** Serve the thread's checkout again before its next run. */
+      ensureLocalBridge: (threadId: string) => Promise<boolean>
+      getLocalThread: (threadId: string) => Promise<DesktopLocalThread | null>
+      listLocalThreads: () => Promise<Array<DesktopLocalThread>>
+      /** Forget a deleted thread and remove the worktrees this app made for it. */
+      discardLocalThread: (threadId: string) => Promise<boolean>
+      setAppearance: (
+        appearance: "light" | "dark" | "system"
+      ) => Promise<boolean>
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPr: (threadId: string) => Promise<AgentPullRequest | null>

@@ -7,7 +7,10 @@ test.describe("Slack run usage footer", () => {
     await expect(page.locator("#thread")).toContainText("No messages yet");
   });
 
-  test("omits pending cost on the final reply", async ({ page, request }) => {
+  test("shows the pending cost on the final reply", async ({
+    page,
+    request,
+  }) => {
     await page
       .locator("#text")
       .fill("<@U0BOT> please add a greet() helper and open a PR");
@@ -25,10 +28,10 @@ test.describe("Slack run usage footer", () => {
         return response.status();
       })
       .toBe(200);
-    await expect(reply).not.toContainText("calculating cost");
+    await expect(reply).toContainText("calculating cost");
     await expect(reply).not.toContainText("$");
-    await expect(
-      reply.getByRole("button", { name: "Open in Web" }),
-    ).toHaveCount(1);
+    await expect(reply.getByRole("link", { name: "Open in Web" })).toHaveCount(
+      1,
+    );
   });
 });

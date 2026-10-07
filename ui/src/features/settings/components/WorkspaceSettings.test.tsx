@@ -20,6 +20,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -148,6 +149,18 @@ function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
       />
     </QueryClientProvider>
   )
+}
+
+/** What `InvalidationTab` does when the stream invalidates `workspaces`. */
+async function invalidateWorkspaces() {
+  await act(async () => {
+    await clients.at(-1)?.invalidateQueries({
+      predicate: (query) =>
+        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
+        false,
+    })
+    await vi.advanceTimersByTimeAsync(1)
+  })
 }
 
 describe("WorkspaceSettingsPanel", () => {
@@ -325,7 +338,7 @@ describe("WorkspaceSettingsPanel", () => {
     ["refreshing", "unknown"],
     ["success", "unknown"],
   ] as const)(
-    "follows a repository rebuild from a %s save response through stale polls to %s",
+    "follows a repository rebuild from a %s save response through invalidations to %s",
     async (savedStatus, outcome) => {
       const initial = {
         ...RECORD,
@@ -389,9 +402,7 @@ describe("WorkspaceSettingsPanel", () => {
           .mocked(api.getWorkspace)
           .mockResolvedValue(saved)
         const reads = getWorkspace.mock.calls.length
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
         expect(screen.getByRole("status").textContent).toContain(
           "rebuild queued"
@@ -401,6 +412,7 @@ describe("WorkspaceSettingsPanel", () => {
           ...saved,
           refresh_status: outcome === "unknown" ? "success" : "refreshing",
         })
+        await invalidateWorkspaces()
         await act(async () => {
           await vi.advanceTimersByTimeAsync(65_001)
         })
@@ -422,9 +434,7 @@ describe("WorkspaceSettingsPanel", () => {
               : "2026-01-01T00:01:00Z",
           refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
         })
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(
           within(general).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
@@ -539,8 +549,8 @@ describe("WorkspaceSettingsPanel", () => {
       screen.getByRole("button", { name: "Save proxy configuration" })
     )
     expect(
-      (await within(editor.closest("section")!).findByRole("alert")).textContent
-    ).toContain("JSON object")
+      await screen.findByText("Proxy configuration must be a JSON object.")
+    ).toBeTruthy()
     expect(update).not.toHaveBeenCalled()
     fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
     fireEvent.click(screen.getByRole("tab", { name: "Rules" }))

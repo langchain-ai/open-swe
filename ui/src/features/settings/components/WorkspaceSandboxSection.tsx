@@ -42,6 +42,9 @@ export function WorkspaceSandboxSection({
   onSaved: (saved: WorkspaceRecord) => void
   onRebuildStarted: () => void
 }) {
+  const [inheritDefault, setInheritDefault] = useState(
+    record.inherit_default_sandbox ?? false
+  )
   const buildAction = record.snapshot_id ? "Rebuild" : "Build"
   const [setupScript, setSetupScript] = useState(record.setup_script ?? "")
   const [updateScript, setUpdateScript] = useState(record.update_script ?? "")
@@ -53,6 +56,7 @@ export function WorkspaceSandboxSection({
     resourceValue(record.fs_capacity_bytes, 1024 ** 3)
   )
   const configurationDirty =
+    inheritDefault !== (record.inherit_default_sandbox ?? false) ||
     vcpus !== resourceValue(record.vcpus) ||
     memory !== resourceValue(record.mem_bytes, 1024 ** 3) ||
     disk !== resourceValue(record.fs_capacity_bytes, 1024 ** 3)
@@ -64,6 +68,9 @@ export function WorkspaceSandboxSection({
     meta: { silent: true },
     mutationFn: async () => {
       return api.updateWorkspace(record.slug, {
+        ...(inheritDefault !== (record.inherit_default_sandbox ?? false)
+          ? { inherit_default_sandbox: inheritDefault }
+          : {}),
         vcpus: resourceBytes(vcpus),
         mem_bytes: resourceBytes(memory, 1024 ** 3),
         fs_capacity_bytes: resourceBytes(disk, 1024 ** 3),
@@ -96,12 +103,28 @@ export function WorkspaceSandboxSection({
       title="Sandbox image"
       description="Every run in this workspace boots from this image. The setup script builds it nightly from the base snapshot; the update script refreshes it while it is in use."
     >
+      {record.slug !== "default" && (
+        <SettingsRow
+          label="Inherit sandbox from default"
+          description="Use the default workspace’s latest image, sizing, creation settings, and update script. Workspace instructions and integrations remain independent. Ensure you’re comfortable sharing all contents of the inherited sandbox image with members of this workspace."
+          control={
+            <input
+              type="checkbox"
+              aria-label="Inherit sandbox from default"
+              checked={inheritDefault}
+              onChange={(event) => setInheritDefault(event.target.checked)}
+            />
+          }
+        />
+      )}
       <SettingsRow
         label="Image"
         description={record.status_message ?? record.snapshot_name ?? undefined}
         control={
           <span className="text-xs text-muted-foreground">
-            {SNAPSHOT_LABEL[status]}
+            {record.inherit_default_sandbox
+              ? "Inherited from default"
+              : SNAPSHOT_LABEL[status]}
           </span>
         }
       />
@@ -157,6 +180,7 @@ export function WorkspaceSandboxSection({
               variant="ghost"
               disabled={configuration.isPending}
               onClick={() => {
+                setInheritDefault(record.inherit_default_sandbox ?? false)
                 setVcpus(resourceValue(record.vcpus))
                 setMemory(resourceValue(record.mem_bytes, 1024 ** 3))
                 setDisk(resourceValue(record.fs_capacity_bytes, 1024 ** 3))
@@ -214,7 +238,10 @@ export function WorkspaceSandboxSection({
             size="sm"
             variant="outline"
             disabled={
-              rebuild.isPending || refreshing || !(record.setup_script ?? "")
+              rebuild.isPending ||
+              refreshing ||
+              record.inherit_default_sandbox ||
+              !(record.setup_script ?? "")
             }
             onClick={() => rebuild.mutate()}
           >

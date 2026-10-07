@@ -5,10 +5,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.dashboard import user_preferences
-from agent.dashboard.oauth import require_session
-from agent.dashboard.routes import router
-from agent.utils import langsmith
+from openswe.dashboard import user_preferences
+from openswe.dashboard.oauth import require_session
+from openswe.dashboard.routes import router
+from openswe.utils import langsmith
 
 THREAD_ID = "a743f4f9-7a4b-4f02-aef8-55297febfc30"
 URL = f"/dashboard/api/me/local-trace-url/{THREAD_ID}"

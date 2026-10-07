@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.database import postgres
+from openswe.database import postgres
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 

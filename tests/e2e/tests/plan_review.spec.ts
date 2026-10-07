@@ -32,12 +32,7 @@ test.describe("HTML artifacts", () => {
       .filter({ hasText: /plan is ready for review/i });
     await expect(ready).toBeVisible({ timeout: 60_000 });
     await expect(ready.locator('a[href*="/plan"]')).toBeVisible();
-    await expect(
-      ready.getByRole("button", { name: /approve|reject|request changes/i }),
-    ).toHaveCount(0);
-    await expect(
-      ready.getByRole("button", { name: "Rate this reply helpful" }),
-    ).toBeVisible();
+    await expect(ready.getByRole("button")).toHaveCount(0);
   });
 
   test("Slack artifact → sign in → view and comment together", async ({
