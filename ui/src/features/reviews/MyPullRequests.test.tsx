@@ -466,9 +466,7 @@ describe("My PRs", () => {
     await screen.findByText("Change 10")
     expect(screen.queryByText("Change 11")).toBeNull()
     expect(cards()).toHaveLength(10)
-    await waitFor(() =>
-      expect(api.pullRequestStatus).toHaveBeenCalledTimes(10)
-    )
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(10))
     resolve(pull(10))
     await waitFor(() =>
       expect(
@@ -777,9 +775,7 @@ describe("My PRs", () => {
     await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
     expect(await screen.findByText("Change 1")).toBeTruthy()
-    await waitFor(() =>
-      expect(api.pullRequestStatus).toHaveBeenCalledTimes(2)
-    )
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(2))
   })
 
   it("filters conflicts and sends the applied repository to the server", async () => {

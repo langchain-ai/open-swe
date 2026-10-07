@@ -310,9 +310,12 @@ export function MyPullRequests({
               disabled={query.isFetching}
               onClick={() => {
                 setSettled({})
-                for (const [queryKey, status] of queryClient.getQueriesData<
-                  OpenPullRequest | null
-                >({ queryKey: [PULL_REQUEST_STATUS, login] })) {
+                for (const [
+                  queryKey,
+                  status,
+                ] of queryClient.getQueriesData<OpenPullRequest | null>({
+                  queryKey: [PULL_REQUEST_STATUS, login],
+                })) {
                   if (leftOpenList(status))
                     queryClient.removeQueries({ queryKey, exact: true })
                 }

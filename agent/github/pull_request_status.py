@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -797,14 +797,24 @@ async def list_open_pull_requests(
 async def load_open_pull_request(
     client: httpx2.AsyncClient, item: object, details: bool = True
 ) -> OpenPullRequest | None:
-    result = await load_pull_request(client, item, details)
-    return result if result is not None and result.state == "open" else None
+    """An open pull request's live status; ``None`` once it is closed or merged."""
+    return await _load_pull_request(client, item, details, wanted={"open"})
 
 
 async def load_pull_request(
     client: httpx2.AsyncClient, item: object, details: bool = True
 ) -> OpenPullRequest | None:
     """A pull request's live status in any state; ``None`` for an unreadable identity."""
+    return await _load_pull_request(client, item, details, wanted={"open", "closed", "merged"})
+
+
+async def _load_pull_request(
+    client: httpx2.AsyncClient,
+    item: object,
+    details: bool,
+    *,
+    wanted: Collection[PullRequestState],
+) -> OpenPullRequest | None:
     if not isinstance(item, dict):
         return None
     repository_url = item.get("repository_url")
@@ -822,7 +832,7 @@ async def load_pull_request(
     owner, name, number = identity
     pull = await _fetch_mergeable_pull_request(client, owner, name, number) if details else None
     state = _live_state(pull) if pull is not None else "open"
-    if state is None:
+    if state not in wanted:
         return None
     source: Mapping[str, Any] = pull if pull is not None else item
     result = OpenPullRequest(

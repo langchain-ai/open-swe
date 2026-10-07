@@ -278,7 +278,11 @@ def _patch_detail_fetchers(monkeypatch):
     )
     monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
     monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
+    monkeypatch.setattr(
+        prs,
+        "_fetch_reviewers",
+        AsyncMock(return_value=[prs.PullRequestReviewer(login="reviewer", state="approved")]),
+    )
     monkeypatch.setattr(prs, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
 
 

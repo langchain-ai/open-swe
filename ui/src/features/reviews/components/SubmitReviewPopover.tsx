@@ -180,7 +180,9 @@ export function SubmitReviewPopover({
                   key={verdict.event}
                   className={cn(
                     "flex items-start gap-2 text-xs",
-                    alreadyGiven ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                    alreadyGiven
+                      ? "cursor-not-allowed opacity-60"
+                      : "cursor-pointer"
                   )}
                 >
                   <input
