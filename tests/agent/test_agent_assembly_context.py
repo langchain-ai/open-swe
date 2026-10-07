@@ -792,6 +792,43 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         assert prepare._requested_models is None
 
 
+@pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
+async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
+) -> None:
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from agent.threads.runs import _build_dashboard_configurable
+
+    monkeypatch.setattr("agent.threads.runs.resolve_run_email", AsyncMock(return_value=None))
+    monkeypatch.setattr("agent.server._model_routing_mode", lambda _: "fast")
+    source_context = {
+        "slack_ask": True,
+        "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
+        "slack_by_the_way_thread_ts": reply_thread_ts,
+    }
+    for source in ("slack", "dashboard"):
+        config = _base_config()
+        config["configurable"].update(
+            await _build_dashboard_configurable(
+                "thread-ctx",
+                "octocat",
+                {"source": source, "source_context": source_context, "model_selection": "auto"},
+                profile={},
+            )
+        )
+        captured = await _capture_create_deep_agent_kwargs(
+            config, profile={"model_routing_enabled": True}
+        )
+        selection = next(
+            item
+            for item in cast(list[object], captured["middleware"])
+            if isinstance(item, ModelSelectionMiddleware)
+        )
+        assert await selection.select_route({"messages": []}) == (
+            "fast" if source == "dashboard" else "default"
+        )
+
+
 async def test_queued_images_reach_vision_fallback_for_text_only_main_model() -> None:
     from langchain_core.messages import convert_to_messages
     from langgraph.store.memory import InMemoryStore
