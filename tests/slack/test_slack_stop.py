@@ -1,7 +1,9 @@
 import builtins
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 from agent.slack import stop as slack_stop
 from agent.slack.stop import process_slack_stop_reaction
@@ -252,4 +254,71 @@ async def test_failed_queue_cleanup_does_not_dispatch_summary(
     await process_slack_stop_reaction(_event("2.000"), event_id="EvStoreFailure")
 
     assert dispatched == []
+    assert client.threads.updates == []
+
+
+async def test_native_stop_routes_to_ordinary_thread_without_clearing_queued_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeClient()
+    thread_id = _add_thread(client)
+    _add_thread(client, slack_stop.CODE_CHANNEL_SESSION_TS)
+    client.threads.values[thread_id]["metadata"]["source_context"]["slack_thread"]["team_id"] = (
+        "T123"
+    )
+    client.store.items[(("queue", thread_id), "pending_messages")] = {
+        "value": {"messages": [{"content": "later"}]}
+    }
+    _patch_handler(monkeypatch, client)
+    cancel = AsyncMock()
+    status = AsyncMock(return_value=True)
+    code_status = AsyncMock()
+    monkeypatch.setattr("agent.slack.webhook.slack_login", AsyncMock(return_value="stopper"))
+    monkeypatch.setattr("agent.threads.handlers.cancel_dashboard_thread", cancel)
+    monkeypatch.setattr("agent.slack.client.set_slack_thread_status", status)
+    monkeypatch.setattr(slack_stop, "set_session_status", code_status)
+
+    await slack_stop.process_agent_session_stopped(
+        {"channel": "C123", "thread_ts": "1.000", "user": "USTOPPER"}, "EvNative", "T123"
+    )
+
+    cancel.assert_awaited_once_with(thread_id, "stopper")
+    status.assert_awaited_once_with("C123", "1.000", "")
+    code_status.assert_not_awaited()
+    assert client.runs.cancelled == []
+    assert client.store.deleted == []
+    assert (("queue", thread_id), "pending_messages") in client.store.items
+
+
+@pytest.mark.parametrize("failure", ["team", "authorization"])
+async def test_rejected_native_stop_does_not_clear_status_or_stop_code_channel(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    client = FakeClient()
+    thread_id = _add_thread(client)
+    _add_thread(client, slack_stop.CODE_CHANNEL_SESSION_TS)
+    client.threads.values[thread_id]["metadata"]["source_context"]["slack_thread"]["team_id"] = (
+        "TOTHER" if failure == "team" else "T123"
+    )
+    _patch_handler(monkeypatch, client)
+    cancel = AsyncMock(side_effect=HTTPException(403, "thread is private"))
+    status = AsyncMock()
+    code_status = AsyncMock()
+    monkeypatch.setattr("agent.slack.webhook.slack_login", AsyncMock(return_value="stopper"))
+    monkeypatch.setattr("agent.threads.handlers.cancel_dashboard_thread", cancel)
+    monkeypatch.setattr("agent.slack.client.set_slack_thread_status", status)
+    monkeypatch.setattr(slack_stop, "set_session_status", code_status)
+
+    await slack_stop.process_agent_session_stopped(
+        {"channel": "C123", "thread_ts": "1.000", "user": "USTOPPER"}, "EvRejected", "T123"
+    )
+
+    if failure == "team":
+        cancel.assert_not_awaited()
+    else:
+        cancel.assert_awaited_once_with(thread_id, "stopper")
+    status.assert_not_awaited()
+    code_status.assert_not_awaited()
+    assert client.runs.cancelled == []
+    assert client.store.deleted == []
     assert client.threads.updates == []

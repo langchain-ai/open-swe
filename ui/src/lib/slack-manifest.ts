@@ -21,6 +21,7 @@ const BASE_BOT_SCOPES = [
 
 const BASE_BOT_EVENTS = [
   "app_mention",
+  "agent_session_stopped",
   "message.im",
   "message.mpim",
   "message.channels",
@@ -101,7 +102,7 @@ export function slackAppManifest(
       event_subscriptions: {
         request_url: `${backendUrl}/webhooks/slack`,
         bot_events: codeChannelsEnabled
-          ? [...BASE_BOT_EVENTS, "agent_session_stopped", "code_channel_action"]
+          ? [...BASE_BOT_EVENTS, "code_channel_action"]
           : BASE_BOT_EVENTS,
       },
       interactivity: {
