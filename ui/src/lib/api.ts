@@ -15,6 +15,50 @@ import {
   newRequestId,
 } from "./dashboard-fetch"
 
+export interface AuditLogFilters {
+  start_time: string
+  end_time: string
+  operation_name?: string
+  user_id?: string
+  api_key_id?: string
+  workspace_id?: string
+}
+
+export interface AuditLog {
+  id: string
+  request_time: string
+  operation_name: string
+  operation_succeeded: boolean | null
+  api_key_id: string | null
+  user_id: string | null
+  workspace_id: string | null
+  enrichments: {
+    source: "http" | "tool"
+    actor_kind: "person" | "api_key" | "github_actions" | "agent" | null
+    actor_login: string | null
+    request_method: string | null
+    request_path: string | null
+    response_status_code: number | null
+    resource_ids: string[]
+    workspace: string | null
+    thread_id: string | null
+    delegated_from_sandbox_id: string | null
+    settings_scope: "instance" | "workspace" | null
+    settings_changes: Record<
+      string,
+      {
+        before: boolean | number | "[REDACTED]" | null
+        after: boolean | number | "[REDACTED]" | null
+      }
+    > | null
+  }
+}
+
+export interface AuditLogsPage {
+  items: AuditLog[]
+  cursor: string | null
+}
+
 export interface WorkspaceApiKey {
   id: string
   workspace: string
@@ -1080,6 +1124,8 @@ export interface ReviewPrDetails {
   head_ref: string
   base_ref: string
   author: ReviewUserRef | null
+  created_at: string | null
+  merged_at: string | null
   assignees: Array<ReviewUserRef>
   requested_reviewers: Array<ReviewUserRef>
   labels: Array<{ name: string; color: string | null }>
@@ -1736,6 +1782,11 @@ export const api = {
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
     ).then((payload) => ({ payload, fetchedAt: new Date().toISOString() })),
+  listAuditLogs: (filters: AuditLogFilters, cursor?: string) => {
+    const params = new URLSearchParams({ ...filters, limit: "50" })
+    if (cursor) params.set("cursor", cursor)
+    return request<AuditLogsPage>(`/audit-logs?${params}`)
+  },
   adminListUsers: (page = 1, pageSize = 20, search = "") =>
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`

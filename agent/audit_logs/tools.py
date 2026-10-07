@@ -7,7 +7,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import ParamSpec, TypeVar
 
-from agent.audit_logs.context import enrich_workspace
+from agent.audit_logs.context import current_audit_log, enrich_workspace
 from agent.audit_logs.models import AuditLog, AuditLogEnrichments
 from agent.audit_logs.store import append_safely
 from agent.sandboxes.state import SANDBOX_BACKENDS
@@ -78,6 +78,7 @@ def audit_tool(
             workspace = bound.arguments.get("workspace")
             if operation_name == "manage_feature_flags" and isinstance(workspace, str):
                 await enrich_workspace(entry, workspace)
+            token = current_audit_log.set(entry)
             try:
                 result = await fn(*args, **kwargs)
                 entry.operation_succeeded = not (
@@ -87,6 +88,7 @@ def audit_tool(
                 )
                 return result
             finally:
+                current_audit_log.reset(token)
                 await append_safely(entry)
 
         return audited

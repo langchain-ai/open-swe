@@ -395,6 +395,10 @@ def _serialize_pr_details(pull_request: PullRequest) -> dict[str, Any]:
             if pull_request.author
             else None
         ),
+        "created_at": (
+            pull_request.github_created_at.isoformat() if pull_request.github_created_at else None
+        ),
+        "merged_at": pull_request.merged_at.isoformat() if pull_request.merged_at else None,
         "assignees": pull_request.assignees,
         "requested_reviewers": pull_request.requested_reviewers,
         "labels": pull_request.labels,

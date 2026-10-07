@@ -547,6 +547,58 @@
             ],
             "title": "Response Status Code"
           },
+          "settings_changes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "const": "[REDACTED]",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "propertyNames": {
+                    "enum": [
+                      "before",
+                      "after"
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Changes"
+          },
+          "settings_scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "instance",
+                  "workspace"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Scope"
+          },
           "source": {
             "default": "http",
             "enum": [
@@ -4317,6 +4369,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "claimed": {
+            "default": false,
+            "title": "Claimed",
+            "type": "boolean"
+          },
           "error": {
             "default": "",
             "title": "Error",
@@ -4606,6 +4663,29 @@
           "cancelled"
         ],
         "type": "string"
+      },
+      "ReviewChat": {
+        "properties": {
+          "assistant_id": {
+            "title": "Assistant Id",
+            "type": "string"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "assistant_id",
+          "thread_id"
+        ],
+        "title": "ReviewChat",
+        "type": "object"
       },
       "ReviewCommentUpdate": {
         "properties": {
@@ -13235,9 +13315,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Review Chat Dashboard Api Reviews  Owner   Repo   Pr Number  Chat Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewChat"
                 }
               }
             },
