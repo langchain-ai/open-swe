@@ -16,11 +16,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-from agent.github import comments as github_comments
-from agent.github import thread_token as github_token
-from agent.github import webhook as github_webhooks
-from agent.users import User
-from agent.webhooks import common as webhook_common
+from openswe.github import comments as github_comments
+from openswe.github import thread_token as github_token
+from openswe.github import webhook as github_webhooks
+from openswe.users import User
+from openswe.webhooks import common as webhook_common
 
 
 @pytest.fixture(autouse=True)
@@ -258,7 +258,7 @@ async def test_publish_review_invalidates_cached_token_on_401(
 ) -> None:
     import importlib
 
-    publish_review_module = importlib.import_module("agent.tools.publish_review")
+    publish_review_module = importlib.import_module("openswe.tools.publish_review")
 
     invalidated: dict[str, int] = {"calls": 0}
 

@@ -371,18 +371,7 @@ test.describe("my pull requests", () => {
     const method = card(page, mine).getByLabel(
       `Merge method for PR #${mine.number}`,
     );
-    await expect(method).toBeEnabled();
-    await expect(
-      method.getByRole("option", { name: "Rebase merge", exact: true }),
-    ).toHaveCount(1);
-    await expect(
-      method.getByRole("option", { name: "Squash merge", exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      method.getByRole("option", { name: "Merge commit", exact: true }),
-    ).toHaveCount(0);
-
-    await method.selectOption("rebase");
+    await expect(method).toBeHidden();
     await card(page, mine)
       .getByRole("button", { name: "Merge", exact: true })
       .click();

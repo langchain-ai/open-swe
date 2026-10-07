@@ -6,8 +6,8 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.github import pull_requests
-from agent.webhooks import common as webhook_common
+from openswe.github import pull_requests
+from openswe.webhooks import common as webhook_common
 
 
 @asynccontextmanager
@@ -27,7 +27,7 @@ async def _pr_registry(registry_db_if_available: bool, monkeypatch: pytest.Monke
 
 @pytest.fixture(autouse=True)
 def _no_feedback_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agent.thread_feedback.schedule_pr_feedback", AsyncMock())
+    monkeypatch.setattr("openswe.thread_feedback.schedule_pr_feedback", AsyncMock())
 
 
 def _pr_payload(*, state: str, merged: bool = False, draft: bool = False) -> dict[str, Any]:
@@ -68,10 +68,10 @@ async def test_only_merged_pr_prompts_original_slack_requester(
     client.threads.search.return_value = [{"thread_id": "t1", "metadata": metadata}]
     client.threads.get.return_value = {"metadata": metadata}
     with (
-        patch("agent.webhooks.common.get_client", return_value=client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("agent.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
-        patch("agent.thread_feedback.schedule_pr_feedback", new_callable=AsyncMock) as prompt,
+        patch("openswe.webhooks.common.get_client", return_value=client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
+        patch("openswe.thread_feedback.schedule_pr_feedback", new_callable=AsyncMock) as prompt,
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state=state, merged=merged))
     assert prompt.await_count == expected
@@ -115,8 +115,8 @@ async def test_update_agent_thread_pr_state_resolves_after_all_prs_close() -> No
     fake_client.threads.update = AsyncMock()
 
     with (
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
@@ -161,8 +161,8 @@ async def test_update_agent_thread_pr_state_skips_resolution_without_resolves_th
     fake_client.threads.update = AsyncMock()
 
     with (
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
@@ -206,9 +206,9 @@ async def test_update_agent_thread_pr_state_waits_for_open_prs_when_flagged() ->
     fake_client.threads.update = AsyncMock()
 
     with (
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("agent.webhooks.common.create_langsmith_thread_feedback", AsyncMock()),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.create_langsmith_thread_feedback", AsyncMock()),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
 
@@ -251,8 +251,8 @@ async def test_update_agent_thread_pr_state_reopens_auto_resolved_thread() -> No
     fake_client.threads.update = AsyncMock()
 
     with (
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="open"))
 
@@ -287,8 +287,8 @@ async def test_update_agent_thread_pr_state_paginates_all_matching_threads() -> 
     fake_client.threads.update = AsyncMock()
 
     with (
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
@@ -321,8 +321,8 @@ async def test_duplicate_terminal_state_preserves_manual_unresolve() -> None:
     fake_client.threads.update = AsyncMock()
 
     with (
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
@@ -361,8 +361,8 @@ async def test_update_agent_thread_pr_state_preserves_concurrent_pr_update() -> 
     fake_client.threads.update = AsyncMock()
 
     with (
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed"))
 
@@ -390,8 +390,8 @@ def _follow_up_client(metadata: dict[str, Any]) -> MagicMock:
 
 async def _slack_follow_up(fake_client: MagicMock) -> dict[str, Any]:
     with (
-        patch("agent.webhooks.common.get_client", return_value=fake_client),
-        patch("agent.webhooks.common.agent_thread_pr_state_lock", _unlocked),
+        patch("openswe.webhooks.common.get_client", return_value=fake_client),
+        patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
     ):
         await webhook_common.upsert_agent_thread_metadata(
             "t1", source="slack", github_login="octo", title="Thread"

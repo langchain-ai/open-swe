@@ -726,10 +726,8 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 2")
-    const only = await mergeSelect(1)
-    expect(mergeOptions(only)).toEqual(["Merge method", "Squash merge"])
-    // Nothing left to choose, so the merge is ready without a selection.
-    expect(only.value).toBe("squash")
+    const card = screen.getByText("Change 1").closest("li")!
+    await waitFor(() => expect(within(card).queryByRole("combobox")).toBeNull())
     const pair = await mergeSelect(2)
     expect(mergeOptions(pair)).toEqual([
       "Merge method",

@@ -12,7 +12,7 @@ export interface ErrorReport {
   showToast?: boolean
 }
 
-/** Field caps enforced by `ClientErrorReport` in agent/dashboard/client_errors.py. */
+/** Field caps enforced by `ClientErrorReport` in openswe/dashboard/client_errors.py. */
 const REPORT_LIMITS = {
   title: 200,
   error_message: 2000,

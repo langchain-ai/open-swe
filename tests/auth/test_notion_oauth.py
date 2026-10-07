@@ -7,10 +7,10 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent import store as agent_store
-from agent.dashboard import notion_oauth as no
-from agent.dashboard import notion_routes
-from agent.dashboard.oauth import COOKIE_NAME, issue_session
+from openswe import store as agent_store
+from openswe.dashboard import notion_oauth as no
+from openswe.dashboard import notion_routes
+from openswe.dashboard.oauth import COOKIE_NAME, issue_session
 
 
 class _FakeStore:
