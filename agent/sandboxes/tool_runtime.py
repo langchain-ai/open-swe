@@ -21,7 +21,10 @@ from agent.sandboxes.tool_models import ToolDescription
 from agent.sandboxes.tool_store import ToolStore
 
 _json = TypeAdapter(JsonValue)
-EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
+# Task workers share this channel with their coordinator, so task coordination stays model-only.
+EXCLUDED_TOOLS = frozenset(
+    {"load_integration_tools", "spawn_worker", "control_worker", "message_task_thread"}
+)
 
 
 async def save_tool_context(thread_id: str, config: RunnableConfig) -> None:

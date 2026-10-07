@@ -8,7 +8,8 @@ from fastapi import HTTPException
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.dispatch import dispatch_agent_run
 from agent.prompts import prompt
-from agent.run_config import RunConfig
+from agent.run_config import Repo, RunConfig
+from agent.slack import webhook
 from agent.slack.blocks import block_payload, section
 from agent.slack.breakout_destination import resolve_breakout_destination
 from agent.slack.breakout_links import mark_broken_out, source_thread_line
@@ -24,6 +25,7 @@ from agent.slack.client import (
     store_slack_run_mapping,
 )
 from agent.slack.http import SlackRequestError
+from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
 from agent.threads.creation import create_thread
 from agent.utils.dashboard_links import dashboard_thread_url
@@ -31,7 +33,7 @@ from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
-from agent.webhooks.common import is_repo_allowed
+from agent.webhooks.common import SlackRepoResolution, is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
@@ -168,6 +170,7 @@ async def slack_breakout_thread(
     instructions: str,
     default_repo: str | None = None,
     channel_id: str | None = None,
+    web_only: bool = False,
 ) -> dict[str, Any]:
     """Implement the `slack_breakout_thread` tool."""
     cfg = RunConfig.from_runtime()
@@ -272,6 +275,40 @@ async def slack_breakout_thread(
                     "success": False,
                     "error": "Only the private thread owner can start a breakout",
                 }
+
+    if web_only:
+        if channel_id:
+            return {"success": False, "error": "Web breakouts do not have a Slack destination"}
+        if cfg.background_task_completion or not owner_login:
+            return {"success": False, "error": "Web breakouts require an authenticated user run"}
+        if not isinstance(current_thread_ts, str) or not current_thread_ts:
+            return {"success": False, "error": "Missing source Slack thread timestamp"}
+        thread_id = str(uuid.uuid4())
+        started = await webhook.process_slack_web_mention(
+            SlackRequest(
+                channel_id=source_channel,
+                thread_ts=current_thread_ts,
+                event_ts=cfg.slack_thread.triggering_event_ts or current_thread_ts,
+                user_id=cfg.slack_thread.triggering_user_id,
+                text=clean_instructions,
+                thread_id=thread_id,
+                context_channel_id=source_channel,
+                context_thread_ts=current_thread_ts,
+            ),
+            SlackRepoResolution(
+                repo=Repo.model_validate(repo) if repo else None,
+                explicit=bool(default_repo),
+            ),
+            inherited_workspace=cfg.workspace_slug,
+        )
+        if not started:
+            return {"success": False, "error": "Could not start the web breakout"}
+        return {
+            "success": True,
+            "thread_id": thread_id,
+            "dashboard_url": dashboard_thread_url(thread_id),
+            "next_step": "Share the dashboard_url with the requester; the thread is web-only.",
+        }
 
     destination = await resolve_breakout_destination(
         source_channel, channel_id, workspace=cfg.workspace_slug

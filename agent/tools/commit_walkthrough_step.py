@@ -3,8 +3,7 @@
 import logging
 from typing import Any
 
-from agent.review_scout.git import OTHER_TITLE, ScoutGitError, commit_staged, committed_kinds
-from agent.review_scout.paths import scout_repo_dir
+from agent.review_scout.git import OTHER_TITLE, ScoutCheckout, ScoutGitError
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
 
@@ -24,22 +23,19 @@ async def commit_walkthrough_step(
     cfg = RunConfig.from_runtime()
     if not cfg.thread_id or not cfg.base_sha or not cfg.head_sha:
         return {"success": False, "error": "scout thread unavailable"}
-    backend = get_cached_sandbox_backend(cfg.thread_id)
-    repo_dir = await scout_repo_dir(backend, cfg)
-    if repo_dir is None:
+    checkout = await ScoutCheckout.locate(get_cached_sandbox_backend(cfg.thread_id), cfg)
+    if checkout is None:
         return {"success": False, "error": "scout repository unavailable"}
     try:
         if not other and not any(
-            await committed_kinds(backend, repo_dir, base_sha=cfg.base_sha, head_sha=cfg.head_sha)
+            await checkout.committed_kinds(base_sha=cfg.base_sha, head_sha=cfg.head_sha)
         ):
             return {
                 "success": False,
                 "error": "commit the `other: true` pass first: stage every change a reviewer "
                 "does not need to read and commit it before any step",
             }
-        sha = await commit_staged(
-            backend,
-            repo_dir,
+        sha = await checkout.commit_staged(
             title=trimmed_title,
             summary="" if other else summary.strip()[:MAX_SUMMARY_CHARS],
             other=other,

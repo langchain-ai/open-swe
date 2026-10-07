@@ -63,6 +63,7 @@ class ProfileUpdate(BaseModel):
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
     prefer_tools_in_sandbox: bool | None = None
+    experimental_task_coordination: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_assistant_ui: bool | None = Field(
@@ -451,6 +452,7 @@ async def put_my_profile(
             pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
             prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
+            experimental_task_coordination=update.experimental_task_coordination,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
             act_as_always_allowed=(
@@ -464,6 +466,7 @@ async def put_my_profile(
         or update.pr_review_links
         or update.pr_failure_reactions
         or update.prefer_tools_in_sandbox
+        or update.experimental_task_coordination
         or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")

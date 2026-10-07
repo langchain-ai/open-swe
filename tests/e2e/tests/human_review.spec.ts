@@ -481,9 +481,12 @@ test.describe("Human review in Slack", () => {
       mention_bot: true,
     })) as { thread_ts?: string };
     await expect
-      .poll(async () => (await reviewRequests(request)).length, {
-        timeout: 90_000,
-      })
+      .poll(
+        async () =>
+          (await reviewRequests(request)).filter((req) => req.slack_message_ts)
+            .length,
+        { timeout: 90_000 },
+      )
       .toBe(1);
     const posted = await latestRequest(request);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
@@ -662,10 +665,18 @@ test.describe("Human review in Slack", () => {
     // ...and messaged in his DM, which is his concierge conversation.
     const picked = await pickedDm(request, "D_BOB");
     expect(picked.thread_ts).toBe(picked.ts);
-    const state = await request.get(`/threads/${dm.thread_id}/state`);
-    expect(JSON.stringify(await state.json())).toContain(
-      "picked you to review",
-    );
+    await expect
+      .poll(async () => {
+        const queued = await request.get(`${HARNESS}/store/items`, {
+          params: {
+            namespace: `queue.${dm.thread_id}`,
+            key: "pending_messages",
+          },
+        });
+        const state = await request.get(`/threads/${dm.thread_id}/state`);
+        return JSON.stringify([await queued.json(), await state.json()]);
+      })
+      .toContain("picked you to review");
     await shootCard(page, "picked");
 
     // 3. Bob accepts from his DM and becomes the reviewer.

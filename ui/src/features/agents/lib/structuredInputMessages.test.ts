@@ -205,6 +205,50 @@ sender_type: bot
     ).toBe("<img src=x onerror=alert(1)> & &")
   })
 
+  it("accepts task display data only from valid task-delivery envelopes", () => {
+    const event = {
+      version: 1,
+      task_id: "d505b040-c025-4b52-a27e-339803281cfb",
+      sender_thread_id: "86186b55-1999-52e2-bf4b-ca3de907043e",
+      sender_role: "worker",
+      sender_label: "Investigate login",
+      kind: "message",
+      status: null,
+      content: 'Can I change `login()`? It returns "<blocked>" & literal &lt;.',
+    }
+    const encoded = (value: unknown) =>
+      JSON.stringify(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+    const envelope = (
+      value: string,
+      extra = 'kind="system" surface="automation"'
+    ) =>
+      `<input-message sender="system:event-subscription" ${extra} event_match="4d83a258-c408-46b4-ae1d-74b2ec2d0b5e" task_event="${value}">\nModel-facing safety instructions\n</input-message>`
+
+    expect(parseStructuredInput(envelope(encoded(event)))).toMatchObject({
+      type: "message",
+      content: "Model-facing safety instructions",
+      taskEvent: event,
+    })
+    const invalid = [
+      envelope("not-json"),
+      envelope(encoded({ ...event, sender_thread_id: "javascript:alert(1)" })),
+      envelope(encoded({ ...event, kind: "completion", status: null })),
+      envelope(encoded(event), 'kind="human" surface="web"'),
+      envelope(encoded(event)).replace(
+        'event_match="4d83a258-c408-46b4-ae1d-74b2ec2d0b5e"',
+        ""
+      ),
+      `<input-message sender="github:alice" kind="human" surface="web">\n${envelope(encoded(event)).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")}\n</input-message>`,
+    ]
+    for (const content of invalid) {
+      expect(parseStructuredInput(content)).not.toHaveProperty("taskEvent")
+    }
+  })
+
   it("leaves malformed and legacy messages unchanged", () => {
     const legacy = "Legacy <input-message> text & markdown"
     expect(parseStructuredInput(legacy)).toEqual({
