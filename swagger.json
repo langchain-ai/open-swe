@@ -3706,17 +3706,6 @@
             ],
             "title": "Prefer Tools In Sandbox"
           },
-          "preserve_sandbox_memory": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preserve Sandbox Memory"
-          },
           "reasoning_effort": {
             "title": "Reasoning Effort",
             "type": "string"

@@ -34,7 +34,6 @@ from agent.sandboxes.state import (
     unwrap_sandbox_backend,
 )
 from agent.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
-from agent.users import User
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
 from agent.workspaces.refresh import is_snapshot_stale, maybe_start_update
@@ -47,11 +46,6 @@ from agent.workspaces.store import (
 logger = logging.getLogger(__name__)
 
 client = get_client()
-
-
-def _owner_login(metadata: dict[str, Any]) -> str | None:
-    owner = metadata.get("owner_login")
-    return owner.strip() if isinstance(owner, str) and owner.strip() else None
 
 
 SandboxSource = Literal["workspace", "base"]
@@ -72,21 +66,12 @@ class SandboxCreateConfig:
         workspace_slug: str | None = None,
         *,
         source: SandboxSource = "workspace",
-        owner_login: str | None = None,
     ) -> SandboxCreateConfig:
-        async def workspace_for_source() -> Workspace | None:
-            # An absent slug is not "no workspace": load_workspace falls back to the
-            # `default` workspace, so "base" has to skip the lookup outright.
-            return None if source == "base" else await load_workspace(workspace_slug)
-
-        workspace, preserve_memory = await asyncio.gather(
-            workspace_for_source(), cls._owner_preserves_memory(owner_login)
-        )
+        workspace = None if source == "base" else await load_workspace(workspace_slug)
         if workspace is not None and workspace.inherit_default_sandbox:
             workspace = await load_workspace(None)
         create_params = workspace.sandbox_create_params() if workspace is not None else {}
-        if preserve_memory:
-            create_params = {**create_params, "preserve_memory_on_stop": True}
+        create_params["preserve_memory_on_stop"] = True
         if workspace is None:
             return cls(snapshot_id=None, create_params=create_params)
         return cls(
@@ -95,22 +80,6 @@ class SandboxCreateConfig:
             create_params=create_params,
             workspace=workspace,
         )
-
-    @staticmethod
-    async def _owner_preserves_memory(owner_login: str | None) -> bool:
-        if not owner_login:
-            return False
-        try:
-            preferences = await User.preferences_for_login(owner_login)
-        except Exception:
-            # A preference only picks how the box stops; it must not block the boot.
-            logger.warning(
-                "Could not load sandbox memory preference",
-                exc_info=True,
-                extra={"owner_login": owner_login},
-            )
-            return False
-        return preferences.preserve_sandbox_memory
 
     @property
     def proxy_config(self) -> dict[str, Any] | None:
@@ -132,14 +101,11 @@ async def _create_sandbox_with_proxy(
     github_proxy_repositories: Sequence[str] | None = None,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
-    owner_login: str | None = None,
     record_stale_boot: bool = False,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
-        config = await SandboxCreateConfig.resolve(
-            workspace_slug, source=source, owner_login=owner_login
-        )
+        config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
     async with aphase(thread_id, "sandbox.boot", snapshot_id=config.snapshot_id):
         sandbox_backend = await config.boot()
 
@@ -403,7 +369,6 @@ async def ensure_sandbox_for_thread(
         if isinstance(metadata_proxy_config, dict)
         else get_recorded_proxy_base_config(thread_id)
     )
-    owner_login = _owner_login(sandbox_metadata)
     created = False
     created_proxy_config: dict[str, Any] | None = None
     async with aphase(thread_id, "sandbox.token_scope"):
@@ -417,7 +382,6 @@ async def ensure_sandbox_for_thread(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
             workspace_slug=workspace_slug,
-            owner_login=owner_login,
             record_stale_boot=record_stale_boot,
         )
         created = True
@@ -448,7 +412,6 @@ async def ensure_sandbox_for_thread(
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
                     workspace_slug=workspace_slug,
-                    owner_login=owner_login,
                     record_stale_boot=record_stale_boot,
                 )
                 created = True
@@ -554,7 +517,6 @@ async def recreate_sandbox_for_thread(
         github_proxy_repositories=await thread_token_repositories(thread_id),
         workspace_slug=workspace_slug,
         source=source,
-        owner_login=_owner_login(metadata),
     )
     if new_sandbox.id == old_sandbox_id:
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")

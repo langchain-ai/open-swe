@@ -17,7 +17,7 @@ async def test_inherited_sandbox_tracks_default_without_changing_workspace_ident
         snapshot_status="ready",
         snapshot_id="snap-1",
         mem_bytes=1234,
-        create_params={"preserve_memory_on_stop": True},
+        create_params={"preserve_memory_on_stop": False},
     )
 
     async def load(slug: str | None) -> Workspace:
