@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from agent.run_config import RunConfig
 from agent.slack.blocks import block_payload
+from agent.slack.cards import origin_footer, run_slack_location
 from agent.slack.client import (
     SLACK_USER_ID_RE,
     convert_mentions_to_slack_format,
@@ -195,6 +196,11 @@ async def slack_post_message(
         seen_cursors.add(cursor)
 
     blocks = markdown_blocks(message)
+    cfg = RunConfig.from_runtime()
+    if cfg.thread_id:
+        location = await run_slack_location(cfg, cfg.thread_id)
+        if location[0] and location[1] and location[0] != channel_id:
+            blocks.extend(await origin_footer(cfg.thread_id, location))
     try:
         message_ts = await post_slack_top_level_message_with_ts(
             channel_id,
