@@ -122,24 +122,25 @@ function NotionRow() {
       control={
         <div className="flex items-center gap-2">
           <StatusPill connected={connected} />
-          {connected ? (
+          {connected && (
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => disconnect.mutate()}
+              disabled={connecting || disconnect.isPending}
             >
               Disconnect
             </Button>
-          ) : (
-            <Button
-              size="sm"
-              onClick={connect}
-              disabled={connecting || creds.isLoading}
-            >
-              <SiNotion className="size-4" />
-              {connecting ? "Redirecting…" : "Connect"}
-            </Button>
           )}
+          <Button
+            size="sm"
+            variant={connected ? "outline" : "default"}
+            onClick={connect}
+            disabled={connecting || creds.isLoading || disconnect.isPending}
+          >
+            <SiNotion className="size-4" />
+            {connecting ? "Redirecting…" : connected ? "Reconnect" : "Connect"}
+          </Button>
         </div>
       }
     />
