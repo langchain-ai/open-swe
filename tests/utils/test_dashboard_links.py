@@ -1,6 +1,6 @@
 import pytest
 
-from agent.utils.dashboard_links import dashboard_thread_id
+from openswe.utils.dashboard_links import dashboard_thread_id
 
 
 @pytest.mark.parametrize(

@@ -3,8 +3,8 @@
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.profiles import ProfileUpdate, get_my_profile, put_my_profile
-from agent.users import User, UserPreferences
+from openswe.dashboard.profiles import ProfileUpdate, get_my_profile, put_my_profile
+from openswe.users import User, UserPreferences
 from tests.conftest import FakeStore
 
 pytestmark = pytest.mark.usefixtures("registry_db")

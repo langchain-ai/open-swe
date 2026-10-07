@@ -4,14 +4,14 @@ import pytest
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from fastapi import HTTPException
 
-from agent.review import chat as review_chat_api
+from openswe.review import chat as review_chat_api
 
-# `agent.tools.__init__` rebinds these names to the tool *functions*, shadowing
+# `openswe.tools.__init__` rebinds these names to the tool *functions*, shadowing
 # the submodules. Import the real modules so we can monkeypatch their globals.
-list_review_findings = importlib.import_module("agent.tools.list_review_findings")
-read_repo_file = importlib.import_module("agent.github.tools.read_repo_file")
-search_repo_code = importlib.import_module("agent.github.tools.search_repo_code")
-web_search = importlib.import_module("agent.tools.web_search")
+list_review_findings = importlib.import_module("openswe.tools.list_review_findings")
+read_repo_file = importlib.import_module("openswe.github.tools.read_repo_file")
+search_repo_code = importlib.import_module("openswe.github.tools.search_repo_code")
+web_search = importlib.import_module("openswe.tools.web_search")
 
 
 # --- tools -------------------------------------------------------------------
@@ -19,12 +19,12 @@ web_search = importlib.import_module("agent.tools.web_search")
 
 @pytest.mark.asyncio
 async def test_repo_tools_require_context_and_token(monkeypatch) -> None:
-    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": {}})
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: {"configurable": {}})
     result = await read_repo_file.read_repo_file("src/app.py")
     assert result["success"] is False
 
     config = {"configurable": {"chat_repo_owner": "acme", "chat_repo_name": "repo"}}
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config)
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     for tool, args in (
         (read_repo_file.read_repo_file, ("src/app.py",)),
         (search_repo_code.search_repo_code, ("foo",)),
@@ -37,13 +37,13 @@ async def test_repo_tools_require_context_and_token(monkeypatch) -> None:
 
 
 def test_chat_excludes_mutating_filesystem_tools() -> None:
-    from agent.chat import _EXCLUDED_TOOLS
+    from openswe.chat import _EXCLUDED_TOOLS
 
     assert {"write_file", "edit_file", "delete", "execute"} <= _EXCLUDED_TOOLS
 
 
 def test_chat_general_purpose_subagent_is_read_only() -> None:
-    from agent.chat import _chat_general_purpose_subagent
+    from openswe.chat import _chat_general_purpose_subagent
 
     spec = _chat_general_purpose_subagent()
 

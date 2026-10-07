@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from agent.dashboard import oauth
+from openswe.dashboard import oauth
 
 BACKEND = "https://backend.example"
 

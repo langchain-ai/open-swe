@@ -1,6 +1,6 @@
 import pytest
 
-from agent.review.styles import normalize_repo_full_name
+from openswe.review.styles import normalize_repo_full_name
 
 
 def test_normalize_repo_full_name_accepts_urls() -> None:
