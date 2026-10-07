@@ -8,30 +8,15 @@ from typing import Any
 from openswe.dashboard.notion_oauth import is_reauth_required_error, refresh_notion_access_token
 from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import delete_value, get_value, now_iso, put_value
+from openswe.store import now_iso
+from openswe.users.records import UserRecords
 
 logger = logging.getLogger(__name__)
 
-USER_CREDENTIALS_NAMESPACE: list[str] = ["user_credentials"]
+USER_CREDENTIALS = UserRecords("credential")
 NOTION_KEY = "notion"
 
 _NOTION_TOKEN_EXPIRY_SKEW_SECONDS = 300
-
-
-def _namespace(login: str) -> list[str]:
-    return [*USER_CREDENTIALS_NAMESPACE, login]
-
-
-async def _get_provider(login: str, key: str) -> dict[str, Any] | None:
-    return await get_value(_namespace(login), key)
-
-
-async def _put_provider(login: str, key: str, value: dict[str, Any]) -> None:
-    await put_value(_namespace(login), key, value)
-
-
-async def _delete_provider(login: str, key: str) -> None:
-    await delete_value(_namespace(login), key)
 
 
 @dataclass(frozen=True)
@@ -66,7 +51,7 @@ def _token_expired(
 
 async def get_notion_status(login: str) -> dict[str, Any]:
     """Return a redacted view of the user's Notion MCP connection."""
-    notion = await _get_provider(login, NOTION_KEY)
+    notion = await USER_CREDENTIALS.get(login, NOTION_KEY)
     return {
         "notion": {
             "connected": True,
@@ -132,21 +117,21 @@ async def connect_notion(login: str, data: dict[str, Any], flow: dict[str, Any])
     client_secret = (
         flow.get("client_secret") if isinstance(flow.get("client_secret"), str) else None
     )
-    await _put_provider(
+    await USER_CREDENTIALS.put(
         login,
-        NOTION_KEY,
         _notion_record_from_response(
             data,
             client_id=client_id,
             client_secret=client_secret,
             token_endpoint=token_endpoint,
         ),
+        NOTION_KEY,
     )
     return await get_notion_status(login)
 
 
 async def disconnect_notion(login: str) -> dict[str, Any]:
-    await _delete_provider(login, NOTION_KEY)
+    await USER_CREDENTIALS.delete(login, NOTION_KEY)
     return await get_notion_status(login)
 
 
@@ -184,7 +169,9 @@ async def _refresh_stored_notion_token(
     except Exception as exc:  # noqa: BLE001
         logger.warning("Notion token refresh failed for %s", login, exc_info=True)
         return None, is_reauth_required_error(exc)
-    await _put_provider(login, NOTION_KEY, _notion_record_from_response(data, existing=record))
+    await USER_CREDENTIALS.put(
+        login, _notion_record_from_response(data, existing=record), NOTION_KEY
+    )
     access_token = data.get("access_token")
     return (access_token if isinstance(access_token, str) else None), False
 
@@ -208,7 +195,7 @@ async def get_notion_credentials(
 async def _load_notion_credentials(
     login: str, *, force_refresh: bool = False
 ) -> NotionCredentials | None:
-    record = await _get_provider(login, NOTION_KEY)
+    record = await USER_CREDENTIALS.get(login, NOTION_KEY)
     if not record:
         return None
     access_token = _decrypt_notion_access_token(record)
@@ -225,7 +212,7 @@ async def _load_notion_credentials(
     if not _decrypt_notion_refresh_token(record):
         return None
     async with refresh_guard("notion", login):
-        record = await _get_provider(login, NOTION_KEY)
+        record = await USER_CREDENTIALS.get(login, NOTION_KEY)
         if not record:
             return None
         access_token = _decrypt_notion_access_token(record)
@@ -241,7 +228,7 @@ async def _load_notion_credentials(
             )
         refreshed, refresh_token_dead = await _refresh_stored_notion_token(login, record)
         if refreshed:
-            refreshed_record = await _get_provider(login, NOTION_KEY) or record
+            refreshed_record = await USER_CREDENTIALS.get(login, NOTION_KEY) or record
             return NotionCredentials(
                 access_token=refreshed,
                 refresh_token=_decrypt_notion_refresh_token(refreshed_record),
@@ -250,7 +237,7 @@ async def _load_notion_credentials(
                 client_secret=_decrypt_notion_client_secret(refreshed_record),
             )
         if refresh_token_dead:
-            latest = await _get_provider(login, NOTION_KEY)
+            latest = await USER_CREDENTIALS.get(login, NOTION_KEY)
             if latest and latest.get("encrypted_refresh_token") != record.get(
                 "encrypted_refresh_token"
             ):

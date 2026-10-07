@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 from openswe.dashboard.profiles import ProfileUpdate, get_my_profile, put_my_profile
 from openswe.users import User, UserPreferences
-from tests.conftest import FakeStore
+from tests.conftest import FakeUserRecords
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -24,18 +24,20 @@ def _update(concierge_mode: bool | None) -> ProfileUpdate:
     )
 
 
-async def test_saving_the_default_back_works_without_a_users_row(fake_store: FakeStore) -> None:
+async def test_saving_the_default_back_works_without_a_users_row(
+    user_records: FakeUserRecords,
+) -> None:
     saved = await put_my_profile(_update(False), _SESSION)
 
     assert saved["concierge_mode"] is False
     assert "dm_session_enabled" not in saved
 
 
-async def test_turning_concierge_mode_on_needs_a_users_row(fake_store: FakeStore) -> None:
+async def test_turning_concierge_mode_on_needs_a_users_row(user_records: FakeUserRecords) -> None:
     with pytest.raises(HTTPException) as exc:
         await put_my_profile(_update(True), _SESSION)
     assert exc.value.status_code == 409
-    assert fake_store.values(["profiles"]) == {}
+    assert not user_records.items
 
     await User.sign_in("github", "1", login="ada")
     saved = await put_my_profile(_update(True), _SESSION)
@@ -45,7 +47,7 @@ async def test_turning_concierge_mode_on_needs_a_users_row(fake_store: FakeStore
 
 
 async def test_task_coordination_opt_in_survives_unrelated_profile_saves(
-    fake_store: FakeStore,
+    user_records: FakeUserRecords,
 ) -> None:
     await User.sign_in("github", "1", login="ada")
     assert (await get_my_profile(_SESSION))["experimental_task_coordination"] is False

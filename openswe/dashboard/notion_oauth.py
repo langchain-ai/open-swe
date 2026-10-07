@@ -10,12 +10,13 @@ import httpx2
 
 from openswe.config import ENV
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import delete_value, get_value, now_iso, put_value
+from openswe.store import now_iso
+from openswe.users.records import UserRecords
 from openswe.utils.dashboard_links import dashboard_base_url
 
 NOTION_MCP_URL = "https://mcp.notion.com/mcp"
 NOTION_STATE_COOKIE_NAME = "osw_notion_oauth_state"
-NOTION_OAUTH_FLOW_NAMESPACE: list[str] = ["notion_oauth_flows"]
+NOTION_OAUTH_FLOWS = UserRecords("notion_oauth_flow")
 
 _NOTION_HOST = "mcp.notion.com"
 _PROTECTED_RESOURCE_METADATA_URL = "https://mcp.notion.com/.well-known/oauth-protected-resource"
@@ -190,7 +191,7 @@ async def store_notion_oauth_flow(
         "redirect_uri": redirect_uri,
         "created_at": now_iso(),
     }
-    await put_value([*NOTION_OAUTH_FLOW_NAMESPACE, login], nonce_hash, value)
+    await NOTION_OAUTH_FLOWS.put(login, value, nonce_hash)
     return build_notion_authorize_url(
         authorization_endpoint=authorization_endpoint,
         client_id=client_id,
@@ -202,9 +203,7 @@ async def store_notion_oauth_flow(
 
 async def pop_notion_oauth_flow(login: str, nonce_hash: str) -> dict[str, Any] | None:
     """Read and delete a pending Notion OAuth flow."""
-    namespace = [*NOTION_OAUTH_FLOW_NAMESPACE, login]
-    value = await get_value(namespace, nonce_hash)
-    await delete_value(namespace, nonce_hash)
+    value = await NOTION_OAUTH_FLOWS.pop(login, nonce_hash)
     if value is None:
         return None
     encrypted_code_verifier = value.pop("encrypted_code_verifier", "")

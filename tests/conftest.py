@@ -18,6 +18,7 @@ from openswe import store as agent_store
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
 from openswe.tools import access as tool_access
+from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
 from openswe.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
@@ -91,8 +92,8 @@ class FakeStore:
         offset: int = 0,
     ) -> dict[str, Any]:
         matches = [
-            {"value": dict(value)}
-            for value in self.values(namespace).values()
+            {"key": key, "value": dict(value)}
+            for key, value in self.values(namespace).items()
             if all(value.get(k) == expected for k, expected in (filter or {}).items())
         ]
         return {"items": matches[offset : offset + limit]}
@@ -109,6 +110,44 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     client = FakeStoreClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client.store
+
+
+class FakeUserRecords:
+    """In-memory stand-in for every ``UserRecords`` kind, keyed like PostgreSQL resolves logins."""
+
+    def __init__(self) -> None:
+        self.items: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def seed(self, kind: str, login: str, value: dict[str, Any], key: str = "") -> None:
+        self.items[(kind, login.strip().lower(), key)] = dict(value)
+
+    def get(self, kind: str, login: str, key: str = "") -> dict[str, Any]:
+        return self.items[(kind, login.strip().lower(), key)]
+
+    def pop(self, kind: str, login: str, key: str = "") -> dict[str, Any] | None:
+        return self.items.pop((kind, login.strip().lower(), key), None)
+
+
+@pytest.fixture
+def user_records(monkeypatch: pytest.MonkeyPatch) -> FakeUserRecords:
+    """Route every ``UserRecords`` access to an in-memory table for this test."""
+    fake = FakeUserRecords()
+
+    async def get(self: UserRecords, login: str, key: str = "") -> dict[str, Any] | None:
+        value = fake.items.get((self.kind, login.strip().lower(), key))
+        return None if value is None else dict(value)
+
+    async def put(self: UserRecords, login: str, value: dict[str, Any], key: str = "") -> None:
+        fake.seed(self.kind, login, value, key)
+
+    async def pop(self: UserRecords, login: str, key: str = "") -> dict[str, Any] | None:
+        return fake.pop(self.kind, login, key)
+
+    monkeypatch.setattr(UserRecords, "get", get)
+    monkeypatch.setattr(UserRecords, "put", put)
+    monkeypatch.setattr(UserRecords, "delete", pop)
+    monkeypatch.setattr(UserRecords, "pop", pop)
+    return fake
 
 
 @pytest.fixture

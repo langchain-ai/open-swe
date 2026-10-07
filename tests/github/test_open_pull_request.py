@@ -630,7 +630,7 @@ def test_updating_pr_preserves_original_feedback_run() -> None:
     assert result[0]["state"] == "open"
 
 
-def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, fake_store) -> None:
+def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, user_records) -> None:
     from cryptography.fernet import Fernet
 
     from openswe.dashboard import profiles

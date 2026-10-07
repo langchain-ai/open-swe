@@ -45,6 +45,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
     from openswe.users.import_concierge_mode import import_concierge_mode
+    from openswe.users.import_records import import_user_records
     from openswe.users.import_store import import_user_mappings
     from openswe.utils.model import validate_local_dev_llm_config
 
@@ -75,6 +76,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Startup continues: opted-in people get a thread per DM message until
         # an import succeeds.
         logger.exception("Importing concierge mode from the LangGraph Store failed")
+    try:
+        # Profiles, preferences, instructions, and tokens used to be Store
+        # records keyed by GitHub login; this moves them into user_record.
+        await import_user_records()
+    except Exception:  # noqa: BLE001
+        # Startup continues: people whose records are still in the Store see
+        # default settings and reconnect until an import succeeds.
+        logger.exception("Importing per-person records from the LangGraph Store failed")
     try:
         # Automations used to live in the LangGraph Store; this copies them into
         # PostgreSQL and is a no-op once the Store namespaces are empty.

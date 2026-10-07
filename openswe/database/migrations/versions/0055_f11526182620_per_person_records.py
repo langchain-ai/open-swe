@@ -1,0 +1,29 @@
+"""Per-person records moved out of the LangGraph Store.
+
+One JSON document per person, kind, and key: profiles, dashboard preferences,
+custom instructions, encrypted GitHub and Notion tokens, and pending OAuth flows.
+"""
+
+from alembic import op
+
+revision = "f11526182620"
+down_revision = "e74e583ea10e"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.execute("""
+        CREATE TABLE user_record (
+            user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+            kind text NOT NULL,
+            key text NOT NULL DEFAULT '',
+            value jsonb NOT NULL,
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            PRIMARY KEY (user_id, kind, key)
+        )
+    """)
+
+
+def downgrade() -> None:
+    raise NotImplementedError

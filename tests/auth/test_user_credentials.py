@@ -1,45 +1,21 @@
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
 
-from openswe import store as agent_store
 from openswe.dashboard import user_credentials as uc
 from openswe.dashboard.notion_oauth import NotionOAuthError
+from tests.conftest import FakeUserRecords
 
 
-class _FakeStore:
-    def __init__(self) -> None:
-        self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-
-    async def get_item(self, namespace: list[str], key: str):
-        value = self.items.get((tuple(namespace), key))
-        return {"value": value} if value is not None else None
-
-    async def put_item(self, namespace: list[str], key: str, value: dict[str, Any]) -> None:
-        self.items[(tuple(namespace), key)] = value
-
-    async def delete_item(self, namespace: list[str], key: str) -> None:
-        self.items.pop((tuple(namespace), key), None)
-
-
-class _FakeClient:
-    def __init__(self, store: _FakeStore) -> None:
-        self.store = store
-
-
-@pytest.fixture()
-def fake_store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
-    store = _FakeStore()
-    monkeypatch.setattr(agent_store, "store_client", lambda: _FakeClient(store))
+@pytest.fixture(autouse=True)
+def _encryption_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    return store
 
 
 @pytest.mark.asyncio
-async def test_notion_roundtrip_and_redaction(fake_store: _FakeStore) -> None:
+async def test_notion_roundtrip_and_redaction(user_records: FakeUserRecords) -> None:
     status = await uc.connect_notion(
         "alice",
         {
@@ -56,7 +32,7 @@ async def test_notion_roundtrip_and_redaction(fake_store: _FakeStore) -> None:
     )
     assert status["notion"]["connected"] is True
 
-    record = fake_store.items[(("user_credentials", "alice"), "notion")]
+    record = user_records.items[("credential", "alice", "notion")]
     assert record["encrypted_access_token"] != "notion-access-1234"
     assert record["encrypted_refresh_token"] != "notion-refresh"
     assert record["encrypted_client_secret"] != "client-secret"
@@ -74,7 +50,7 @@ async def test_notion_roundtrip_and_redaction(fake_store: _FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_notion_refresh_rotates_tokens(fake_store: _FakeStore) -> None:
+async def test_notion_refresh_rotates_tokens(user_records: FakeUserRecords) -> None:
     await uc.connect_notion(
         "alice",
         {
@@ -88,7 +64,7 @@ async def test_notion_refresh_rotates_tokens(fake_store: _FakeStore) -> None:
             "token_endpoint": "https://mcp.notion.com/token",
         },
     )
-    record = fake_store.items[(("user_credentials", "alice"), "notion")]
+    record = user_records.items[("credential", "alice", "notion")]
     record["token_expires_at"] = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
 
     with patch.object(
@@ -115,7 +91,7 @@ async def test_notion_refresh_rotates_tokens(fake_store: _FakeStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_notion_invalid_grant_disconnects(fake_store: _FakeStore) -> None:
+async def test_notion_invalid_grant_disconnects(user_records: FakeUserRecords) -> None:
     await uc.connect_notion(
         "alice",
         {
@@ -128,7 +104,7 @@ async def test_notion_invalid_grant_disconnects(fake_store: _FakeStore) -> None:
             "token_endpoint": "https://mcp.notion.com/token",
         },
     )
-    record = fake_store.items[(("user_credentials", "alice"), "notion")]
+    record = user_records.items[("credential", "alice", "notion")]
     record["token_expires_at"] = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
 
     with patch.object(
