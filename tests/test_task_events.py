@@ -226,8 +226,9 @@ async def test_persistence_failure_fails_webhook_after_usage_and_transcript_sett
     settled.assert_awaited_once()
 
 
-async def test_cancelled_worker_reports_outcome_without_restarting_owed_assignment(
-    worker_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("status", ["interrupted", "error"])
+async def test_cancelled_worker_only_reports_interruption_without_restarting_owed_assignment(
+    worker_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, status: str
 ) -> None:
     from agent.tasks import service
 
@@ -239,10 +240,13 @@ async def test_cancelled_worker_reports_outcome_without_restarting_owed_assignme
     monkeypatch.setattr(completion, "_finalize_agent_usage_telemetry", AsyncMock())
     monkeypatch.setattr(completion, "_settle_transcript_turn", AsyncMock())
     result = await completion.handle_run_completion(
-        {"thread_id": _WORKER, "run_id": "run", "status": "error", "error": "Cancelled"}
+        {"thread_id": _WORKER, "run_id": "run", "status": status, "error": "Cancelled"}
     )
     assert result["status"] == "ok"
-    notify.assert_awaited_once()
+    if status == "interrupted":
+        notify.assert_awaited_once()
+    else:
+        notify.assert_not_awaited()
     events.EventSubscription.deliver_to.assert_not_awaited()
 
 

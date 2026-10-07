@@ -90,6 +90,9 @@ async def worker_finished(
         return True
     from agent.tasks.service import notify
 
+    delegation = await store.get_delegation(thread_id)
+    if delegation is not None and delegation.cancelled and status != "interrupted":
+        return True
     result = await worker_result(thread_id, run_id, status, payload)
     await notify(
         context.task,
