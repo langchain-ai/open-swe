@@ -5,7 +5,7 @@ from langsmith.sandbox import SandboxRetryableConnectionError
 
 import agent.server as server
 from agent.middleware import task_coordination
-from agent.tasks.store import CoordinatedTask, TaskContext, TaskDelegation, TaskMembership
+from agent.tasks.store import Task, TaskContext, TaskDelegation, TaskMembership
 
 
 def _middleware() -> server.PrepareAgentRunMiddleware:
@@ -31,7 +31,7 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_TRACING", "false")
-    task = CoordinatedTask(coordinator_thread_id="host", title="Fix login", workspace="default")
+    task = Task(coordinator_thread_id="host", title="Fix login", workspace="default")
     context = TaskContext(task, TaskMembership(thread_id="worker", task_id=task.id, role="worker"))
     delegation = TaskDelegation(
         worker_thread_id="worker",

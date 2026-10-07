@@ -131,13 +131,11 @@ async def test_task_tools_require_owner_opt_in_and_supported_sandbox(
 async def test_existing_task_keeps_controls_after_opt_out(
     saved_thread_scope, role: Literal["coordinator", "worker"]
 ):
-    from agent.tasks.store import CoordinatedTask, TaskContext, TaskMembership
+    from agent.tasks.store import Task, TaskContext, TaskMembership
     from agent.users import User, UserPreferences
 
     saved_thread_scope.update(owner_type="user", owner_login="owner")
-    task = CoordinatedTask(
-        coordinator_thread_id="coordinator", title="Existing task", workspace="default"
-    )
+    task = Task(coordinator_thread_id="coordinator", title="Existing task", workspace="default")
     context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
     with (
         patch.object(User, "preferences_for_login", return_value=UserPreferences()),

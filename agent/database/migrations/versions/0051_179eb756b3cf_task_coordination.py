@@ -10,7 +10,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute("""
-        CREATE TABLE coordinated_task (
+        CREATE TABLE task (
             id uuid PRIMARY KEY,
             coordinator_thread_id text NOT NULL UNIQUE,
             title text NOT NULL,
@@ -22,7 +22,7 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE task_membership (
             thread_id text PRIMARY KEY,
-            task_id uuid NOT NULL REFERENCES coordinated_task(id),
+            task_id uuid NOT NULL REFERENCES task(id),
             role text NOT NULL CHECK (role IN ('coordinator', 'worker')),
             UNIQUE (task_id, thread_id)
         )
@@ -32,7 +32,7 @@ def upgrade() -> None:
             WHERE role = 'coordinator'
     """)
     op.execute("""
-        ALTER TABLE coordinated_task ADD CONSTRAINT task_coordinator_membership
+        ALTER TABLE task ADD CONSTRAINT task_coordinator_membership
             FOREIGN KEY (id, coordinator_thread_id)
             REFERENCES task_membership(task_id, thread_id)
             DEFERRABLE INITIALLY DEFERRED
@@ -50,7 +50,7 @@ def upgrade() -> None:
             FOREIGN KEY (task_id, worker_thread_id)
                 REFERENCES task_membership(task_id, thread_id),
             FOREIGN KEY (task_id, coordinator_thread_id)
-                REFERENCES coordinated_task(id, coordinator_thread_id),
+                REFERENCES task(id, coordinator_thread_id),
             CHECK (worker_thread_id <> coordinator_thread_id)
         )
     """)

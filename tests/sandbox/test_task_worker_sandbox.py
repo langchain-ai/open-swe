@@ -8,12 +8,12 @@ from agent import background_tasks
 from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
-from agent.tasks.store import CoordinatedTask, TaskContext, TaskMembership
+from agent.tasks.store import Task, TaskContext, TaskMembership
 
 
 @pytest.fixture
 def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, object]]:
-    task = CoordinatedTask(
+    task = Task(
         coordinator_thread_id="coordinator",
         title="Fix login",
         workspace="default",

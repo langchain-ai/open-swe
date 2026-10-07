@@ -90,8 +90,8 @@ async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPat
         await service.model_choice("default", metadata, None, "none")
 
 
-def task() -> store.CoordinatedTask:
-    return store.CoordinatedTask(
+def task() -> store.Task:
+    return store.Task(
         coordinator_thread_id=COORDINATOR,
         title="Fix login",
         workspace="default",
@@ -448,7 +448,7 @@ async def test_concurrent_first_spawns_and_replay_share_one_task(
     assert len(await store.list_delegations(context.task.id)) == 2
     assert len(client.created_runs) == 2
     async with postgres.session() as session:
-        assert await session.scalar(select(func.count()).select_from(store.CoordinatedTask)) == 1
+        assert await session.scalar(select(func.count()).select_from(store.Task)) == 1
         memberships = list(await session.scalars(select(store.TaskMembership)))
     assert {member.thread_id for member in memberships if member.role == "coordinator"} == {
         COORDINATOR

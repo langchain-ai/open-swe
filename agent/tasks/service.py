@@ -156,7 +156,7 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
 
 
 async def record_event(
-    task: store.CoordinatedTask,
+    task: store.Task,
     recipient_thread_id: str,
     delivery_id: str,
     content: str,
@@ -191,7 +191,7 @@ async def record_event(
 
 
 async def notify(
-    task: store.CoordinatedTask,
+    task: store.Task,
     recipient_thread_id: str,
     delivery_id: str,
     content: str,
@@ -204,7 +204,7 @@ async def notify(
 
 async def owned_worker(
     actor: Actor, worker_thread_id: str
-) -> tuple[store.CoordinatedTask, store.TaskDelegation]:
+) -> tuple[store.Task, store.TaskDelegation]:
     context = await authorized_context(actor, coordinator=True)
     delegation = await store.get_delegation(worker_thread_id)
     membership = await store.load_context(worker_thread_id)
@@ -229,7 +229,7 @@ async def owned_worker(
 
 
 async def launch_worker(
-    task: store.CoordinatedTask, delegation: store.TaskDelegation, metadata: Mapping[str, JsonValue]
+    task: store.Task, delegation: store.TaskDelegation, metadata: Mapping[str, JsonValue]
 ) -> None:
     if delegation.cancelled:
         raise ValueError("This worker was cancelled; create a new worker for further work")
@@ -308,7 +308,7 @@ async def launch_worker(
 
 
 async def dispatch_reserved_worker(
-    actor: Actor, task: store.CoordinatedTask, delegation: store.TaskDelegation
+    actor: Actor, task: store.Task, delegation: store.TaskDelegation
 ) -> dict[str, object]:
     try:
         metadata = await authorized_metadata(actor)
@@ -416,7 +416,7 @@ async def task_status(actor: Actor) -> dict[str, object]:
     return {**task_details(context.task), "workers": workers}
 
 
-def task_details(task: store.CoordinatedTask) -> dict[str, object]:
+def task_details(task: store.Task) -> dict[str, object]:
     return {
         "task_id": str(task.id),
         "title": task.title,

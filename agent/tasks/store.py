@@ -11,8 +11,8 @@ from agent.database.orm import Base
 type TaskRole = Literal["coordinator", "worker"]
 
 
-class CoordinatedTask(Base):
-    __tablename__ = "coordinated_task"
+class Task(Base):
+    __tablename__ = "task"
 
     coordinator_thread_id: Mapped[str]
     title: Mapped[str]
@@ -44,7 +44,7 @@ class TaskDelegation(Base):
 
 @dataclass(frozen=True)
 class TaskContext:
-    task: CoordinatedTask
+    task: Task
     membership: TaskMembership
 
 
@@ -55,7 +55,7 @@ async def load_context(thread_id: str) -> TaskContext | None:
         membership = await session.get(TaskMembership, thread_id)
         if membership is None:
             return None
-        task = await session.get(CoordinatedTask, membership.task_id)
+        task = await session.get(Task, membership.task_id)
         if task is None:
             raise RuntimeError("Task membership has no task")
         return TaskContext(task, membership)
@@ -88,7 +88,7 @@ async def reserve_worker(
     instructions: str,
     model: str,
     effort: str,
-) -> tuple[CoordinatedTask, TaskDelegation]:
+) -> tuple[Task, TaskDelegation]:
     postgres.require_configured()
     async with postgres.session() as session:
         await session.execute(
@@ -97,7 +97,7 @@ async def reserve_worker(
         )
         membership = await session.get(TaskMembership, coordinator_thread_id)
         if membership is None:
-            task = CoordinatedTask(
+            task = Task(
                 coordinator_thread_id=coordinator_thread_id,
                 title=title,
                 workspace=workspace,
@@ -108,7 +108,7 @@ async def reserve_worker(
                 TaskMembership(thread_id=coordinator_thread_id, task_id=task.id, role="coordinator")
             )
         else:
-            task = await session.get(CoordinatedTask, membership.task_id, with_for_update=True)
+            task = await session.get(Task, membership.task_id, with_for_update=True)
             if (
                 task is None
                 or membership.role != "coordinator"
