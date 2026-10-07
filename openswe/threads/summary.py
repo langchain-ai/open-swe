@@ -417,6 +417,7 @@ async def _thread_summary(
     *,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
+    bridge_status: bool = True,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
@@ -519,7 +520,8 @@ async def _thread_summary(
             if metadata.get("sandbox_kind") == "bridge"
             else None
         ),
-        "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id),
+        # Lists skip it: one bridge lookup per thread would cost a query each.
+        "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id) if bridge_status else None,
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

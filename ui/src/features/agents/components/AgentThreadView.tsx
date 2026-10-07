@@ -151,7 +151,7 @@ export function AgentThreadView({
     runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
   // A move takes effect with the next message, whose run carries the checkout over.
   const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
-  // An offline Mac's thread can still move to the cloud, from its pushed work.
+  // A thread its Mac isn't serving can still move to the cloud, from its pushed work.
   const macOffline = runsElsewhere && handoff !== "cloud"
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
@@ -736,7 +736,7 @@ export function AgentThreadView({
                 <span>
                   {bridgeError
                     ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                    : `This thread runs in a checkout on another Mac, which is offline. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
+                    : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
                 </span>
               </AlertDescription>
             </Alert>
@@ -948,7 +948,7 @@ export function AgentThreadView({
               <AgentPromptBar
                 placeholder={
                   macOffline
-                    ? "This thread's Mac is offline"
+                    ? "This thread's Mac isn't serving it right now"
                     : botThread
                       ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
                       : canPost

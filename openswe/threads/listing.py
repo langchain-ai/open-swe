@@ -302,6 +302,7 @@ async def _summarize_thread(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
+        bridge_status=False,
     )
 
 

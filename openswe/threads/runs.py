@@ -676,7 +676,7 @@ async def _sandbox_handoff(
         and Bridge.bridge_id_of(source)
         and not await BridgeStore.is_connected(source)
     ):
-        # An offline Mac's checkout stays behind; the cloud starts from what was pushed.
+        # A checkout no Mac is serving stays behind; the cloud starts from what was pushed.
         source = None
     update[HANDOFF_FROM_KEY] = None if source == update["sandbox_id"] else source
     return update
