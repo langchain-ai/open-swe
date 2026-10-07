@@ -281,7 +281,7 @@ async def trigger_pr_review_from_ref(
     if pr_metadata.get("draft"):
         return {
             "success": False,
-            "error": f"{pr_ref.url} is a draft. " + load_prompt("tools/human-review-blocked.md"),
+            "error": f"{pr_ref.url} is a draft. " + prompt("tools/human-review-blocked"),
         }
 
     repo_private = common.repo_private_from_pr_metadata(pr_metadata)
@@ -342,7 +342,9 @@ async def trigger_pr_review_from_ref(
         token=app_token,
     )
 
-    prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+    review_prompt = build_github_pr_review_prompt(
+        repo_config, pr_ref.number, pr_url, base_sha, head_sha
+    )
     configurable = await common.build_reviewer_configurable(
         source=source,
         github_login=github_login,
@@ -364,13 +366,13 @@ async def trigger_pr_review_from_ref(
     review_input = (
         _github_human_run_input(
             github_login,
-            prompt,
+            review_prompt,
             user_id=github_user_id,
             data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha),
         )
         if github_login
         else _github_webhook_run_input(
-            prompt, data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+            review_prompt, data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
         )
     )
     run = await common.dispatch_agent_run(
