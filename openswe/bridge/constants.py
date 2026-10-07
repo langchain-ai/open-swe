@@ -12,6 +12,9 @@ REQUEST_EVENT = "request"
 RESULT_EVENT = "result"
 CLOSED_EVENT = "closed"
 
+HANDOFF_FROM_KEY = "sandbox_handoff_from"
+"""Thread metadata naming the sandbox whose checkout the next run carries over."""
+
 SANDBOX_ID_PREFIX = "bridge:"
 """What a thread's ``sandbox_id`` starts with when its sandbox is the machine running the CLI."""
 

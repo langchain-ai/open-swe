@@ -19,6 +19,7 @@ from openswe.bridge.store import Bridge
 from openswe.config import ENV
 from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from openswe.github.sandbox_access import SandboxGitHubAccess, workspace_token
+from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from openswe.sandboxes.state import (
@@ -489,9 +490,10 @@ async def ensure_sandbox_for_thread(
         # managed proxy to reconfigure, and no global git config of theirs to
         # rewrite. An unreachable bridge fails the run, as any bound sandbox does.
         async with aphase(thread_id, "sandbox.bridge_connect", sandbox_id=sandbox_id):
-            return set_sandbox_backend(
-                thread_id, await BridgeSandboxBackend.connect(thread_id, bridge_id)
-            )
+            bridged = await BridgeSandboxBackend.connect(thread_id, bridge_id)
+        async with aphase(thread_id, "sandbox.handoff"):
+            await complete_handoff(thread_id, sandbox_metadata, bridged)
+        return set_sandbox_backend(thread_id, bridged)
     metadata_proxy_config = sandbox_metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
         metadata_proxy_config
@@ -585,6 +587,8 @@ async def ensure_sandbox_for_thread(
     from openswe.sandboxes.tool_access import provision_tool_url
     from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 
+    async with aphase(thread_id, "sandbox.handoff"):
+        await complete_handoff(thread_id, sandbox_metadata, sandbox_backend)
     await provision_tool_url(thread_id, sandbox_backend)
     published = set_sandbox_backend(thread_id, sandbox_backend)
     if sandbox_metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
