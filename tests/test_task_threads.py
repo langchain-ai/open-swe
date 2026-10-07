@@ -41,6 +41,22 @@ WORKSPACE_MODEL = "anthropic:claude-sonnet-5-5"
         ),
         pytest.param({"resolved_model": MODEL, "resolved_effort": "high"}, id="legacy"),
         pytest.param({"agent_settings": {"model_id": MODEL, "effort": "high"}}, id="saved"),
+        pytest.param(
+            {
+                "model": WORKSPACE_MODEL,
+                "effort": "low",
+                "resolved_model": WORKSPACE_MODEL,
+                "resolved_effort": "low",
+                "agent_settings": {
+                    "model_id": MODEL,
+                    "effort": "high",
+                    "requested_model": MODEL,
+                    "model_handoff_complete": True,
+                    "model_routing_enabled": False,
+                },
+            },
+            id="opening-model-handoff",
+        ),
     ],
 )
 async def test_worker_inherits_coordinator_model_and_effort(
