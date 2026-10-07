@@ -785,6 +785,25 @@ def test_current_slack_message_preserves_ingress_mention(explicit_mention: bool)
     assert (trigger.text or "").strip() == "do the thing"
 
 
+def test_multiline_trigger_appends_only_forwarded_context() -> None:
+    contents = _context_input(
+        [
+            {
+                "ts": "9.0",
+                "text": "<@UBOT> do\nthe thing",
+                "user": "U123",
+                "attachments": [{"is_share": True, "author_name": "Bob", "text": "details"}],
+            }
+        ]
+    )
+    trigger_blocks = contents[-1]
+    assert isinstance(trigger_blocks, list)
+    trigger = ElementTree.fromstring(trigger_blocks[0]["text"])
+    assert (trigger.text or "").strip() == (
+        "do the thing\n[Forwarded Slack message from Bob]\ndetails"
+    )
+
+
 def test_replayed_slack_mentions_ignore_forwarded_tags() -> None:
     contents = _context_input(
         [
