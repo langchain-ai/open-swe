@@ -17006,6 +17006,16 @@
               "title": "Sort By",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "hierarchy",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hierarchy",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

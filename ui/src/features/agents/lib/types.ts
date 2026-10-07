@@ -490,7 +490,13 @@ export interface AgentSubagentSummary {
   endedAt: number | null
 }
 
+export type TaskMembership =
+  | { role: "coordinator"; taskId: string }
+  | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
+
 export interface AgentThread {
+  taskMembership?: TaskMembership
+  taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
   visibility?: "public" | "private"
   id: string

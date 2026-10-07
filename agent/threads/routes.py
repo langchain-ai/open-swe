@@ -176,6 +176,7 @@ async def api_list_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
+    hierarchy: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not session_is_admin(session):
@@ -204,6 +205,7 @@ async def api_list_threads_page(
         repo=repo,
         ownerless=ownerless,
         sort_by=sort_by,
+        hierarchy=hierarchy,
     )
 
 

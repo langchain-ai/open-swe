@@ -9,6 +9,7 @@ from agent import background_tasks
 from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
+from agent.tasks import service as task_service
 from agent.tasks.store import Task, TaskContext, TaskMembership
 from agent.users import User
 from agent.users.models import UserIdentity
@@ -149,6 +150,11 @@ async def test_worker_reattach_recovers_a_missed_background_completion(
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[task]))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(
+        task_service,
+        "recipient_config",
+        AsyncMock(return_value={"thread_id": "worker", "github_login": "owner"}),
+    )
 
     await lifecycle.ensure_sandbox_for_thread("worker")
     await asyncio.gather(*lifecycle._BACKGROUND)
