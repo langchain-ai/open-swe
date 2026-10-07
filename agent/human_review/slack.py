@@ -1,4 +1,4 @@
-"""Slack interactivity for standard human review cards: I'll review, Accept, and Dismiss."""
+"""Slack interactivity for human review cards and picks: I'll review, Accept, Decline, Snooze, and Dismiss."""
 
 import logging
 
@@ -17,6 +17,7 @@ from agent.slack.client import open_slack_modal
 from agent.slack.dm import note_for_concierge
 from agent.slack.payloads import SlackButtonValue, SlackInteraction
 from agent.slack.responses import FeedbackResponse, WebhookResponse, accepted, ignored
+from agent.slack.thread_owner import note_for_thread_owner
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -78,24 +79,25 @@ async def _process(
 ) -> None:
     async def handle(request: HumanReviewRequest) -> Outcome:
         if action == "dismiss":
-            return await dismiss_request(request, slack_user_id)
-        user = await User.for_person({"id": f"slack:{slack_user_id}"})
-        if action == "decline":
-            outcome = await decline(request, user, reason)
-        elif action == "snooze":
-            outcome = await snooze(request, user)
+            outcome = await dismiss_request(request, slack_user_id)
         else:
-            outcome = await claim(request, user)
+            user = await User.for_person({"id": f"slack:{slack_user_id}"})
+            if action == "decline":
+                outcome = await decline(request, user, reason)
+            elif action == "snooze":
+                outcome = await snooze(request, user)
+            else:
+                outcome = await claim(request, user)
+        note = prompt(
+            "slack/review-request-clicked",
+            action=action,
+            pr_url=request.pull_request.url,
+            outcome=outcome.message,
+        )
         if channel_id.startswith("D"):
-            await note_for_concierge(
-                slack_user_id,
-                channel_id,
-                prompt(
-                    "slack/concierge-review-pick-clicked",
-                    pr_url=request.pull_request.url,
-                    outcome=outcome.message,
-                ),
-            )
+            await note_for_concierge(slack_user_id, channel_id, note)
+        else:
+            await note_for_thread_owner(channel_id, thread_ts, note)
         return outcome
 
     await answer_click(

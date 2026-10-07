@@ -82,6 +82,7 @@ HUMAN_REVIEW_DISMISS_MARKER = "E2E_HUMAN_REVIEW_DISMISS"
 HUMAN_REVIEW_DISMISS_REASON = "posted with the wrong summary"
 HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
+_SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
 
 # The seeded remote holds only a README, so the first turn writes the file. Two
 # added lines keeps the pull request inside the eligibility limit.
@@ -563,9 +564,10 @@ def _human_review_dismiss_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
-    """Nobody signed up: pick the reviewer the CODEOWNERS file names."""
+    """Nobody signed up: take Open SWE's suggestion, else the reviewer CODEOWNERS names."""
     humans = _script_humans(messages)
     text = _text(humans[-1].content) if humans else ""
+    suggested = _SUGGESTED_REVIEWER.search(text)
     return AIMessage(
         content="Picking a reviewer from CODEOWNERS.",
         tool_calls=[
@@ -573,8 +575,10 @@ def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
                 "name": "assign_human_reviewer",
                 "args": {
                     "pr_url": _pr_url_in(text),
-                    "github_login": HUMAN_REVIEW_PICK,
-                    "reason": "They own greet.py in CODEOWNERS.",
+                    "github_login": suggested.group(1) if suggested else HUMAN_REVIEW_PICK,
+                    "reason": (
+                        suggested.group(2) if suggested else "They own greet.py in CODEOWNERS."
+                    ),
                 },
                 "id": f"call-human-review-assign-{len(messages)}",
             }

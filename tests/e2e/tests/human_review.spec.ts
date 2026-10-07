@@ -622,8 +622,8 @@ test.describe("Human review in Slack", () => {
       "Requested by",
     );
 
-    // 2. The auto-assignment timeout passes with nobody signed up: Alice's thread
-    //    for the PR is woken and the agent picks Bob, who has yet to accept.
+    // 2. The auto-assignment timeout passes with nobody signed up: the agent owning
+    //    the card's thread is woken and picks Bob, who has yet to accept.
     await control(request, "/control/human-review-deadline", {
       request_id: posted.id,
       step: "unclaimed",
@@ -635,7 +635,6 @@ test.describe("Human review in Slack", () => {
       })
       .toEqual(["bob"]);
     expect((await latestRequest(request)).reviewers).toEqual([]);
-    expect((await latestRequest(request)).thread_id).not.toBe("");
     await expect
       .poll(
         async () => (await pull(request, seeded.number)).requested_reviewers,
@@ -740,7 +739,8 @@ test.describe("Human review in Slack", () => {
     });
     const posted = await latestRequest(request);
 
-    // 2. Nobody signs up: Open SWE picks Bob from CODEOWNERS itself, with no agent run.
+    // 2. Nobody signs up: Open SWE suggests Bob from CODEOWNERS, and the agent owning
+    //    the card's thread picks him with Open SWE's reason.
     await control(request, "/control/human-review-deadline", {
       request_id: posted.id,
       step: "unclaimed",
@@ -748,10 +748,9 @@ test.describe("Human review in Slack", () => {
     });
     await expect
       .poll(async () => (await latestRequest(request)).picks, {
-        timeout: 30_000,
+        timeout: 90_000,
       })
       .toEqual(["bob"]);
-    expect((await latestRequest(request)).thread_id).toBe("");
     expect((await latestRequest(request)).reviewers).toEqual([]);
     await expect
       .poll(

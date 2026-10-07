@@ -146,7 +146,7 @@ async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
         ),
         patch("agent.human_review.standard._wake_picker", AsyncMock()) as wake,
     ):
-        assert (await _auto_assign(request, asked=True)).status == "claimed"
+        assert (await _auto_assign(request, asked=True, trigger=None)).status == "claimed"
     wake.assert_not_awaited()
 
 
