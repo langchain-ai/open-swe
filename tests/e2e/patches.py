@@ -202,6 +202,7 @@ def apply() -> None:
     # follow-up (dashboard run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
     from agent.dashboard import profiles, repo_access
+    from agent.github import http as github_http
     from agent.github import (
         pull_request_actions,
         pull_request_context,
@@ -253,6 +254,8 @@ def apply() -> None:
         schedules_store,
     ):
         module.__dict__["get_valid_access_token"] = _dummy_user_token
+    github_http.GITHUB_API_BASE = FAKE_GITHUB_API
+    github_http.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     # Each of these imported GITHUB_API_BASE by name, so the module attribute is
     # the one their calls read.
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
