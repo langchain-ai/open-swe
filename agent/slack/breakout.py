@@ -3,6 +3,8 @@
 import logging
 import re
 from dataclasses import dataclass
+from typing import Literal
+from uuid import uuid4
 
 from agent.slack import webhook as service
 from agent.slack.blocks import block_payload, section
@@ -42,26 +44,35 @@ class BreakoutCommand:
     prior_text: str = ""
 
     @classmethod
-    def parse(cls, text: str, bot_user_id: str) -> BreakoutCommand | None:
+    def parse(
+        cls, text: str, bot_user_id: str, *, command: Literal["breakout", "web"] = "breakout"
+    ) -> BreakoutCommand | None:
         """Parse a command immediately after the bot mention, or a bare command."""
         mentions = [f"<@{bot_user_id}>"] if bot_user_id else []
         if common.SLACK_BOT_USERNAME:
             mentions.append(f"@{common.SLACK_BOT_USERNAME}")
+        command_re = (
+            _COMMAND_RE
+            if command == "breakout"
+            else re.compile(r"/web(?:\s+(?P<instruction>.*))?", re.DOTALL | re.IGNORECASE)
+        )
         match = None
         prior_text = ""
         if mentions:
             mention_re = re.compile("|".join(re.escape(mention) for mention in mentions))
             for mention in mention_re.finditer(text):
-                candidate = _COMMAND_RE.fullmatch(text[mention.end() :].strip())
+                candidate = command_re.fullmatch(text[mention.end() :].strip())
                 if candidate is not None:
                     match = candidate
                     prior_text = text[: mention.start()].strip()
                     break
         if match is None:
-            match = _COMMAND_RE.fullmatch(text.strip())
+            match = command_re.fullmatch(text.strip())
         if match is None:
             return None
         rest = (match.group("instruction") or "").strip()
+        if command == "web":
+            return cls(instruction=rest, prior_text=prior_text)
         parts = rest.split(maxsplit=1)
         if not parts or not parts[0].startswith(("#", "<#")):
             return cls(instruction=rest, prior_text=prior_text)
@@ -251,6 +262,41 @@ async def _start(
         repo,
         inherited_workspace=inherited_workspace,
     )
+
+
+async def process_slack_web(
+    request: SlackRequest, command: BreakoutCommand, repo: common.SlackRepoResolution | None
+) -> None:
+    """Start an unattached web conversation with the source Slack transcript."""
+    if not command.instruction:
+        await _tell_sender(request, "Add a question after `@Open SWE /web`.")
+        return
+    thread_id = str(uuid4())
+    try:
+        started = await service.process_slack_web_mention(
+            request.model_copy(
+                update={
+                    "thread_id": thread_id,
+                    "text": command.instruction,
+                    "context_channel_id": request.channel_id,
+                    "context_thread_ts": request.thread_ts,
+                    "prior_message_text": command.prior_text,
+                    "web_only": True,
+                    "code_channel": False,
+                    "concierge_mode": False,
+                    "reply_thread_ts": "",
+                }
+            ),
+            repo,
+            inherited_workspace=(
+                await common.get_thread_workspace(request.thread_id) if request.thread_id else None
+            ),
+        )
+        if started:
+            await _tell_sender(request, f"Continue on the web: {dashboard_thread_url(thread_id)}")
+    except Exception:
+        logger.exception("Slack web question failed", extra={"agent_thread_id": thread_id})
+        await _tell_sender(request, "Could not start a web conversation; try again.")
 
 
 async def process_slack_breakout(

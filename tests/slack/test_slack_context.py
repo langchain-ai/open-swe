@@ -302,6 +302,42 @@ def _setup_slack_mention_fakes(
     monkeypatch.setattr(webhook_common, "post_account_link_prompt", fake_post_prompt)
 
 
+@pytest.mark.asyncio
+async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fake_store):
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    persisted = AsyncMock(return_value=True)
+    mapping = AsyncMock()
+    status = AsyncMock()
+    monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", persisted)
+    monkeypatch.setattr(webhook_common, "store_slack_run_mapping", mapping)
+    monkeypatch.setattr(slack_webhooks, "show_slack_thinking_status", status)
+    request = SlackRequest(
+        channel_id="C123",
+        thread_ts="1700000000.000100",
+        event_ts="1700000000.000200",
+        thread_id="web-question",
+        user_id="U123",
+        text="quick question",
+        bot_user_id="UBOT",
+        context_thread_ts="1700000000.000100",
+    )
+    assert await slack_webhooks.process_slack_web_mention(request, None)
+    run = captured["run_create"]
+    assert isinstance(run, dict)
+    config = run["kwargs"]["config"]["configurable"]
+    assert config["source"] == "web"
+    assert "slack_thread" not in config
+    assert "slack_breakout" not in config
+    assert persisted.await_args.kwargs["visibility"] == "private"
+    assert persisted.await_args.kwargs["source_context"] is None
+    messages = str(run["kwargs"]["input"])
+    assert "first request" in messages and "context" in messages
+    assert 'surface="web"' in messages
+    mapping.assert_not_awaited()
+    status.assert_not_awaited()
+
+
 @pytest.fixture
 async def slack_file_mention(monkeypatch, fake_store, registry_db):
     from agent.sandboxes import lifecycle, state
