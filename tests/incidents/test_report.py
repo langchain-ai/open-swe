@@ -2,9 +2,9 @@
 
 import json
 
-from agent.incidents import evidence_tools
-from agent.incidents.models import Evidence
-from agent.incidents.report import CONTEXT_MARKER, ReportDraft, context_evidence, finalize_report
+from openswe.incidents import evidence_tools
+from openswe.incidents.models import Evidence
+from openswe.incidents.report import CONTEXT_MARKER, ReportDraft, context_evidence, finalize_report
 
 
 def test_report_keeps_supported_claims_and_drops_invented_or_partial_citations():
@@ -53,8 +53,8 @@ def test_malformed_and_foreign_headers_are_not_evidence():
 
 def test_digest_fields_strip_citations_without_erasing_bracketed_findings():
     """Only evidence references are citation noise; a bracketed errno is part of the finding."""
-    from agent.incidents.models import IncidentReport
-    from agent.incidents.report import digest_fields
+    from openswe.incidents.models import IncidentReport
+    from openswe.incidents.report import digest_fields
 
     def report(summary: str) -> IncidentReport:
         return IncidentReport(summary=summary, impact="Impact remains unverified.")

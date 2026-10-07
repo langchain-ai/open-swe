@@ -15,15 +15,15 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-from agent.input_messages import human_input, person_introduction
-from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from agent.middleware.model_selection import ModelSelectionMiddleware
-from agent.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
-from agent.middleware.require_user_reply import RequireUserReplyMiddleware
-from agent.run_config import RunConfig
-from agent.server import PrepareAgentRunMiddleware, _DisableInheritedMiddleware
-from agent.utils import ttl_cache
-from agent.utils.authorship import CollaboratorIdentity, ThreadParticipant
+from openswe.input_messages import human_input, person_introduction
+from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from openswe.middleware.model_selection import ModelSelectionMiddleware
+from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
+from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
+from openswe.run_config import RunConfig
+from openswe.server import PrepareAgentRunMiddleware, _DisableInheritedMiddleware
+from openswe.utils import ttl_cache
+from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
 
 class DummyPrepareMiddleware(BasePrepareRunMiddleware):

@@ -1,3 +1,5 @@
+import type { TaskEventMetadata } from "./structuredInputMessages"
+
 export type Author = "user" | "agent" | "system" | "tool"
 
 export type ChunkKind =
@@ -215,6 +217,7 @@ export interface Message {
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
@@ -487,7 +490,13 @@ export interface AgentSubagentSummary {
   endedAt: number | null
 }
 
+export type TaskMembership =
+  | { role: "coordinator"; taskId: string }
+  | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
+
 export interface AgentThread {
+  taskMembership?: TaskMembership
+  taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
   visibility?: "public" | "private"
   id: string
@@ -534,6 +543,8 @@ export interface AgentThread {
   sandboxId?: string | null
   /** For a thread bridged to someone's machine: which app serves it. */
   sandboxBridgeClient?: "cli" | "desktop" | null
+  /** Whether that machine is serving the thread's checkout right now; null in lists. */
+  sandboxBridgeOnline?: boolean | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

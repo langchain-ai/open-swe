@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from agent.sandboxes.environment import EnvironmentUpdate, thread_environment
+from openswe.sandboxes.environment import EnvironmentUpdate, thread_environment
 
 
 @pytest.mark.parametrize("visibility", ["public", None, "private"])
@@ -15,7 +15,7 @@ async def test_personal_values_only_reach_private_sandboxes(visibility: str | No
     with (
         patch("langgraph_sdk.get_client", return_value=client),
         patch(
-            "agent.sandboxes.environment._load_environment",
+            "openswe.sandboxes.environment._load_environment",
             AsyncMock(side_effect=[{"KEY": "team", "OTHER": "shared"}, {"KEY": "personal"}]),
         ) as load,
     ):

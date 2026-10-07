@@ -273,6 +273,7 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
+  experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   login?: string
@@ -301,6 +302,7 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
+  experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_model: string
@@ -447,6 +449,7 @@ export interface AdminUser {
   email: string
   slack_user_id: string | null
   display_name: string
+  avatar_url: string
   is_admin: boolean
 }
 
@@ -2052,23 +2055,16 @@ export function loginUrl(redirectTo?: string): string {
  * provider's consent page have separate cookie jars, so it runs the flow
  * itself and resolves once the connection is stored.
  */
-/** Starts Sign in with LangSmith, returning to `redirectTo` afterwards. */
-export function connectLangSmith(redirectTo: string) {
-  const query = new URLSearchParams({ redirect_to: redirectTo })
-  window.location.assign(`${API_BASE}/dashboard/api/langsmith/login?${query}`)
-}
-
 export function connectService(
-  provider: "slack" | "notion",
+  provider: "slack" | "notion" | "langsmith",
   redirectTo?: string,
   target: "_self" | "_blank" = "_self"
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
-    const query =
-      provider === "notion" && redirectTo
-        ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
-        : ""
+    const query = redirectTo
+      ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
+      : ""
     const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
     if (target === "_blank") {
       window.open(url, "_blank", "noopener,noreferrer")
