@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, Request
 
 from agent.slack import routes as slack_routes
 from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
+from agent.threads.admin_approval import _blocks
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -149,6 +150,110 @@ async def test_option_interaction_schedules_update_before_agent_processing(
     process.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    ("decision", "authorized", "status"),
+    [("approve", False, "ignored"), ("approve", True, "accepted"), ("reject", True, "accepted")],
+)
+@pytest.mark.parametrize("parent_in_container", [False, True])
+async def test_admin_approval_uses_actual_location_and_only_queues_authorized_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    decision: str,
+    authorized: bool,
+    status: str,
+    parent_in_container: bool,
+) -> None:
+    payload = _option_payload()
+    if parent_in_container:
+        payload["container"] = {"thread_ts": payload["message"].pop("thread_ts")}
+    blocks = _blocks("privileged_tool", '{"secret_argument":"private value"}', "request-1")
+    actions = blocks[-1]["elements"]
+    assert isinstance(actions, list)
+    action = dict(actions[0 if decision == "approve" else 1])
+    action["action_ts"] = "3.0"
+    button = json.loads(action["value"])
+    button.update(thread_id="forged-thread", thread_ts="forged-ts")
+    action["value"] = json.dumps(button)
+    payload["actions"] = [action]
+    payload["message"]["blocks"] = blocks
+    payload["message"]["text"] = "private value"
+    payload["response_url"] = "https://hooks.slack.com/actions/test"
+    decide = AsyncMock(return_value=authorized)
+    update = AsyncMock(return_value=True)
+    public_update = AsyncMock()
+    process = AsyncMock()
+    ephemeral = AsyncMock()
+    public_reply = AsyncMock()
+    lookup = AsyncMock(return_value="thread-1")
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
+    monkeypatch.setattr(slack_routes.common, "lookup_slack_thread_id", lookup)
+    monkeypatch.setattr(
+        slack_routes.common,
+        "resolve_slack_channel_context",
+        AsyncMock(
+            return_value=SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
+        ),
+    )
+    monkeypatch.setattr(
+        slack_routes.common,
+        "get_slack_repo_config",
+        AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
+    )
+    monkeypatch.setattr(slack_routes, "decide_admin_approval", decide)
+    monkeypatch.setattr(slack_routes, "respond_to_slack_interaction", update)
+    monkeypatch.setattr(slack_routes.common, "update_slack_message", public_update)
+    monkeypatch.setattr(slack_routes.service, "process_slack_mention", process)
+    monkeypatch.setattr(slack_routes.common, "post_slack_ephemeral_message", ephemeral)
+    monkeypatch.setattr(slack_routes.common, "post_slack_thread_reply", public_reply)
+    tasks = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(_request(payload), tasks)
+    await tasks()
+
+    assert result.get("status") == status
+    lookup.assert_awaited_once_with(ANY, "C1", "1.0")
+    decide.assert_awaited_once_with(
+        "thread-1",
+        "request-1",
+        slack_user_id="U1",
+        channel_id="C1",
+        thread_ts="1.0",
+        approved=decision == "approve",
+    )
+    public_reply.assert_not_awaited()
+    public_update.assert_not_awaited()
+    if not authorized:
+        ephemeral.assert_awaited_once()
+        update.assert_not_awaited()
+        process.assert_not_awaited()
+    else:
+        ephemeral.assert_not_awaited()
+        message = (
+            "Admin action approved; retry queued."
+            if decision == "approve"
+            else "Admin action rejected."
+        )
+        update.assert_awaited_once_with(
+            "https://hooks.slack.com/actions/test",
+            {
+                "replace_original": True,
+                "response_type": "ephemeral",
+                "text": message,
+                "blocks": [{"type": "section", "text": {"type": "plain_text", "text": message}}],
+            },
+        )
+        if decision == "approve":
+            process.assert_awaited_once()
+            assert process.await_args is not None
+            request = process.await_args.args[0]
+            assert request.user_id == "U1"
+            assert request.thread_id == "thread-1"
+            assert request.event_ts == "3.0"
+            assert request.thread_ts == "1.0"
+        else:
+            process.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_code_channel_view_action_routes_to_channel_session(
     monkeypatch: pytest.MonkeyPatch,
@@ -195,7 +300,7 @@ async def test_code_channel_view_action_routes_to_channel_session(
     result = await slack_routes.slack_interactivity(_request(payload), background_tasks)
     await background_tasks()
 
-    assert result["status"] == "accepted"
+    assert result.get("status") == "accepted"
     assert process.await_args is not None
     event_data = process.await_args.args[0]
     assert event_data.thread_ts == "0"
