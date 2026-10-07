@@ -81,7 +81,6 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists(
         github_proxy_repositories=None,
         workspace_slug=None,
         source="workspace",
-        owner_login="octocat",
     )
     configure.assert_awaited_once_with(new_sandbox)
     update.assert_awaited_once_with(
@@ -123,7 +122,6 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
         github_proxy_repositories=None,
         workspace_slug="langchainplus",
         source="base",
-        owner_login=None,
     )
     SANDBOX_BACKENDS.clear()
 
@@ -141,24 +139,7 @@ async def test_base_source_skips_workspace_lookup_entirely() -> None:
     load_workspace.assert_not_awaited()
     assert config.snapshot_id is None
     assert config.workspace is None
-    assert config.create_params == {}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("preserve", [True, False])
-async def test_owner_preference_decides_memory_preservation(preserve: bool) -> None:
-    from agent.sandboxes.lifecycle import SandboxCreateConfig
-    from agent.users import UserPreferences
-
-    with patch(
-        "agent.sandboxes.lifecycle.User.preferences_for_login",
-        new_callable=AsyncMock,
-        return_value=UserPreferences(preserve_sandbox_memory=preserve),
-    ) as preferences_for_login:
-        config = await SandboxCreateConfig.resolve(source="base", owner_login="octocat")
-
-    preferences_for_login.assert_awaited_once_with("octocat")
-    assert config.create_params == ({"preserve_memory_on_stop": True} if preserve else {})
+    assert config.create_params == {"preserve_memory_on_stop": True}
 
 
 @pytest.mark.asyncio

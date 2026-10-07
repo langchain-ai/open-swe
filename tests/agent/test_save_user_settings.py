@@ -156,7 +156,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_model": "anthropic:claude-fable-5-1"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
         {"branch_prefix": "new/", "default_visibility": "invalid"},
-        {"preserve_sandbox_memory": None, "auto_fix_ci": False},
+        {"pr_review_links": None, "auto_fix_ci": False},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -194,7 +194,7 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     assert fake_store.items == before
 
 
-async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
+async def test_feature_flag_requires_user_and_validates_before_writing(
     fake_store: FakeStore, requester: dict[str, object], saved_scope: dict[str, object]
 ) -> None:
     from agent.users import User, UserPreferences
@@ -202,7 +202,7 @@ async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
     ) as save:
-        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"pr_review_links": True, "auto_fix_ci": False}))[
             "ok"
         ] is False
         save.assert_awaited_once()
@@ -211,13 +211,13 @@ async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
         User,
         "update_preferences",
         new_callable=AsyncMock,
-        return_value=UserPreferences(preserve_sandbox_memory=True),
+        return_value=UserPreferences(pr_review_links=True),
     ) as save:
-        assert (await save_user_settings({"preserve_sandbox_memory": True, "auto_fix_ci": False}))[
+        assert (await save_user_settings({"pr_review_links": True, "auto_fix_ci": False}))[
             "updated"
-        ] == {"preserve_sandbox_memory": True, "auto_fix_ci": False}
+        ] == {"pr_review_links": True, "auto_fix_ci": False}
         assert save.await_args.args[0] == "Alice"
-        assert save.await_args.args[1].preserve_sandbox_memory is True
+        assert save.await_args.args[1].pr_review_links is True
     assert fake_store.values(["profiles"])["Alice"]["auto_fix_ci"] is False
 
 
@@ -273,7 +273,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "profile": {
                 **ordinary,
                 "concierge_mode": False,
-                "preserve_sandbox_memory": True,
                 "pr_review_links": False,
                 "pr_failure_reactions": False,
                 "prefer_tools_in_sandbox": False,
