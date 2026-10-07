@@ -13,7 +13,7 @@ from langchain.agents.middleware.types import AgentState, ModelRequest, ModelRes
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 
 from openswe import completion
 from openswe.database import postgres
@@ -408,9 +408,14 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
     assert await TaskMessage.owed(_COORDINATOR, checkpoint) == []
 
 
-@pytest.mark.parametrize("thread_id", [_COORDINATOR, _WORKER])
-async def test_running_task_thread_checkpoints_owed_messages_once(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch, thread_id: str
+@pytest.mark.parametrize(
+    ("thread_id", "missing_task_message"), [(_COORDINATOR, False), (_WORKER, True)]
+)
+async def test_repaired_task_thread_checkpoints_owed_messages_once(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+    thread_id: str,
+    missing_task_message: bool,
 ) -> None:
     from openswe.middleware import task_coordination
 
@@ -430,8 +435,24 @@ async def test_running_task_thread_checkpoints_owed_messages_once(
         content="Check logout too",
         run_config={},
     )
-    async with postgres.session() as session:
-        await message.record(session)
+    if not missing_task_message:
+        async with postgres.session() as session:
+            await message.record(session)
+    async with postgres.transaction() as conn:
+        if missing_task_message:
+            await conn.execute(text("DROP TABLE task_message"))
+        await conn.execute(text("DELETE FROM alembic_version"))
+        await conn.execute(
+            text(
+                "INSERT INTO alembic_version (version_num) VALUES ('6f06bbadfc02'), ('a823229a905f')"
+            )
+        )
+        await conn.run_sync(
+            postgres.upgrade, postgres.load_migrations(), postgres.SCHEMA, "7d34d8e5b6a3"
+        )
+    if missing_task_message:
+        async with postgres.session() as session:
+            await message.record(session)
     context = await store.TaskMembership.context_for_thread(thread_id)
     middleware = task_coordination.TaskCoordinationMiddleware(thread_id, "owner", True, context)
     monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
