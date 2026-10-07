@@ -18,6 +18,7 @@ from agent.users import User, UserPreferences
 from agent.webhooks import event_matches
 from agent.webhooks.event_matches import EventMatch
 from agent.webhooks.event_subscriptions import EventSubscription
+from agent.workspaces.rows import WorkspaceRow
 
 MODEL = "openai:gpt-6-astra"
 COORDINATOR = str(uuid4())
@@ -451,9 +452,12 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
         actor, instructions="Implement", model=None, effort=None, request_id="call"
     )
     worker_id = str(result["worker_thread_id"])
+    workspace = WorkspaceRow(slug="task-cancellation", name="Task cancellation")
+    async with postgres.session() as session:
+        session.add(workspace)
     subscription = EventSubscription(
         thread_id=worker_id,
-        workspace_id=uuid4(),
+        workspace_id=workspace.id,
         multitask_strategy="enqueue",
         run_config={"thread_id": worker_id},
         expires_at=datetime.now(UTC) + timedelta(hours=1),
