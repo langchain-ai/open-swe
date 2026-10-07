@@ -80,8 +80,24 @@ async def background_task_complete(task_id: TaskId, access: Access) -> None:
     try:
         result = await reconcile_background_task_callback(task_id, access)
     except PermissionError as exc:
+        logger.warning(
+            "Background-task completion rejected",
+            extra={
+                "task_id": task_id,
+                "agent_thread_id": access.thread_id,
+                "sandbox_id": access.sandbox_id,
+            },
+        )
         raise HTTPException(403, str(exc)) from exc
     except LookupError as exc:
+        logger.warning(
+            "Background-task completion for an unknown task",
+            extra={
+                "task_id": task_id,
+                "agent_thread_id": access.thread_id,
+                "sandbox_id": access.sandbox_id,
+            },
+        )
         raise HTTPException(404, str(exc)) from exc
     if result.get("pending"):
         # The runner retries on 5xx, which is what redelivers a failed dispatch.
