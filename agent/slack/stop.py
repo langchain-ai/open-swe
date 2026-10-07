@@ -236,7 +236,47 @@ async def process_slack_stop_reaction(event: dict[str, Any], event_id: str = "")
         logger.exception("Failed to stop Open SWE from Slack reaction")
 
 
-async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -> None:
+async def _process_agent_session_stopped(
+    event: Mapping[str, object], event_id: str, team_id: str = ""
+) -> None:
+    thread_ts = event.get("thread_ts")
+    if isinstance(thread_ts, str) and thread_ts and thread_ts != CODE_CHANNEL_SESSION_TS:
+        from agent.slack.client import set_slack_thread_status
+        from agent.slack.webhook import slack_login
+        from agent.threads.handlers import cancel_dashboard_thread
+
+        channel_id = event.get("channel") or event.get("channel_id")
+        user_id = event.get("user")
+        if not (
+            isinstance(channel_id, str)
+            and channel_id
+            and isinstance(user_id, str)
+            and user_id
+            and team_id
+            and event_id
+        ):
+            return
+        client = get_client(url=LANGGRAPH_URL)
+        thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+        if not thread_id:
+            return
+        thread = await client.threads.get(thread_id)
+        slack_thread = SourceContext.from_metadata(_thread_metadata(thread)).slack_thread
+        if (
+            slack_thread is None
+            or not slack_thread.is_at(channel_id, thread_ts)
+            or slack_thread.team_id != team_id
+        ):
+            logger.warning("Ignoring session stop with mismatched Slack location")
+            return
+        login = await slack_login(user_id)
+        if not login or not await claim_slack_event(event_id):
+            return
+        await cancel_dashboard_thread(thread_id, login)
+        if not await set_slack_thread_status(channel_id, thread_ts, ""):
+            logger.warning("Failed to clear stopped Slack thread status")
+        return
+
     channel_id = event.get("channel") or event.get("channel_id")
     if not isinstance(channel_id, str) or not channel_id:
         return
@@ -272,9 +312,11 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     await set_session_status(channel_id, "active")
 
 
-async def process_agent_session_stopped(event: dict[str, Any], event_id: str = "") -> None:
+async def process_agent_session_stopped(
+    event: Mapping[str, object], event_id: str = "", team_id: str = ""
+) -> None:
     """Stop work immediately when Slack signals the session was stopped."""
     try:
-        await _process_agent_session_stopped(event, event_id)
+        await _process_agent_session_stopped(event, event_id, team_id)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to stop Open SWE from a Slack session stop event")
