@@ -33,7 +33,7 @@ from openswe.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
 from openswe.review_guide.advance import cancel_prefetch
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
@@ -64,15 +64,15 @@ from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace, workspace_for_repo
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
 
-_CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
+_CODE_CHANNEL_CONTEXT = prompt("runs/slack-code-channel")
 # Slack opens a new code channel by quoting its origin message on the requester's behalf.
 _CODE_CHANNEL_ORIGIN_QUOTE = re.compile(
     r"<https://[^|>\s]+/archives/[A-Z0-9]+/p\d+\|Context> from <#"
 )
-_CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
-_KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
-_NON_KITCHEN_CONTEXT = load_prompt("runs/slack-non-kitchen.md")
-_MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
+_CONCIERGE_CONTEXT = prompt("runs/slack-concierge")
+_KITCHEN_CONTEXT = prompt("runs/slack-kitchen")
+_NON_KITCHEN_CONTEXT = prompt("runs/slack-non-kitchen")
+_MESSAGE_UPDATE_PREAMBLE = prompt("runs/slack-message-update")
 
 
 def _is_explicit_slack_request(
@@ -1167,7 +1167,7 @@ async def _process_slack_mention_impl(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
-            load_prompt("runs/slack-review-request.md")
+            prompt("runs/slack-review-request")
             if event_ts != thread_ts
             and context_thread_ts == thread_ts
             and any(

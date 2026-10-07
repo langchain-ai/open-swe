@@ -30,7 +30,7 @@ from openswe.middleware.require_user_reply import (
     current_reply_surface,
 )
 from openswe.middleware.trace import scrub_middleware_inputs
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
 from openswe.users import User
 from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -192,7 +192,7 @@ async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> st
         logger.debug(
             "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
         )
-    message = load_prompt("runs/autofix-event.md")
+    message = prompt("runs/autofix-event")
     details = item.value.get("details")
     if isinstance(details, list):
         joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
