@@ -255,6 +255,8 @@ from agent.tools.admin_gate import (
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
+from agent.tools.propose_pr_review import propose_pr_review
+from agent.tools.propose_review_comment import propose_review_comment
 from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
@@ -1770,6 +1772,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         submit_thread_feedback,
         suggest_task,
         submit_review_assessment_feedback,
+        propose_review_comment,
+        propose_pr_review,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
         read_only_sql,
