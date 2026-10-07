@@ -204,6 +204,21 @@ ENV.var(
     default="http://localhost:2024",
 )
 ENV.var(
+    "REVIEWER_RUNTIME_URL",
+    "Managed Deep Agents deployment that runs reviewer graphs; unset keeps them on LANGGRAPH_URL.",
+)
+ENV.var(
+    "REVIEWER_RUNTIME_API_KEY",
+    "LangSmith service key the backend uses to call REVIEWER_RUNTIME_URL.",
+    secret=True,
+)
+ENV.var(
+    "REMOTE_RUNTIME_TOKEN_SECRET",
+    "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/mcp; "
+    "comma-separated, the first signs and every one verifies.",
+    secret=True,
+)
+ENV.var(
     "LANGCHAIN_REVISION_ID", "Revision id LangGraph Platform injects; attached to run metadata."
 )
 ENV.var(

@@ -29,6 +29,8 @@ The FastAPI app is `agent.webapp:app`. `agent/dashboard/routes.py` only aggregat
 
 The main agent is assembled in `agent/server.py` from the middleware in `agent/middleware/`, with tools from `agent/tools/` and sandboxes from `agent/sandboxes/`.
 
+With `REVIEWER_RUNTIME_URL` set, reviewer runs go to the Managed Deep Agents project in `mda/reviewer/` instead of the `reviewer` graph. It keeps only the model loop and calls back to `agent/remote_runtime/`, which serves the reviewer's tools and run hooks over MCP at `/remote-runtime/mcp` behind a run token that dispatch signs.
+
 ## Conventions
 
 - Use async-only implementations. Add a sync method only when an interface requires it, and then raise `NotImplementedError`.

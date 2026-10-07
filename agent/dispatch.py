@@ -45,6 +45,7 @@ from agent.input_messages import (
     build_run_input,
 )
 from agent.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
+from agent.remote_runtime.client import remote_runtime_client, stamp_runtime_token
 from agent.run_config import RunConfig
 from agent.source_context import SourceContext
 from agent.threads.creation import ensure_titled_thread
@@ -310,6 +311,7 @@ async def create_durable_run(
     means the caller already created and titled the thread.
     """
     client = client or dispatch_client()
+    remote_client = remote_runtime_client(assistant_id)
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
     run_metadata = dict(metadata or {})
@@ -341,7 +343,16 @@ async def create_durable_run(
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
-    run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    if remote_client is not None:
+        # The thread here stays the index the webhooks and dashboard read; the run and
+        # its checkpoints live on the remote deployment, which reaches back through
+        # the tool server with this token.
+        run_config["configurable"] = stamp_runtime_token(
+            run_config["configurable"], thread_id=thread_id, assistant_id=assistant_id
+        )
+        run = await remote_client.runs.create(thread_id, assistant_id, **create_kwargs)
+    else:
+        run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
     cfg = RunConfig.from_config(run_config)
     if assistant_id == "agent" and cfg.slack_ask is not True:
         from agent.slack.thinking import sync_slack_background_status

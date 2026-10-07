@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.routing import Route
 
 from agent.api.health import router as health_router
 from agent.api.request_ids import add_request_ids
@@ -16,6 +17,7 @@ from agent.dashboard import router as dashboard_router
 from agent.github.routes import router as github_webhook_router
 from agent.linear.routes import router as linear_webhook_router
 from agent.openai_responses.routes import router as sandbox_openai_router
+from agent.remote_runtime import server as remote_runtime_server
 from agent.sandboxes.tool_routes import router as sandbox_tool_router
 from agent.slack.routes import router as slack_webhook_router
 from agent.threads.plan_api import plan_router
@@ -28,6 +30,8 @@ logger = logging.getLogger(__name__)
 # Before the queue starts: it reads this when it builds its workers, and Open SWE
 # cannot survive them landing on different loops.
 pin_single_event_loop()
+
+REMOTE_RUNTIME = remote_runtime_server.build_mount()
 
 
 @asynccontextmanager
@@ -116,7 +120,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
     try:
-        yield
+        async with REMOTE_RUNTIME.lifespan():
+            yield
     finally:
         await HUB.stop()
         await bridge_listener.stop()
@@ -158,6 +163,10 @@ def create_app() -> FastAPI:
     app.include_router(github_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
+    # Routed at the exact path so no redirect sits between a remote runtime and its tools.
+    app.router.routes.append(
+        Route(remote_runtime_server.PATH, REMOTE_RUNTIME.app, methods=["GET", "POST", "DELETE"])
+    )
     mount_dashboard_ui(app)
     return app
 
