@@ -88,7 +88,8 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         blocks.append({"type": "text", "text": self.instructions})
         messages = list(request.messages)
         if self.context is not None:
-            messages.append(
+            messages.insert(
+                0,
                 HumanMessage(
                     content=prompt(
                         "tasks/context",
@@ -96,7 +97,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
                         title=self.context.task.title,
                         coordinator_thread_id=self.context.task.coordinator_thread_id,
                     )
-                )
+                ),
             )
         return await handler(
             request.override(system_message=SystemMessage(content_blocks=blocks), messages=messages)
