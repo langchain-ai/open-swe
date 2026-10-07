@@ -45,6 +45,8 @@ class PullRequestSnapshot:
     failing_checks: list[str] = field(default_factory=list)
     unreported_required_checks: list[str] = field(default_factory=list)
     failures_are_required: bool = True
+    required_checks_failed: bool = False
+    required_checks_pending: bool = False
     changes_requested_by: list[str] = field(default_factory=list)
     allowed_merge_methods: list[str] = field(default_factory=list)
     approved_review_ids: frozenset[int] = frozenset()
@@ -229,6 +231,14 @@ async def assess_readiness(
     mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
 
     check_state, failures = aggregate_check_state(check_runs, statuses)
+    required_runs = [
+        run for run in check_runs if any(check.reported_by([run], []) for check in required)
+    ]
+    required_statuses = [
+        status for status in statuses if any(check.reported_by([], [status]) for check in required)
+    ]
+    required_state, _ = aggregate_check_state(required_runs, required_statuses)
+    missing_required = unreported_required_checks(required, check_runs, statuses)
     author_login = author if isinstance(author, str) else ""
     snapshot = PullRequestSnapshot(
         state=str(pr.get("state") or ""),
@@ -242,7 +252,11 @@ async def assess_readiness(
         check_state=check_state,
         unresolved_threads=len(threads),
         failing_checks=sorted({str(failure["name"]) for failure in failures}),
-        unreported_required_checks=unreported_required_checks(required, check_runs, statuses),
+        unreported_required_checks=missing_required,
+        required_checks_failed=bool(required) and required_state in {"failure", "blocked"},
+        required_checks_pending=bool(missing_required)
+        or any(run.get("status") != "completed" for run in required_runs)
+        or any(status.get("state") == "pending" for status in required_statuses),
         # GitHub says "unstable" when the pull request is mergeable and only
         # checks it does not require are unhappy, and "blocked" when a required
         # one is. Trusting it keeps us from having to read branch protection,

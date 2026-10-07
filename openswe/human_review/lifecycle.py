@@ -681,7 +681,7 @@ async def update_blocked_reactions(
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None:
             return
-        failing = conflicted = False
+        failing = pending = conflicted = False
         if (
             row.state == "open"
             and snapshot is not None
@@ -690,12 +690,14 @@ async def update_blocked_reactions(
         ):
             author = snapshot.author or row.pull_request.author
             preferences = await User.preferences_for_login(author)
-            failing = preferences.pr_failure_reactions and snapshot.check_state in {
-                "failure",
-                "blocked",
-            }
+            failing = preferences.pr_failure_reactions and snapshot.required_checks_failed
+            pending = preferences.pr_failure_reactions and snapshot.required_checks_pending
             conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
-        for emoji, blocked in (("x", failing), ("construction", conflicted)):
+        for emoji, blocked in (
+            ("x", failing),
+            ("hourglass_flowing_sand", pending),
+            ("construction", conflicted),
+        ):
             react = add_slack_reaction if blocked else remove_slack_reaction
             await react(row.slack_channel_id, row.slack_message_ts, emoji)
 

@@ -94,7 +94,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
             for method, params in slack_api.calls[start:]
             if method == "reactions.remove" and params["name"] != "white_check_mark"
         }
-        assert removed == {"x", "construction"} - expected
+        assert removed == {"x", "hourglass_flowing_sand", "construction"} - expected
         assert all(
             params["channel"] == "C1" and params["timestamp"] == "1.0"
             for _, params in slack_api.calls[start:]
@@ -139,6 +139,12 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     await settle_with_reactions({"construction"})
     snapshot.mergeable = None
     preferences.pr_failure_reactions = True
+    await settle_with_reactions(set())
+    snapshot.required_checks_pending = True
+    await settle_with_reactions({"hourglass_flowing_sand"})
+    snapshot.required_checks_failed = True
+    await settle_with_reactions({"x", "hourglass_flowing_sand"})
+    snapshot.required_checks_pending = False
     await settle_with_reactions({"x"})
     preferences.pr_failure_reactions = False
     await settle_with_reactions(set())
@@ -147,6 +153,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     snapshot.mergeable_state = "dirty"
     await settle_with_reactions({"x", "construction"})
     snapshot.check_state = "success"
+    snapshot.required_checks_failed = False
     await settle_with_reactions({"construction"})
     snapshot.mergeable = True
     snapshot.mergeable_state = "clean"

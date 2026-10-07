@@ -10,6 +10,7 @@ from openswe.expedited_review.readiness import (
     assess_readiness,
     readiness_blockers,
 )
+from openswe.github.ci import RequiredCheck
 from openswe.github.pull_request_status import Mergeability, PullRequestClient
 
 
@@ -87,8 +88,10 @@ def test_every_gate_reports_independently() -> None:
 
 
 @pytest.mark.parametrize("live_approval_id", [None, 123])
-async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
+@pytest.mark.parametrize("required_conclusion", [None, "failure", "success"])
+async def test_assess_readiness_separates_required_checks_from_optional_checks(
     live_approval_id: int | None,
+    required_conclusion: str | None,
 ) -> None:
     live_reviews = (
         [{"id": live_approval_id, "state": "APPROVED", "user": {"login": "grace"}}]
@@ -113,7 +116,14 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
             "openswe.expedited_review.readiness.list_check_runs",
             AsyncMock(
                 return_value=[
-                    {"name": "Open SWE Review", "status": "completed", "conclusion": "neutral"}
+                    {"name": "Open SWE Review", "status": "completed", "conclusion": "neutral"},
+                    {"name": "optional", "status": "completed", "conclusion": "failure"},
+                    {"name": "optional-pending", "status": "in_progress"},
+                    {
+                        "name": "required",
+                        "status": "completed" if required_conclusion else "in_progress",
+                        "conclusion": required_conclusion,
+                    },
                 ]
             ),
         ),
@@ -122,7 +132,7 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
         ),
         patch(
             "openswe.expedited_review.readiness.fetch_required_checks",
-            AsyncMock(return_value=set()),
+            AsyncMock(return_value={RequiredCheck("required")}),
         ),
         patch("openswe.github.http.github_client"),
         patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
@@ -132,8 +142,9 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
         result = await assess_readiness(owner="lc", repo="repo", pr_number=7, token="t")
 
     assert result is not None
-    assert result.snapshot.check_state == "success"
-    assert result.ready
+    assert result.snapshot.check_state == "failure"
+    assert result.snapshot.required_checks_failed == (required_conclusion == "failure")
+    assert result.snapshot.required_checks_pending == (required_conclusion is None)
     assert result.snapshot.approved_review_ids == (
         frozenset({live_approval_id}) if live_approval_id is not None else frozenset()
     )
