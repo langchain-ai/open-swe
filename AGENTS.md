@@ -33,9 +33,12 @@ Never run the full test suite locally; run only tests related to the change.
 Tests are maintenance cost. Add one only when you can name a concrete regression existing coverage would miss.
 
 - Prefer extending an existing behavioral test over new files, fixtures, or mock-heavy harnesses.
-- No tests for docs, prompt wording, constants, trivial accessors, or behavior guaranteed by types or a library.
+- No tests for docs, prompt wording, constants, mappings, source structure, trivial accessors, or behavior guaranteed by types or a library.
 - No change-detector tests, incidental snapshots, call-order assertions, or mocks that only prove the mock was called.
+- Behavior-preserving refactors should not need mechanical test updates; rewrite or remove tests that do.
+- No speculative edge cases or the same behavior tested across layers. Security, authorization, data integrity, and tricky state transitions do deserve targeted coverage.
 - For bug fixes, prefer a focused regression test that fails before the fix.
+- Before submitting, prune redundant or low-signal tests the change added. Shipping no new tests is often correct.
 
 ## Pull Requests
 
