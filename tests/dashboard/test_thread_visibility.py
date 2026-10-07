@@ -229,12 +229,14 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert copied[0]["additional_kwargs"]["x"] == 1
 
 
-async def test_continue_privately_copies_referenced_blobs(private_thread, fake_store):
+async def test_continue_privately_copies_referenced_blobs(private_thread, registry_db):
     thread, client = private_thread
     thread["metadata"]["visibility"] = "public"
     kept, gone, unreferenced = "a" * 64, "b" * 64, "c" * 64
     for digest in (kept, unreferenced):
-        fake_store.seed(blobs.blob_namespace("private-thread"), f"/{digest}", {"digest": digest})
+        await blobs.ThreadBlobs("private-thread").aput(
+            blobs.blob_namespace("private-thread"), f"/{digest}", {"digest": digest}
+        )
     image = {"type": "image", "mime_type": "image/png"}
     client.threads.get_state.return_value = {
         "values": {
@@ -248,7 +250,8 @@ async def test_continue_privately_copies_referenced_blobs(private_thread, fake_s
     await handlers.continue_thread_privately("private-thread", "bob")
 
     new_thread_id = client.threads.create.call_args.kwargs["thread_id"]
-    assert fake_store.values(blobs.blob_namespace(new_thread_id)) == {f"/{kept}": {"digest": kept}}
+    copies = await blobs.ThreadBlobs(new_thread_id).asearch(blobs.blob_namespace(new_thread_id))
+    assert [(item.key, item.value) for item in copies] == [(f"/{kept}", {"digest": kept})]
 
 
 async def test_continue_privately_rolls_back_when_blob_copy_fails(private_thread, monkeypatch):
@@ -259,7 +262,9 @@ async def test_continue_privately_rolls_back_when_blob_copy_fails(private_thread
         "values": {"messages": [{"type": "human", "content": [image]}]}
     }
     client.threads.delete = AsyncMock()
-    monkeypatch.setattr(blobs, "get_value", AsyncMock(side_effect=RuntimeError("store down")))
+    monkeypatch.setattr(
+        handlers, "copy_thread_blobs", AsyncMock(side_effect=RuntimeError("database down"))
+    )
     with pytest.raises(HTTPException) as exc:
         await handlers.continue_thread_privately("private-thread", "bob")
     assert exc.value.status_code == 502

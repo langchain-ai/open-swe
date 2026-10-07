@@ -1,5 +1,6 @@
 """FastAPI application composition."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -41,6 +42,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.notifications import LISTENER
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
+    from openswe.skill_store.store import import_store_skills
+    from openswe.threads.blobs import import_store_blobs
     from openswe.transcript import listener as transcript_listener
     from openswe.ui_invalidations.hub import HUB
     from openswe.users import User
@@ -88,6 +91,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "Imported automations from the LangGraph Store",
             extra={"imported_automations": imported_automations},
         )
+    try:
+        # Skills used to live in the LangGraph Store; this moves them into
+        # PostgreSQL and is a no-op once the Store namespaces are empty.
+        await import_store_skills()
+    except Exception:  # noqa: BLE001
+        # Startup continues: skills still in the Store are missing until an
+        # import succeeds.
+        logger.exception("Importing skills from the LangGraph Store failed")
+    blob_import = asyncio.create_task(import_store_blobs())
     if admins := configured_admins():
         await User.sync_admins(admins)
     try:
@@ -118,6 +130,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        blob_import.cancel()
         await HUB.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()
