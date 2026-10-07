@@ -21,7 +21,11 @@ from agent.slack.client import parse_github_pr_url
 from agent.threads.access import _authorized_thread, _readable_thread_metadata
 from agent.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from agent.threads.creation import TITLE_LOCKED_KEY, create_thread
-from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
+from agent.threads.listing import (
+    attach_task_workers,
+    list_unresolved_dashboard_threads,
+    settle_review_walkthrough,
+)
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
 from agent.threads.runs import (
@@ -188,6 +192,7 @@ async def get_dashboard_thread(
         )
     with phase(record, "subagents"):
         await attach_subagents([summary])
+    await attach_task_workers(client, [summary], login, email)
     return summary
 
 
