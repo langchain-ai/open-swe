@@ -65,7 +65,6 @@ from agent.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
     _is_thread_resolved,
-    _metadata_model_id,
     _now_ms,
     _parse_repo,
     repo_config_from_metadata,
@@ -93,6 +92,7 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
+from agent.utils.thread_settings import thread_model_choice
 from agent.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
@@ -851,10 +851,9 @@ async def _enrich_run_start_command(
         metadata = thread_metadata(thread)
         if sandbox_bridge is not None:
             metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
-        run_model = _metadata_model_id(metadata)
-        resolved_effort = metadata.get("resolved_effort")
-        if isinstance(resolved_effort, str):
-            run_effort = resolved_effort
+        run_model, run_effort = normalize_model_choice(
+            metadata.get("resolved_model"), metadata.get("resolved_effort")
+        )
         if command_images and run_model and run_effort:
             overrides["agent_model_id"] = run_model
             overrides["agent_effort"] = run_effort
@@ -862,14 +861,9 @@ async def _enrich_run_start_command(
             overrides["agent_model_id"] = chosen_model
             overrides["agent_effort"] = chosen_effort
     else:
-        run_model = chosen_model or _metadata_model_id(metadata)
-        run_effort = chosen_effort
-        if not run_effort:
-            for key in ("resolved_effort", "effort"):
-                value = metadata.get(key)
-                if isinstance(value, str):
-                    run_effort = value
-                    break
+        run_model, run_effort = (
+            (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
+        )
         if command_images and run_model and run_effort:
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
@@ -1097,7 +1091,7 @@ async def steer_running_thread(
     run_model = (await _run_metadata(client, thread_id, live_run_id)).get(RUN_MODEL_KEY)
     image_blocks = _image_blocks(
         command_images,
-        model_id=run_model if isinstance(run_model, str) else _metadata_model_id(metadata),
+        model_id=run_model if isinstance(run_model, str) else thread_model_choice(metadata)[0],
     )
 
     structured, _, persisted_message_ids = await _attributed_run_messages(

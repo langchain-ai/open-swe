@@ -146,9 +146,13 @@ export function RunningAgentsSection() {
     >
       <div className="flex flex-col gap-3 p-4">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
-            {running.length} running
-          </span>
+          {threads.isFetching ? (
+            <Skeleton className="h-4 w-16" />
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {running.length} running
+            </span>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -178,6 +182,14 @@ export function RunningAgentsSection() {
                   </p>
                   <p className="truncate font-mono text-[11px] text-muted-foreground">
                     {thread.repoFullName || "no repo"} · {thread.id}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Thread started{" "}
+                    <time dateTime={new Date(thread.createdAt).toISOString()}>
+                      {new Date(thread.createdAt).toLocaleString(undefined, {
+                        timeZoneName: "short",
+                      })}
+                    </time>
                   </p>
                 </Link>
                 <Button

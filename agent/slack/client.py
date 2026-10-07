@@ -345,7 +345,7 @@ def _slack_card_text(message: Mapping[str, object]) -> str:
     return "\n".join(texts)[:SLACK_FORWARDED_ATTACHMENT_TEXT_MAX_CHARS]
 
 
-def _format_forwarded_slack_attachments(attachments: Any) -> str:
+def format_forwarded_slack_attachments(attachments: Any) -> str:
     forwarded: list[str] = []
     rendered_count = 0
     visited_count = 0
@@ -427,7 +427,7 @@ def format_slack_messages_for_prompt(
 
     lines: list[str] = []
     for message in messages:
-        forwarded = _format_forwarded_slack_attachments(message.get("attachments"))
+        forwarded = format_forwarded_slack_attachments(message.get("attachments"))
         text = label_slack_user_mentions(
             replace_bot_mention_with_username(
                 str(message.get("text", "")),

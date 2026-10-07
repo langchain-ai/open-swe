@@ -3686,6 +3686,17 @@
             ],
             "title": "Experimental Background Callbacks"
           },
+          "experimental_task_coordination": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Task Coordination"
+          },
           "model_routing_enabled": {
             "anyOf": [
               {

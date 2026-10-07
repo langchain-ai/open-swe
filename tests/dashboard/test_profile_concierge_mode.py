@@ -3,7 +3,7 @@
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard.profiles import ProfileUpdate, put_my_profile
+from agent.dashboard.profiles import ProfileUpdate, get_my_profile, put_my_profile
 from agent.users import User, UserPreferences
 from tests.conftest import FakeStore
 
@@ -42,3 +42,18 @@ async def test_turning_concierge_mode_on_needs_a_users_row(fake_store: FakeStore
 
     assert saved["concierge_mode"] is True
     assert await User.preferences_for_login("ada") == UserPreferences(concierge_mode=True)
+
+
+async def test_task_coordination_opt_in_survives_unrelated_profile_saves(
+    fake_store: FakeStore,
+) -> None:
+    await User.sign_in("github", "1", login="ada")
+    assert (await get_my_profile(_SESSION))["experimental_task_coordination"] is False
+    enabled = _update(None).model_copy(update={"experimental_task_coordination": True})
+    assert (await put_my_profile(enabled, _SESSION))["experimental_task_coordination"] is True
+    assert (await put_my_profile(_update(True), _SESSION))["experimental_task_coordination"] is True
+    assert not (await User.preferences_for_login("someone-else")).experimental_task_coordination
+    disabled = _update(None).model_copy(update={"experimental_task_coordination": False})
+    saved = await put_my_profile(disabled, _SESSION)
+    assert saved["experimental_task_coordination"] is False
+    assert saved["concierge_mode"] is True
