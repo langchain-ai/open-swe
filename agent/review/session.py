@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 from agent.thread_ids import review_chat_thread_id, review_scout_thread_id
 from agent.threads.creation import create_thread
 from agent.utils.thread_ops import langgraph_client
+from agent.utils.thread_participants import participant_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class ReviewSession(BaseModel):
             thread_id=self.thread_id,
             metadata={
                 "title": thread_title,
-                "participant_logins": {self.login.lower(): True},
+                **await participant_metadata({}, login=self.login),
                 "thread_category": "review",
                 "workspace": workspace,
                 "pr_url": url,

@@ -32,7 +32,7 @@ from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.json_types import thread_metadata
 from agent.utils.langsmith import get_langsmith_trace_url
 from agent.utils.thread_ops import langgraph_client
-from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY, merge_participants
+from agent.utils.thread_participants import participant_metadata
 from agent.webhooks.common import SlackRepoResolution, is_repo_allowed
 
 _TITLE_MAX_CHARS = 160
@@ -413,7 +413,7 @@ async def slack_breakout_thread(
         )
     if owner_type == "user":
         metadata["owner_login"] = owner_login
-        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(None, owner_login)
+        metadata.update(await participant_metadata({}, login=owner_login))
     if cfg.github_login:
         metadata["github_login"] = cfg.github_login
     if cfg.user_email:

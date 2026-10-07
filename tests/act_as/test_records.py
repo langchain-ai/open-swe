@@ -7,7 +7,11 @@ import pytest
 from agent.act_as.records import ActAsRequest, ThreadActAs
 from agent.users import User, UserPreferences, UserPreferencesPatch
 from agent.utils.json_types import JsonObject
-from agent.utils.thread_participants import PARTICIPANT_EMAILS_KEY, PARTICIPANT_LOGINS_KEY
+from agent.utils.thread_participants import (
+    PARTICIPANT_EMAILS_KEY,
+    PARTICIPANT_LOGINS_KEY,
+    participant_metadata,
+)
 
 _PR = {"owner": "o", "repo": "r", "head": "h", "base": "b", "title": "t"}
 
@@ -49,20 +53,32 @@ async def test_distinct_participants_make_a_thread_shared(
     emails: JsonObject,
     shared: bool,
 ) -> None:
+    alice, bob = User(), User()
     monkeypatch.setattr(
         User,
-        "login_for_email",
+        "for_login",
+        AsyncMock(side_effect=lambda _, login: {"alice": alice, "bob": bob}.get(login)),
+    )
+    monkeypatch.setattr(
+        User,
+        "for_email",
         AsyncMock(
-            side_effect=lambda email: {"alice@example.com": "Alice", "bob@example.com": "bob"}.get(
+            side_effect=lambda email: {"alice@example.com": alice, "bob@example.com": bob}.get(
                 email
             )
         ),
     )
     thread_metadata[PARTICIPANT_LOGINS_KEY] = logins
     thread_metadata[PARTICIPANT_EMAILS_KEY] = emails
+    thread_metadata.update(await participant_metadata(thread_metadata))
+    monkeypatch.setattr(
+        User,
+        "for_person",
+        AsyncMock(side_effect=AssertionError("Consent must use stored identities")),
+    )
 
     thread = await ThreadActAs.load("thread-1")
-    assert await thread.is_shared() is shared
+    assert thread.is_shared() is shared
 
 
 @pytest.mark.asyncio
@@ -78,7 +94,7 @@ async def test_the_first_answer_stands(
 ) -> None:
     thread_metadata[PARTICIPANT_EMAILS_KEY] = {"alice@example.com": True}
     monkeypatch.setattr(
-        User, "login_for_email", AsyncMock(side_effect=RuntimeError("Email lookup unavailable"))
+        User, "for_person", AsyncMock(side_effect=RuntimeError("Identity lookup unavailable"))
     )
     thread = await ThreadActAs.load("thread-1")
     request = await thread.request("alice", **_PR)

@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 import pytest
 
 from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from agent.input_messages import PersonIdentity
 from agent.run_config import Repo
 from agent.slack import client as slack_utils
 from agent.slack import webhook as slack_webhooks
@@ -16,7 +17,9 @@ from agent.slack.client import (
 from agent.slack.payloads import SlackChannelContext, SlackChannelPayload
 from agent.slack.request import SlackRequest
 from agent.source_context import SourceContext
+from agent.users import User
 from agent.utils.run_usage import RunUsageSummary
+from agent.utils.thread_participants import participant_ids
 from agent.webhooks import common as webhook_common
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -122,6 +125,40 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == "private"
     assert metadata["owner_login"] == "Alice"
+
+
+@pytest.mark.asyncio
+async def test_upsert_counts_linked_and_unregistered_slack_participants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = _FakeThreadsClient(thread={"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    alice = User()
+
+    async def known(person: PersonIdentity) -> User | None:
+        return (
+            alice
+            if person["id"] in {"github:alice", "email:alice@example.com", "slack:U1"}
+            else None
+        )
+
+    monkeypatch.setattr(User, "for_person", known)
+    monkeypatch.setattr(
+        User, "login_for_slack", AsyncMock(side_effect=lambda uid: "alice" if uid == "U1" else None)
+    )
+    for slack_ids, expected in [
+        (["U1"], {f"user:{alice.id}"}),
+        (["U1", "U2"], {f"user:{alice.id}", "slack:U2"}),
+    ]:
+        assert await webhook_common.upsert_agent_thread_metadata(
+            "thread-id",
+            source="slack",
+            github_login="alice",
+            user_email="alice@example.com",
+            slack_participant_user_ids=slack_ids,
+            title="Thread",
+        )
+        assert participant_ids(cast(dict, threads.thread)["metadata"]) == expected
 
 
 def test_upsert_records_a_token_scope_only_on_creation(

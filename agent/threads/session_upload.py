@@ -32,11 +32,7 @@ from agent.threads.runs import (
 )
 from agent.threads.summary import DASHBOARD_SOURCE, _now_ms, _parse_repo, _thread_summary
 from agent.utils.thread_ops import langgraph_client
-from agent.utils.thread_participants import (
-    PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    merge_participants,
-)
+from agent.utils.thread_participants import participant_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -301,8 +297,7 @@ async def upload_session(
         "visibility": "private" if header.visibility == "private" else "public",
         "thread_category": "interactive",
         "trigger_kind": "user",
-        PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
-        PARTICIPANT_EMAILS_KEY: merge_participants(None, email),
+        **await participant_metadata({}, login=login, email=email),
         "title": title,
         "workspace": workspace,
         "repo_owner": target.owner,

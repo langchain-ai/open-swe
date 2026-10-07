@@ -5,7 +5,6 @@ updates merge per key, so a stale request write can never erase a decision, and
 two people's requests never overwrite each other.
 """
 
-import asyncio
 import hashlib
 import logging
 from collections.abc import Mapping
@@ -17,11 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from agent.slack.events import claim_slack_event
 from agent.store import now_iso
 from agent.users import User, UserPreferencesPatch
-from agent.utils.thread_participants import (
-    PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    participant_logins,
-)
+from agent.utils.thread_participants import participant_ids
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +62,12 @@ class ThreadActAs:
         thread_id: str,
         requests: dict[str, ActAsRequest],
         decisions: dict[str, ActAsDecision],
-        logins: set[str],
-        emails: list[str],
+        participants: set[str],
     ) -> None:
         self.thread_id = thread_id
         self.requests = requests
         self.decisions = decisions
-        self._logins = logins
-        self._emails = emails
+        self._participants = participants
 
     @classmethod
     async def load(cls, thread_id: str) -> Self:
@@ -82,14 +75,10 @@ class ThreadActAs:
         metadata = thread["metadata"] or {}
         requests = _parse(thread_id, metadata, _REQUEST_PREFIX, ActAsRequest)
         decisions = _parse(thread_id, metadata, _DECISION_PREFIX, ActAsDecision)
-        logins = set(participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY)))
-        emails = participant_logins(metadata.get(PARTICIPANT_EMAILS_KEY))
-        return cls(thread_id, requests, decisions, logins, emails)
+        return cls(thread_id, requests, decisions, participant_ids(metadata))
 
-    async def is_shared(self) -> bool:
-        mapped = await asyncio.gather(*(User.login_for_email(email) for email in self._emails))
-        logins = self._logins | {login.strip().lower() for login in mapped if login}
-        return len(logins) + sum(not login for login in mapped) > 1
+    def is_shared(self) -> bool:
+        return len(self._participants) > 1
 
     def for_login(self, login: str) -> ActAsRequest | None:
         return self.requests.get(ActAsRequest.fingerprint_for(self.thread_id, login))

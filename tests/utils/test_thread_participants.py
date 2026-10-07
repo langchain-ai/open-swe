@@ -3,7 +3,68 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent.input_messages import PersonIdentity
+from agent.users import User
 from agent.utils import thread_participants as participants
+
+
+@pytest.mark.asyncio
+async def test_participant_ingress_upgrades_legacy_and_preserves_uncovered_people(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alice = User()
+    monkeypatch.setattr(User, "for_person", AsyncMock(return_value=alice))
+    metadata: dict[str, object] = {
+        participants.PARTICIPANT_LOGINS_KEY: ["Alice"],
+        participants.PARTICIPANT_EMAILS_KEY: {"alice@example.com": True},
+    }
+    assert len(participants.participant_ids(metadata)) == 2
+    metadata.update(await participants.participant_metadata(metadata))
+    assert participants.participant_ids(metadata) == {f"user:{alice.id}"}
+    metadata[participants.PARTICIPANT_LOGINS_KEY] = {"alice": True, "bob": True}
+    assert participants.participant_ids(metadata) == {f"user:{alice.id}", "github:bob"}
+
+
+@pytest.mark.asyncio
+async def test_external_participants_link_without_losing_historical_users(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alice, bob = User(), User()
+    known: dict[str, User] = {"github:alice": alice}
+
+    async def resolve(person: PersonIdentity) -> User | None:
+        return known.get(person["id"])
+
+    monkeypatch.setattr(User, "for_person", resolve)
+    metadata = await participants.participant_metadata(
+        {}, login="alice", people=[{"id": "slack:U1"}, {"id": "slack:U2"}]
+    )
+    assert participants.participant_ids(metadata) == {f"user:{alice.id}", "slack:U1", "slack:U2"}
+    known.update({"slack:U1": alice, "slack:U2": bob})
+    metadata.update(await participants.participant_metadata(metadata))
+    assert participants.participant_ids(metadata) == {f"user:{alice.id}", f"user:{bob.id}"}
+    known["slack:U2"] = alice
+    metadata.update(await participants.participant_metadata(metadata, people=[{"id": "slack:U2"}]))
+    assert participants.participant_ids(metadata) == {f"user:{alice.id}", f"user:{bob.id}"}
+    monkeypatch.setattr(
+        User, "for_person", AsyncMock(side_effect=RuntimeError("Database unavailable"))
+    )
+    metadata.update(await participants.participant_metadata(metadata, login="alice"))
+    assert participants.participant_ids(metadata) == {f"user:{alice.id}", f"user:{bob.id}"}
+
+
+@pytest.mark.asyncio
+async def test_concurrent_participant_updates_do_not_erase_people(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alice, bob = User(), User()
+    monkeypatch.setattr(User, "for_person", AsyncMock(side_effect=[alice, bob]))
+    first = await participants.participant_metadata({}, login="alice")
+    second = await participants.participant_metadata({}, login="bob")
+    assert participants.participant_ids({**first, **second}) == {
+        f"user:{alice.id}",
+        f"user:{bob.id}",
+    }
 
 
 class _Threads:
