@@ -2,11 +2,12 @@ import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import { DotsThreeIcon } from "@phosphor-icons/react"
 import { Folder } from "lucide-react"
-import { useRef, useState } from "react"
+import { type ReactNode, useRef, useState } from "react"
 
 import { useNavigate } from "@tanstack/react-router"
-import type { DesktopLocalThreadSummary } from "@/desktop"
-import { useRefreshLocalThreads } from "@/features/agents/lib/desktopLocal"
+import type { DesktopLegacyLocalThread } from "@/desktop"
+import { useLocalThread } from "@/features/agents/lib/desktopLocal"
+import { useRefreshLegacyLocalThreads } from "@/features/agents/lib/legacyLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 
@@ -36,7 +37,7 @@ function ThreadRepoIndicator({
   localThread,
 }: {
   thread?: AgentThread
-  localThread?: DesktopLocalThreadSummary
+  localThread?: DesktopLegacyLocalThread
 }) {
   const [open, setOpen] = useState(false)
   const { projects: localRepos } = useDesktopProjects()
@@ -77,6 +78,7 @@ function ThreadRepoIndicator({
 export function AgentThreadHeader({
   title,
   target,
+  targetMenu,
   panelCollapsed,
   thread,
   onRename,
@@ -86,18 +88,21 @@ export function AgentThreadHeader({
 }: {
   title?: string | null
   target: "Cloud" | "This Mac" | "Local CLI"
+  /** Replaces the target label with a control that moves the thread. */
+  targetMenu?: ReactNode
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
-  localThread?: DesktopLocalThreadSummary
+  localThread?: DesktopLegacyLocalThread
   thread?: AgentThread
   // Visibility of a thread that does not exist yet.
   visibility?: ThreadVisibility
   onVisibilityChange?: (next: ThreadVisibility) => void
 }) {
   const navigate = useNavigate()
-  const refreshLocalThreads = useRefreshLocalThreads()
+  const refreshLocalThreads = useRefreshLegacyLocalThreads()
   const { prefs, toggleLocalPin } = useSidebarPrefs()
   const [deletingLocal, setDeletingLocal] = useState(false)
+  const worktreeThread = useLocalThread(thread?.id ?? "") ?? localThread
   const sidebarCollapsed = useSidebarCollapsed()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -108,9 +113,11 @@ export function AgentThreadHeader({
   const continuePrivately = useContinueThreadPrivately()
   const shareWithWorkspace = useShareThreadWithWorkspace()
   const session = useSession()
+  // A "This Mac" thread runs commands on its owner's machine, so it stays private.
   const canShare = Boolean(
     thread?.ownerLogin &&
-    thread.ownerLogin.toLowerCase() === session.data?.login.toLowerCase()
+    thread.ownerLogin.toLowerCase() === session.data?.login.toLowerCase() &&
+    thread.sandboxBridgeClient !== "desktop"
   )
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -134,7 +141,7 @@ export function AgentThreadHeader({
     }
     setDeletingLocal(true)
     try {
-      const deleted = await window.openSweDesktop?.deleteLocalThread(
+      const deleted = await window.openSweDesktop?.deleteLegacyLocalThread(
         localThread.id
       )
       if (!deleted) throw new Error("Local Open SWE thread not found")
@@ -216,7 +223,7 @@ export function AgentThreadHeader({
       onToggleArchived={() => {
         if (localThread) {
           void window.openSweDesktop
-            ?.updateLocalThread({
+            ?.updateLegacyLocalThread({
               threadId: localThread.id,
               archived: !archived,
             })
@@ -318,7 +325,9 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          <span className="text-xs text-muted-foreground">{target}</span>
+          {targetMenu ?? (
+            <span className="text-xs text-muted-foreground">{target}</span>
+          )}
           {!localThread && visibilityMenu}
         </div>
       </div>
@@ -362,8 +371,8 @@ export function AgentThreadHeader({
         isDeleting={isDeleting}
         onConfirm={() => void confirmDelete()}
         detail={
-          localThread
-            ? localThread.ownedWorktrees?.length
+          worktreeThread
+            ? worktreeThread.ownedWorktrees?.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
             : undefined

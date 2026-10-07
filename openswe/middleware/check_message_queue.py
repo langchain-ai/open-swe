@@ -1,0 +1,362 @@
+"""Before-model middleware that injects queued messages into state.
+
+Checks the LangGraph store for pending messages (e.g. follow-up Linear
+comments that arrived while the agent was busy) and injects them as new
+human messages before the next model call.
+"""
+
+import logging
+from typing import Any, cast
+
+import httpx2
+from langchain.agents.middleware import before_model
+from langgraph.config import get_config, get_store
+from langgraph.runtime import Runtime
+from langgraph.store.base import BaseStore
+from langgraph_sdk import get_client
+
+from openswe.dashboard.options import model_supports_images
+from openswe.input_messages import (
+    PersonIdentity,
+    SystemIdentity,
+    build_input_messages,
+    visible_dynamic_context_hashes,
+)
+from openswe.middleware.require_user_reply import (
+    SLACK_REPLY_SURFACE,
+    WEB_REPLY_SURFACE,
+    ReplySurface,
+    ReplySurfaceState,
+    current_reply_surface,
+)
+from openswe.middleware.trace import scrub_middleware_inputs
+from openswe.prompts import prompt
+from openswe.users import User
+from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
+from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
+
+logger = logging.getLogger(__name__)
+
+
+class LinearNotifyState(ReplySurfaceState):
+    """Extended agent state for tracking Linear notifications."""
+
+    linear_messages_sent_count: int
+
+
+async def _resolve_thread_model_id(thread_id: str) -> str | None:
+    """Read the resolved model from thread metadata (set by ``get_agent``)."""
+    try:
+        client = get_client()
+        thread = await client.threads.get(thread_id)
+        metadata = thread.get("metadata") if isinstance(thread, dict) else None
+        if not isinstance(metadata, dict):
+            return None
+        model = metadata.get("model")
+        return model if isinstance(model, str) and model else None
+    except Exception:
+        logger.debug("Could not read thread metadata for model resolution", exc_info=True)
+        return None
+
+
+async def _build_blocks_from_payload(
+    payload: dict[str, Any],
+    *,
+    model_id: str | None = None,
+) -> list[dict[str, Any]]:
+    text = payload.get("text", "")
+    image_urls = payload.get("image_urls", []) or []
+    images = payload.get("images", []) or []
+    blocks: list[dict[str, Any]] = []
+    if text:
+        blocks.append({"type": "text", "text": text})
+    if isinstance(images, list):
+        blocks.extend(image for image in images if isinstance(image, dict))
+
+    if not image_urls:
+        return blocks
+    if model_id and not model_supports_images(model_id):
+        logger.warning(
+            "Skipping %d queued image(s): model %s does not support images",
+            len(image_urls),
+            model_id,
+        )
+        if text:
+            blocks[0] = {
+                "type": "text",
+                "text": text + vision_not_supported_warning(model_id, len(image_urls)),
+            }
+        return blocks
+    async with httpx2.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT) as client:
+        for image_url in image_urls:
+            image_block = await fetch_image_block(image_url, client)
+            if image_block:
+                blocks.append(cast(dict[str, Any], image_block))
+    return blocks
+
+
+def _is_dashboard_queued_message(content: object) -> bool:
+    return isinstance(content, dict) and content.get("source") == "dashboard"
+
+
+_QUEUE_SYSTEM: SystemIdentity = {
+    "id": "system:thread-queue",
+    "display_name": "Queued message",
+    "platform": "open-swe",
+}
+
+
+# Each structured envelope has to arrive as its own message: the transcript
+# parses one envelope per message, so packing several into one message's blocks
+# renders the concatenation as raw XML.
+def _merge_text_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    texts = [
+        block["text"]
+        for block in blocks
+        if block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"]
+    ]
+    others = [block for block in blocks if block.get("type") != "text"]
+    merged: list[dict[str, Any]] = [{"type": "text", "text": "\n\n".join(texts)}] if texts else []
+    return merged + others
+
+
+def _flush_blocks(
+    messages: list[dict[str, Any]], blocks: list[dict[str, Any]], injected: set[str]
+) -> None:
+    if not blocks:
+        return
+    messages.extend(
+        cast(
+            list[dict[str, Any]],
+            build_input_messages(
+                _merge_text_blocks(blocks),
+                {"sender_id": _QUEUE_SYSTEM["id"], "surface": "automation", "kind": "system"},
+                systems=[_QUEUE_SYSTEM],
+                injected_dynamic_context_hashes=injected,
+            ),
+        )
+    )
+    blocks.clear()
+
+
+def _message_update(
+    queued: list[dict[str, Any]],
+    thread_id: str,
+    surface: ReplySurface | None = None,
+) -> dict[str, Any] | None:
+    surface_update = {"reply_surface": surface} if surface is not None else {}
+    if not queued:
+        return surface_update or None
+    logger.info(
+        "Injected %d queued message(s) into state for thread %s",
+        len(queued),
+        thread_id,
+    )
+    return {"messages": queued, **surface_update}
+
+
+async def _consume_queued_messages(
+    store: BaseStore, namespace: tuple[str, ...], consumed: list[dict[str, Any]]
+) -> None:
+    """Remove ``consumed`` from the queue, keeping follow-ups appended since.
+
+    Building the injected messages awaits (model lookup, image fetches), and a
+    follow-up queued during that time is not in the snapshot; deleting the
+    whole entry would drop it without ever delivering it.
+    """
+    current_item = await store.aget(namespace, "pending_messages")
+    current = current_item.value.get("messages", []) if current_item is not None else []
+    remaining = [message for message in current if message not in consumed]
+    if remaining:
+        await store.aput(namespace, "pending_messages", {"messages": remaining})
+    else:
+        await store.adelete(namespace, "pending_messages")
+
+
+async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
+    """Pull and clear a batched PR-babysitting event from the store (no thread fetch)."""
+    namespace = ("autofix", thread_id)
+    try:
+        item = await store.aget(namespace, "pending_event")
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Could not read pending auto-fix event for thread %s", thread_id, exc_info=True
+        )
+        return None
+    if item is None or not item.value.get("reason"):
+        return None
+    try:
+        await store.adelete(namespace, "pending_event")
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
+        )
+    message = prompt("runs/autofix-event")
+    details = item.value.get("details")
+    if isinstance(details, list):
+        joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
+        if joined:
+            message += "\n\nNewly arrived feedback to address:\n" + joined
+    return message
+
+
+@scrub_middleware_inputs
+@before_model(state_schema=LinearNotifyState)
+async def check_message_queue_before_model(  # noqa: PLR0911
+    state: LinearNotifyState,
+    runtime: Runtime,  # noqa: ARG001
+) -> dict[str, Any] | None:
+    """Middleware that checks for queued messages before each model call.
+
+    If messages are found in the queue for this thread, it extracts all messages,
+    adds them to the conversation state as new human messages, and clears the queue.
+    Messages are processed in FIFO order (oldest first).
+
+    This enables handling of follow-up comments that arrive while the agent is busy.
+    The agent will see the new messages and can incorporate them into its response.
+    """
+    try:
+        config = get_config()
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id")
+
+        if not thread_id:
+            return None
+
+        try:
+            store = get_store()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Could not get store from context: %s", e)
+            return None
+
+        if store is None:
+            return None
+
+        queued_updates: list[dict[str, Any]] = []
+        content_blocks: list[dict[str, Any]] = []
+        injected = visible_dynamic_context_hashes(state)
+        pending_autofix = await _consume_pending_autofix_event(store, thread_id)
+        if pending_autofix:
+            content_blocks.append({"type": "text", "text": pending_autofix})
+
+        namespace = ("queue", thread_id)
+
+        try:
+            queued_item = await store.aget(namespace, "pending_messages")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to get queued item: %s", e)
+            _flush_blocks(queued_updates, content_blocks, injected)
+            return _message_update(queued_updates, thread_id)
+
+        if queued_item is None:
+            _flush_blocks(queued_updates, content_blocks, injected)
+            return _message_update(queued_updates, thread_id)
+
+        queued_value = queued_item.value
+        # A snapshot: what this call consumes, whatever is appended meanwhile.
+        queued_messages = list(queued_value.get("messages", []))
+
+        if not queued_messages:
+            await store.adelete(namespace, "pending_messages")
+            _flush_blocks(queued_updates, content_blocks, injected)
+            return _message_update(queued_updates, thread_id)
+
+        logger.info(
+            "Found %d queued message(s) for thread %s, injecting into state",
+            len(queued_messages),
+            thread_id,
+        )
+
+        has_images = any(
+            isinstance(msg.get("content"), dict)
+            and (msg["content"].get("image_urls") or msg["content"].get("images"))
+            for msg in queued_messages
+        )
+        resolved_model_id: str | None = None
+        if has_images and not configurable.get("image_model_fallback_enabled"):
+            # This run's own model first: thread metadata already names the
+            # model of any follow-up queued behind it.
+            run_model = configurable.get("resolved_agent_model_id") or configurable.get(
+                "agent_model_id"
+            )
+            resolved_model_id = (
+                run_model
+                if isinstance(run_model, str) and run_model
+                else await _resolve_thread_model_id(thread_id)
+            )
+
+        surface = current_reply_surface(state)
+        moved_surface: ReplySurface | None = None
+        for msg in queued_messages:
+            content = msg.get("content")
+            if _is_dashboard_queued_message(content):
+                _flush_blocks(queued_updates, content_blocks, injected)
+                # Only the move itself is worth announcing. Re-announcing it on
+                # every later web follow-up stacks identical handoff notices in
+                # the dashboard stream.
+                if surface == SLACK_REPLY_SURFACE:
+                    queued_updates.extend(
+                        cast(
+                            list[dict[str, Any]],
+                            build_input_messages(
+                                DASHBOARD_HANDOFF_BODY,
+                                {
+                                    "sender_id": "system:dashboard-handoff",
+                                    "surface": "automation",
+                                    "kind": "system",
+                                },
+                                systems=[
+                                    {
+                                        "id": "system:dashboard-handoff",
+                                        "display_name": "Dashboard handoff",
+                                        "platform": "open-swe",
+                                    }
+                                ],
+                                injected_dynamic_context_hashes=injected,
+                            ),
+                        )
+                    )
+                surface = moved_surface = WEB_REPLY_SURFACE
+            if isinstance(content, dict) and (
+                "text" in content or "image_urls" in content or "images" in content
+            ):
+                logger.debug("Queued message contains text + image URLs")
+                blocks = await _build_blocks_from_payload(content, model_id=resolved_model_id)
+                sender = content.get("sender")
+                if isinstance(sender, dict) and isinstance(sender.get("id"), str):
+                    person: PersonIdentity = {"id": sender["id"]}
+                    for key in ("github_login", "email"):
+                        value = sender.get(key)
+                        if isinstance(value, str):
+                            cast(dict[str, str], person)[key] = value
+                    person = await User.canonical_person(person)
+                    structured = build_input_messages(
+                        blocks,
+                        {"sender_id": person["id"], "surface": "web", "kind": "human"},
+                        injected_dynamic_context_hashes=injected,
+                    )
+                    _flush_blocks(queued_updates, content_blocks, injected)
+                    queue_id = content.get("queue_id")
+                    if isinstance(queue_id, str) and structured:
+                        structured[-1]["id"] = queue_id
+                    queued_updates.extend(cast(list[dict[str, Any]], structured))
+                else:
+                    content_blocks.extend(blocks)
+                continue
+            if isinstance(content, list):
+                logger.debug("Queued message contains %d content block(s)", len(content))
+                content_blocks.extend(content)
+                continue
+            if isinstance(content, str) and content:
+                logger.debug("Queued message contains text content")
+                content_blocks.append({"type": "text", "text": content})
+
+        _flush_blocks(queued_updates, content_blocks, injected)
+        # Cleared only once every message is built: a failure above leaves
+        # them for the next model call instead of losing them.
+        await _consume_queued_messages(store, namespace, queued_messages)
+        return _message_update(queued_updates, thread_id, moved_surface)  # noqa: TRY300
+    except Exception:
+        logger.exception("Error in check_message_queue_before_model")
+    return None

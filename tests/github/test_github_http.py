@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
-from agent.github.http import (
+from openswe.github.http import (
     _compute_backoff,
     github_request,
 )
@@ -31,7 +31,7 @@ async def test_github_request_retries_on_secondary_rate_limit() -> None:
     client = AsyncMock()
     client.get = AsyncMock(side_effect=responses)
 
-    with patch("agent.github.http.asyncio.sleep", new_callable=AsyncMock):
+    with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         response = await github_request(client, "GET", "https://api.github.com/test")
 
     assert response.status_code == 200
@@ -62,7 +62,7 @@ async def test_github_request_retries_on_429_even_for_post() -> None:
     client = AsyncMock()
     client.post = AsyncMock(side_effect=responses)
 
-    with patch("agent.github.http.asyncio.sleep", new_callable=AsyncMock):
+    with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         response = await github_request(client, "POST", "https://api.github.com/test")
 
     assert response.status_code == 201
@@ -78,7 +78,7 @@ async def test_github_request_retries_on_503_even_for_post() -> None:
     client = AsyncMock()
     client.post = AsyncMock(side_effect=responses)
 
-    with patch("agent.github.http.asyncio.sleep", new_callable=AsyncMock):
+    with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         response = await github_request(client, "POST", "https://api.github.com/test")
 
     assert response.status_code == 201
@@ -123,7 +123,7 @@ async def test_github_request_retries_502_on_get() -> None:
     client = AsyncMock()
     client.get = AsyncMock(side_effect=responses)
 
-    with patch("agent.github.http.asyncio.sleep", new_callable=AsyncMock):
+    with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         response = await github_request(client, "GET", "https://api.github.com/test")
 
     assert response.status_code == 200
@@ -135,7 +135,7 @@ async def test_github_request_raises_after_exhausting_transport_retries() -> Non
     client = AsyncMock()
     client.get = AsyncMock(side_effect=httpx2.ConnectTimeout("timeout"))
 
-    with patch("agent.github.http.asyncio.sleep", new_callable=AsyncMock):
+    with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         with pytest.raises(httpx2.ConnectTimeout):
             await github_request(client, "GET", "https://api.github.com/test", max_retries=1)
 

@@ -3,7 +3,7 @@ from typing import Any
 import httpx2
 import pytest
 
-from agent.review import publish as reviewer_publish
+from openswe.review import publish as reviewer_publish
 
 
 class _FakeResponse:

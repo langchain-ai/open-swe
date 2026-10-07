@@ -4,14 +4,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.expedited_review.eligibility import ChangedFile
-from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
-from agent.human_review import lifecycle, standard
-from agent.human_review.requests import HumanReviewRequest
-from agent.slack.client import GitHubPrRef
+from openswe.expedited_review.eligibility import ChangedFile
+from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
+from openswe.human_review import lifecycle, standard
+from openswe.human_review.requests import HumanReviewRequest
+from openswe.slack.client import GitHubPrRef
 from tests.expedited_review.conftest import OpenApproval
 
-tool = import_module("agent.tools.expedite_pr_approval")
+tool = import_module("openswe.tools.expedite_pr_approval")
 
 
 @pytest.mark.asyncio
@@ -113,11 +113,14 @@ async def test_standard_review_replaces_author_only_request(
         standard,
         "record_pull_request",
         AsyncMock(
-            return_value=(approval.pull_request, SimpleNamespace(head_sha="new", body="Fix"))
+            return_value=(
+                approval.pull_request,
+                SimpleNamespace(head_sha="new", body="Fix", author="ada"),
+            )
         ),
     )
     monkeypatch.setattr(standard, "_schedule", AsyncMock(return_value=True))
-    monkeypatch.setattr(standard, "post_standard_card", AsyncMock(return_value=("3.0", None)))
+    monkeypatch.setattr(standard, "post_standard_card", AsyncMock(return_value="3.0"))
     monkeypatch.setattr(
         standard, "_permalink", AsyncMock(return_value="https://slack.example/card")
     )
