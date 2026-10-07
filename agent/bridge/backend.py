@@ -40,6 +40,7 @@ from agent.bridge.protocol import (
     ExecuteParams,
     JsonObject,
     UploadFilesParams,
+    WorktreeHandoffParams,
 )
 from agent.bridge.store import Bridge, BridgeStore, BridgeUnavailableError
 from agent.sandboxes.state import SandboxUnreachableError
@@ -154,6 +155,12 @@ class BridgeSandboxBackend(BaseSandbox):
             wait=_FILE_TRANSFER_TIMEOUT_SECONDS + WAIT_GRACE_SECONDS,
         )
         return DownloadFilesResult.model_validate(result).response()
+
+    async def ahandoff_worktree(self, params: WorktreeHandoffParams) -> JsonObject:
+        """Ask the desktop app to move this thread into a new worktree."""
+        return await self._round_trip(
+            "worktree_handoff", params, wait=_FILE_TRANSFER_TIMEOUT_SECONDS + WAIT_GRACE_SECONDS
+        )
 
     async def _is_alive(self) -> bool:
         bridge = await BridgeStore.load(self._bridge_id)

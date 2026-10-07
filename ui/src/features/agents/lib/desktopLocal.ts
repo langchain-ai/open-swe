@@ -58,6 +58,15 @@ export function runsOnAMac(thread: Pick<AgentThread, "sandboxBridgeClient">) {
  * changes the list, so it is refreshed where it does rather than polled.
  */
 export function useLocalThreads() {
+  const queryClient = useQueryClient()
+  useEffect(
+    () =>
+      window.openSweDesktop?.onLocalThreadsChanged(
+        () =>
+          void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+      ),
+    [queryClient]
+  )
   return useQuery({
     queryKey: localThreadKeys.all,
     queryFn: async () =>

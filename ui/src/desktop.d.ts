@@ -207,6 +207,7 @@ declare global {
       onUpdateState: (
         callback: (state: DesktopUpdateState) => void
       ) => () => void
+      onLocalThreadsChanged: (callback: () => void) => () => void
       onProjectsChanged: (
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void

@@ -10,7 +10,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
-BridgeMethod = Literal["execute", "upload_files", "download_files"]
+BridgeMethod = Literal["execute", "upload_files", "download_files", "worktree_handoff"]
 
 JsonObject = dict[str, JsonValue]
 
@@ -51,3 +51,9 @@ class UploadFilesParams(BridgeParams):
 
 class DownloadFilesParams(BridgeParams):
     paths: list[str]
+
+
+class WorktreeHandoffParams(BridgeParams):
+    branch: str
+    base_ref: str | None = None
+    start_from_origin: bool = True

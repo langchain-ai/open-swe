@@ -65,6 +65,7 @@ from agent.bridge.cli_result import cli_result
 from agent.bridge.constants import BridgeClient
 from agent.bridge.store import Bridge
 from agent.bridge.worktree_branch import schedule_worktree_branch_rename
+from agent.bridge.worktree_handoff import worktree_handoff
 from agent.credential_scope import private_credential_login
 from agent.dashboard.agent_overrides import (
     load_profile,
@@ -1776,6 +1777,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         propose_pr_review,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
+        *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
         read_only_sql,
         read_store_item,
         manage_feature_flags,

@@ -161,6 +161,11 @@ async def _is_writable_directory(
     return result.exit_code == 0
 
 
+def forget_work_dir(sandbox_backend: object) -> None:
+    """Drop a cached work dir once the checkout behind the backend has moved."""
+    vars(sandbox_backend).pop(_WORK_DIR_CACHE_ATTR, None)
+
+
 def _cache_work_dir(sandbox_backend: SandboxBackendProtocol, work_dir: str) -> None:
     try:
         setattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, work_dir)
