@@ -82,6 +82,7 @@ HUMAN_REVIEW_DISMISS_MARKER = "E2E_HUMAN_REVIEW_DISMISS"
 HUMAN_REVIEW_DISMISS_REASON = "posted with the wrong summary"
 HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
+_DECLINED_MARKER = "declined the review of"
 _SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
 
 # The seeded remote holds only a README, so the first turn writes the file. Two
@@ -1189,7 +1190,15 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     # Woken because nobody signed up within 30 minutes.
     "human_review_assign": (
         _dynamic_step(_human_review_assign_step),
-        StepSpec(content="Assigned a reviewer from CODEOWNERS."),
+        _tool_step(
+            "The pick already tagged them in the thread.",
+            "slack_no_reply_needed",
+            {
+                "reason": "assign_human_reviewer already tagged the reviewer in this thread.",
+                "confirmation": "The user cannot see anything I do not send to Slack.",
+            },
+            "call-human-review-assign-done",
+        ),
     ),
     "multi_pr": (
         _tool_step(
@@ -1422,7 +1431,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         ),
     ),
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
-    ScriptRule("human_review_assign", lambda ctx: _UNCLAIMED_MARKER in ctx.last_text),
+    ScriptRule(
+        "human_review_assign",
+        lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.last_text,
+    ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(

@@ -1,6 +1,7 @@
 """Hand background events to the agent that owns a Slack thread instead of posting there."""
 
 import logging
+import time
 
 from agent.prompts import prompt
 from agent.slack import webhook
@@ -37,6 +38,8 @@ async def wake_thread_owner(channel_id: str, thread_ts: str, slack_user_id: str,
             channel_id=channel_id,
             channel_context=channel_context,
             thread_ts=thread_ts,
+            # After every message in the thread, so the agent reads all of them first.
+            event_ts=f"{time.time():.6f}",
             user_id=slack_user_id,
             text=prompt("slack/thread-owner-event", event=event),
             bot_user_id=common.SLACK_BOT_USER_ID,

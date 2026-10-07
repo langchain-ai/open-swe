@@ -30,8 +30,10 @@ from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.github.pull_requests import PullRequest
 from agent.github.repositories import Repository
+from agent.slack.client import lookup_slack_thread_id
 from agent.users import User
 from agent.utils.json_types import JsonObject
+from agent.utils.thread_ops import langgraph_client
 
 RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
@@ -181,6 +183,18 @@ class HumanReviewRequest(Base):
 
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)
+
+    async def picked_by(self, thread_id: str) -> bool:
+        """Whether ``thread_id`` may pick this request's reviewer: its own thread or its Slack thread's."""
+        if not thread_id:
+            return False
+        if self.thread_id == thread_id:
+            return True
+        root = self.slack_thread_ts or self.slack_message_ts
+        if not self.slack_channel_id or not root:
+            return False
+        owner = await lookup_slack_thread_id(langgraph_client(), self.slack_channel_id, root)
+        return owner == thread_id
 
     @property
     def slack_location(self) -> tuple[str, str] | None:

@@ -20,6 +20,15 @@ const REPO = { owner: "fakeorg", repo: "demo" };
 const REVIEW_CHANNEL = "CREVIEWS01";
 const ALICE = { login: "alice", email: "alice@example.com", slack: "U_ALICE" };
 const BOB = { login: "bob", email: "bob@example.com", slack: "U_BOB" };
+const DANA = { login: "dana", email: "dana@example.com", slack: "U_DANA" };
+const DECLINE_REASONS = [
+  "Too many reviews / not enough time",
+  "Away or unavailable",
+  "Not familiar with this code",
+  "Someone else is a better reviewer",
+  "Conflict of interest",
+  "Other",
+];
 const TLDR =
   "Makes the greeting punctuation consistent and covers it with a test.";
 const CORRECTED_TLDR =
@@ -70,6 +79,12 @@ type ReviewRequest = {
   slack_broadcast: boolean;
   reviewers: Array<{ github_login: string; assigned_by_agent: boolean }>;
   picks: Array<string>;
+};
+
+type SlackView = {
+  id: string;
+  callback_id: string;
+  blocks: Array<{ element: { options: Array<{ value: string }> } }>;
 };
 
 type PullRequest = {
@@ -268,6 +283,13 @@ async function grantWrite(request: APIRequestContext) {
       permission: "write",
     });
   }
+}
+
+/** Open the mock Slack UI on ``channel``, so a trace shows what people see there. */
+async function showSlack(page: Page, channel: string) {
+  await page.goto("/mock/slack");
+  await page.locator(`[data-channel-id="${channel}"]`).click();
+  await expect(page.locator(".msg").last()).toBeVisible({ timeout: 15_000 });
 }
 
 async function shootCard(page: Page, name: string) {
@@ -661,10 +683,13 @@ test.describe("Human review in Slack", () => {
     // ...and messaged in his DM, which is his concierge conversation.
     const picked = await pickedDm(request, "D_BOB");
     expect(picked.thread_ts).toBe(picked.ts);
-    const state = await request.get(`/threads/${dm.thread_id}/state`);
-    expect(JSON.stringify(await state.json())).toContain(
-      "picked you to review",
-    );
+    await expect
+      .poll(async () =>
+        JSON.stringify(
+          await (await request.get(`/threads/${dm.thread_id}/state`)).json(),
+        ),
+      )
+      .toContain("picked you to review");
     await shootCard(page, "picked");
 
     // 3. Bob accepts from his DM and becomes the reviewer.
@@ -706,7 +731,7 @@ test.describe("Human review in Slack", () => {
     expect((await latestRequest(request)).state).toBe("merged");
   });
 
-  test("nobody signs up, so Open SWE picks the code owner without an agent; they accept from their DM and their approval merges it", async ({
+  test("nobody signs up, so the thread's agent picks the code owner Open SWE suggests; they accept from their DM and their approval merges it", async ({
     page,
     request,
   }) => {
@@ -809,6 +834,148 @@ test.describe("Human review in Slack", () => {
       })
       .toBe(true);
     expect((await latestRequest(request)).state).toBe("merged");
+  });
+
+  test("a picked reviewer declines with a reason; the thread's agent picks the other code owner", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    await setReviewChannel(request);
+    await control(request, "/control/collaborator-permission", {
+      login: DANA.login,
+      permission: "write",
+    });
+    await control(request, "/control/repo-file", {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      files: { ".github/CODEOWNERS": "* @alice\n/greeting/ @bob @dana\n" },
+    });
+
+    // 1. Alice asks from the dashboard; nobody signs up, so the card thread's agent
+    //    picks one of the two code owners.
+    await loginAs(page, ALICE);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Greet in Spanish",
+      author: ALICE.login,
+      body: "Says hola.",
+      files: { "greeting/hello.py": 'print("Hola")\n' },
+      check_runs: GREEN,
+    });
+    await page.goto("/agents/reviews");
+    await page
+      .getByRole("listitem")
+      .filter({ hasText: new RegExp(`#${seeded.number}(?!\\d)`) })
+      .getByRole("button", { name: "Request review in Slack" })
+      .click();
+    await expect(page.getByText(/Asked Slack to review/)).toBeVisible({
+      timeout: 30_000,
+    });
+    const posted = await latestRequest(request);
+    await control(request, "/control/human-review-deadline", {
+      request_id: posted.id,
+      step: "unclaimed",
+      hours: 2,
+    });
+    let first = "";
+    await expect
+      .poll(
+        async () => {
+          first = (await latestRequest(request)).picks.join(",");
+          return first;
+        },
+        { timeout: 90_000 },
+      )
+      .toMatch(/^(bob|dana)$/);
+    const declining = first === BOB.login ? BOB : DANA;
+    const next = first === BOB.login ? DANA : BOB;
+    const dmChannel = `D_${declining.slack.replace(/^U_/, "")}`;
+    await showSlack(page, REVIEW_CHANNEL);
+
+    // 2. The pick's DM offers Accept, Decline and Snooze.
+    const picked = await pickedDm(request, dmChannel);
+    expect(buttons(picked)).toEqual(["Accept", "Decline", "Snooze 1 hour"]);
+    await showSlack(page, dmChannel);
+
+    // 3. Decline opens a modal asking why, with every reason to choose from.
+    const decline = (picked.blocks ?? [])
+      .filter((block) => block.type === "actions")
+      .flatMap((block) => block.elements ?? [])
+      .find(
+        (element) =>
+          (typeof element.text === "string"
+            ? element.text
+            : element.text?.text) === "Decline",
+      );
+    await control(request, "/mock/slack/action", {
+      action: decline,
+      channel: dmChannel,
+      message_ts: picked.ts,
+      thread_ts: picked.thread_ts,
+      user: declining.slack,
+    });
+    const views = (await (
+      await request.get("/mock/slack/views")
+    ).json()) as Array<SlackView>;
+    const modal = views.at(-1);
+    expect(modal?.callback_id).toBe("human_review_decline");
+    expect(modal?.blocks[0].element.options.map((item) => item.value)).toEqual(
+      DECLINE_REASONS,
+    );
+
+    // 4. Submitting a reason withdraws the pick on Slack and GitHub and tells them.
+    await control(request, "/mock/slack/view-submit", {
+      view_id: modal!.id,
+      user: declining.slack,
+      values: {
+        reason: {
+          reason: { selected_option: { value: "Away or unavailable" } },
+        },
+      },
+    });
+    await expect
+      .poll(
+        async () =>
+          (await channelMessages(request, dmChannel)).some(
+            (m) =>
+              m.is_bot &&
+              m.text.includes("You declined the review") &&
+              m.text.includes("Away or unavailable"),
+          ),
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    await expect
+      .poll(async () =>
+        (await pull(request, seeded.number)).requested_reviewers.includes(
+          declining.login,
+        ),
+      )
+      .toBe(false);
+    await showSlack(page, dmChannel);
+
+    // 5. The card thread's agent is told why and picks the other code owner, whom
+    //    Open SWE suggests now that the first one is out.
+    await expect
+      .poll(async () => (await latestRequest(request)).picks, {
+        timeout: 90_000,
+      })
+      .toEqual([next.login]);
+    const replies = await channelMessages(
+      request,
+      REVIEW_CHANNEL,
+      posted.slack_message_ts,
+    );
+    expect(
+      replies.some(
+        (m) =>
+          m.is_bot &&
+          m.text.includes(`<@${next.slack}>`) &&
+          m.text.includes("Open SWE picked you"),
+      ),
+    ).toBe(true);
+    await pickedDm(request, `D_${next.slack.replace(/^U_/, "")}`);
+    await showSlack(page, REVIEW_CHANNEL);
   });
 
   test("the agent dismisses the review request its thread posted", async ({

@@ -756,6 +756,7 @@ async def slack_action(request: Request) -> JSONResponse:
 
     payload = {
         "type": "block_actions",
+        "trigger_id": f"trigger-{fakes.next_slack_ts()}",
         "user": {"id": user_id},
         "channel": {"id": channel_id},
         "container": {
@@ -1448,6 +1449,21 @@ async def gh_request_reviewers(
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 
 
+@app.delete("/fake-gh/repos/{owner}/{repo}/pulls/{number}/requested_reviewers")
+async def gh_remove_requested_reviewers(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    body = await request.json()
+    removed = set(body.get("reviewers") or [])
+    pr["requested_reviewers"] = [
+        login for login in pr["requested_reviewers"] if login not in removed
+    ]
+    return JSONResponse(_gh_pr_json(pr))
+
+
 @app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
 async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
     body = await request.json()
@@ -1671,6 +1687,47 @@ async def slack_conversations_open(request: Request) -> JSONResponse:
     body = await _slack_form(request)
     user = str(body.get("users") or "")
     return _ok({"channel": {"id": f"D_{user.removeprefix('U_')}"}})
+
+
+@app.post("/fake-slack/views.open")
+async def slack_views_open(request: Request) -> JSONResponse:
+    body = await _slack_form(request)
+    view = body.get("view")
+    if isinstance(view, str):
+        view = json.loads(view)
+    if not isinstance(view, dict) or not body.get("trigger_id"):
+        return JSONResponse({"ok": False, "error": "invalid_arguments"})
+    opened = {**view, "id": f"V{fakes.next_slack_ts().replace('.', '')}"}
+    fakes.VIEWS.append(opened)
+    return _ok({"view": opened})
+
+
+@app.get("/mock/slack/views")
+async def mock_slack_views() -> JSONResponse:
+    return JSONResponse(fakes.VIEWS)
+
+
+@app.post("/mock/slack/view-submit")
+async def mock_slack_view_submit(request: Request) -> JSONResponse:
+    """Submit an opened modal as ``user`` with ``values``, the way Slack delivers it."""
+    body = await request.json()
+    view = next((item for item in fakes.VIEWS if item["id"] == body.get("view_id")), None)
+    if view is None:
+        raise HTTPException(status_code=404, detail="View not found")
+    payload = {
+        "type": "view_submission",
+        "user": {"id": str(body.get("user") or "")},
+        "view": {
+            "id": view["id"],
+            "callback_id": view.get("callback_id", ""),
+            "private_metadata": view.get("private_metadata", ""),
+            "state": {"values": body.get("values") or {}},
+        },
+    }
+    response = await _deliver_slack_interaction(payload)
+    return JSONResponse(
+        response.json() if response.content else {}, status_code=response.status_code
+    )
 
 
 @app.post("/fake-slack/chat.postEphemeral")

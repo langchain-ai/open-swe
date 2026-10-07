@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import socket
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -236,7 +237,13 @@ def apply() -> None:
         ) as client:
             yield client
 
-    github_repos.github_sdk = _fake_github_sdk
+    from agent.github import sdk as github_sdk_module
+
+    real_github_sdk = github_sdk_module.github_sdk
+    github_sdk_module.github_sdk = _fake_github_sdk
+    for module in list(sys.modules.values()):
+        if getattr(module, "github_sdk", None) is real_github_sdk:
+            module.github_sdk = _fake_github_sdk
     from agent.review import routes as review_routes
     from agent.schedules import store as schedules_store
     from agent.webhooks import common as webhook_common
