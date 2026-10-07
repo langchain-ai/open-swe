@@ -79,7 +79,6 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
             title=context.task.title,
             coordinator_thread_id=context.task.coordinator_thread_id,
             role=context.membership.role,
-            delegated=context.task.delegated,
             delegation_enabled=self.enabled and await task_coordination_enabled(self.owner_login),
         )
         blocks = list(request.system_message.content_blocks) if request.system_message else []

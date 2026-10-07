@@ -101,7 +101,9 @@ async def model_choice(
     chosen_model = model or (inherited_model if inherited_model in choices else default_model)
     option = choices.get(chosen_model)
     if option is None:
-        raise ValueError("The requested model is not available in this workspace")
+        raise ValueError(
+            f"The requested model is not available in this workspace; choose one of {', '.join(choices)}"
+        )
     chosen_effort = effort or (
         inherited_effort
         if model is None
@@ -443,7 +445,12 @@ async def message_task_thread(
         context.task,
         recipient,
         f"message:{actor.thread_id}:{request_id}",
-        prompt("tasks/message", sender_thread_id=actor.thread_id, message=message.strip()),
+        prompt(
+            "tasks/message",
+            sender_thread_id=actor.thread_id,
+            sender_role=context.membership.role,
+            message=message.strip(),
+        ),
         task_event=TaskEventMetadata(
             task_id=context.task.id,
             sender_thread_id=UUID(actor.thread_id),
