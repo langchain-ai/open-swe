@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
 from fastapi import HTTPException
 
+from agent.github import http as github_http
 from agent.github import pull_request_dashboard_routes as pr_routes
 from agent.github import pull_request_status as prs
 from agent.github.ci import RequiredCheck
@@ -13,8 +14,12 @@ from agent.review import routes as review_routes
 
 @asynccontextmanager
 async def client(**kwargs):
-    assert kwargs == {"token": "user-token"}
+    assert kwargs["token"] == "user-token"
     yield object()
+
+
+def _client(number: int) -> prs.PullRequestClient:
+    return github_http.GitHubClient(MagicMock()).repo("acme", "app").pull_request(number)
 
 
 def response(payload, status=200):
@@ -24,7 +29,7 @@ def response(payload, status=200):
 
 
 async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypatch):
-    monkeypatch.setattr(prs, "github_client", client)
+    monkeypatch.setattr(github_http, "github_client", client)
     queries = []
 
     async def request(_client, method, url, **kwargs):
@@ -86,7 +91,7 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
             }
         )
 
-    monkeypatch.setattr(prs, "github_request", request)
+    monkeypatch.setattr(github_http, "github_request", request)
     result = await prs.list_open_pull_requests("octocat", "user-token", "acme/app")
     assert queries == ["is:pr is:open author:octocat repo:acme/app"]
     assert [pr.number for pr in result.pull_requests] == [1, 3, 4]
@@ -127,16 +132,18 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
         "head": {"sha": "a" * 40},
         "base": {"ref": "main"},
     }
-    monkeypatch.setattr(prs, "_fetch_pull_request", AsyncMock(return_value=pull))
-    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=runs))
-    monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
+    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        prs, "_fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
+        prs.PullRequestClient, "review_decision", AsyncMock(return_value="approved")
+    )
+    monkeypatch.setattr(
+        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
     rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
     monkeypatch.setattr(prs, "read_required_checks", rules)
-    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
+    result = await _client(1).load_open()
     assert result is not None
     assert result.missing_checks == missing
     assert rules.await_count == int(reads_rules)
@@ -147,9 +154,9 @@ async def test_mergeability_is_not_awaited_forever(monkeypatch):
     fetches = AsyncMock(
         return_value={"state": "open", "mergeable": None, "mergeable_state": "unknown"}
     )
-    monkeypatch.setattr(prs, "_fetch_pull_request", fetches)
-    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="none"))
-    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
+    monkeypatch.setattr(prs.PullRequestClient, "pull", fetches)
+    monkeypatch.setattr(prs.PullRequestClient, "review_decision", AsyncMock(return_value="none"))
+    result = await _client(1).load_open()
     assert fetches.await_count == prs._MERGEABILITY_ATTEMPTS
     assert result is not None
     assert result.status_available is True and result.mergeable is None
@@ -183,7 +190,7 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
 
 async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypatch):
     monkeypatch.setattr(
-        prs,
+        github_http,
         "github_request",
         AsyncMock(
             return_value=response(
@@ -196,9 +203,9 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
             )
         ),
     )
-    assert await prs._fetch_review_decision(object(), "acme", "app", 1) == "approved"
+    assert await _client(1).review_decision() == "approved"
     monkeypatch.setattr(
-        prs,
+        github_http,
         "github_request",
         AsyncMock(
             return_value=response(
@@ -209,9 +216,9 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
             )
         ),
     )
-    assert await prs._fetch_review_decision(object(), "acme", "app", 1) == "none"
+    assert await _client(1).review_decision() == "none"
     monkeypatch.setattr(
-        prs,
+        github_http,
         "github_request",
         AsyncMock(
             return_value=response(
@@ -222,7 +229,7 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
             )
         ),
     )
-    assert await prs._fetch_review_decision(object(), "acme", "app", 1) == "changes_requested"
+    assert await _client(1).review_decision() == "changes_requested"
 
 
 async def test_review_indicators_require_repo_access_before_reading(monkeypatch):
@@ -250,8 +257,8 @@ async def test_review_indicators_require_repo_access_before_reading(monkeypatch)
 
 def _patch_detail_fetchers(monkeypatch):
     monkeypatch.setattr(
-        prs,
-        "_fetch_pull_request",
+        prs.PullRequestClient,
+        "pull",
         AsyncMock(
             return_value={
                 "state": "open",
@@ -262,10 +269,12 @@ def _patch_detail_fetchers(monkeypatch):
             }
         ),
     )
-    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs, "_fetch_review_decision", AsyncMock(return_value="approved"))
-    monkeypatch.setattr(prs, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        prs.PullRequestClient, "review_decision", AsyncMock(return_value="approved")
+    )
+    monkeypatch.setattr(github_http, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
 
 
 def _threads_response(resolved_flags, *, has_next=False, cursor=None):
@@ -288,11 +297,11 @@ def _threads_response(resolved_flags, *, has_next=False, cursor=None):
 async def test_a_graphql_failure_leaves_the_unresolved_count_unknown(monkeypatch):
     _patch_detail_fetchers(monkeypatch)
     monkeypatch.setattr(
-        prs,
+        github_http,
         "github_request",
         AsyncMock(return_value=response({"errors": [{"message": "Bad credentials"}]})),
     )
-    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 7})
+    result = await _client(7).load_open()
     assert result is not None
     assert result.unresolved_threads is None
     assert result.review_decision == "approved"

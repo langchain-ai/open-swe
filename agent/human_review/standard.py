@@ -96,6 +96,29 @@ SNOOZE_DURATIONS = {
     "1 day": timedelta(days=1),
     "2 days": timedelta(days=2),
 }
+_AUTO_ASSIGN_ASKED = "auto_assign_asked"
+
+
+class ReviewChannelUnknownError(Exception):
+    """The repository's review channels could not be read, so membership is unknown."""
+
+
+async def in_review_channel(owner: str, repo: str, channel_id: str, token: str) -> bool:
+    """Whether ``channel_id`` is one of the repository's configured review channels."""
+    try:
+        settings = await RepoSettings.fetch(owner, repo, token=token, strict=True)
+    except RepoFileUnreadableError as exc:
+        raise ReviewChannelUnknownError(str(exc)) from exc
+    unresolved: list[str] = []
+    for configured in settings.review_channels:
+        channel = await SlackChannel.resolve(configured)
+        if channel is None:
+            unresolved.append(configured)
+        elif channel.id == channel_id:
+            return True
+    if unresolved:
+        raise ReviewChannelUnknownError(f"Could not resolve review channels {unresolved}")
+    return False
 
 
 async def _assignment_minutes(request: HumanReviewRequest) -> int:
@@ -903,6 +926,10 @@ async def start_auto_assign(
     ``trigger`` hands the pick to the agent owning the request's Slack thread,
     with Open SWE's choice as a suggestion.
     """
+    if asked:
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            if row is not None:
+                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
     result = (
         AutoAssignResult("disabled")
         if not asked and skip_on_preview("start_auto_assign")
@@ -977,7 +1004,18 @@ async def _wake_picker(
     requester = request.requested_by
     thread_ts = request.slack_thread_ts or request.slack_message_ts
     if requester is not None and requester.slack_user_id and request.slack_channel_id and thread_ts:
-        await wake_thread_owner(request.slack_channel_id, thread_ts, requester.slack_user_id, text)
+        try:
+            await wake_thread_owner(
+                request.slack_channel_id, thread_ts, requester.slack_user_id, text
+            )
+        except Exception:
+            logger.warning(
+                "Could not wake the Slack thread's agent to pick a reviewer; retrying",
+                extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
+                exc_info=True,
+            )
+            await _schedule(request, "unclaimed", _DEADLINE_RETRY)
+            return False
         return True
     if request.thread_id:
         return await notify_agent(request, text)
@@ -1194,6 +1232,42 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     return "rotating"
 
 
+async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | None:
+    """Why Open SWE does not pick reviewers unasked for ``request`` now; ``None`` if it may.
+
+    A pull request merely linked outside a review channel only gets reactions, so
+    its unaccepted picks are withdrawn.
+    """
+    if request.kind != "posted" or _AUTO_ASSIGN_ASKED in request.run_config:
+        return None
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return None
+    try:
+        if await in_review_channel(pr.owner, pr.repo, request.slack_channel_id, token):
+            return None
+    except ReviewChannelUnknownError:
+        logger.warning(
+            "Could not tell whether a posted pull request is in a review channel",
+            extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
+            exc_info=True,
+        )
+        await _schedule(request, step, _DEADLINE_RETRY)
+        return "retrying"
+    logger.info(
+        "Not auto-assigning a pull request posted outside its review channels",
+        extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
+    )
+    await drop_picks(
+        request,
+        {pick.user_id for pick in request.picks},
+        f"You no longer need to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+        f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
+    )
+    return "not_asked"
+
+
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     """Scheduler entry point for the unclaimed, pick-expiry and auto-merge deadlines."""
     try:
@@ -1235,6 +1309,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         "run_deadline"
     ):
         return {"status": "disabled_in_preview"}
+    if step in ("unclaimed", "pick_expiry") and (hold := await _auto_assign_hold(request, step)):
+        return {"status": hold}
     if step == "pick_expiry":
         return {"status": await expire_picks(request)}
     if step == "unclaimed":

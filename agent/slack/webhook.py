@@ -645,6 +645,11 @@ async def process_slack_mention(
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 
+async def start_slack_run(request: SlackRequest, repo: common.SlackRepoResolution | None) -> bool:
+    """Process ``request`` without the error reply ``process_slack_mention`` posts; whether a run started."""
+    return await _process_slack_mention_impl(request, repo)
+
+
 async def _notify_slack_processing_error(
     request: SlackRequest, repo: Repo | None, exc: BaseException
 ) -> None:
