@@ -98,6 +98,34 @@ async def test_decline_only_withdraws_the_users_pending_pick() -> None:
         assert rotate.await_count == 1
 
 
+async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
+    from agent.human_review.standard import expire_picks, snooze
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    user = User()
+    pick = HumanReviewParticipant(user_id=user.id, decision="picked")
+    pick.user = user
+    request.participants.append(pick)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch("agent.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("agent.human_review.standard._assignment_minutes", AsyncMock(return_value=120)),
+    ):
+        await snooze(request, User())
+        assert pick.joined_at is None
+        await snooze(request, user)
+        assert pick.joined_at is not None and pick.joined_at > datetime.now(UTC)
+        assert await expire_picks(request) == "accepted"
+        assert pick.decision == "picked"
+
+
 async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
     from agent.human_review.picking import Pick
     from agent.human_review.standard import RequestResult, _auto_assign

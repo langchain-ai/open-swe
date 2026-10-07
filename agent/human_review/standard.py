@@ -38,7 +38,7 @@ from agent.github.codeowners import CodeOwners
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoFileUnreadableError, RepoSettings
-from agent.human_review.card import accept_button, decline_button, mention
+from agent.human_review.card import accept_button, decline_button, mention, snooze_button
 from agent.human_review.lifecycle import (
     drop_picks,
     mark_approved,
@@ -514,6 +514,28 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
+async def snooze(request: HumanReviewRequest, user: User | None) -> Outcome:
+    if user is None:
+        return Outcome("Link your Open SWE account before snoozing a review.")
+    until = datetime.now(UTC) + timedelta(hours=1)
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        participant = row.participant(user.id) if row else None
+        if (
+            row is None
+            or row.state != "open"
+            or participant is None
+            or participant.decision != "picked"
+        ):
+            return Outcome("This reviewer pick is no longer pending for you.")
+        participant.joined_at = until
+        row.run_config = {**row.run_config, f"review_snoozed:{user.id}": until.isoformat()}
+    await _schedule(
+        request, "pick_expiry", timedelta(hours=1, minutes=await _assignment_minutes(request))
+    )
+    await _schedule(request, f"snooze:{user.id}", timedelta(hours=1))
+    return Outcome("Review snoozed for 1 hour; your pick stays reserved until then.")
+
+
 async def decline(request: HumanReviewRequest, user: User | None, reason: str) -> Outcome:
     if user is None:
         return Outcome("Link your Open SWE account before declining a review.")
@@ -606,7 +628,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
-    accept = actions(accept_button(added), decline_button(added))
+    accept = actions(accept_button(added), decline_button(added), snooze_button(added))
     thread_ts = added.slack_thread_ts or added.slack_message_ts
     thread_text = f"{notice}{why}{deadline}"
     await post_slack_thread_reply_with_ts(
@@ -1051,7 +1073,14 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     minutes = await _assignment_minutes(request)
     wait = timedelta(minutes=minutes) - _SCHEDULER_EARLINESS
     now = datetime.now(UTC)
-    stale = [p for p in request.picks if p.joined_at is None or now - p.joined_at >= wait]
+    stale: list[HumanReviewParticipant] = []
+    for pick in request.picks:
+        snoozed = request.run_config.get(f"review_snoozed:{pick.user_id}")
+        if isinstance(snoozed, str) and (until := datetime.fromisoformat(snoozed)) > now:
+            await _schedule(request, "pick_expiry", until - now)
+            continue
+        if pick.joined_at is None or now - pick.joined_at >= wait:
+            stale.append(pick)
     logger.info(
         "Checking reviewer picks for expiry",
         extra={
@@ -1138,6 +1167,32 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if step.startswith("snooze:"):
+        user_id = UUID(step.removeprefix("snooze:"))
+        participant = request.participant(user_id)
+        snoozed = request.run_config.get(f"review_snoozed:{user_id}")
+        if participant is None or participant.decision != "picked" or not isinstance(snoozed, str):
+            return {"status": "inactive"}
+        remaining = datetime.fromisoformat(snoozed) - datetime.now(UTC)
+        if remaining > timedelta(0):
+            await _schedule(request, step, remaining)
+            return {"status": "snoozed"}
+        if participant.user.slack_user_id:
+            text = f"Your review snooze ended: {request.pull_request.url}."
+            await send_dm(
+                participant.user.slack_user_id,
+                text,
+                blocks=block_payload(
+                    [
+                        section(text),
+                        actions(
+                            accept_button(request), decline_button(request), snooze_button(request)
+                        ),
+                        *await origin_footer(request.thread_id),
+                    ]
+                ),
+            )
+        return {"status": "reminded"}
     if step.startswith("remind:"):
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
 

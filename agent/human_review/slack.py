@@ -10,7 +10,7 @@ from agent.human_review.clicks import answer_click
 from agent.human_review.lifecycle import dismiss_request
 from agent.human_review.people import Outcome
 from agent.human_review.requests import HumanReviewRequest
-from agent.human_review.standard import claim, decline
+from agent.human_review.standard import claim, decline, snooze
 from agent.prompts import prompt
 from agent.slack.blocks import InputBlock, modal, option, plain_text, static_select, view_payload
 from agent.slack.client import open_slack_modal
@@ -80,11 +80,12 @@ async def _process(
         if action == "dismiss":
             return await dismiss_request(request, slack_user_id)
         user = await User.for_person({"id": f"slack:{slack_user_id}"})
-        outcome = (
-            await decline(request, user, reason)
-            if action == "decline"
-            else await claim(request, user)
-        )
+        if action == "decline":
+            outcome = await decline(request, user, reason)
+        elif action == "snooze":
+            outcome = await snooze(request, user)
+        else:
+            outcome = await claim(request, user)
         if channel_id.startswith("D"):
             await note_for_concierge(
                 slack_user_id,
@@ -151,7 +152,7 @@ async def handle_button(
         ):
             return ignored("Could not open decline modal")
         return accepted("Decline modal opened")
-    if button.action not in {"review", "dismiss"}:
+    if button.action not in {"review", "dismiss", "snooze"}:
         logger.warning("Ignored an unknown human review click", extra=extra)
         return ignored("Unknown human review action")
     logger.info("Queued a human review click", extra=extra)
