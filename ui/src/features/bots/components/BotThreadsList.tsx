@@ -43,7 +43,7 @@ export function BotThreadsList({
   const bots = directory.data ?? []
   const threadsQuery = useThreadsPage(
     { limit: THREAD_LIMIT, offset: 0, scope: "bot", bot },
-    { pollWhileRunning: true }
+    { enabled: !!bot, pollWhileRunning: !!bot }
   )
   const threads = threadsQuery.data?.items ?? []
   const botsByKey = new Map(bots.map((entry) => [entry.key, entry]))
@@ -52,117 +52,125 @@ export function BotThreadsList({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        <h1 className="text-base font-medium text-foreground">Bots</h1>
+        {bot && (
+          <Button
+            variant="link"
+            className="mb-3 h-auto p-0"
+            onClick={() => onBotChange(undefined)}
+          >
+            ← Bots
+          </Button>
+        )}
+        <h1 className="text-base font-medium text-foreground">
+          {bot ? `${botsByKey.get(bot)?.name ?? "Bot"} threads` : "Bots"}
+        </h1>
         <p className="mt-1 text-xs text-muted-foreground">
           Threads started by Slack bots on the allowlist. They are read-only
           here: reply in the Slack thread to steer one.
           {!isAdmin && " Workspace admins manage which bots are allowed."}
         </p>
 
-        {isAdmin && (
-          <div className="mt-4 rounded-xl border border-border bg-card">
-            <AllowedSlackBotsSection />
-          </div>
-        )}
-
-        {bots.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            <BotChip
-              label="All bots"
-              selected={!bot}
-              onClick={() => onBotChange(undefined)}
-            />
-            {bots.map((entry) => (
-              <BotChip
-                key={entry.key}
-                label={entry.name}
-                entry={entry}
-                selected={bot === entry.key}
-                onClick={() => onBotChange(entry.key)}
-              />
-            ))}
-          </div>
-        )}
-
-        <div className="mt-6">
-          {threadsQuery.isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-16 w-full rounded-xl" />
-              <Skeleton className="h-16 w-full rounded-xl" />
-            </div>
-          ) : threadsQuery.isError ? (
-            <div className="flex flex-col items-center rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
-              <p className="text-xs text-destructive">
-                Bot threads could not be loaded.
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="mt-3"
-                onClick={() => void threadsQuery.refetch()}
-                disabled={threadsQuery.isFetching}
-              >
-                {threadsQuery.isFetching ? "Retrying…" : "Retry"}
-              </Button>
-            </div>
-          ) : threads.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
-              No bot threads yet. They appear here once an allowed bot mentions
-              Open SWE in Slack.
+        {!bot &&
+          (isAdmin ? (
+            <div className="mt-4 rounded-xl border border-border bg-card">
+              <AllowedSlackBotsSection onBotChange={onBotChange} />
             </div>
           ) : (
-            <div className="space-y-2">
-              {threads.map((thread) => (
-                <BotThreadRow
-                  key={thread.id}
-                  thread={thread}
-                  entry={
-                    thread.triggeringBot
-                      ? botsByKey.get(thread.triggeringBot.key)
-                      : undefined
-                  }
-                />
-              ))}
-              {threadsQuery.data?.hasMore && (
-                <p className="pt-4 text-center text-xs text-muted-foreground">
-                  Showing the {THREAD_LIMIT} most recent threads.
+            <div className="mt-4 divide-y rounded-xl border border-border bg-card">
+              {directory.isPending ? (
+                <p className="p-4 text-xs text-muted-foreground">
+                  Loading enabled bots…
                 </p>
+              ) : directory.isError ? (
+                <div className="p-4">
+                  <p className="text-xs text-destructive">
+                    Enabled bots could not be loaded.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => void directory.refetch()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : bots.length === 0 ? (
+                <p className="p-4 text-xs text-muted-foreground">
+                  No Slack bots are enabled.
+                </p>
+              ) : (
+                bots.map((entry) => (
+                  <button
+                    key={entry.key}
+                    type="button"
+                    onClick={() => onBotChange(entry.key)}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                  >
+                    <BotAvatar entry={entry} />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {entry.name}
+                    </span>
+                    <span className="text-xs text-success">Enabled</span>
+                    <span aria-hidden="true">→</span>
+                  </button>
+                ))
               )}
             </div>
-          )}
-        </div>
+          ))}
+
+        {bot && (
+          <div className="mt-6">
+            {threadsQuery.isLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-16 w-full rounded-xl" />
+                <Skeleton className="h-16 w-full rounded-xl" />
+              </div>
+            ) : threadsQuery.isError ? (
+              <div className="flex flex-col items-center rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
+                <p className="text-xs text-destructive">
+                  Bot threads could not be loaded.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={() => void threadsQuery.refetch()}
+                  disabled={threadsQuery.isFetching}
+                >
+                  {threadsQuery.isFetching ? "Retrying…" : "Retry"}
+                </Button>
+              </div>
+            ) : threads.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
+                No bot threads yet. They appear here once an allowed bot
+                mentions Open SWE in Slack.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {threads.map((thread) => (
+                  <BotThreadRow
+                    key={thread.id}
+                    thread={thread}
+                    entry={
+                      thread.triggeringBot
+                        ? botsByKey.get(thread.triggeringBot.key)
+                        : undefined
+                    }
+                  />
+                ))}
+                {threadsQuery.data?.hasMore && (
+                  <p className="pt-4 text-center text-xs text-muted-foreground">
+                    Showing the {THREAD_LIMIT} most recent threads.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
-  )
-}
-
-function BotChip({
-  label,
-  entry,
-  selected,
-  onClick,
-}: {
-  label: string
-  entry?: AllowedSlackBotEntry
-  selected: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
-      className={cn(
-        "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
-        selected
-          ? "border-foreground/30 bg-accent text-foreground"
-          : "border-border bg-card text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {entry && <BotAvatar entry={entry} />}
-      <span className="max-w-40 truncate">{label}</span>
-    </button>
   )
 }
 

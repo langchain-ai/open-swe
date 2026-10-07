@@ -1,6 +1,8 @@
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import {
   Profiler,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -29,6 +31,10 @@ import type { ModelSelection } from "@/features/agents/lib/provider/useModelOpti
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
+import {
+  type ThreadTarget,
+  ThreadTargetMenu,
+} from "@/features/agents/components/ThreadTargetMenu"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
@@ -44,7 +50,10 @@ import type {
   LoadEarlier,
   MessagesScrollControl,
 } from "@/features/agents/components/messages"
-import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
+import {
+  type ThreadHandoff,
+  useSubmitAgentMessage,
+} from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { createAutoSelectionIntent } from "@/features/agents/lib/autoSelectionIntent"
 import {
@@ -86,6 +95,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
+  composerDraft?: { key: number; text: string }
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -117,7 +127,11 @@ function CodeChannelLink({ url }: { url?: string | null }) {
   )
 }
 
-export function AgentThreadView({ thread }: AgentThreadViewProps) {
+export function AgentThreadView({
+  thread,
+  composerDraft,
+}: AgentThreadViewProps) {
+  const reviewChat = useContext(ReviewChatActionsContext)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
@@ -129,14 +143,20 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
-  // A "This Mac" thread can only run where its checkout is: the Mac whose app
-  // started it. Everywhere else it is read-only.
-  const localThread = useLocalThread(thread.id)
-  const runsElsewhere = runsOnAMac(thread) && !localThread
+  // A "This Mac" thread runs in its checkout on the Mac whose app started it,
+  // so elsewhere it is read-only while that Mac is not serving it.
+  const localRecord = useLocalThread(thread.id)
+  const localThread = runsOnAMac(thread) ? localRecord : null
+  const runsElsewhere =
+    runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
+  // A move takes effect with the next message, whose run carries the checkout over.
+  const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
+  // A thread its Mac isn't serving can still move to the cloud, from its pushed work.
+  const macOffline = runsElsewhere && handoff !== "cloud"
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
   const canPost =
-    !runsElsewhere &&
+    !macOffline &&
     !botThread &&
     ((thread.threadCategory !== "automation" && !thread.adminThread) ||
       session.data?.is_admin === true)
@@ -146,7 +166,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     queryKey: ["local-bridge", thread.id],
     queryFn: async () =>
       (await window.openSweDesktop?.ensureLocalBridge(thread.id)) ?? false,
-    enabled: Boolean(localThread),
+    // Also kept up for a thread moving off this Mac, until its checkout is carried over.
+    enabled: Boolean(localRecord),
     retry: false,
     refetchOnWindowFocus: "always",
   })
@@ -189,11 +210,37 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     },
     [queryClient, refetchLocalRepoRefs, thread.id]
   )
-  const bridgeError = localBridge.error
-    ? localBridge.error instanceof Error
-      ? localBridge.error.message
-      : "This Mac could not be reached"
-    : null
+  const bridgeError =
+    localThread && localBridge.error
+      ? localBridge.error instanceof Error
+        ? localBridge.error.message
+        : "This Mac could not be reached"
+      : null
+  const runsHere: ThreadTarget = runsOnAMac(thread) ? "local" : "cloud"
+  const canMove =
+    (runsElsewhere || Boolean(window.openSweDesktop)) &&
+    thread.sandboxBridgeClient !== "cli" &&
+    Boolean(thread.repoFullName) &&
+    thread.visibility === "private" &&
+    thread.ownerLogin?.toLowerCase() === session.data?.login.toLowerCase()
+  const prepareHandoff = useCallback(async (): Promise<
+    ThreadHandoff | undefined
+  > => {
+    if (handoff === "cloud")
+      return {
+        configurable: { sandbox_target: "cloud" },
+        sandboxBridgeClient: null,
+      }
+    if (handoff !== "local" || !window.openSweDesktop) return undefined
+    const bridgeId = await window.openSweDesktop.takeOverThread({
+      threadId: thread.id,
+      repo: thread.repoFullName,
+    })
+    return {
+      configurable: { sandbox_bridge_id: bridgeId },
+      sandboxBridgeClient: "desktop",
+    }
+  }, [handoff, thread.id, thread.repoFullName])
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
@@ -265,6 +312,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
         await ensureLocalBridge()
+        const moving = await prepareHandoff()
         await sendMessage.mutateAsync({
           content,
           images,
@@ -273,10 +321,15 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
           enqueue: isStreaming && queue,
+          ...(moving ? { handoff: moving } : {}),
           ...(carriesAutoSelection
             ? { onStartError: restoreAutoSelection }
             : {}),
         })
+        if (moving) {
+          setHandoff(null)
+          void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+        }
       } catch (error) {
         restoreAutoSelection()
         throw error
@@ -288,6 +341,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       ensureLocalBridge,
       followUpBehavior,
       isStreaming,
+      prepareHandoff,
+      queryClient,
       sendMessage,
     ]
   )
@@ -308,6 +363,18 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const [appliedComposerDraft, setAppliedComposerDraft] =
+    useState<typeof composerDraft>(undefined)
+  if (composerDraft !== appliedComposerDraft) {
+    setAppliedComposerDraft(composerDraft)
+    if (composerDraft) {
+      setRestoreDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: composerDraft.text,
+        images: [],
+      }))
+    }
+  }
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>
@@ -645,10 +712,20 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 ? "Local CLI"
                 : "Cloud"
           }
+          targetMenu={
+            canMove ? (
+              <ThreadTargetMenu
+                value={handoff ?? runsHere}
+                pending={handoff !== null}
+                disabled={isStreaming}
+                onChange={(next) => setHandoff(next === runsHere ? null : next)}
+              />
+            ) : undefined
+          }
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
-        {(runsElsewhere || bridgeError) && (
+        {(macOffline || bridgeError) && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert
               variant={bridgeError ? "error" : "info"}
@@ -659,7 +736,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 <span>
                   {bridgeError
                     ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                    : "This thread runs in a checkout on another Mac. Open it in the Open SWE app there to continue it."}
+                    : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
                 </span>
               </AlertDescription>
             </Alert>
@@ -851,25 +928,27 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              <ThreadPullRequests
-                pullRequests={
-                  // A local branch's PR may come from `gh`, which the thread
-                  // record never hears about.
-                  thread.pullRequests?.length
-                    ? thread.pullRequests
-                    : localPr
-                      ? [localPr]
-                      : []
-                }
-                health={pullRequestHealth}
-                healthUnavailable={pullRequestStatus.isError}
-                onFix={fixPullRequest}
-                fixDisabled={!canPost || sendMessage.isPending}
-              />
+              {!reviewChat && (
+                <ThreadPullRequests
+                  pullRequests={
+                    // A local branch's PR may come from `gh`, which the thread
+                    // record never hears about.
+                    thread.pullRequests?.length
+                      ? thread.pullRequests
+                      : localPr
+                        ? [localPr]
+                        : []
+                  }
+                  health={pullRequestHealth}
+                  healthUnavailable={pullRequestStatus.isError}
+                  onFix={fixPullRequest}
+                  fixDisabled={!canPost || sendMessage.isPending}
+                />
+              )}
               <AgentPromptBar
                 placeholder={
-                  runsElsewhere
-                    ? "This thread runs on another Mac"
+                  macOffline
+                    ? "This thread's Mac isn't serving it right now"
                     : botThread
                       ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
                       : canPost
@@ -898,7 +977,6 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
-                      targetControlsBelow: true,
                       selectedLocalRepoPath: localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,

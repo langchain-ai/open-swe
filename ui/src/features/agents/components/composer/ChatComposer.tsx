@@ -103,8 +103,6 @@ export interface ChatComposerProps {
   placeholder?: string
   autoFocus?: boolean
   compact?: boolean
-  /** Render the target controls as a row under the input instead of a tab above it. */
-  targetControlsBelow?: boolean
   disabled?: boolean
   busy?: boolean
   canOffload?: boolean
@@ -257,7 +255,6 @@ export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
   compact = false,
-  targetControlsBelow = false,
   disabled = false,
   busy = false,
   canOffload = false,
@@ -770,12 +767,6 @@ export const ChatComposer = memo(function ChatComposer({
         </div>
       )}
 
-      {targetControls && !targetControlsBelow && (
-        <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
-          {targetControls}
-        </div>
-      )}
-
       <div
         data-chat-composer
         className={cn(
@@ -930,7 +921,7 @@ export const ChatComposer = memo(function ChatComposer({
         </div>
       </div>
 
-      {targetControls && targetControlsBelow && (
+      {targetControls && (
         <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 px-3 text-xs">
           {targetControls}
         </div>

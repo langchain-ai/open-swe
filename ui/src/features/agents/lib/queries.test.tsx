@@ -12,6 +12,7 @@ import {
   markAgentThreadViewed,
   optimisticThread,
   setAgentThreadStatus,
+  setAgentThreadResolved,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useRenameAgentThread,
@@ -47,8 +48,13 @@ const page: ThreadsPage = {
 }
 
 const clients: Array<QueryClient> = []
+const profile = vi.hoisted(() => ({
+  data: { experimental_task_coordination: false },
+}))
+vi.mock("@/lib/profile", () => ({ useProfile: () => profile }))
 
 afterEach(() => {
+  profile.data.experimental_task_coordination = false
   vi.useRealTimers()
   for (const client of clients) client.clear()
   clients.length = 0
@@ -261,6 +267,7 @@ describe("setAgentThreadStatus", () => {
         {
           items: [thread],
           limit: SIDEBAR_PAGE_SIZE,
+          hierarchy: true,
           offset: 0,
           hasMore: false,
         },
@@ -382,6 +389,7 @@ describe("sidebar queries", () => {
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
         limit: SIDEBAR_PAGE_SIZE,
+        hierarchy: false,
         offset: 0,
         resolved: false,
         scope: "interactive",
@@ -395,6 +403,7 @@ describe("sidebar queries", () => {
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
         limit: SIDEBAR_PAGE_SIZE,
+        hierarchy: false,
         offset: 0,
         resolved: false,
         scope: "interactive",
@@ -461,17 +470,19 @@ describe("sidebar queries", () => {
     )
   })
 
-  it("fetches the active thread when it is outside the loaded pages", async () => {
+  it("only inserts the active thread while it is outside the loaded families", async () => {
+    profile.data.experimental_task_coordination = true
     const opened = { id: "opened-thread", resolved: false } as AgentThread
     const getThread = vi.spyOn(agentsApi, "getThread").mockResolvedValue(opened)
     const client = testClient()
-    const { result } = renderHook(
-      () =>
+    const { result, rerender } = renderHook(
+      (loadedThreads: Array<AgentThread>) =>
         useSidebarActiveThread({
           activeThreadId: opened.id,
-          loadedThreads: [],
+          loadedThreads,
         }),
       {
+        initialProps: [] as Array<AgentThread>,
         wrapper: ({ children }) => (
           <QueryClientProvider client={client}>{children}</QueryClientProvider>
         ),
@@ -480,6 +491,8 @@ describe("sidebar queries", () => {
 
     await waitFor(() => expect(result.current).toEqual(opened))
     expect(getThread).toHaveBeenCalledWith(opened.id, { markViewed: false })
+    rerender([{ ...opened, id: "coordinator", taskWorkers: [opened] }])
+    expect(result.current).toBeUndefined()
   })
 })
 
@@ -733,5 +746,111 @@ describe("markAgentThreadViewed", () => {
     expect(
       client.getQueryState(agentThreadKeys.detail("thread-1"))?.dataUpdatedAt
     ).toBe(0)
+  })
+})
+
+describe("sidebar task families", () => {
+  const worker = {
+    id: "worker",
+    title: "Implementation",
+    status: "running",
+    viewed: false,
+  } as AgentThread
+  const coordinator = {
+    id: "coordinator",
+    status: "idle",
+    taskMembership: { role: "coordinator", taskId: "task" },
+    taskWorkers: [worker],
+  } as AgentThread
+
+  it("switches list modes and hides cached workers without discovery polling after opt-out", async () => {
+    vi.useFakeTimers()
+    const list = vi.spyOn(agentsApi, "listThreadsPage").mockResolvedValue({
+      ...page,
+      items: [coordinator],
+    })
+    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([coordinator])
+    const client = testClient()
+    const { result, rerender } = renderHook(
+      () => ({
+        recents: useSidebarRecents({ repoMode: false }),
+        pins: useSidebarPinnedThreads(),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await vi.waitFor(() => expect(result.current.recents.items).toHaveLength(1))
+    expect(list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hierarchy: false })
+    )
+    expect(result.current.recents.items[0]?.taskWorkers).toBeUndefined()
+    expect(result.current.pins.data?.[0]?.taskWorkers).toBeUndefined()
+
+    profile.data.experimental_task_coordination = true
+    rerender()
+    await vi.waitFor(() =>
+      expect(result.current.recents.items[0]?.taskWorkers).toHaveLength(1)
+    )
+    expect(list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hierarchy: true })
+    )
+    expect(result.current.pins.data?.[0]?.taskWorkers).toHaveLength(1)
+
+    profile.data.experimental_task_coordination = false
+    rerender()
+    await vi.waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hierarchy: false })
+      )
+    )
+    expect(result.current.recents.items[0]?.taskWorkers).toBeUndefined()
+    expect(result.current.pins.data?.[0]?.taskWorkers).toBeUndefined()
+    const calls = list.mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(31_000))
+    expect(list).toHaveBeenCalledTimes(calls)
+  })
+
+  it("updates nested worker caches for navigation and optimistic edits", () => {
+    const client = testClient()
+    const key = agentThreadKeys.page({ hierarchy: true, resolved: false })
+    client.setQueryData(key, { ...page, items: [coordinator] })
+    markAgentThreadViewed(client, worker.id)
+    setAgentThreadStatus(client, worker.id, "finished")
+    expect(
+      client.getQueryData<ThreadsPage>(key)?.items[0]?.taskWorkers?.[0]
+    ).toMatchObject({ viewed: true, status: "finished" })
+    setAgentThreadResolved(client, worker.id, true)
+    expect(
+      client.getQueryData<ThreadsPage>(key)?.items[0]?.taskWorkers
+    ).toEqual([])
+  })
+
+  it("keeps the existing page poll alive for idle coordinators and discovers new workers", async () => {
+    profile.data.experimental_task_coordination = true
+    vi.useFakeTimers()
+    let workers: Array<AgentThread> = [{ ...worker, status: "finished" }]
+    vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(async () => ({
+      ...page,
+      items: [{ ...coordinator, taskWorkers: workers }],
+    }))
+    const client = testClient()
+    const { result } = renderHook(
+      () => useSidebarRecents({ repoMode: false }),
+      { wrapper: wrapperFor(client) }
+    )
+    await vi.waitFor(() =>
+      expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
+    )
+    workers = [...workers, { ...worker, id: "new-worker", status: "running" }]
+    await act(() => vi.advanceTimersByTimeAsync(2100))
+    expect(result.current.items[0]?.taskWorkers).toHaveLength(1)
+    await act(() => vi.advanceTimersByTimeAsync(30_000))
+    await vi.waitFor(() =>
+      expect(result.current.items[0]?.taskWorkers).toHaveLength(2)
+    )
+    workers = workers.map((thread) => ({ ...thread, status: "finished" }))
+    await act(() => vi.advanceTimersByTimeAsync(2100))
+    await vi.waitFor(() =>
+      expect(result.current.items[0]?.taskWorkers?.[1]?.status).toBe("finished")
+    )
   })
 })

@@ -6,7 +6,7 @@ import langgraph_sdk
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
-from agent.mcp import MCPConnection, runtime
+from openswe.mcp import MCPConnection, runtime
 
 
 def record(name="linear", **fields):
@@ -142,7 +142,7 @@ async def test_unavailable_source_does_not_expose_lower_precedence_tools(remote,
 
 
 async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(remote, monkeypatch):
-    from agent.mcp import user
+    from openswe.mcp import user
 
     metadata = {"visibility": "private", "owner_type": "user", "owner_login": "alice"}
     monkeypatch.setattr(
@@ -153,7 +153,7 @@ async def test_loaded_personal_mcp_is_revoked_when_thread_is_shared(remote, monk
         ),
     )
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "openswe.run_config.get_config",
         lambda: {"configurable": {"thread_id": "t", "github_login": "alice"}},
     )
     monkeypatch.setattr(user, "list_user_mcp_records", AsyncMock(return_value=[record()]))
