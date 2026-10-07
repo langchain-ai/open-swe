@@ -161,6 +161,8 @@ async def test_worker_text_cannot_close_its_untrusted_boundary(
     notify = AsyncMock()
     monkeypatch.setattr(service, "notify", notify)
     if is_message:
+        monkeypatch.setattr(service, "record_event", notify)
+        monkeypatch.setattr(EventMatch, "deliver", AsyncMock(return_value=True))
         monkeypatch.setattr(service, "authorized_context", AsyncMock(return_value=worker_context))
         monkeypatch.setattr(service, "authorized_metadata", AsyncMock(return_value={}))
         await service.message_task_thread(

@@ -430,7 +430,7 @@ async def message_task_thread(
             raise PermissionError("Workers can only message their coordinator")
         recipient = context.task.coordinator_thread_id
         await authorized_metadata(actor, recipient)
-    await notify(
+    await record_event(
         context.task,
         recipient,
         f"message:{actor.thread_id}:{request_id}",
@@ -444,6 +444,14 @@ async def message_task_thread(
             content=message,
         ),
     )
+    try:
+        await EventMatch.deliver(recipient, "enqueue")
+    except Exception:
+        # The message is saved, so reporting failure would invite a duplicate resend.
+        logger.exception(
+            "Task message saved but not yet delivered", extra={"recipient_thread_id": recipient}
+        )
+        return {"success": True, "recipient_thread_id": recipient, "delivery": "pending"}
     return {"success": True, "recipient_thread_id": recipient}
 
 
