@@ -822,7 +822,7 @@ def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
 
 
 def _slack_ask_mode(cfg: RunConfig) -> bool:
-    """A one-off question, until the conversation moves from Slack to the web."""
+    """A one-off `/oswe` question (ephemeral answer, no Slack thread), until it continues on the web."""
     return (
         cfg.source == "slack"
         and cfg.slack_ask is True

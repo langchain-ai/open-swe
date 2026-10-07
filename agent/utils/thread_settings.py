@@ -46,7 +46,7 @@ _THREAD_SETTINGS_ADAPTER = TypeAdapter(ThreadSettings)
 
 
 def thread_model_choice(metadata: Mapping[str, object]) -> tuple[str | None, str | None]:
-    """Read the saved selection, falling back to legacy model metadata."""
+    """Prefer the saved thread setting, then the requested `model`/`effort`, then the resolved values."""
     stored = metadata.get(THREAD_SETTINGS_KEY)
     settings = stored if isinstance(stored, Mapping) else {}
     for model, effort in (

@@ -740,6 +740,11 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 turn_id=turn_id,
             )
         )
+        # Every human message already in state belongs to a turn that is over, so
+        # recording one again would move it into this turn. Two exceptions: a
+        # ``<dynamic-context>`` introduction (injected once per thread, renders as
+        # nothing, and recording it is what makes attribution work), and event
+        # matches this run was started to deliver, which belong to this turn.
         run_state.seen_human_ids.update(
             message.id
             for message in messages

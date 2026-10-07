@@ -422,7 +422,7 @@ async def _attach_task_worker_sandbox(
     if metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
         from agent.background_tasks import reconcile_background_tasks
 
-        # Attaching the host only reconciles commands owned by the coordinator.
+        # Ensuring the host's sandbox reconciles only its own commands; reconcile this worker's.
         _fire_and_forget(reconcile_background_tasks(thread_id), "background task reconcile")
     return published
 
@@ -445,6 +445,8 @@ async def ensure_sandbox_for_thread(
     1. Metadata has an id -> reuse this process's connection to that sandbox if
        it has one, else reconnect; then refresh proxy.
     2. No sandbox at all -> create one and persist the id.
+    3. A task worker (metadata has ``task_id``) -> attach to its coordinator's
+       existing sandbox; it never creates or replaces one.
 
     A sandbox that exists but can't be reached raises ``SandboxUnreachableError``
     instead of being replaced, because a replacement is empty and swapping one in
@@ -458,6 +460,9 @@ async def ensure_sandbox_for_thread(
     read-only reviewer, which re-preps the repo every run.
 
     ``record_stale_boot`` is for callers that collect ``take_stale_boot``.
+
+    ``require_existing`` raises ``SandboxUnreachableError`` instead of creating or
+    replacing a sandbox.
 
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. Newly
     created sandboxes boot from the workspace's snapshot when one is ready,

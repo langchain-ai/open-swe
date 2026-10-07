@@ -3,7 +3,7 @@
 Two triggers, chosen per launch by the triggering person's
 ``experimental_background_callbacks`` flag: the runner calling back through the
 sandbox tools channel when its command exits, or a per-thread cron polling every
-minute. Either one reconciles the owner's tasks from the sandbox, and claims
+minute. Either one reconciles the commands the owning thread launched, and claims
 keep a completion from being delivered twice.
 """
 
