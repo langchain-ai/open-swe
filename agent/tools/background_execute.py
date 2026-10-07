@@ -41,7 +41,9 @@ def encoded(value: str) -> str:
     return base64.b64encode(value.encode()).decode()
 
 
-def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
+def _runner(
+    task_id: str, command: str, timeout: int, callback: bool, *, owner_thread_id: str
+) -> str:
     return textwrap.dedent(
         f"""
         import base64, json, os, selectors, signal, subprocess, time
@@ -121,6 +123,7 @@ def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
         def write_state(status, pid=None, exit_code=None):
             payload = {{
                 "task_id": task_id,
+                "owner_thread_id": {owner_thread_id!r},
                 "status": status,
                 "pid": pid,
                 "runner_pid": os.getpid(),
@@ -215,9 +218,11 @@ def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
     ).strip()
 
 
-def _launch_command(task_id: str, command: str, timeout: int, *, callback: bool) -> str:
+def _launch_command(
+    task_id: str, command: str, timeout: int, *, callback: bool, owner_thread_id: str
+) -> str:
     task_dir = f"{TASK_ROOT}/{task_id}"
-    runner = encoded(_runner(task_id, command, timeout, callback))
+    runner = encoded(_runner(task_id, command, timeout, callback, owner_thread_id=owner_thread_id))
     lock = shlex.quote(LAUNCH_LOCK)
     callback_checks = (
         "command -v curl >/dev/null || { echo 'background execution requires curl' >&2; exit 74; }; "
@@ -418,7 +423,10 @@ async def _launch_with_callback(
     # Tracked first: a fast command's completion callback can reconcile before launch returns.
     await _track(thread_id, task_id)
     try:
-        state = await execute(backend, _launch_command(task_id, command, timeout, callback=True))
+        state = await execute(
+            backend,
+            _launch_command(task_id, command, timeout, callback=True, owner_thread_id=thread_id),
+        )
     except Exception:
         await _track(thread_id, task_id, running=False)
         raise
@@ -442,7 +450,10 @@ async def _launch_with_cron(
     if getattr(wait, "exit_code", None) != 0:
         raise RuntimeError("background-task monitor is busy")
     task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-    state = await execute(backend, _launch_command(task_id, command, timeout, callback=False))
+    state = await execute(
+        backend,
+        _launch_command(task_id, command, timeout, callback=False, owner_thread_id=thread_id),
+    )
     await _track(thread_id, task_id)
     wait = await backend.aexecute(wait_for_monitor, timeout=15)
     if getattr(wait, "exit_code", None) != 0:
