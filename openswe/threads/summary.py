@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
+from openswe.bridge.store import BridgeStore
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
@@ -400,11 +401,23 @@ async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
         pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
 
 
+async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bool:
+    """Whether a "This Mac" thread's Mac is serving its checkout, so it can run from anywhere."""
+    if metadata.get("sandbox_bridge_client") != "desktop":
+        return False
+    try:
+        return await BridgeStore.is_connected(sandbox_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read the thread's sandbox bridge", exc_info=True)
+        return False
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
+    bridge_status: bool = True,
 ) -> dict[str, Any]:
     metadata = thread_metadata(thread)
     owner, name, full_name = _metadata_repo(metadata)
@@ -507,6 +520,8 @@ async def _thread_summary(
             if metadata.get("sandbox_kind") == "bridge"
             else None
         ),
+        # Lists skip it: one bridge lookup per thread would cost a query each.
+        "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id) if bridge_status else None,
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
