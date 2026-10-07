@@ -50,7 +50,28 @@ class SlackBotOption(BaseModel):
     image_url: str = ""
 
 
+class AllowedSlackBotEntry(BaseModel):
+    """What any signed-in user may see of an allowed bot: enough to name its threads."""
+
+    key: str
+    name: str
+    image_url: str = ""
+
+
 ALLOWED_SLACK_BOTS = TypedStore(["allowed_slack_bots"], AllowedSlackBot)
+
+
+async def allowed_slack_bot_directory() -> list[AllowedSlackBotEntry]:
+    bots = await ALLOWED_SLACK_BOTS.search_all()
+    return sorted(
+        (
+            AllowedSlackBotEntry(
+                key=f"{bot.team_id}:{bot.bot_id}", name=bot.name, image_url=bot.image_url
+            )
+            for bot in bots
+        ),
+        key=lambda entry: (entry.name.casefold(), entry.key),
+    )
 
 
 async def resolve_allowed_slack_bot(

@@ -15,35 +15,40 @@ import { cn } from "@/lib/utils"
  */
 export function SidebarSectionHeader({
   label,
-  collapsed,
+  collapsed = false,
   onToggleCollapsed,
   menu,
   action,
 }: {
   label: string
-  collapsed: boolean
-  onToggleCollapsed: () => void
+  collapsed?: boolean
+  onToggleCollapsed?: () => void
   menu?: ReactNode
   action?: ReactNode
 }) {
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
+  const Heading = onToggleCollapsed ? "button" : "div"
 
   return (
     <div className="group/section flex items-center gap-1 pr-1 pl-2">
-      <button
-        type="button"
+      <Heading
+        type={onToggleCollapsed ? "button" : undefined}
         onClick={onToggleCollapsed}
-        aria-expanded={!collapsed}
+        aria-expanded={onToggleCollapsed ? !collapsed : undefined}
         className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left text-[13px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
       >
         <span className="min-w-0 truncate">{label}</span>
         <Caret
           className={cn(
             "size-3.5 shrink-0",
-            collapsed ? "block" : "hidden group-hover/section:block"
+            !onToggleCollapsed
+              ? "hidden"
+              : collapsed
+                ? "block"
+                : "hidden group-hover/section:block"
           )}
         />
-      </button>
+      </Heading>
       <span className="flex shrink-0 items-center gap-0.5">
         {menu}
         {action}

@@ -12,6 +12,7 @@ import {
   MagnifyingGlassIcon,
   NotePencilIcon,
   PlusIcon,
+  RobotIcon,
   TrashIcon,
   PushPinIcon,
   PushPinSlashIcon,
@@ -137,6 +138,7 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
 const NAV = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
+  { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
   { to: "/incidents", label: "Incidents", icon: Radar },
 ] as const
@@ -901,8 +903,12 @@ export function AgentsSidebar({
                 <section className="mb-3">
                   <SidebarSectionHeader
                     label={workspaceMode ? "Workspaces" : "Repositories"}
-                    collapsed={sectionCollapsed("repos")}
-                    onToggleCollapsed={() => toggleSectionCollapsed("repos")}
+                    collapsed={!workspaceMode && sectionCollapsed("repos")}
+                    onToggleCollapsed={
+                      workspaceMode
+                        ? undefined
+                        : () => toggleSectionCollapsed("repos")
+                    }
                     menu={
                       <SidebarSectionMenu label="Repositories options">
                         {viewMenuItems}
@@ -919,7 +925,7 @@ export function AgentsSidebar({
                       ) : undefined
                     }
                   />
-                  {!sectionCollapsed("repos") && (
+                  {(workspaceMode || !sectionCollapsed("repos")) && (
                     <>
                       {workspaceMode
                         ? workspaceGroups.map((workspace) => (

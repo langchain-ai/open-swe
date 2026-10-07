@@ -578,6 +578,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               placeholder="Add a follow up"
               skills={skills.data}
               runTarget="local"
+              targetControlsBelow
               selectedLocalRepoPath={thread.cwd}
               localRepoBranches={repoRefs}
               selectedLocalRepoBranch={threadBranch}

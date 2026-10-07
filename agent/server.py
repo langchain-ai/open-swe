@@ -215,6 +215,7 @@ from agent.tools import (
     output_iframe,
     publish_workspace,
     read_only_sql,
+    read_store_item,
     read_user_settings,
     recreate_sandbox,
     refresh_workspace_start,
@@ -231,6 +232,7 @@ from agent.tools import (
     search_pull_requests,
     slack_add_reaction,
     slack_attach_html,
+    slack_breakout_thread,
     slack_list_channel_members,
     slack_list_channels,
     slack_move_thread,
@@ -239,7 +241,6 @@ from agent.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
-    slack_start_new_thread,
     start_thread,
     submit_thread_feedback,
     suggest_task,
@@ -254,6 +255,8 @@ from agent.tools.admin_gate import (
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
+from agent.tools.propose_pr_review import propose_pr_review
+from agent.tools.propose_review_comment import propose_review_comment
 from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
@@ -324,7 +327,7 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
         "slack_move_thread",
     }
 )
-SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_start_new_thread"})
+SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_breakout_thread"})
 
 
 def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
@@ -540,7 +543,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_post_message",
-        "slack_start_new_thread",
+        "slack_breakout_thread",
         "publish_workspace",
         "refresh_workspace_start",
         "configure_repository",
@@ -1713,7 +1716,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_post_message,
         slack_read_thread_messages,
         slack_reply,
-        slack_start_new_thread,
+        slack_breakout_thread,
     ]
     static_tools = [
         http_request,
@@ -1765,13 +1768,16 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_read_channel_messages,
         slack_read_thread_messages,
         slack_reply,
-        slack_start_new_thread,
+        slack_breakout_thread,
         submit_thread_feedback,
         suggest_task,
         submit_review_assessment_feedback,
+        propose_review_comment,
+        propose_pr_review,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
         read_only_sql,
+        read_store_item,
         manage_feature_flags,
         manage_review_approval_mode,
     ]

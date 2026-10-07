@@ -103,6 +103,8 @@ export interface ChatComposerProps {
   placeholder?: string
   autoFocus?: boolean
   compact?: boolean
+  /** Render the target controls as a row under the input instead of a tab above it. */
+  targetControlsBelow?: boolean
   disabled?: boolean
   busy?: boolean
   canOffload?: boolean
@@ -255,6 +257,7 @@ export const ChatComposer = memo(function ChatComposer({
   placeholder = "Ask Open SWE to build, fix bugs, explore",
   autoFocus = false,
   compact = false,
+  targetControlsBelow = false,
   disabled = false,
   busy = false,
   canOffload = false,
@@ -685,6 +688,67 @@ export const ChatComposer = memo(function ChatComposer({
     [addFiles]
   )
 
+  const targetControls = (onRepoChange ||
+    onRunTargetChange ||
+    onWorkspaceChange ||
+    (runTarget === "local" && onSelectLocalRepoBranch)) && (
+    <>
+      {runTarget && onRunTargetChange && (
+        <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+      )}
+      {runTarget !== "local" && onWorkspaceChange && (
+        <WorkspaceSelector
+          workspaces={workspaceOptions}
+          selectedSlug={selectedWorkspace}
+          onChange={onWorkspaceChange}
+        />
+      )}
+      {runTarget !== "local" && onRepoChange && (
+        <RepoSelector
+          emptySelectionLabel="Don't work in a repository"
+          noMatchesLabel="No matching repositories"
+          onRepoChange={onRepoChange}
+          placeholder="Select repository"
+          repos={repos}
+          searchPlaceholder="Search repositories…"
+          selectedRepo={selectedRepo}
+          side="top"
+        />
+      )}
+      {runTarget === "local" &&
+        onSelectLocalRepo &&
+        onAddLocalRepo &&
+        onRemoveLocalRepo && (
+          <LocalRepoSelector
+            onAddRepo={onAddLocalRepo}
+            onRemoveRepo={onRemoveLocalRepo}
+            onSelectRepo={onSelectLocalRepo}
+            repos={localRepos}
+            selectedRepoPath={selectedLocalRepoPath}
+            side="top"
+          />
+        )}
+      {runTarget === "local" &&
+        onRefreshLocalRepoBranch &&
+        onSelectLocalRepoBranch && (
+          <LocalBranchSelector
+            refs={localRepoBranches}
+            disabled={!selectedLocalRepoPath}
+            onRefresh={onRefreshLocalRepoBranch}
+            onSelectBranch={onSelectLocalRepoBranch}
+            selectedBranch={selectedLocalRepoBranch}
+          />
+        )}
+      {runTarget === "local" && onSelectLocalRepoBranch && (
+        <LocalWorkspaceSelector
+          onChange={onLocalWorkspaceModeChange}
+          value={localWorkspaceMode}
+          worktreeLabel={localWorktreeLabel}
+        />
+      )}
+    </>
+  )
+
   return (
     <div
       className={cn(
@@ -706,64 +770,9 @@ export const ChatComposer = memo(function ChatComposer({
         </div>
       )}
 
-      {(onRepoChange ||
-        onRunTargetChange ||
-        onWorkspaceChange ||
-        (runTarget === "local" && onSelectLocalRepoBranch)) && (
+      {targetControls && !targetControlsBelow && (
         <div className="relative mx-5 -mb-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-t-2xl bg-accent px-4 pt-3 pb-5 text-xs dark:bg-muted">
-          {runTarget && onRunTargetChange && (
-            <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
-          )}
-          {runTarget !== "local" && onWorkspaceChange && (
-            <WorkspaceSelector
-              workspaces={workspaceOptions}
-              selectedSlug={selectedWorkspace}
-              onChange={onWorkspaceChange}
-            />
-          )}
-          {runTarget !== "local" && onRepoChange && (
-            <RepoSelector
-              emptySelectionLabel="Don't work in a repository"
-              noMatchesLabel="No matching repositories"
-              onRepoChange={onRepoChange}
-              placeholder="Select repository"
-              repos={repos}
-              searchPlaceholder="Search repositories…"
-              selectedRepo={selectedRepo}
-              side="top"
-            />
-          )}
-          {runTarget === "local" &&
-            onSelectLocalRepo &&
-            onAddLocalRepo &&
-            onRemoveLocalRepo && (
-              <LocalRepoSelector
-                onAddRepo={onAddLocalRepo}
-                onRemoveRepo={onRemoveLocalRepo}
-                onSelectRepo={onSelectLocalRepo}
-                repos={localRepos}
-                selectedRepoPath={selectedLocalRepoPath}
-                side="top"
-              />
-            )}
-          {runTarget === "local" &&
-            onRefreshLocalRepoBranch &&
-            onSelectLocalRepoBranch && (
-              <LocalBranchSelector
-                refs={localRepoBranches}
-                disabled={!selectedLocalRepoPath}
-                onRefresh={onRefreshLocalRepoBranch}
-                onSelectBranch={onSelectLocalRepoBranch}
-                selectedBranch={selectedLocalRepoBranch}
-              />
-            )}
-          {runTarget === "local" && onSelectLocalRepoBranch && (
-            <LocalWorkspaceSelector
-              onChange={onLocalWorkspaceModeChange}
-              value={localWorkspaceMode}
-              worktreeLabel={localWorktreeLabel}
-            />
-          )}
+          {targetControls}
         </div>
       )}
 
@@ -920,6 +929,12 @@ export const ChatComposer = memo(function ChatComposer({
           />
         </div>
       </div>
+
+      {targetControls && targetControlsBelow && (
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 px-3 text-xs">
+          {targetControls}
+        </div>
+      )}
     </div>
   )
 })

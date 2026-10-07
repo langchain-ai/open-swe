@@ -36,6 +36,7 @@ _TOOL_MODULES = {
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_only_sql": ".read_only_sql",
+    "read_store_item": ".read_store_item",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
@@ -70,7 +71,7 @@ _TOOL_MODULES = {
     "slack_read_channel_messages": "agent.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "agent.slack.tools.read_thread_messages",
     "slack_reply": "agent.slack.tools.reply",
-    "slack_start_new_thread": "agent.slack.tools.start_new_thread",
+    "slack_breakout_thread": "agent.slack.tools.start_new_thread",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
@@ -113,6 +114,7 @@ __all__ = [
     "output_iframe",
     "publish_review",
     "read_only_sql",
+    "read_store_item",
     "read_repo_file",
     "read_user_settings",
     "record_human_input",
@@ -147,7 +149,7 @@ __all__ = [
     "slack_read_channel_messages",
     "slack_read_thread_messages",
     "slack_reply",
-    "slack_start_new_thread",
+    "slack_breakout_thread",
     "submit_thread_feedback",
     "suggest_task",
     "trigger_automation",
@@ -174,7 +176,7 @@ if TYPE_CHECKING:
     from agent.slack.tools.read_thread_messages import slack_read_thread_messages
     from agent.slack.tools.reply import slack_reply
     from agent.slack.tools.request_pr_review import request_pr_review
-    from agent.slack.tools.start_new_thread import slack_start_new_thread
+    from agent.slack.tools.start_new_thread import slack_breakout_thread
     from agent.tools.add_finding import add_finding
     from agent.tools.automations import (
         create_automation,
@@ -201,6 +203,7 @@ if TYPE_CHECKING:
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
     from agent.tools.read_only_sql import read_only_sql
+    from agent.tools.read_store_item import read_store_item
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.record_human_input import record_human_input
     from agent.tools.recreate_sandbox import recreate_sandbox

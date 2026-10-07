@@ -51,6 +51,12 @@ _SANDBOX_CREATING_SENTINEL = "__creating__"
 
 _ThreadSortBy = Literal["created_at", "updated_at"]
 
+SLACK_BOT_TRIGGER_KIND = "slack_bot"
+"""``trigger_kind`` of a thread an allowlisted Slack bot started."""
+TRIGGERING_BOT_KEY = "triggering_bot"
+"""Metadata key holding the starting bot's ``{team_id}:{bot_id}`` allowlist key."""
+BOT_THREAD_READ_ONLY = "This thread was started by a Slack bot. Reply in Slack to steer it."
+
 
 def _now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
@@ -137,6 +143,10 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     )
 
 
+def thread_is_bot_triggered(metadata: Mapping[str, Any]) -> bool:
+    return metadata.get("trigger_kind") == SLACK_BOT_TRIGGER_KIND
+
+
 def assert_thread_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> None:
@@ -145,8 +155,15 @@ def assert_thread_readable(
 
 
 def _assert_thread_promptable(metadata: Mapping[str, Any], login: str | None) -> None:
+    """Dashboard actions on a thread: prompting, approvals, plan edits, shell and files.
+
+    A thread a Slack bot started is steered from its Slack thread only, so the
+    dashboard keeps it read-only for everyone, admins included.
+    """
     if not thread_is_promptable(metadata, login):
         raise HTTPException(404, "thread not found")
+    if thread_is_bot_triggered(metadata):
+        raise HTTPException(403, BOT_THREAD_READ_ONLY)
 
 
 def _assert_thread_postable(
@@ -278,6 +295,15 @@ def _is_automation_thread(metadata: Mapping[str, Any]) -> bool:
         or thread_source(metadata) == "schedule"
         or _metadata_string(metadata, "schedule_id") is not None
     )
+
+
+def _triggering_bot(metadata: Mapping[str, Any]) -> dict[str, str] | None:
+    key = _metadata_string(metadata, TRIGGERING_BOT_KEY)
+    if not thread_is_bot_triggered(metadata) or key is None:
+        return None
+    slack_thread = SourceContext.from_metadata(metadata).slack_thread
+    name = slack_thread.triggering_user_name if slack_thread else ""
+    return {"key": key, "name": name or key.partition(":")[2]}
 
 
 def _thread_classification(metadata: Mapping[str, Any]) -> tuple[str, str, str]:
@@ -449,6 +475,7 @@ async def _thread_summary(
         "origin": origin,
         "threadCategory": thread_category,
         "triggerKind": trigger_kind,
+        "triggeringBot": _triggering_bot(metadata),
         "automationId": _metadata_string(metadata, "schedule_id"),
         "automationName": _metadata_string(metadata, "schedule_name"),
         "automationActionPosted": (

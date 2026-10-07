@@ -147,6 +147,10 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
             f"Open SWE picked @{started.reviewer}; they are tagged in the review's Slack thread "
             "and messaged directly."
         )
+    elif started.status == "claimed":
+        next_step = (
+            "This pull request already has a reviewer or pending pick; nobody else was assigned."
+        )
     elif started.status == "waiting" and started.at is not None:
         next_step = (
             "Nobody who owns or recently changed this code is in their work hours, so Open SWE "

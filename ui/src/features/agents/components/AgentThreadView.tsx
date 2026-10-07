@@ -1,6 +1,8 @@
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import {
   Profiler,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -93,6 +95,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
+  composerDraft?: { key: number; text: string }
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -124,7 +127,11 @@ function CodeChannelLink({ url }: { url?: string | null }) {
   )
 }
 
-export function AgentThreadView({ thread }: AgentThreadViewProps) {
+export function AgentThreadView({
+  thread,
+  composerDraft,
+}: AgentThreadViewProps) {
+  const reviewChat = useContext(ReviewChatActionsContext)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
@@ -141,8 +148,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const localRecord = useLocalThread(thread.id)
   const localThread = runsOnAMac(thread) ? localRecord : null
   const runsElsewhere = runsOnAMac(thread) && !localThread
+  // A Slack bot's thread is steered from its Slack thread, never from here.
+  const botThread = thread.triggerKind === "slack_bot"
   const canPost =
     !runsElsewhere &&
+    !botThread &&
     ((thread.threadCategory !== "automation" && !thread.adminThread) ||
       session.data?.is_admin === true)
   // The bridge outlives a thread view but not the app; serve the checkout
@@ -335,6 +345,11 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     ]
   )
 
+  const commentOnDiff = useCallback(
+    (content: string) => submitMessage(content, []),
+    [submitMessage]
+  )
+
   const restoreQueuedAutoSelection = autoIntent.restore
 
   const queuedText = (entry: QueuedTurn) =>
@@ -346,6 +361,18 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const [appliedComposerDraft, setAppliedComposerDraft] =
+    useState<typeof composerDraft>(undefined)
+  if (composerDraft !== appliedComposerDraft) {
+    setAppliedComposerDraft(composerDraft)
+    if (composerDraft) {
+      setRestoreDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: composerDraft.text,
+        images: [],
+      }))
+    }
+  }
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>
@@ -899,30 +926,34 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              <ThreadPullRequests
-                pullRequests={
-                  // A local branch's PR may come from `gh`, which the thread
-                  // record never hears about.
-                  thread.pullRequests?.length
-                    ? thread.pullRequests
-                    : localPr
-                      ? [localPr]
-                      : []
-                }
-                health={pullRequestHealth}
-                healthUnavailable={pullRequestStatus.isError}
-                onFix={fixPullRequest}
-                fixDisabled={!canPost || sendMessage.isPending}
-              />
+              {!reviewChat && (
+                <ThreadPullRequests
+                  pullRequests={
+                    // A local branch's PR may come from `gh`, which the thread
+                    // record never hears about.
+                    thread.pullRequests?.length
+                      ? thread.pullRequests
+                      : localPr
+                        ? [localPr]
+                        : []
+                  }
+                  health={pullRequestHealth}
+                  healthUnavailable={pullRequestStatus.isError}
+                  onFix={fixPullRequest}
+                  fixDisabled={!canPost || sendMessage.isPending}
+                />
+              )}
               <AgentPromptBar
                 placeholder={
                   runsElsewhere
                     ? "This thread runs on another Mac"
-                    : canPost
-                      ? hasConversation
-                        ? "Add a follow up"
-                        : "Send the first message"
-                      : "Only workspace admins can send messages in this thread"
+                    : botThread
+                      ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
+                      : canPost
+                        ? hasConversation
+                          ? "Add a follow up"
+                          : "Send the first message"
+                        : "Only workspace admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
                 compact
@@ -944,6 +975,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 {...(localThread
                   ? {
                       runTarget: "local" as const,
+                      targetControlsBelow: true,
                       selectedLocalRepoPath: localThread.cwd,
                       localRepoBranches: localRepoRefs,
                       selectedLocalRepoBranch: localBranch,
@@ -968,6 +1000,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       </div>
       <AgentGitPanel
         thread={thread}
+        onComment={canPost ? commentOnDiff : undefined}
         revealFilePath={revealFilePath}
         revealChangesKey={revealChangesKey}
         collapsed={panelCollapsed}

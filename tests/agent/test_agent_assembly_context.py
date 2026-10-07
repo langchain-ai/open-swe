@@ -429,7 +429,7 @@ SLACK_TOOL_NAMES = {
     "slack_no_reply_needed",
     "slack_post_message",
     "slack_read_thread_messages",
-    "slack_start_new_thread",
+    "slack_breakout_thread",
     "slack_reply",
 }
 
@@ -508,7 +508,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_move_thread",
         "slack_post_message",
         "slack_read_thread_messages",
-        "slack_start_new_thread",
+        "slack_breakout_thread",
         "slack_reply",
     }
 

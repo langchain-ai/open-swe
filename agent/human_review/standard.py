@@ -16,15 +16,17 @@ the workspace auto-assignment timeout the agent picks a reviewer, the same way.
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx2
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from agent.dashboard.workspace_settings import get_workspace_settings
+from agent.expedited_review.eligibility import MAX_FILES, fetch_changed_files
 from agent.expedited_review.readiness import (
     PullRequestSnapshot,
     assess_readiness,
@@ -32,9 +34,10 @@ from agent.expedited_review.readiness import (
     review_authors,
 )
 from agent.github.ci import fetch_pr
+from agent.github.codeowners import CodeOwners
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
-from agent.github.repo_files import RepoSettings
+from agent.github.repo_files import RepoFileUnreadableError, RepoSettings
 from agent.human_review.card import accept_button, mention
 from agent.human_review.lifecycle import (
     drop_picks,
@@ -57,7 +60,13 @@ from agent.run_config import RunConfig
 from agent.slack.blocks import actions, block_payload, escape, section
 from agent.slack.cards import origin_footer
 from agent.slack.channels import SlackChannel
-from agent.slack.client import GitHubPrRef, get_slack_permalink, post_slack_thread_reply_with_ts
+from agent.slack.client import (
+    GitHubPrRef,
+    get_slack_permalink,
+    get_slack_user_info,
+    post_slack_thread_reply_with_ts,
+    remove_slack_reaction,
+)
 from agent.slack.dm import send_dm
 from agent.slack.http import SlackRequestError
 from agent.threads.pr_fixes import dispatch_pull_request_prompt
@@ -78,6 +87,29 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
+_AUTO_ASSIGN_ASKED = "auto_assign_asked"
+
+
+class ReviewChannelUnknownError(Exception):
+    """The repository's review channels could not be read, so membership is unknown."""
+
+
+async def in_review_channel(owner: str, repo: str, channel_id: str, token: str) -> bool:
+    """Whether ``channel_id`` is one of the repository's configured review channels."""
+    try:
+        settings = await RepoSettings.fetch(owner, repo, token=token, strict=True)
+    except RepoFileUnreadableError as exc:
+        raise ReviewChannelUnknownError(str(exc)) from exc
+    unresolved: list[str] = []
+    for configured in settings.review_channels:
+        channel = await SlackChannel.resolve(configured)
+        if channel is None:
+            unresolved.append(configured)
+        elif channel.id == channel_id:
+            return True
+    if unresolved:
+        raise ReviewChannelUnknownError(f"Could not resolve review channels {unresolved}")
+    return False
 
 
 async def _assignment_minutes(request: HumanReviewRequest) -> int:
@@ -99,6 +131,7 @@ class RequestResult(BaseModel):
     permalink: str = ""
     reused: bool = False
     summary_updated: bool = False
+    claimed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +149,11 @@ class Origin:
         if self.thread_id and request.thread_id == self.thread_id:
             return True
         return self.requester is not None and request.requested_by_user_id == self.requester.id
+
+
+@dataclass(frozen=True, slots=True)
+class AlreadyClaimed(Outcome):
+    pass
 
 
 def _failure(error: str) -> RequestResult:
@@ -152,9 +190,16 @@ async def _target_channel(
 ) -> SlackChannel | RequestResult:
     configured = override.strip()
     if not configured:
-        configured = (
-            await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
-        ).review_channel
+        settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
+        try:
+            configured = await settings.channel_for_pr(
+                pr_ref.owner, pr_ref.repo, pr_ref.number, token=token
+            )
+        except httpx2.HTTPError, ValueError:
+            logger.exception("Could not resolve review channel from changed files")
+            return _failure(
+                "Could not read the complete changed-file list for review channel routing."
+            )
     if not configured.strip():
         return _failure(
             f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set `reviewChannel` in "
@@ -188,7 +233,25 @@ async def _permalink(request: HumanReviewRequest) -> str:
     return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
 
 
-async def _schedule(request: HumanReviewRequest, step: DeadlineStep, after: timedelta) -> bool:
+def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
+    """Add two hours within local weekday 9am–6pm windows."""
+    cursor = start.astimezone(timezone)
+    remaining = timedelta(hours=2)
+    while True:
+        opening = datetime.combine(cursor.date(), time(9), timezone)
+        closing = datetime.combine(cursor.date(), time(18), timezone)
+        if cursor.weekday() >= 5 or cursor >= closing:
+            cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
+            continue
+        cursor = max(cursor, opening)
+        available = closing - cursor
+        if remaining <= available:
+            return (cursor + remaining).astimezone(UTC)
+        remaining -= available
+        cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
+
+
+async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
     try:
         await langgraph_client().runs.create(
             None,
@@ -409,6 +472,10 @@ async def _add_reviewer(
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
             return Outcome("This review request closed before you signed up.")
+        if picked and (row.reviewers or row.picks):
+            return AlreadyClaimed(
+                "This pull request already has a reviewer or pending pick. Stop assigning reviewers."
+            )
         existing = row.participant(reviewer.user.id)
         if existing is not None and (picked or existing.decision not in ("picked", "expired")):
             return Outcome(f"@{reviewer.github_login} is already reviewing this.")
@@ -529,7 +596,9 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     notice = await _pick_notice(request, who, label)
     added = await _add_reviewer(request, reviewer, picked=True)
     if isinstance(added, Outcome):
-        return _failure(added.message)
+        return RequestResult(
+            success=False, error=added.message, claimed=isinstance(added, AlreadyClaimed)
+        )
     await _request_github_review(added, github_login)
     minutes = await _assignment_minutes(added)
     if not await _schedule(added, "pick_expiry", timedelta(minutes=minutes)):
@@ -563,6 +632,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
             dm_text,
             blocks=block_payload([section(dm_text), accept, *await origin_footer(added.thread_id)]),
         )
+    await _schedule(added, f"remind:{user.id}", timedelta(0))
     return RequestResult(
         success=True,
         request_id=str(added.id),
@@ -598,12 +668,48 @@ def merge_wait(
 
 
 async def _settle_posted(
-    request: HumanReviewRequest, snapshot: PullRequestSnapshot, states: dict[str, str]
+    request: HumanReviewRequest, snapshot: PullRequestSnapshot, states: dict[str, str], token: str
 ) -> None:
-    """React once the pull request is approved; until then, time how long it has sat green."""
-    if "APPROVED" in states.values():
+    """React once the pull request's owners approve; until then, time how long it has sat green."""
+    approvers = {login for login, state in states.items() if state == "APPROVED"}
+    approved = bool(approvers)
+    if approved:
+        pr = request.pull_request
+        try:
+            codeowners = await CodeOwners.fetch(
+                pr.owner, pr.repo, pr.base_ref or None, token=token, strict=True
+            )
+        except RepoFileUnreadableError:
+            logger.warning(
+                "Cannot confirm codeowner approvals",
+                extra={"request_id": str(request.id)},
+                exc_info=True,
+            )
+            approved = False
+            codeowners = None
+        if codeowners is not None:
+            files = await fetch_changed_files(
+                owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
+            )
+            approved = (
+                files is not None
+                and len(files) < MAX_FILES
+                and await codeowners.approved_by([file.filename for file in files], approvers)
+            )
+    if approved:
         await mark_approved(request)
+        await release_picks(
+            request, ", ".join(f"@{login}" for login in sorted(approvers)) + " approved it"
+        )
         return
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is None or row.state != "open":
+            return
+        if row.approved_at is not None:
+            row.approved_at = None
+            await remove_slack_reaction(
+                row.slack_channel_id, row.slack_message_ts, "white_check_mark"
+            )
     now = datetime.now(UTC)
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
@@ -683,6 +789,9 @@ async def settle(request: HumanReviewRequest) -> bool:
         states = await latest_review_states(client, pr.owner, pr.repo, pr.number, snapshot.author)
     if states is None:
         return False
+    if request.kind == "posted":
+        await _settle_posted(request, snapshot, states, token)
+        return True
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
         picked = len(request.reviewers) + len(request.picks)
         request = await release_picks(
@@ -693,9 +802,6 @@ async def settle(request: HumanReviewRequest) -> bool:
             await _schedule(
                 request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
             )
-    if request.kind == "posted":
-        await _settle_posted(request, snapshot, states)
-        return True
     waiting = merge_wait(
         [reviewer.github_login for reviewer in request.reviewers],
         request.created_at,
@@ -742,7 +848,7 @@ async def settle_repository(owner: str, repo: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class AutoAssignResult:
-    status: Literal["picked", "waiting", "woken", "failed", "disabled"]
+    status: Literal["picked", "waiting", "woken", "failed", "disabled", "claimed"]
     reviewer: str = ""
     at: datetime | None = None
 
@@ -754,6 +860,10 @@ async def start_auto_assign(
 
     ``asked`` is someone requesting it now rather than the deadline passing.
     """
+    if asked:
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            if row is not None:
+                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
     result = (
         AutoAssignResult("disabled")
         if not asked and skip_on_preview("start_auto_assign")
@@ -773,6 +883,9 @@ async def start_auto_assign(
 
 
 async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssignResult:
+    request = await HumanReviewRequest.get(request.id) or request
+    if request.reviewers or request.picks:
+        return AutoAssignResult("claimed")
     if await User.for_login("github", request.pull_request.author) is None:
         await retire(request, "cancelled", "PR author has no Open SWE account")
         return AutoAssignResult("disabled")
@@ -785,6 +898,8 @@ async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssig
         result = await assign(request, choice.login, choice.reason)
         if result.success:
             return AutoAssignResult("picked", choice.login)
+        if result.claimed:
+            return AutoAssignResult("claimed")
         logger.warning(
             "Open SWE's reviewer pick was refused; waking an agent to pick",
             extra={
@@ -832,6 +947,106 @@ async def _wake_picker(request: HumanReviewRequest, *, asked: bool) -> bool:
         before_dispatch=record_thread,
     )
     return True
+
+
+async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
+    try:
+        participant = request.participant(UUID(user_id))
+    except ValueError:
+        return "invalid_reviewer"
+    if (
+        participant is None
+        or participant.decision not in ("picked", "review")
+        or not participant.assigned_by_agent
+        or participant.joined_at is None
+        or not participant.user.slack_user_id
+    ):
+        return "not_assigned"
+    marker = f"review_reminded:{user_id}:{participant.joined_at.isoformat()}"
+    if request.run_config.get(marker):
+        return "already_reminded"
+    info = await get_slack_user_info(participant.user.slack_user_id)
+    timezone_name = info.get("tz") if info else None
+    try:
+        timezone = ZoneInfo(timezone_name) if isinstance(timezone_name, str) else None
+    except ZoneInfoNotFoundError:
+        timezone = None
+    if timezone is None:
+        logger.warning(
+            "Reviewer timezone unavailable",
+            extra={"request_id": str(request.id), "user_id": user_id},
+        )
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    now = datetime.now(UTC)
+    due = review_reminder_at(participant.joined_at, timezone)
+    local_now = now.astimezone(timezone)
+    if now >= due and (local_now.weekday() >= 5 or not time(9) <= local_now.time() < time(18)):
+        due = review_reminder_at(now, timezone) - timedelta(hours=2)
+    remaining = due - now
+    if remaining > timedelta(0):
+        await _schedule(request, f"remind:{user_id}", remaining)
+        return "scheduled"
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    details = await fetch_pr(owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token)
+    if details is None:
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    if details.get("state") != "open" or details.get("merged"):
+        return "closed"
+    async with github_client(token=token) as client:
+        authors = await review_authors(client, pr.owner, pr.repo, pr.number)
+    if authors is None:
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    if participant.github_login.lower() in authors:
+        return "reviewed"
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        current = row.participant(participant.user_id) if row else None
+        if (
+            row is None
+            or row.state != "open"
+            or current is None
+            or not current.assigned_by_agent
+            or current.decision not in ("picked", "review")
+            or current.joined_at != participant.joined_at
+            or row.run_config.get(marker)
+        ):
+            return "inactive"
+        waited_minutes = max(
+            0,
+            int(
+                (datetime.now(UTC) - (request.created_at or participant.joined_at)).total_seconds()
+                // 60
+            ),
+        )
+        days, minutes = divmod(waited_minutes, 1440)
+        hours, minutes = divmod(minutes, 60)
+        waited = (
+            ", ".join(
+                f"{value} {unit}{'s' if value != 1 else ''}"
+                for value, unit in ((days, "day"), (hours, "hour"), (minutes, "minute"))
+                if value
+            )
+            or "less than a minute"
+        )
+        sent = await send_dm(
+            participant.user.slack_user_id,
+            f"Reminder: Open SWE picked you to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+            f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
+            f"has been waiting {waited} since the review request was opened. "
+            "Please submit your review on GitHub.",
+        )
+        if sent:
+            row.run_config = {**row.run_config, marker: True}
+    if not sent:
+        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    return "reminded"
 
 
 async def expire_picks(request: HumanReviewRequest) -> str:
@@ -910,6 +1125,8 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         await _schedule(current, "unclaimed", choice.until - datetime.now(UTC))
         return "rotating"
     result = await assign(current, choice.login, choice.reason)
+    if result.claimed:
+        return "claimed"
     if not result.success:
         logger.warning(
             "Open SWE's next reviewer pick was refused",
@@ -917,6 +1134,42 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         )
         return "rotation_refused"
     return "rotated"
+
+
+async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | None:
+    """Why Open SWE does not pick reviewers unasked for ``request`` now; ``None`` if it may.
+
+    A pull request merely linked outside a review channel only gets reactions, so
+    its unaccepted picks are withdrawn.
+    """
+    if request.kind != "posted" or _AUTO_ASSIGN_ASKED in request.run_config:
+        return None
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None:
+        return None
+    try:
+        if await in_review_channel(pr.owner, pr.repo, request.slack_channel_id, token):
+            return None
+    except ReviewChannelUnknownError:
+        logger.warning(
+            "Could not tell whether a posted pull request is in a review channel",
+            extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
+            exc_info=True,
+        )
+        await _schedule(request, step, _DEADLINE_RETRY)
+        return "retrying"
+    logger.info(
+        "Not auto-assigning a pull request posted outside its review channels",
+        extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
+    )
+    await drop_picks(
+        request,
+        {pick.user_id for pick in request.picks},
+        f"You no longer need to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+        f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
+    )
+    return "not_asked"
 
 
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
@@ -927,10 +1180,15 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if step.startswith("remind:"):
+        return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
+
     if (request.kind == "posted" or step in ("unclaimed", "pick_expiry")) and skip_on_preview(
         "run_deadline"
     ):
         return {"status": "disabled_in_preview"}
+    if step in ("unclaimed", "pick_expiry") and (hold := await _auto_assign_hold(request, step)):
+        return {"status": hold}
     if step == "pick_expiry":
         return {"status": await expire_picks(request)}
     if step == "unclaimed":

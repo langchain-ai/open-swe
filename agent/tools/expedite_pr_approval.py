@@ -173,9 +173,8 @@ async def expedite_pr_approval(
     payload = PullRequestPayload.model_validate(pr)
     if await User.for_login("github", payload.author) is None:
         return _failure("Expedited review is only available for PRs authored by Open SWE users.")
-    review_channel = (
-        await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
-    ).review_channel.strip()
+    settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
+    review_channel = settings.channel_for_files([file.filename for file in files])
     broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
     if review_channel and broadcast_target is None:
         return _failure(

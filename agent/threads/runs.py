@@ -391,6 +391,7 @@ async def _build_dashboard_configurable(
         "source": source,
         "github_login": login,
         "user_email": await resolve_run_email(login, profile),
+        "background_task_completion": False,
     }
     repo_config = repo_config_from_metadata(metadata)
     if repo_config:
@@ -730,6 +731,7 @@ async def _attributed_run_messages(
     email: str | None,
     client: Any,
     sandbox_handoff: Mapping[str, Any] | None = None,
+    review_chat_pr_url: str | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -773,6 +775,13 @@ async def _attributed_run_messages(
     if pr_url and history_read and not persisted_message_ids:
         notices.append(
             (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
+        )
+    if isinstance(review_chat_pr_url, str):
+        notices.append(
+            (
+                _PULL_REQUEST_THREAD_SYSTEM,
+                prompt("runs/pull-request-review-chat", url=review_chat_pr_url),
+            )
         )
     structured = build_input_messages(
         content,
@@ -918,6 +927,7 @@ async def _enrich_run_start_command(
         email=email,
         client=client,
         sandbox_handoff=sandbox_handoff,
+        review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
@@ -1593,6 +1603,7 @@ async def _enrich_system_run_start_command(
             "workspace": principal.workspace,
             "environment": principal.workspace,
             STARTED_BY_ID: principal.started_by_id,
+            "background_task_completion": False,
         },
         invocation_id,
     )

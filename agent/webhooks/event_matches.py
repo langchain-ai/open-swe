@@ -40,7 +40,7 @@ _SYSTEM: SystemIdentity = {
     "platform": "open-swe",
 }
 _RETAINED = timedelta(days=RETAINED_DAYS)
-_KIND = "event_match"
+EVENT_MATCH_KIND = "event_match"
 _MAX_ATTEMPTS = 3
 
 
@@ -137,7 +137,7 @@ class EventMatch(Base):
         async with postgres.transaction() as lock:
             await lock.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-                {"key": f"{_KIND}:{thread_id}"},
+                {"key": f"{EVENT_MATCH_KIND}:{thread_id}"},
             )
             if strategy == "enqueue":
                 thread = _Thread.model_validate(await client.threads.get(thread_id))
@@ -161,7 +161,7 @@ class EventMatch(Base):
                 input={"messages": cls.messages(owed)},
                 config={"configurable": latest.run_config},
                 metadata={
-                    "kind": _KIND,
+                    "kind": EVENT_MATCH_KIND,
                     "event_match_ids": [str(match_id) for match_id in owed_ids],
                 },
                 source=latest.source,

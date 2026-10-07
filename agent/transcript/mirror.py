@@ -34,6 +34,7 @@ MIRRORED_KEYS: frozenset[str] = frozenset(
         "thread_category",
         "schedule_id",
         "unlisted",
+        "trigger_kind",
         # Served by the snapshot's ``ThreadView``.
         "title",
     }

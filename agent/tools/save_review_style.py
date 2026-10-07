@@ -6,12 +6,17 @@ from typing import Any
 from langgraph.config import get_config
 
 from agent.review.analyzer_cron import ensure_continual_cron
-from agent.review.styles import REVIEW_STYLES, ReviewStyle
+from agent.review.styles import (
+    REVIEW_STYLES,
+    RepoFullName,
+    ReviewStyle,
+    normalize_repo_full_name,
+)
 
 logger = logging.getLogger(__name__)
 
 
-async def _complete_and_register(full_name: str, **completed_kwargs: Any) -> ReviewStyle:
+async def _complete_and_register(full_name: RepoFullName, **completed_kwargs: Any) -> ReviewStyle:
     """Persist the prompt, then ensure the repo's nightly continual cron exists.
 
     Cron registration is idempotent, so continual runs completing later don't
@@ -39,8 +44,12 @@ async def save_review_style_prompt(
     """
     config = get_config()
     configurable = config.get("configurable") or {}
-    full_name = configurable.get("review_style_full_name")
-    if not isinstance(full_name, str) or "/" not in full_name:
+    raw_full_name = configurable.get("review_style_full_name")
+    try:
+        full_name = normalize_repo_full_name(
+            raw_full_name if isinstance(raw_full_name, str) else ""
+        )
+    except ValueError:
         return {"ok": False, "error": "review_style_full_name missing from config"}
 
     reviewers_from_args = [r.strip() for r in top_reviewers.split(",") if r.strip()]
