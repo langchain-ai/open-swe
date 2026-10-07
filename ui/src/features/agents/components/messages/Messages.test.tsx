@@ -10,7 +10,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 
-import { HumanMessage } from "@langchain/core/messages"
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 
 import { Messages } from "./Messages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
@@ -101,6 +101,107 @@ describe("Messages", () => {
     fireEvent.click(details)
     expect(container.textContent).not.toContain("Can I change")
   })
+
+  it("keeps the worker handoff in the conversation when surrounding work is folded", async () => {
+    const workerId = "7db1bbf5-0623-5a35-a5a4-db372cfc31d4"
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "spawn-turn",
+        content: "",
+        tool_calls: [
+          { id: "read", name: "read_file", args: { path: "AGENTS.md" } },
+          {
+            id: "spawn",
+            name: "spawn_worker",
+            args: { instructions: "Investigate <login> & validation" },
+          },
+          { id: "later-read", name: "read_file", args: { path: "README.md" } },
+        ],
+      }),
+      new ToolMessage({ tool_call_id: "read", content: "Instructions" }),
+      new ToolMessage({
+        tool_call_id: "spawn",
+        content: JSON.stringify({ success: true, worker_thread_id: workerId }),
+      }),
+      new ToolMessage({ tool_call_id: "later-read", content: "Docs" }),
+      new AIMessage({
+        id: "reply",
+        content: "The worker is continuing independently.",
+      }),
+    ])
+    const router = createRouter({
+      routeTree: createRootRoute({
+        component: () => <Messages messages={messages} isStreaming={false} />,
+      }),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    await router.load()
+    const { container } = render(<RouterProvider router={router} />)
+    const chip = screen.getByRole("button", {
+      name: "Worker 7db1bbf5 · Started",
+    })
+    expect(
+      screen
+        .getByRole("button", { name: "Worked · 2 actions" })
+        .getAttribute("aria-expanded")
+    ).toBe("false")
+    expect(
+      screen
+        .getByRole("link", { name: "Open Worker 7db1bbf5 thread" })
+        .getAttribute("href")
+    ).toBe(`/agents/${workerId}`)
+    expect(
+      chip.compareDocumentPosition(
+        screen.getByText("The worker is continuing independently.")
+      ) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.queryByText("Investigate <login> & validation")).toBeNull()
+    fireEvent.click(chip)
+    expect(screen.getByText("Investigate <login> & validation")).toBeTruthy()
+    expect(container.querySelector("login")).toBeNull()
+  })
+
+  it.each([
+    ["in_progress", undefined, "Starting…"],
+    ["error", "launch failed", "Launch failed"],
+    ["completed", '{"success":false}', "Launch failed"],
+    [
+      "completed",
+      '{"success":true,"worker_thread_id":"invalid"}',
+      "Launch status unknown",
+    ],
+  ] as const)(
+    "does not claim a worker started for %s / %s",
+    (status, output, label) => {
+      render(
+        <Messages
+          isStreaming={false}
+          messages={[
+            {
+              id: "spawn",
+              author: "agent",
+              timestamp: "2026-09-03T10:30:00Z",
+              chunks: [
+                {
+                  kind: "tool-execution",
+                  toolCallId: "spawn",
+                  toolName: "spawn_worker",
+                  toolKind: "other",
+                  title: "Spawn worker",
+                  status,
+                  output,
+                },
+              ],
+            },
+          ]}
+        />
+      )
+      expect(
+        screen.getByRole("button", { name: `Worker · ${label}` })
+      ).toBeTruthy()
+      expect(screen.queryByRole("link")).toBeNull()
+    }
+  )
 
   it("expands system context with the shared chip", () => {
     render(

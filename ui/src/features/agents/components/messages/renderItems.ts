@@ -27,12 +27,14 @@ export type RenderItem =
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "worker-spawn-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "connection-item",
   "iframe-item",
+  "worker-spawn-item",
 ])
 
 export function splitWorkAndReply(items: Array<RenderItem>): {
@@ -53,6 +55,7 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
       item.type === "reply-item" ||
       item.type === "connection-item" ||
       item.type === "iframe-item" ||
+      item.type === "worker-spawn-item" ||
       index >= trailingReplyIndex
     ) {
       replyItems.push(item)
@@ -241,6 +244,15 @@ export function buildRenderItems(
     if (!chunk) continue
 
     if (chunk.kind === "tool-execution") {
+      if (chunk.toolName === "spawn_worker") {
+        flushGroups()
+        items.push({
+          type: "worker-spawn-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
       if (chunk.display?.type === "output_iframe") {
         flushGroups()
         items.push({
