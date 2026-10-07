@@ -29,6 +29,7 @@ def _config(source: str = "slack") -> RunConfig:
     [
         ("slack", {"user": "U_ALICE", "text": "<@U0BOT> assign <@U_BOB> please"}, True),
         ("slack", {"user": "U_ALICE", "text": "<@U0BOT> assign @Bob"}, True),
+        ("slack", {"user": "U_ALICE", "text": "<@U0BOT> assign @bobby"}, False),
         ("slack", {"user": "U_ALICE", "text": "<@U0BOT> who is reviewing this?"}, False),
         ("slack", {"user": "U_MALLORY", "text": "assign <@U_BOB>"}, False),
         ("slack", {"user": "U_ALICE", "bot_id": "B1", "text": "assign <@U_BOB>"}, False),

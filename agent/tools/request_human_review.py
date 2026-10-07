@@ -1,5 +1,6 @@
 """Tools that ask people in Slack to review a pull request, assign or report its reviewer, or dismiss the ask."""
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -173,12 +174,12 @@ async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
     message = SlackMessage.model_validate(payload)
     if message.is_from_bot or message.user != slack.triggering_user_id:
         return False
-    text = (message.text or "").lower()
+    text = message.text or ""
     reviewer = await User.for_login("github", github_login)
-    mentions = {f"@{github_login.lower()}"}
-    if reviewer is not None and reviewer.slack_user_id:
-        mentions.add(f"<@{reviewer.slack_user_id.lower()}>")
-    return any(mention in text for mention in mentions)
+    if reviewer is not None and reviewer.slack_user_id and f"<@{reviewer.slack_user_id}>" in text:
+        return True
+    # GitHub logins are letters, digits and hyphens, so ``@bob`` must not match ``@bobby``.
+    return re.search(rf"@{re.escape(github_login)}(?![\w-])", text, re.IGNORECASE) is not None
 
 
 async def get_human_review_status(pr_url: str) -> dict[str, Any]:
