@@ -180,7 +180,7 @@ from openswe.sandboxes.state import (
 )
 from openswe.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
 from openswe.sandboxes.tool_runtime import ToolSurface, save_tool_context
-from openswe.skill_store.store import skills_backend
+from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace

@@ -3,11 +3,11 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
+from openswe.skill_store.backend import skills_backend
 from openswe.skill_store.store import (
     SkillCreate,
     create_skill,
     get_skill,
-    skills_backend,
 )
 from openswe.tools.organization_skills import save_organization_skill
 from openswe.users import User

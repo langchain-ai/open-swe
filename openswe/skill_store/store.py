@@ -5,23 +5,17 @@ import binascii
 import json
 import logging
 import re
-from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
-from deepagents.backends.store import StoreBackend
 from fastapi import HTTPException
-from langgraph.store.base import Op, Result
-from langgraph.store.memory import InMemoryStore
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import ColumnElement, ForeignKey, delete, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
-from openswe.database.agent_store import AgentStore
 from openswe.database.orm import Base
-from openswe.sandboxes.read_only_backend import ReadOnlyBackend
 from openswe.store import delete_value, now_iso, search_all_entries
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
@@ -206,34 +200,12 @@ async def delete_skill(login: str, name: str) -> None:
     await _delete_skill(await _person(login), name)
 
 
-async def _agent_skills(login: str | None) -> list[dict[str, Any]]:
+async def agent_skills(login: str | None) -> list[dict[str, Any]]:
+    """The organization's skills, or ``login``'s, as the agent reads them."""
     if login is None:
         return await _search(None, limit=MAX_ORGANIZATION_SKILLS)
     user = await User.for_login("github", login)
     return [] if user is None else await _search(user.id, limit=MAX_ORGANIZATION_SKILLS)
-
-
-class _SkillFiles(AgentStore):
-    """The organization's skills, or ``login``'s, loaded on the agent's first read."""
-
-    def __init__(self, login: str | None) -> None:
-        super().__init__()
-        self.login = login
-        self._files: InMemoryStore | None = None
-
-    async def abatch(self, ops: Iterable[Op]) -> list[Result]:
-        if self._files is None:
-            self._files = InMemoryStore()
-            for skill in await _agent_skills(self.login):
-                await self._files.aput(("skills",), skill_path(skill["name"]), skill)
-        return await self._files.abatch(ops)
-
-
-def skills_backend(login: str | None) -> ReadOnlyBackend:
-    """The organization's skills, or ``login``'s, as read-only files for the agent."""
-    return ReadOnlyBackend(
-        StoreBackend(store=_SkillFiles(login), namespace=lambda _runtime: ("skills",))
-    )
 
 
 def _encode_cursor(name: str) -> str:
