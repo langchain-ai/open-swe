@@ -1,4 +1,4 @@
-"""Tools that ask people in Slack to review a pull request, assign a reviewer, or dismiss the ask."""
+"""Tools that ask people in Slack to review a pull request, assign or report its reviewer, or dismiss the ask."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -10,7 +10,13 @@ from agent.dashboard import repo_access
 from agent.github.token import resolve_github_token
 from agent.human_review.lifecycle import dismiss_by
 from agent.human_review.requests import HumanReviewRequest
-from agent.human_review.standard import Origin, assign, request_review, start_auto_assign
+from agent.human_review.standard import (
+    Origin,
+    ReviewStatus,
+    assign,
+    request_review,
+    start_auto_assign,
+)
 from agent.run_config import RunConfig
 from agent.slack.cards import run_slack_location
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
@@ -103,7 +109,9 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
     }
 
 
-async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = "") -> dict[str, Any]:
+async def assign_human_reviewer(
+    pr_url: str, github_login: str, reason: str = "", named_by_person: bool = False
+) -> dict[str, Any]:
     """Implement the `assign_human_reviewer` tool."""
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
@@ -112,18 +120,38 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
     if request is None or request.kind == "expedited":
         return _failure("This pull request has no open review request to assign a reviewer to.")
     thread_id = RunConfig.from_config(get_config()).thread_id or ""
-    # Only the thread woken to pick a reviewer may pick one.
-    if not await request.picked_by(thread_id):
+    # Unprompted picks come only from the thread woken to make one.
+    if not named_by_person and not await request.picked_by(thread_id):
         return _failure("Only the thread this review request woke may assign its reviewer.")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
-    result = await assign(request, github_login.strip().lstrip("@"), reason)
+    result = await assign(
+        request, github_login.strip().lstrip("@"), reason, replace=named_by_person
+    )
     if not result.success:
         return _failure(result.error)
     return {
         "success": True,
-        "next": "They are tagged on the card and messaged directly. Nothing else to post.",
+        "next": (
+            "They are shown on the review card, requested on GitHub, and messaged directly "
+            "with Accept, Decline and Snooze."
+        ),
     }
+
+
+async def get_human_review_status(pr_url: str) -> dict[str, Any]:
+    """Implement the `get_human_review_status` tool."""
+    pr_ref = parse_github_pr_url(pr_url)
+    if pr_ref is None:
+        return _failure("pr_url must be a canonical GitHub pull request URL")
+    thread_id = RunConfig.from_config(get_config()).thread_id or ""
+    if refusal := await _repository_refusal(pr_ref, thread_id):
+        return _failure(refusal)
+    request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if request is None or request.kind == "expedited":
+        return {"success": True, "open_review_request": False}
+    status = await ReviewStatus.of(request)
+    return {"success": True, "open_review_request": True, **status.model_dump(mode="json")}
 
 
 async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:

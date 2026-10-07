@@ -1194,7 +1194,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "The pick already tagged them in the thread.",
             "slack_no_reply_needed",
             {
-                "reason": "assign_human_reviewer already tagged the reviewer in this thread.",
+                "reason": "assign_human_reviewer already messaged the reviewer directly.",
                 "confirmation": "The user cannot see anything I do not send to Slack.",
             },
             "call-human-review-assign-done",
