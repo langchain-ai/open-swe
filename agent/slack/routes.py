@@ -27,7 +27,7 @@ from agent.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
-from agent.slack.breakout import BreakoutCommand, process_slack_breakout
+from agent.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
 from agent.slack.dm import CONCIERGE_TS, is_dm_channel
 from agent.slack.failures import (
     SlackRequestError,
@@ -704,6 +704,14 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
+            web = (
+                None
+                if in_dm_channel or allowed_bot is not None
+                else BreakoutCommand.parse(text, bot_user_id, command="web")
+            )
+            if web is not None:
+                background_tasks.add_task(process_slack_web, request, web, repo)
+                return accepted("Slack web question queued")
             breakout = (
                 None
                 if in_code_channel or in_dm_channel or allowed_bot is not None

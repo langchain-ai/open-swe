@@ -105,6 +105,26 @@ async def _queued_request(payload: dict[str, Any]) -> SlackRequest:
     return cast(SlackRequest, background_tasks.tasks[0][1][0])
 
 
+@pytest.mark.parametrize("concierge_on", [True, False])
+async def test_web_breakout_in_dm_stays_in_normal_dm_processing(
+    monkeypatch: pytest.MonkeyPatch, concierge_on: bool
+) -> None:
+    monkeypatch.setattr(
+        slack_routes.User, "concierge_mode_for_slack", AsyncMock(return_value=concierge_on)
+    )
+    payload = _dm_payload(f"Ev-web-dm-{concierge_on}")
+    payload["event"]["text"] = "<@BOT> /breakout:web explain this"
+    tasks = _FakeBackgroundTasks()
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, tasks)
+    )
+    assert response["status"] == "accepted"
+    assert tasks.tasks[0][0] is slack_service.process_slack_mention
+    request = tasks.tasks[0][1][0]
+    assert request.concierge_mode is concierge_on
+    assert request.text == payload["event"]["text"]
+
+
 async def test_dm_thread_reply_keeps_the_session_but_answers_in_the_thread() -> None:
     request = await _queued_request(
         _dm_payload("Ev-dm-thread", thread_ts="1786573300.000000"),

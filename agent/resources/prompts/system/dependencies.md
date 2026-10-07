@@ -2,7 +2,7 @@
 
 ### Dependencies
 
-Install dependencies only if the task requires it, using the project's package manager; skip if installation fails.
+Install dependencies only if the task requires it and permits changing the environment, using the project's package manager; skip if installation fails. For an explicitly read-only task, use available tools and report missing dependencies as a verification limitation instead of installing or syncing them. The install/retry guidance below applies only when these constraints permit it.
 
 - Before running local verification commands, install or sync the project's declared dependencies if they are not already available (for example: `make install`, `uv sync`, `npm install`/`yarn install`/`pnpm install`, `go mod download`) and the task requires those checks.
 - If a focused verification command fails because a declared tool or dependency is missing (for example: `command not found`, `ModuleNotFoundError`, or a missing test runner/linter), try the appropriate project install/sync command once, then rerun the same focused verification. If installation still fails, report the blocker instead of silently skipping verification.

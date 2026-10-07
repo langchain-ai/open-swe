@@ -35,6 +35,7 @@ from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
+from agent.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from agent.thread_feedback import schedule_answer_feedback
 from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
@@ -492,43 +493,7 @@ async def _top_up_review_guide(thread_id: str, metadata: object) -> None:
         )
 
 
-async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
-    """Handle a platform run-completion webhook POST.
-
-    Schedules feedback prompts, enqueues cost refreshes, and posts failure replies.
-    """
-    status = payload.get("status")
-    thread_id = payload.get("thread_id")
-    raw_run_id = payload.get("run_id")
-    run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
-    if not isinstance(thread_id, str) or not thread_id:
-        return {"status": "ignored", "reason": "missing thread_id"}
-    await _finalize_agent_usage_telemetry(thread_id, status, payload)
-    await _settle_transcript_turn(thread_id, run_id, status)
-    payload_metadata = payload.get("metadata")
-    if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
-        await settle_review_style_run(payload_metadata)
-    # A run that failed, or a pickup run that left the store as it found it,
-    # would only fail the same way again: one attempt per leftover.
-    if status == "success" and not (
-        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
-    ):
-        await _start_run_for_pending_follow_ups(thread_id)
-    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
-        await EventSubscription.deliver_to(thread_id, "enqueue")
-    if status == "success":
-        await _top_up_review_guide(thread_id, payload_metadata)
-        return await _handle_successful_run(thread_id, run_id, payload)
-    if (
-        status in _TERMINAL_FAILURE_STATUSES
-        and isinstance(payload_metadata, dict)
-        and payload_metadata.get("kind") == "thread_wakeup"
-    ):
-        return {"status": "ignored", "reason": "automated wakeup failure"}
-    if status not in _TERMINAL_FAILURE_STATUSES:
-        return {"status": "ignored", "reason": f"non-failure status: {status}"}
-
-    error = payload.get("error")
+def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: object) -> None:
     # The platform serializes the exception (class name, and the message when its
     # type is allowlisted) — there is no traceback to attach on this side.
     error_attributes = (
@@ -548,6 +513,70 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             },
         },
     )
+
+
+async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
+    """Handle a platform run-completion webhook POST.
+
+    Schedules feedback prompts, enqueues cost refreshes, and posts failure replies.
+    """
+    status = payload.get("status")
+    thread_id = payload.get("thread_id")
+    raw_run_id = payload.get("run_id")
+    run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
+    if not isinstance(thread_id, str) or not thread_id:
+        return {"status": "ignored", "reason": "missing thread_id"}
+    await _finalize_agent_usage_telemetry(thread_id, status, payload)
+    await _settle_transcript_turn(thread_id, run_id, status)
+    is_worker = False
+    if run_id and isinstance(status, str) and status in _TERMINAL_RUN_STATUSES:
+        from agent.tasks.events import worker_finished
+
+        try:
+            is_worker = await worker_finished(thread_id, run_id, status, payload)
+        except Exception:
+            logger.exception(
+                "Could not persist worker completion",
+                extra={"thread_id": thread_id, "run_id": run_id},
+            )
+            raise
+    payload_metadata = payload.get("metadata")
+    if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
+        await settle_review_style_run(payload_metadata)
+    # A run that failed, or a pickup run that left the store as it found it,
+    # would only fail the same way again: one attempt per leftover.
+    if status == "success" and not (
+        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
+    ):
+        pickup_allowed = True
+        if is_worker:
+            from agent.tasks.store import TaskDelegation
+
+            delegation = await TaskDelegation.get(thread_id)
+            pickup_allowed = delegation is not None and not delegation.cancelled
+        if pickup_allowed:
+            await _start_run_for_pending_follow_ups(thread_id)
+    if is_worker:
+        if status in _TERMINAL_FAILURE_STATUSES:
+            _log_run_failure(thread_id, run_id, status, payload.get("error"))
+        return {"status": "ok", "reason": "worker completion handled"}
+    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
+        await TaskMessage.deliver_to(thread_id)
+        await EventSubscription.deliver_to(thread_id, "enqueue")
+    if status == "success":
+        await _top_up_review_guide(thread_id, payload_metadata)
+        return await _handle_successful_run(thread_id, run_id, payload)
+    if (
+        status in _TERMINAL_FAILURE_STATUSES
+        and isinstance(payload_metadata, dict)
+        and payload_metadata.get("kind") == "thread_wakeup"
+    ):
+        return {"status": "ignored", "reason": "automated wakeup failure"}
+    if status not in _TERMINAL_FAILURE_STATUSES:
+        return {"status": "ignored", "reason": f"non-failure status: {status}"}
+
+    error = payload.get("error")
+    _log_run_failure(thread_id, run_id, status, error)
 
     client = langgraph_client()
     try:
@@ -575,9 +604,10 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     # Only event-woken runs count: a failure on a run a person started always replies
     # and lets later event-woken failures report again.
-    event_woken = (
-        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == EVENT_MATCH_KIND
-    )
+    event_woken = isinstance(payload_metadata, dict) and payload_metadata.get("kind") in {
+        EVENT_MATCH_KIND,
+        TASK_MESSAGE_KIND,
+    }
     failures = _consecutive_failures(metadata) + 1 if event_woken else 0
     counter = (
         {_CONSECUTIVE_FAILURES: failures} if failures or _consecutive_failures(metadata) else {}
