@@ -1134,6 +1134,8 @@ export interface ReviewPrDetails {
   head_ref: string
   base_ref: string
   author: ReviewUserRef | null
+  created_at: string | null
+  merged_at: string | null
   assignees: Array<ReviewUserRef>
   requested_reviewers: Array<ReviewUserRef>
   labels: Array<{ name: string; color: string | null }>

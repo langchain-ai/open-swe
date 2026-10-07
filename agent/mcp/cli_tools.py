@@ -21,6 +21,7 @@ _TOOL_MODULES = (
     "agent.tools.organization_skills",
     "agent.tools.manage_feature_flags",
     "agent.tools.read_only_sql",
+    "agent.tools.read_store_item",
 )
 
 
