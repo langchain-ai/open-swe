@@ -11,7 +11,7 @@ from xml.etree import ElementTree
 import pytest
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.runtime import Runtime
 from sqlalchemy import delete, func, select, update
 
@@ -451,7 +451,7 @@ async def test_running_task_thread_checkpoints_owed_messages_once(
         assert saved.delivered_at is not None
 
 
-async def test_first_spawn_adds_task_context_without_changing_system_prompt(
+async def test_first_spawn_adds_task_context_to_system_prompt(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from openswe.middleware import task_coordination
@@ -483,12 +483,74 @@ async def test_first_spawn_adds_task_context_without_changing_system_prompt(
         effort="high",
     )
     await middleware.awrap_model_call(request, handler)
-    assert received[0].system_message == received[1].system_message
+    assert received[0].system_message is not None
     assert received[1].system_message is not None
-    assert str(task.id) not in received[1].system_message.text
-    assert str(task.id) in received[1].messages[-1].text
-    assert _COORDINATOR in received[1].messages[-1].text
-    assert len(received[0].messages) + 1 == len(received[1].messages)
+    assert str(task.id) not in received[0].system_message.text
+    assert str(task.id) in received[1].system_message.text
+    assert _COORDINATOR in received[1].system_message.text
+    assert received[0].messages == received[1].messages == request.messages
+
+
+@pytest.mark.parametrize(
+    ("role", "lazy_context"), [("coordinator", False), ("worker", False), ("coordinator", True)]
+)
+async def test_task_context_preserves_model_request_prefix(
+    monkeypatch: pytest.MonkeyPatch, role: store.TaskRole, lazy_context: bool
+) -> None:
+    from openswe.middleware import task_coordination
+
+    thread_id = _COORDINATOR if role == "coordinator" else _WORKER
+    task = store.Task(
+        title="Repair login", workspace_id=uuid4(), coordinator_thread_id=_COORDINATOR
+    )
+    context = store.TaskContext(
+        task, store.TaskMembership(thread_id=thread_id, task_id=task.id, role=role)
+    )
+    monkeypatch.setattr(
+        store.TaskMembership,
+        "context_for_thread",
+        AsyncMock(side_effect=[context, AssertionError("Task context must remain stable")]),
+    )
+    middleware = task_coordination.TaskCoordinationMiddleware(
+        thread_id, "owner", True, None if lazy_context else context
+    )
+    request = ModelRequest(
+        model=FakeListChatModel(responses=["ok"]),
+        messages=[HumanMessage(content="Repair login")],
+        system_message=SystemMessage(content="Existing instructions"),
+    )
+    received: list[ModelRequest] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        received.append(request)
+        return ModelResponse(result=[AIMessage(content="ok")])
+
+    await middleware.awrap_model_call(request, handler)
+    next_request = request.override(
+        messages=[
+            *request.messages,
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "execute", "args": {}, "id": "check-login"}],
+            ),
+            ToolMessage(content="Login repaired", tool_call_id="check-login"),
+        ]
+    )
+    await middleware.awrap_model_call(next_request, handler)
+
+    assert received[0].messages == request.messages
+    assert received[1].messages == next_request.messages
+    assert received[0].system_message is not None
+    assert received[1].system_message is not None
+    assert received[0].system_message.content == received[1].system_message.content
+    assert str(task.id) in received[0].system_message.text
+    first_prefix = "".join(
+        message.model_dump_json() for message in [received[0].system_message, *received[0].messages]
+    ).encode()
+    next_prefix = "".join(
+        message.model_dump_json() for message in [received[1].system_message, *received[1].messages]
+    ).encode()
+    assert next_prefix.startswith(first_prefix)
 
 
 async def test_workspace_deletion_cascades_through_tasks_and_messages(registry_db: None) -> None:
