@@ -696,7 +696,7 @@ async def slack_webhook(
             )
             web = (
                 None
-                if allowed_bot is not None
+                if in_dm_channel or allowed_bot is not None
                 else BreakoutCommand.parse(text, bot_user_id, command="web")
             )
             if web is not None:
