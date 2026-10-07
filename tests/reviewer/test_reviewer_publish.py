@@ -219,8 +219,17 @@ async def test_advisory_summary_updates_latest_commented_review() -> None:
     listed = MagicMock()
     listed.json.return_value = [
         {"id": 10, "state": "COMMENTED", "body": marker},
-        {"id": 11, "state": "COMMENTED", "body": marker},
+        {
+            "id": 11,
+            "state": "COMMENTED",
+            "body": f"## ✅ Open SWE Review: No issues found\n{marker}",
+        },
         {"id": 12, "state": "APPROVED", "body": marker},
+        {
+            "id": 13,
+            "state": "COMMENTED",
+            "body": f"**Open SWE Review** found 3 potential issues.\n{marker}",
+        },
     ]
     updated = MagicMock()
     updated.json.return_value = {"id": 11, "body": f"Updated assessment {marker}"}

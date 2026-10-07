@@ -234,8 +234,8 @@ async def get_assessment_feedback(
     session: dict[str, object] = SESSION_DEP,
 ) -> AssessmentFeedback | None:
     login = str(session["sub"])
-    await require_assessment_access(owner, repo, pr_number, review_id, login)
-    return await feedback_store(review_id).get(login.lower())
+    assessment = await require_assessment_access(owner, repo, pr_number, review_id, login)
+    return await feedback_store(review_id, assessment.head_sha).get(login.lower())
 
 
 @router.put("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")

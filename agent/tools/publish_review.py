@@ -566,6 +566,11 @@ async def _publish_review_async(
                 )
                 if isinstance(current_run_id, str) and current_run_id:
                     langgraph_run_id = current_run_id
+            previous_assessment = await ASSESSMENTS.get(str(review_id))
+            if previous_assessment is not None:
+                await ASSESSMENTS.put(
+                    f"{review_id}:{previous_assessment.head_sha}", previous_assessment
+                )
             await ASSESSMENTS.put(
                 str(review_id),
                 PublishedAssessment(

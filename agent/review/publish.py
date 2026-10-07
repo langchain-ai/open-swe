@@ -345,7 +345,10 @@ def render_review_body(
             if ui_url
             else ""
         )
-        parts.append(f"React 👍 or 👎{feedback_link}.")
+        if approved or surfaced_count:
+            parts.append(f"React 👍 or 👎{feedback_link}.")
+        elif ui_url:
+            parts.append(f"[Rate this assessment in Open SWE]({ui_url}#assessment-feedback).")
     links = []
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")
@@ -641,6 +644,9 @@ async def post_pull_request_review(
                             isinstance(review, dict)
                             and review.get("state") == "COMMENTED"
                             and review_summary_marker(pr_number) in (review.get("body") or "")
+                            and (review.get("body") or "").startswith(
+                                "## ✅ Open SWE Review: No issues found"
+                            )
                             and isinstance(review.get("id"), int)
                         ):
                             latest_review_id = review["id"]
