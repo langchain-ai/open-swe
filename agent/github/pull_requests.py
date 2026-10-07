@@ -104,6 +104,8 @@ _SNAPSHOT_COLUMNS = (
     "assignees",
     "requested_reviewers",
     "github_updated_at",
+    "github_created_at",
+    "merged_at",
 )
 _DIFF_COLUMNS = ("additions", "deletions", "changed_files")
 _WRITE_ONCE_COLUMNS = (
@@ -224,6 +226,8 @@ class PullRequest(Base):
     assignees: Mapped[list[UserRef]] = mapped_column(JSONB, default_factory=list)
     requested_reviewers: Mapped[list[UserRef]] = mapped_column(JSONB, default_factory=list)
     github_updated_at: Mapped[datetime | None] = mapped_column(default=None)
+    github_created_at: Mapped[datetime | None] = mapped_column(default=None)
+    merged_at: Mapped[datetime | None] = mapped_column(default=None)
     synced_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     files_head_sha: Mapped[str] = mapped_column(server_default="", default="", init=False)
     files_base_ref: Mapped[str] = mapped_column(server_default="", default="", init=False)
@@ -923,6 +927,8 @@ class PullRequestPayload(BaseModel):
     changed_files: int | None = None
     commits: int | None = None
     updated_at: datetime | None = None
+    created_at: datetime | None = None
+    merged_at: datetime | None = None
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     author_avatar_url: str | None = Field(None, validation_alias=AliasPath("user", "avatar_url"))
@@ -976,6 +982,8 @@ class PullRequestPayload(BaseModel):
             assignees=_UserPayload.refs(self.assignees),
             requested_reviewers=_UserPayload.refs(self.requested_reviewers),
             github_updated_at=self.updated_at,
+            github_created_at=self.created_at,
+            merged_at=self.merged_at,
         )
 
 

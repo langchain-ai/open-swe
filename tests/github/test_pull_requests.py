@@ -362,6 +362,8 @@ class _GitHub:
                     "title": self.title,
                     "state": "open",
                     "updated_at": self.updated_at,
+                    "created_at": "2026-09-30T12:00:00Z",
+                    "merged_at": None,
                     "user": {"login": "ada", "avatar_url": "https://a/ada.png"},
                     "head": {"ref": "widgets", "sha": self.head},
                     "base": {"ref": "main", "sha": self.base},
@@ -433,6 +435,10 @@ async def test_review_page_reads_the_mirror_once_a_pr_is_listed(github: _GitHub)
     diff = await reviews.get_review_diff("lc", "repo", 7)
 
     assert review["pr"]["head_sha"] == github.head
+    assert (review["pr"]["created_at"], review["pr"]["merged_at"]) == (
+        "2026-09-30T12:00:00+00:00",
+        None,
+    )
     assert review["checks"] == [
         {"name": "lint", "status": "completed", "conclusion": "success", "url": None}
     ]
