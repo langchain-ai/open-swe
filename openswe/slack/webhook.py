@@ -56,6 +56,7 @@ from openswe.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
 from openswe.utils.thread_ops import queue_message_for_thread
+from openswe.utils.thread_participants import slack_participant_ids
 from openswe.utils.thread_settings import load_thread_settings
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace, workspace_for_repo
@@ -1243,7 +1244,9 @@ async def _process_slack_mention_impl(
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.
-        slack_participant_user_ids=[*logins_by_user_id] if not is_first_mention else [],
+        slack_participant_user_ids=slack_participant_ids(context_messages)
+        if not is_first_mention
+        else [],
         visibility=visibility,
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",

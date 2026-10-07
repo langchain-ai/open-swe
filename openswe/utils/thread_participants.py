@@ -1,7 +1,7 @@
 """Resolve verified participants for the active agent thread."""
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 from langgraph.config import get_config
@@ -10,11 +10,13 @@ from langgraph_sdk import get_client
 from openswe.dashboard.agent_overrides import resolve_github_login
 from openswe.github.comments import fetch_github_thread_participants
 from openswe.github.thread_token import resolve_thread_github_token
+from openswe.input_messages import PersonIdentity
 from openswe.slack.client import fetch_slack_thread_messages
 from openswe.source_context import SourceContext
 from openswe.users import User
 from openswe.utils.json_types import as_json_object, thread_metadata
 
+PARTICIPANT_IDENTITY_PREFIX = "participant_identity:"
 PARTICIPANT_LOGINS_KEY = "participant_logins"
 # Slack and Linear senders who have no GitHub mapping are still participants;
 # their email is the only identifier the thread ever learns.
@@ -69,6 +71,98 @@ def participant_logins(stored: Any) -> list[str]:
     return []
 
 
+def _legacy_people(metadata: Mapping[str, object]) -> list[PersonIdentity]:
+    return [
+        {"id": f"github:{login}", "github_login": login}
+        for login in participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))
+    ] + [
+        {"id": f"email:{email}", "email": email}
+        for email in participant_logins(metadata.get(PARTICIPANT_EMAILS_KEY))
+    ]
+
+
+def participant_ids(metadata: Mapping[str, object]) -> set[str]:
+    """Stored people plus every legacy alias not yet covered by an ingress upgrade."""
+    identities = {
+        key.removeprefix(PARTICIPANT_IDENTITY_PREFIX): value
+        for key, value in metadata.items()
+        if key.startswith(PARTICIPANT_IDENTITY_PREFIX) and isinstance(value, str) and value
+    }
+    return set(identities.values()) | {
+        person["id"] for person in _legacy_people(metadata) if person["id"] not in identities
+    }
+
+
+async def participant_metadata(
+    existing: Mapping[str, object],
+    *,
+    login: str | None = None,
+    email: str | None = None,
+    people: Collection[PersonIdentity] = (),
+) -> dict[str, object]:
+    """Resolve participants at ingress, preserving legacy search fields and historical users."""
+    logins = merge_participants(
+        existing.get(PARTICIPANT_LOGINS_KEY),
+        login,
+        *(person.get("github_login") for person in people),
+    )
+    emails = merge_participants(
+        existing.get(PARTICIPANT_EMAILS_KEY), email, *(person.get("email") for person in people)
+    )
+    update: dict[str, object] = {
+        PARTICIPANT_LOGINS_KEY: logins,
+        PARTICIPANT_EMAILS_KEY: emails,
+    }
+    candidates = {person["id"]: person for person in _legacy_people(update)}
+    for key, value in existing.items():
+        if key.startswith(PARTICIPANT_IDENTITY_PREFIX) and isinstance(value, str):
+            alias = key.removeprefix(PARTICIPANT_IDENTITY_PREFIX)
+            if value == alias and not alias.startswith("user:"):
+                person: PersonIdentity = {"id": alias}
+                if alias.startswith("email:"):
+                    person["email"] = alias.removeprefix("email:")
+                candidates.setdefault(alias, person)
+    candidates = {
+        alias: person
+        for alias, person in candidates.items()
+        if not str(existing.get(PARTICIPANT_IDENTITY_PREFIX + alias, "")).startswith("user:")
+    }
+    incoming = _legacy_people(
+        {
+            PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
+            PARTICIPANT_EMAILS_KEY: merge_participants(None, email),
+        }
+    )
+    candidates.update((person["id"], person) for person in [*incoming, *people])
+    resolved = dict(
+        zip(
+            candidates,
+            await asyncio.gather(*(User.canonical_person(p) for p in candidates.values())),
+            strict=True,
+        )
+    )
+    for alias, person in resolved.items():
+        key = PARTICIPANT_IDENTITY_PREFIX + alias
+        previous = existing.get(key)
+        identity = person["id"]
+        if identity == alias and (login := person.get("github_login")):
+            login_alias = f"github:{login.strip().lower()}"
+            linked = resolved.get(login_alias, {}).get("id") or existing.get(
+                PARTICIPANT_IDENTITY_PREFIX + login_alias
+            )
+            if isinstance(linked, str) and linked.startswith("user:"):
+                identity = linked
+        if isinstance(previous, str) and previous.startswith("user:"):
+            if not identity.startswith("user:"):
+                continue
+            if previous != identity:
+                update[PARTICIPANT_IDENTITY_PREFIX + previous] = previous
+        if identity.startswith("user:"):
+            update[PARTICIPANT_IDENTITY_PREFIX + identity] = identity
+        update[key] = identity
+    return update
+
+
 async def _active_mapping_login(login: str | None) -> str | None:
     if not isinstance(login, str) or not login.strip():
         return None
@@ -76,8 +170,8 @@ async def _active_mapping_login(login: str | None) -> str | None:
     return (user.github_login or None) if user is not None else None
 
 
-async def _mapped_slack_logins(messages: list[dict[str, Any]]) -> tuple[set[str], int]:
-    user_ids = {
+def slack_participant_ids(messages: Collection[Mapping[str, object]]) -> set[str]:
+    return {
         user_id
         for message in messages
         if not message.get("bot_id")
@@ -86,6 +180,10 @@ async def _mapped_slack_logins(messages: list[dict[str, Any]]) -> tuple[set[str]
         and isinstance(user_id := message.get("user"), str)
         and user_id
     }
+
+
+async def _mapped_slack_logins(messages: list[dict[str, Any]]) -> tuple[set[str], int]:
+    user_ids = slack_participant_ids(messages)
     resolved = await asyncio.gather(*(User.login_for_slack(user_id) for user_id in user_ids))
     mapped = await asyncio.gather(*(_active_mapping_login(login) for login in resolved))
     return {login for login in mapped if login}, sum(login is None for login in mapped)

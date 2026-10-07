@@ -16,11 +16,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from openswe.slack.events import claim_slack_event
 from openswe.store import now_iso
 from openswe.users import User, UserPreferencesPatch
-from openswe.utils.thread_participants import (
-    PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    participant_logins,
-)
+from openswe.utils.thread_participants import participant_ids
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +62,12 @@ class ThreadActAs:
         thread_id: str,
         requests: dict[str, ActAsRequest],
         decisions: dict[str, ActAsDecision],
-        participant_count: int,
+        participants: set[str],
     ) -> None:
         self.thread_id = thread_id
         self.requests = requests
         self.decisions = decisions
-        self.participant_count = participant_count
+        self._participants = participants
 
     @classmethod
     async def load(cls, thread_id: str) -> Self:
@@ -79,15 +75,10 @@ class ThreadActAs:
         metadata = thread["metadata"] or {}
         requests = _parse(thread_id, metadata, _REQUEST_PREFIX, ActAsRequest)
         decisions = _parse(thread_id, metadata, _DECISION_PREFIX, ActAsDecision)
-        # Senders with no GitHub link are tracked by email only, and can steer the run too.
-        participant_count = len(participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))) + len(
-            participant_logins(metadata.get(PARTICIPANT_EMAILS_KEY))
-        )
-        return cls(thread_id, requests, decisions, participant_count)
+        return cls(thread_id, requests, decisions, participant_ids(metadata))
 
-    @property
     def is_shared(self) -> bool:
-        return self.participant_count > 1
+        return len(self._participants) > 1
 
     def for_login(self, login: str) -> ActAsRequest | None:
         return self.requests.get(ActAsRequest.fingerprint_for(self.thread_id, login))
