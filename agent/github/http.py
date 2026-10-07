@@ -394,6 +394,14 @@ class RepoClient:
         return list(latest.values())
 
 
+async def or_none[T](read: Awaitable[T]) -> T | None:
+    """``read``'s answer, or ``None`` when GitHub could not give one."""
+    try:
+        return await read
+    except httpx2.HTTPError, ValueError:
+        return None
+
+
 class GraphQLError(ValueError):
     """GitHub answered a GraphQL query with errors."""
 

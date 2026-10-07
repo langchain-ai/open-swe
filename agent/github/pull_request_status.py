@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Self
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from agent.github.ci import read_required_checks, unreported_required_checks
-from agent.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient
+from agent.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 
 logger = logging.getLogger(__name__)
 
@@ -271,14 +271,6 @@ class ReviewState:
     review_required: bool = False
 
 
-async def _or_none[T](read: Awaitable[T]) -> T | None:
-    """``read``'s answer, or ``None`` when GitHub could not give one."""
-    try:
-        return await read
-    except httpx2.HTTPError, ValueError:
-        return None
-
-
 class _CursorLoop(Exception):
     """GitHub handed back a page cursor it had already given."""
 
@@ -340,7 +332,7 @@ class PullRequestClient:
         return {"pr_repo_full_name": self.repo.full_name, "pr_number": self.number}
 
     async def pull(self) -> dict[str, Any] | None:
-        payload = await _or_none(self.repo.get(f"pulls/{self.number}"))
+        payload = await or_none(self.repo.get(f"pulls/{self.number}"))
         return payload if isinstance(payload, dict) else None
 
     async def mergeable_pull(self) -> dict[str, Any] | None:
@@ -359,7 +351,7 @@ class PullRequestClient:
         return None
 
     async def reviews(self) -> list[dict[str, Any]] | None:
-        return await _or_none(self.repo.pages(f"pulls/{self.number}/reviews"))
+        return await or_none(self.repo.pages(f"pulls/{self.number}/reviews"))
 
     async def review_decision(self) -> ReviewDecision | None:
         """The standing decision across each reviewer's latest approval, change request or dismissal."""
@@ -540,7 +532,7 @@ class PullRequestClient:
         if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
             return result
         runs, statuses = await asyncio.gather(
-            _or_none(self.repo.check_runs(sha)), _or_none(self.repo.commit_statuses(sha))
+            or_none(self.repo.check_runs(sha)), or_none(self.repo.commit_statuses(sha))
         )
         if runs is not None and statuses is not None:
             failing, pending, inconclusive = _normalize_checks(runs, statuses)
@@ -590,8 +582,8 @@ class PullRequestClient:
             return result
         result.head_sha = sha
         runs, statuses, decision, review_state = await asyncio.gather(
-            _or_none(self.repo.check_runs(sha)),
-            _or_none(self.repo.commit_statuses(sha)),
+            or_none(self.repo.check_runs(sha)),
+            or_none(self.repo.commit_statuses(sha)),
             self.review_decision(),
             self.review_state(),
         )

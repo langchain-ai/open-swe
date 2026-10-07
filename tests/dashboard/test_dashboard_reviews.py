@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from agent.github import app as github_app
 from agent.github import repos
 from agent.review import reviews as review_api
 from agent.review.findings import REVIEWER_THREAD_KIND
@@ -77,7 +78,9 @@ async def test_accessible_repo_full_names_resolves_fresh_each_call(monkeypatch) 
 
 @pytest.mark.asyncio
 async def test_get_review_propagates_a_pull_request_missing_on_github(monkeypatch) -> None:
-    monkeypatch.setattr(review_api, "_require_app_token", AsyncMock(return_value="tok"))
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
     monkeypatch.setattr(
         review_api, "_github_get", AsyncMock(side_effect=HTTPException(404, "not found on GitHub"))
     )

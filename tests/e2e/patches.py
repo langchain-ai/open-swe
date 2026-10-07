@@ -88,6 +88,11 @@ def apply() -> None:
     auth.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry
     auth.get_github_app_installation_token = _dummy_install_token
     auth.get_github_app_installation_id_for_repo = _dummy_install_id
+    # GitHubClient.as_app reads these from their defining module at call time.
+    from agent.github import app as github_app
+
+    github_app.get_github_app_installation_token = _dummy_install_token
+    github_app.get_github_app_installation_id_for_repo = _dummy_install_id
     opr.__dict__["get_github_app_installation_token"] = _dummy_install_token
 
     # The App-token boundary again, for the modules that bound these names at
@@ -321,7 +326,6 @@ def apply() -> None:
 
     for module in (review_reviews, pull_request_diff, review_conversation):
         module.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
-    review_conversation.__dict__["get_valid_access_token"] = _dummy_user_token
     for module in (review_reviews, review_chat, chat_graph):
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff

@@ -11,16 +11,15 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from agent.dashboard.deps import SESSION_DEP
-from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
-from agent.github.checks import github_headers
+from agent.github.http import GitHubClient
+from agent.github.pull_request_status import PullRequestClient
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["review"])
 
 _GITHUB_API = "https://api.github.com"
-_GITHUB_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 _PAGE_SIZE = 100
 
 ReviewState = Literal["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"]
@@ -102,12 +101,6 @@ _REVIEW_STATES: frozenset[str] = frozenset(
 )
 
 
-def _client(token: str) -> httpx2.AsyncClient:
-    return httpx2.AsyncClient(
-        base_url=_GITHUB_API, headers=github_headers(token), timeout=_GITHUB_TIMEOUT
-    )
-
-
 def _error_message(response: httpx2.Response) -> str:
     fallback = f"GitHub request failed ({response.status_code})"
     try:
@@ -123,28 +116,41 @@ def _error_message(response: httpx2.Response) -> str:
     return error.message or details or fallback
 
 
-def _raise_for_github(response: httpx2.Response, method: str, path: str) -> None:
-    if response.status_code < 400:
-        return
-    message = _error_message(response)
-    logger.warning(
-        "GitHub conversation request failed",
-        extra={
-            "http_method": method,
-            "github_path": path,
-            "status_code": response.status_code,
-            "github_message": message,
-        },
-    )
-    raise HTTPException(response.status_code if response.status_code < 500 else 502, message)
+async def _request(
+    github: GitHubClient,
+    method: Literal["GET", "POST"],
+    path: str,
+    *,
+    params: dict[str, int] | None = None,
+    body: str | None = None,
+) -> httpx2.Response:
+    try:
+        if body is None:
+            return await github.request(method, f"{_GITHUB_API}{path}", params=params)
+        return await github.request(method, f"{_GITHUB_API}{path}", json={"body": body})
+    except httpx2.HTTPStatusError as exc:
+        response = exc.response
+        message = _error_message(response)
+        logger.warning(
+            "GitHub conversation request failed",
+            extra={
+                "http_method": method,
+                "github_path": path,
+                "status_code": response.status_code,
+                "github_message": message,
+            },
+        )
+        status = response.status_code if response.status_code < 500 else 502
+        raise HTTPException(status, message) from exc
 
 
-async def _get_all_pages(client: httpx2.AsyncClient, path: str) -> list[object]:
+async def _get_all_pages(github: GitHubClient, path: str) -> list[object]:
     items: list[object] = []
     page = 1
     while True:
-        response = await client.get(path, params={"per_page": _PAGE_SIZE, "page": page})
-        _raise_for_github(response, "GET", path)
+        response = await _request(
+            github, "GET", path, params={"per_page": _PAGE_SIZE, "page": page}
+        )
         batch = response.json()
         if not isinstance(batch, list):
             raise HTTPException(502, "unexpected GitHub response")
@@ -192,13 +198,12 @@ def build_timeline(
     return items
 
 
-async def fetch_conversation(
-    client: httpx2.AsyncClient, owner: str, repo: str, pr_number: int
-) -> Conversation:
+async def fetch_conversation(pull: PullRequestClient) -> Conversation:
+    github, owner, repo, pr_number = pull.repo.github, pull.repo.owner, pull.repo.name, pull.number
     raw_comments, raw_reviews, raw_review_comments = await asyncio.gather(
-        _get_all_pages(client, f"/repos/{owner}/{repo}/issues/{pr_number}/comments"),
-        _get_all_pages(client, f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews"),
-        _get_all_pages(client, f"/repos/{owner}/{repo}/pulls/{pr_number}/comments"),
+        _get_all_pages(github, f"/repos/{owner}/{repo}/issues/{pr_number}/comments"),
+        _get_all_pages(github, f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews"),
+        _get_all_pages(github, f"/repos/{owner}/{repo}/pulls/{pr_number}/comments"),
     )
     try:
         comments = _ISSUE_COMMENTS.validate_python(raw_comments)
@@ -217,12 +222,11 @@ async def fetch_conversation(
     return Conversation(items=build_timeline(comments, reviews, inline_counts))
 
 
-async def post_conversation_comment(
-    client: httpx2.AsyncClient, owner: str, repo: str, pr_number: int, body: str
-) -> ConversationComment:
-    path = f"/repos/{owner}/{repo}/issues/{pr_number}/comments"
-    response = await client.post(path, json={"body": body})
-    _raise_for_github(response, "POST", path)
+async def post_conversation_comment(pull: PullRequestClient, body: str) -> ConversationComment:
+    owner, repo, pr_number = pull.repo.owner, pull.repo.name, pull.number
+    response = await _request(
+        pull.repo.github, "POST", f"/repos/{owner}/{repo}/issues/{pr_number}/comments", body=body
+    )
     try:
         created = _GitHubIssueComment.model_validate(response.json())
     except (ValueError, ValidationError) as exc:
@@ -235,13 +239,6 @@ async def post_conversation_comment(
     return _comment_item(created)
 
 
-async def _viewer_token(login: str) -> str:
-    token = await get_valid_access_token(login)
-    if not token:
-        raise HTTPException(401, "GitHub re-auth required")
-    return token
-
-
 @router.get("/reviews/{owner}/{repo}/{pr_number}/conversation")
 async def api_get_review_conversation(
     owner: str,
@@ -250,9 +247,8 @@ async def api_get_review_conversation(
     session: dict[str, Any] = SESSION_DEP,
 ) -> Conversation:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    token = await _viewer_token(session["sub"])
-    async with _client(token) as client:
-        return await fetch_conversation(client, owner, repo, pr_number)
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await fetch_conversation(github.repo(owner, repo).pull_request(pr_number))
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/conversation/comments")
@@ -267,6 +263,7 @@ async def api_post_review_conversation_comment(
     body = comment.body.strip()
     if not body:
         raise HTTPException(422, "comment body is required")
-    token = await _viewer_token(session["sub"])
-    async with _client(token) as client:
-        return await post_conversation_comment(client, owner, repo, pr_number, body)
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await post_conversation_comment(
+            github.repo(owner, repo).pull_request(pr_number), body
+        )

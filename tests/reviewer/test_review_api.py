@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi import HTTPException
 
@@ -48,17 +50,20 @@ def test_image_content_type_allowlist_excludes_svg():
 
 
 async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
-    async def fake_github_get(path, token, **kwargs):
+    async def fake_github_get(github, path, **kwargs):
         return {"body": "see ![diagram](https://x.githubusercontent.com/a.png)"}
 
+    monkeypatch.setattr(
+        "agent.github.app.get_github_app_installation_token", AsyncMock(return_value="tok")
+    )
     monkeypatch.setattr("agent.review.reviews._github_get", fake_github_get)
 
     # A URL not present in the PR body (cross-repo IDOR attempt) is rejected.
     with pytest.raises(HTTPException) as exc:
         await _require_image_in_pr(
-            "acme", "repo", 7, "https://x.githubusercontent.com/other-repo.png", "tok"
+            "acme", "repo", 7, "https://x.githubusercontent.com/other-repo.png"
         )
     assert exc.value.status_code == 403
 
     # A URL actually embedded in the PR body is allowed.
-    await _require_image_in_pr("acme", "repo", 7, "https://x.githubusercontent.com/a.png", "tok")
+    await _require_image_in_pr("acme", "repo", 7, "https://x.githubusercontent.com/a.png")

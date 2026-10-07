@@ -1,10 +1,13 @@
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 import httpx2
 import pytest
 from fastapi import HTTPException
 
+from agent.dashboard import profiles
+from agent.github import http as github_http
 from agent.github.checks import github_headers
 from agent.review import conversation
 from agent.review.conversation import (
@@ -32,7 +35,7 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], list[httpx2.R
         return "viewer-token"
 
     monkeypatch.setattr(conversation, "require_repo_access_for_user", allow)
-    monkeypatch.setattr(conversation, "get_valid_access_token", token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", token)
 
     def install(handler: Handler) -> list[httpx2.Request]:
         seen: list[httpx2.Request] = []
@@ -41,14 +44,14 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], list[httpx2.R
             seen.append(request)
             return handler(request)
 
-        def client(token: str) -> httpx2.AsyncClient:
-            return httpx2.AsyncClient(
-                base_url="https://api.github.com",
-                headers=github_headers(token),
-                transport=httpx2.MockTransport(record),
-            )
+        @asynccontextmanager
+        async def client(*, token: str, **_kwargs: object) -> AsyncIterator[httpx2.AsyncClient]:
+            async with httpx2.AsyncClient(
+                headers=github_headers(token), transport=httpx2.MockTransport(record)
+            ) as http:
+                yield http
 
-        monkeypatch.setattr(conversation, "_client", client)
+        monkeypatch.setattr(github_http, "github_client", client)
         return seen
 
     return install

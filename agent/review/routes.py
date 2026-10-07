@@ -1,5 +1,7 @@
 """HTTP API for the PR review feature: reviews, review chat, and review styles."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, Self
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -9,8 +11,8 @@ from pydantic.alias_generators import to_camel
 
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
 from agent.dashboard.options import model_supports_effort
-from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
+from agent.github.http import GitHubClient, RepoClient
 from agent.github.pull_request_status import pull_request_identity
 from agent.github.repos import accessible_repo_full_names
 from agent.review.analyzer_cron import remove_continual_cron
@@ -257,11 +259,8 @@ async def api_get_pull_request_preview(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PullRequestPreview:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await get_pull_request_preview(owner, repo, pr_number, token)
+    async with _as_viewer(session, owner, repo) as repository:
+        return await get_pull_request_preview(repository.pull_request(pr_number))
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
@@ -374,8 +373,8 @@ async def api_post_review_comment(
     comment: PendingReviewCommentInput,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PostedReviewComment:
-    token = await _viewer_token(session, owner, repo)
-    return await post_review_comment(owner, repo, pr_number, comment, token=token)
+    async with _as_viewer(session, owner, repo) as repository:
+        return await post_review_comment(repository.pull_request(pr_number), comment)
 
 
 class PullRequestReviewSubmit(BaseModel):
@@ -391,32 +390,28 @@ async def api_submit_pull_request_review(
     review: PullRequestReviewSubmit,
     session: dict[str, Any] = SESSION_DEP,
 ) -> SubmittedReview:
-    token = await _viewer_token(session, owner, repo)
-    return await submit_pull_request_review(
-        owner,
-        repo,
-        pr_number,
-        token=token,
-        login=session["sub"],
-        event=review.event,
-        body=review.body.strip(),
-    )
+    async with _as_viewer(session, owner, repo) as repository:
+        return await submit_pull_request_review(
+            repository.pull_request(pr_number),
+            login=session["sub"],
+            event=review.event,
+            body=review.body.strip(),
+        )
 
 
-async def _viewer_token(session: dict[str, Any], owner: str, repo: str) -> str:
+@asynccontextmanager
+async def _as_viewer(session: dict[str, Any], owner: str, repo: str) -> AsyncIterator[RepoClient]:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub re-auth required")
-    return token
+    async with GitHubClient.as_user(session["sub"]) as github:
+        yield github.repo(owner, repo)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/pending-review")
 async def api_get_pending_review(
     owner: str, repo: str, pr_number: int, session: dict[str, Any] = SESSION_DEP
 ) -> PendingReview | None:
-    token = await _viewer_token(session, owner, repo)
-    return await get_pending_review(owner, repo, pr_number, token=token, login=session["sub"])
+    async with _as_viewer(session, owner, repo) as repository:
+        return await get_pending_review(repository.pull_request(pr_number), login=session["sub"])
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/pending-review/comments")
@@ -427,10 +422,10 @@ async def api_add_pending_review_comment(
     comment: PendingReviewCommentInput,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PendingReview:
-    token = await _viewer_token(session, owner, repo)
-    return await add_pending_review_comment(
-        owner, repo, pr_number, comment, token=token, login=session["sub"]
-    )
+    async with _as_viewer(session, owner, repo) as repository:
+        return await add_pending_review_comment(
+            repository.pull_request(pr_number), comment, login=session["sub"]
+        )
 
 
 class PendingReviewCommentUpdate(BaseModel):
@@ -446,10 +441,13 @@ async def api_update_pending_review_comment(
     update: PendingReviewCommentUpdate,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PendingReview:
-    token = await _viewer_token(session, owner, repo)
-    return await update_pending_review_comment(
-        owner, repo, pr_number, comment_id, update.body.strip(), token=token, login=session["sub"]
-    )
+    async with _as_viewer(session, owner, repo) as repository:
+        return await update_pending_review_comment(
+            repository.pull_request(pr_number),
+            comment_id,
+            update.body.strip(),
+            login=session["sub"],
+        )
 
 
 @router.delete("/reviews/{owner}/{repo}/{pr_number}/pending-review/comments/{comment_id}")
@@ -460,9 +458,9 @@ async def api_delete_pending_review_comment(
     comment_id: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PendingReview | None:
-    token = await _viewer_token(session, owner, repo)
-    await delete_pending_review_comment(owner, repo, comment_id, token=token)
-    return await get_pending_review(owner, repo, pr_number, token=token, login=session["sub"])
+    async with _as_viewer(session, owner, repo) as repository:
+        await delete_pending_review_comment(repository, comment_id)
+        return await get_pending_review(repository.pull_request(pr_number), login=session["sub"])
 
 
 class PendingReviewDiscarded(BaseModel):
@@ -473,12 +471,11 @@ class PendingReviewDiscarded(BaseModel):
 async def api_discard_pending_review(
     owner: str, repo: str, pr_number: int, session: dict[str, Any] = SESSION_DEP
 ) -> PendingReviewDiscarded:
-    token = await _viewer_token(session, owner, repo)
-    return PendingReviewDiscarded(
-        discarded=await discard_pending_review(
-            owner, repo, pr_number, token=token, login=session["sub"]
+    async with _as_viewer(session, owner, repo) as repository:
+        discarded = await discard_pending_review(
+            repository.pull_request(pr_number), login=session["sub"]
         )
-    )
+    return PendingReviewDiscarded(discarded=discarded)
 
 
 class ReviewCommentUpdate(BaseModel):
@@ -494,22 +491,16 @@ async def api_update_review_comment(
     comment: ReviewCommentUpdate,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     body = comment.body.strip()
     if not body:
         raise HTTPException(422, "comment body is required")
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub re-auth required")
-    return await update_review_comment(
-        owner,
-        repo,
-        pr_number,
-        comment_id,
-        token=token,
-        viewer_login=session["sub"],
-        body=body,
-    )
+    async with _as_viewer(session, owner, repo) as repository:
+        return await update_review_comment(
+            repository.pull_request(pr_number),
+            comment_id,
+            viewer_login=session["sub"],
+            body=body,
+        )
 
 
 # --- PR chat (sandbox-less ``chat`` graph) -----------------------------------
