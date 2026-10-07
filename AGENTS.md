@@ -4,9 +4,9 @@ Open SWE is an asynchronous coding agent and software factory. Graphs and the Fa
 
 Local setup: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-## Till the soil first
+## Constant gardening
 
-Before making any change, refactor the surrounding code so the change slots in naturally and the result reads as if it had always been designed that way. Spend real effort here; the goal is constant gardening, not bolting features onto whatever shape the code happens to be in.
+Before making any change, first till the soil: refactor the surrounding code so the change slots in naturally and the result reads as if it had always been designed that way. Spend real effort here rather than bolting features onto whatever shape the code happens to be in.
 
 ## Conventions
 
