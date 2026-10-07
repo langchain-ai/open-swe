@@ -183,6 +183,14 @@ export function RunningAgentsSection() {
                   <p className="truncate font-mono text-[11px] text-muted-foreground">
                     {thread.repoFullName || "no repo"} · {thread.id}
                   </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Thread started{" "}
+                    <time dateTime={new Date(thread.createdAt).toISOString()}>
+                      {new Date(thread.createdAt).toLocaleString(undefined, {
+                        timeZoneName: "short",
+                      })}
+                    </time>
+                  </p>
                 </Link>
                 <Button
                   size="sm"

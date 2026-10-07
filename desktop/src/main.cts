@@ -340,6 +340,15 @@ function threadRoot(thread) {
   return thread.worktreePath || project;
 }
 
+async function projectForRepo(repo) {
+  if (typeof repo !== "string" || !repo) return null;
+  for (const project of listProjects()) {
+    const origin = await originRepo(project.cwd);
+    if (origin?.toLowerCase() === repo.toLowerCase()) return project.cwd;
+  }
+  return null;
+}
+
 /** A thread this Mac has a checkout for, whichever backend runs it. */
 function findLocalThread(threadId) {
   return localThreadStore.get(threadId) ?? legacyThreadStore.get(threadId);
@@ -900,6 +909,38 @@ function configureDesktopIpc() {
       thread = await recordLocalCheckpoint(thread);
       const bridgeId = await localBridges.ensure(thread.id);
       return { bridgeId, repo: await originRepo(threadRoot(thread)) };
+    } catch (error) {
+      await discardLocalThread(thread);
+      throw error;
+    }
+  });
+  /**
+   * Move a cloud thread onto This Mac: the worktree it had here, or a fresh one
+   * of the project whose origin is the thread's repository, and the bridge its
+   * next run hands the cloud checkout over through.
+   */
+  ipcMain.handle("desktop:take-over-thread", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    const existing = localThreadStore.get(input?.threadId);
+    if (existing) {
+      // Its worktree and bridge may be the source of a handoff still pending.
+      // A thread that ran in the user's own checkout moves to a worktree, so
+      // the handoff never overwrites that checkout.
+      const thread = existing.worktreePath
+        ? await ensureThreadWorktree(existing)
+        : await recordLocalCheckpoint(
+            await createThreadWorktree(existing, null),
+          );
+      return localBridges.ensure(thread.id);
+    }
+    const cwd = await projectForRepo(input?.repo);
+    if (!cwd)
+      throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
+    let thread = localThreadStore.create({ id: input?.threadId, cwd });
+    try {
+      thread = await createThreadWorktree(thread, null);
+      thread = await recordLocalCheckpoint(thread);
+      return await localBridges.ensure(thread.id);
     } catch (error) {
       await discardLocalThread(thread);
       throw error;

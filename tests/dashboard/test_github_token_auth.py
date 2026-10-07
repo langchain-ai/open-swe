@@ -4,8 +4,8 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from agent.dashboard import oauth
-from agent.github import token_auth as github_token_auth
+from openswe.dashboard import oauth
+from openswe.github import token_auth as github_token_auth
 
 
 def _request(

@@ -73,6 +73,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.invoke("desktop:delete-legacy-local-thread", threadId),
   prepareLocalThread: (input) =>
     ipcRenderer.invoke("desktop:prepare-local-thread", { ...input }),
+  takeOverThread: (input) =>
+    ipcRenderer.invoke("desktop:take-over-thread", { ...input }),
   ensureLocalBridge: (threadId) =>
     ipcRenderer.invoke("desktop:ensure-local-bridge", threadId),
   getLocalThread: (threadId) =>

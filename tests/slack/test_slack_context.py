@@ -5,20 +5,20 @@ from xml.etree import ElementTree
 
 import pytest
 
-from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
-from agent.run_config import Repo
-from agent.slack import client as slack_utils
-from agent.slack import webhook as slack_webhooks
-from agent.slack.channels import SlackChannel
-from agent.slack.client import (
+from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.run_config import Repo
+from openswe.slack import client as slack_utils
+from openswe.slack import webhook as slack_webhooks
+from openswe.slack.channels import SlackChannel
+from openswe.slack.client import (
     format_slack_messages_for_prompt,
 )
-from agent.slack.payloads import SlackChannelContext, SlackChannelPayload
-from agent.slack.request import SlackRequest
-from agent.source_context import SourceContext
-from agent.utils.run_usage import RunUsageSummary
-from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.slack.payloads import SlackChannelContext, SlackChannelPayload
+from openswe.slack.request import SlackRequest
+from openswe.source_context import SourceContext
+from openswe.utils.run_usage import RunUsageSummary
+from openswe.webhooks import common as webhook_common
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -340,7 +340,7 @@ async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fa
 
 @pytest.fixture
 async def slack_file_mention(monkeypatch, fake_store, registry_db):
-    from agent.sandboxes import lifecycle, state
+    from openswe.sandboxes import lifecycle, state
 
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -503,9 +503,9 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
 
     import langgraph_sdk
 
-    from agent.dashboard import profiles
+    from openswe.dashboard import profiles
 
-    opr = importlib.import_module("agent.tools.open_pull_request")
+    opr = importlib.import_module("openswe.tools.open_pull_request")
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     client = slack_webhooks.get_langgraph_client()
@@ -549,7 +549,7 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     ) == explicitly_tagged
     run_config = kwargs["config"]
     run_config["configurable"]["thread_id"] = run_create["thread_id"]
-    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
 
     assert asyncio.run(opr._resolve_pr_author_token()) == ("bob-token", "user")
     assert saved_metadata["owner_login"] == "alice"
