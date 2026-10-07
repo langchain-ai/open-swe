@@ -204,7 +204,9 @@ export function OwnershipPicker({
         )}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex items-center gap-2">
-            <span className="truncate">{item.label}</span>
+            <span className="truncate" title={item.label}>
+              {item.label}
+            </span>
             {item.meta && (
               <span className="shrink-0 text-xs text-muted-foreground">
                 {item.meta}

@@ -1,4 +1,4 @@
-from agent.dashboard.workspace_settings import (
+from openswe.dashboard.workspace_settings import (
     REVIEW_SCOUT_FALLBACK_MODEL,
     WorkspaceSettings,
 )

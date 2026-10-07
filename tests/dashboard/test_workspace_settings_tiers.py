@@ -3,16 +3,16 @@
 import pytest
 from fastapi import HTTPException, Request
 
-from agent.audit_logs.models import AuditLog
-from agent.dashboard import workspace_settings, workspace_settings_cache
-from agent.dashboard.workspace_settings import (
+from openswe.audit_logs.models import AuditLog
+from openswe.dashboard import workspace_settings, workspace_settings_cache
+from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_instance_settings,
     get_workspace_settings,
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
 
 

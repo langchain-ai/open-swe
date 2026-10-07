@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { ErrorState, isReadUnavailable } from "./shared"
 import { workspaceApi } from "./workspace-api"
 
@@ -11,7 +12,12 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
   const documents = useQuery({
     queryKey: ["incidents", "documents", incidentId, "current"],
     queryFn: () => workspaceApi.documents(incidentId),
-    refetchInterval: 5000,
+    meta: {
+      invalidatedBy: [
+        invalidationTopic("incidents", incidentId),
+        invalidationTopic("incident-settings"),
+      ],
+    },
     retry: false,
   })
   if (documents.isPending)

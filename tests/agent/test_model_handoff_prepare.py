@@ -10,17 +10,17 @@ from langchain_core.tracers.langchain import LangChainTracer
 from langsmith import trace, tracing_context
 from langsmith.run_trees import RunTree
 
-import agent.server as server
-from agent.dashboard.options import available_requested_models
-from agent.middleware.model_selection import (
+import openswe.server as server
+from openswe.dashboard.options import available_requested_models
+from openswe.middleware.model_selection import (
     ModelSelectionMiddleware,
     ModelSelectionState,
     SelectedRoute,
 )
-from agent.middleware.prepare_run import PrepareRunState
-from agent.model_request import ModelRequestIntent
-from agent.utils.jev import JevDecision
-from agent.utils.thread_settings import ThreadSettings
+from openswe.middleware.prepare_run import PrepareRunState
+from openswe.model_request import ModelRequestIntent
+from openswe.utils.jev import JevDecision
+from openswe.utils.thread_settings import ThreadSettings
 
 
 @dataclass
@@ -211,7 +211,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     assert selection is not None
     selection._routing_mode = "auto"
     classify = AsyncMock(return_value=fresh_route)
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", classify)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     state: ModelSelectionState = {
         "messages": [HumanMessage(content="Fix the typo")],
         "model_route": previous_route,

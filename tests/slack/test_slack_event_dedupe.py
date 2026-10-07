@@ -9,14 +9,14 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.slack import events as slack_events
-from agent.slack import failures as slack_failures
-from agent.slack import routes as slack_routes
-from agent.slack import unfurls
-from agent.slack.channels import SlackChannel
-from agent.slack.payloads import SlackChannelContext, SlackEventEnvelope
-from agent.users import User, UserIdentity
-from agent.webhooks import common as webhook_common
+from openswe.slack import events as slack_events
+from openswe.slack import failures as slack_failures
+from openswe.slack import routes as slack_routes
+from openswe.slack import unfurls
+from openswe.slack.channels import SlackChannel
+from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
+from openswe.users import User, UserIdentity
+from openswe.webhooks import common as webhook_common
 
 
 @pytest.mark.parametrize(
@@ -292,7 +292,9 @@ async def _post(
 def _patch_slack_webhook(monkeypatch: pytest.MonkeyPatch) -> _FakeClient:
     slack_events.reset_slack_event_claims()
     client = _FakeClient()
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)

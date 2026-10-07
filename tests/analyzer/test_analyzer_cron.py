@@ -2,8 +2,8 @@ from typing import Any
 
 import pytest
 
-from agent.review import analyzer_cron
-from agent.review.styles import REVIEW_STYLES, ReviewStyle
+from openswe.review import analyzer_cron
+from openswe.review.styles import REVIEW_STYLES, ReviewStyle
 
 
 class _FakeCrons:

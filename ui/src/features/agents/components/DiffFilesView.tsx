@@ -1,9 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  MultiFileDiff,
-  Virtualizer,
-  WorkerPoolContextProvider,
-} from "@pierre/diffs/react"
+import { Virtualizer, WorkerPoolContextProvider } from "@pierre/diffs/react"
 import {
   FileTree,
   useFileTree,
@@ -24,6 +20,7 @@ import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { ScopedFileDiff } from "@/features/agents/components/ScopedFileDiff"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -401,7 +398,7 @@ const FileDiffSection = memo(
                 } as React.CSSProperties
               }
             >
-              <MultiFileDiff
+              <ScopedFileDiff
                 oldFile={oldFile}
                 newFile={newFile}
                 options={options}

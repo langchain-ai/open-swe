@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-import agent.utils.build_info as build_info_module
-from agent.utils.build_info import backend_build_info, build_info
+import openswe.utils.build_info as build_info_module
+from openswe.utils.build_info import backend_build_info, build_info
 
 
 @pytest.fixture(autouse=True)

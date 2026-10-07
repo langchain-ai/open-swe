@@ -4,8 +4,8 @@ import importlib
 
 import pytest
 
-from agent.sandboxes.providers import registry
-from agent.sandboxes.providers.registry import (
+from openswe.sandboxes.providers import registry
+from openswe.sandboxes.providers.registry import (
     _load_sandbox_factory,
 )
 

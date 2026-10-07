@@ -6,13 +6,13 @@ import langgraph_sdk
 import pytest
 from langchain_core.tools import StructuredTool
 
-from agent.tool_loaders import notion_mcp
+from openswe.tool_loaders import notion_mcp
 
 
 @pytest.fixture(autouse=True)
 def _resolve_participant(monkeypatch):
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "openswe.run_config.get_config",
         lambda: {"configurable": {"thread_id": "notion-thread", "github_login": "alice"}},
     )
     monkeypatch.setattr(
