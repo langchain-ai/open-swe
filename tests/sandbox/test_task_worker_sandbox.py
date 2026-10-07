@@ -9,15 +9,18 @@ from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
 from agent.tasks.store import Task, TaskContext, TaskMembership
+from agent.workspaces.rows import WorkspaceRow
 
 
 @pytest.fixture
 def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, object]]:
+    workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
         coordinator_thread_id="coordinator",
         title="Fix login",
-        workspace="default",
+        workspace_id=workspace.id,
     )
+    task.workspace = workspace
     metadata: dict[str, dict[str, object]] = {
         "coordinator": {
             "owner_type": "user",
@@ -166,7 +169,7 @@ async def test_worker_does_not_replace_a_deleted_host_sandbox(
     assert shared_sandbox["worker"]["sandbox_id"] == "sb-old"
 
 
-@pytest.mark.parametrize("invalid_binding", ["membership", "repository_scope"])
+@pytest.mark.parametrize("invalid_binding", ["membership", "repository_scope", "workspace"])
 async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
     shared_sandbox: dict[str, dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
@@ -174,6 +177,8 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
 ) -> None:
     if invalid_binding == "membership":
         shared_sandbox["worker"]["sandbox_host_thread_id"] = "another-coordinator"
+    elif invalid_binding == "workspace":
+        shared_sandbox["worker"]["workspace"] = "another-workspace"
     else:
         shared_sandbox["worker"]["github_token_repositories"] = []
     connect = AsyncMock()

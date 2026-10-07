@@ -385,9 +385,10 @@ async def _attach_task_worker_sandbox(
         or not owner.strip()
         or not isinstance(host_owner, str)
         or owner.strip().lower() != host_owner.strip().lower()
-        or metadata.get("workspace") != context.task.workspace
-        or (host.get("workspace") or host.get("environment") or "default") != context.task.workspace
-        or (workspace_slug is not None and workspace_slug != context.task.workspace)
+        or metadata.get("workspace") != context.task.workspace.slug
+        or (host.get("workspace") or host.get("environment") or "default")
+        != context.task.workspace.slug
+        or (workspace_slug is not None and workspace_slug != context.task.workspace.slug)
         or metadata.get("admin_thread", False) != host.get("admin_thread", False)
         or metadata.get("visibility", "public") != host.get("visibility", "public")
     ):
@@ -404,7 +405,7 @@ async def _attach_task_worker_sandbox(
     ):
         raise PermissionError("The shared sandbox grants repositories outside this worker's scope")
     backend = await ensure_sandbox_for_thread(
-        host_id, workspace_slug=context.task.workspace, require_existing=True
+        host_id, workspace_slug=context.task.workspace.slug, require_existing=True
     )
     current_host = await get_sandbox_metadata(host_id)
     if current_host.get("sandbox_id") != backend.id:

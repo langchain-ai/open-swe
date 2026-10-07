@@ -78,7 +78,7 @@ async def authorized_context(actor: Actor, *, coordinator: bool = False) -> stor
     if context is None:
         raise ValueError("No task exists yet; spawn_worker creates it on first delegation")
     workspace = metadata.get("workspace") or metadata.get("environment")
-    if workspace and workspace != context.task.workspace:
+    if workspace and workspace != context.task.workspace.slug:
         raise PermissionError("The thread no longer belongs to the task's workspace")
     if coordinator and (
         context.membership.role != "coordinator"
@@ -165,9 +165,9 @@ async def record_event(
 ) -> None:
     config = await recipient_config(recipient_thread_id)
     workspace = config.get("workspace")
-    if workspace and workspace != task.workspace:
+    if workspace and workspace != task.workspace.slug:
         raise PermissionError("The recipient no longer belongs to the task's workspace")
-    config["workspace"] = task.workspace
+    config["workspace"] = task.workspace.slug
     async with postgres.session() as session:
         await session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
@@ -219,7 +219,7 @@ async def owned_worker(
         raise PermissionError("Choose a worker belonging to this task")
     try:
         metadata = await authorized_metadata(actor, worker_thread_id)
-        if metadata.get("workspace") != context.task.workspace:
+        if metadata.get("workspace") != context.task.workspace.slug:
             raise PermissionError("The worker no longer belongs to the task's workspace")
     except NotFoundError:
         logger.info(
@@ -264,7 +264,7 @@ async def launch_worker(
         origin="task",
         thread_category="interactive",
         trigger_kind="task_delegation",
-        workspace=task.workspace,
+        workspace=task.workspace.slug,
         sandbox_host_thread_id=delegation.coordinator_thread_id,
         task_id=str(task.id),
         model=delegation.model,
@@ -352,7 +352,7 @@ async def spawn_worker(
     workspace_value = metadata.get("workspace") or metadata.get("environment")
     workspace = await resolve_workspace(
         thread_workspace=(
-            context.task.workspace
+            context.task.workspace.slug
             if context is not None
             else workspace_value
             if isinstance(workspace_value, str)

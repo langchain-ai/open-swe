@@ -14,7 +14,7 @@ def upgrade() -> None:
             id uuid PRIMARY KEY,
             coordinator_thread_id text UNIQUE,
             title text NOT NULL,
-            workspace text NOT NULL,
+            workspace_id uuid NOT NULL REFERENCES workspace(id),
             delegated boolean NOT NULL DEFAULT false,
             UNIQUE (id, coordinator_thread_id)
         )

@@ -2,11 +2,12 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID, uuid7
 
-from sqlalchemy import Text, select, text, update
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import ForeignKey, Text, select, text, update
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agent.database import postgres
 from agent.database.orm import Base
+from agent.workspaces.rows import WorkspaceRow
 
 type TaskRole = Literal["coordinator", "worker"]
 
@@ -15,7 +16,8 @@ class Task(Base):
     __tablename__ = "task"
 
     title: Mapped[str]
-    workspace: Mapped[str]
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id"))
+    workspace: Mapped[WorkspaceRow] = relationship(init=False, lazy="joined", innerjoin=True)
     coordinator_thread_id: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delegated: Mapped[bool] = mapped_column(default=False)
@@ -101,27 +103,33 @@ async def reserve_worker(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
             {"key": f"task-delegation:{coordinator_thread_id}"},
         )
+        workspace_row = await session.scalar(
+            select(WorkspaceRow).where(WorkspaceRow.slug == workspace)
+        )
+        if workspace_row is None:
+            raise ValueError("The task's workspace no longer exists")
         membership = await session.get(TaskMembership, coordinator_thread_id)
         if membership is None:
             task = Task(
                 coordinator_thread_id=coordinator_thread_id,
                 title=title,
-                workspace=workspace,
+                workspace_id=workspace_row.id,
             )
+            task.workspace = workspace_row
             session.add(task)
             await session.flush()
             session.add(
                 TaskMembership(thread_id=coordinator_thread_id, task_id=task.id, role="coordinator")
             )
         else:
-            task = await session.get(Task, membership.task_id, with_for_update=True)
+            task = await session.get(Task, membership.task_id, with_for_update={"of": Task})
             if (
                 task is None
                 or membership.role != "coordinator"
                 or task.coordinator_thread_id != coordinator_thread_id
             ):
                 raise PermissionError("Only the coordinator can delegate")
-            if task.workspace != workspace:
+            if task.workspace_id != workspace_row.id:
                 raise PermissionError("The thread no longer belongs to the task's workspace")
         existing = await session.get(TaskDelegation, worker_thread_id)
         if existing is not None:

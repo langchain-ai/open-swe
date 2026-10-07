@@ -91,11 +91,14 @@ async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPat
 
 
 def task() -> store.Task:
-    return store.Task(
+    workspace = WorkspaceRow(slug="default", name="Default")
+    task = store.Task(
         coordinator_thread_id=COORDINATOR,
         title="Fix login",
-        workspace="default",
+        workspace_id=workspace.id,
     )
+    task.workspace = workspace
+    return task
 
 
 @pytest.fixture
@@ -354,6 +357,10 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
+    workspace = WorkspaceRow(slug="engineering", name="Engineering")
+    async with postgres.session() as session:
+        session.add(workspace)
+    client.metadata[COORDINATOR]["workspace"] = workspace.slug
     client.metadata[COORDINATOR]["title"] = "Fix login"
     assert await store.load_context(COORDINATOR) is None
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
@@ -376,6 +383,7 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert context.membership.role == "coordinator"
     assert context.task.coordinator_thread_id == COORDINATOR
     assert context.task.title == "Fix login"
+    assert context.task.workspace_id == workspace.id
     assert context.task.delegated is True
     worker_context = await store.load_context(worker_id)
     assert worker_context is not None
@@ -408,6 +416,8 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert worker_config["agent_model_id"] == MODEL
     assert worker_config["agent_effort"] == "low"
     assert worker_config["model_selection"] == "explicit"
+    assert worker_config["workspace"] == workspace.slug
+    assert client.metadata[worker_id]["workspace"] == workspace.slug
     assert "slack_thread" not in worker_config
     assert len(await store.list_delegations(context.task.id)) == 1
     assert client.metadata[worker_id]["sandbox_id"] == "shared-sandbox"
