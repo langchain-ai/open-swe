@@ -694,7 +694,7 @@ export function AgentThreadView({
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className="flex min-w-0 flex-1 flex-col"
+        className="flex min-w-0 flex-1 flex-col bg-pink-100 dark:bg-pink-950"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         <AgentThreadHeader
