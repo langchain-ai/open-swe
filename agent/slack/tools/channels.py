@@ -195,7 +195,7 @@ async def slack_post_message(
             return {"success": False, "error": "invalid_slack_response"}
         seen_cursors.add(cursor)
 
-    blocks = markdown_blocks(message)
+    blocks = markdown_blocks(message) or []
     cfg = RunConfig.from_runtime()
     if cfg.thread_id:
         location = await run_slack_location(cfg, cfg.thread_id)
