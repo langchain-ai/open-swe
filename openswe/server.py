@@ -154,7 +154,7 @@ from openswe.model_request import (
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import construct_system_prompt
-from openswe.prompts import apply_tool_descriptions, load_prompt
+from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -643,7 +643,7 @@ class _SubagentToolGuard(AgentMiddleware):
     ) -> ToolMessage | Command:
         if _is_subagent_excluded_tool(request.tool_call["name"]):
             return ToolMessage(
-                content=load_prompt("tools/subagent-unavailable.md"),
+                content=prompt("tools/subagent-unavailable"),
                 tool_call_id=request.tool_call["id"],
             )
         return await handler(request)
@@ -664,7 +664,7 @@ def _general_purpose_subagent(
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": (
             f"{GENERAL_PURPOSE_SUBAGENT['description']} "
-            f"{load_prompt('system/general-purpose-subagent-suffix.md')}"
+            f"{prompt('system/general-purpose-subagent-suffix')}"
         ),
         "mode": "fork",
         "model": model,
