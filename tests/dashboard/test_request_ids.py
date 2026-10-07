@@ -6,9 +6,9 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from agent.api import request_ids
-from agent.dashboard.client_errors import router as client_errors_router
-from agent.dashboard.oauth import require_session
+from openswe.api import request_ids
+from openswe.dashboard.client_errors import router as client_errors_router
+from openswe.dashboard.oauth import require_session
 
 REQUEST_ID = "req_0f8fad5b-d9cb-469f-a165-70867728950e"
 

@@ -490,7 +490,13 @@ export interface AgentSubagentSummary {
   endedAt: number | null
 }
 
+export type TaskMembership =
+  | { role: "coordinator"; taskId: string }
+  | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
+
 export interface AgentThread {
+  taskMembership?: TaskMembership
+  taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
   visibility?: "public" | "private"
   id: string
@@ -537,6 +543,8 @@ export interface AgentThread {
   sandboxId?: string | null
   /** For a thread bridged to someone's machine: which app serves it. */
   sandboxBridgeClient?: "cli" | "desktop" | null
+  /** Whether that machine is serving the thread's checkout right now; null in lists. */
+  sandboxBridgeOnline?: boolean | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

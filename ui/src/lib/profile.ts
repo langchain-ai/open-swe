@@ -153,6 +153,9 @@ export function usePatchProfile() {
     },
     onSuccess: (saved, write) => {
       qc.setQueryData(profileQueryKey(write.login), saved)
+      if (write.patch.experimental_task_coordination !== undefined) {
+        void qc.invalidateQueries({ queryKey: ["agent-threads"] })
+      }
     },
     onSettled: async (_saved, _error, write) => {
       if (

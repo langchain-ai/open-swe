@@ -5,14 +5,15 @@ from uuid import uuid4
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
-from agent import background_tasks
-from agent.sandboxes import lifecycle
-from agent.sandboxes.providers.registry import SandboxGoneError
-from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
-from agent.tasks.store import Task, TaskContext, TaskMembership
-from agent.users import User
-from agent.users.models import UserIdentity
-from agent.workspaces.rows import WorkspaceRow
+from openswe import background_tasks
+from openswe.sandboxes import lifecycle
+from openswe.sandboxes.providers.registry import SandboxGoneError
+from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
+from openswe.tasks import service as task_service
+from openswe.tasks.store import Task, TaskContext, TaskMembership
+from openswe.users import User
+from openswe.users.models import UserIdentity
+from openswe.workspaces.rows import WorkspaceRow
 
 
 @pytest.fixture
@@ -67,7 +68,7 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
     monkeypatch.setattr(
         lifecycle, "thread_token_repositories", AsyncMock(return_value=["langchain-ai/open-swe"])
     )
-    from agent.sandboxes import tool_access
+    from openswe.sandboxes import tool_access
 
     monkeypatch.setattr(tool_access, "provision_tool_url", AsyncMock())
     SANDBOX_BACKENDS.clear()
@@ -149,6 +150,11 @@ async def test_worker_reattach_recovers_a_missed_background_completion(
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[task]))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(
+        task_service,
+        "recipient_config",
+        AsyncMock(return_value={"thread_id": "worker", "github_login": "owner"}),
+    )
 
     await lifecycle.ensure_sandbox_for_thread("worker")
     await asyncio.gather(*lifecycle._BACKGROUND)

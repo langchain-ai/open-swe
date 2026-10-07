@@ -22,10 +22,10 @@ import sys
 
 from langgraph_sdk import get_client
 
-from agent.github.pull_requests import PullRequest
-from agent.input_messages import human_input
-from agent.review.author_guidance import SteeringHistory
-from agent.thread_ids import pr_comment_thread_id
+from openswe.github.pull_requests import PullRequest
+from openswe.input_messages import human_input
+from openswe.review.author_guidance import SteeringHistory
+from openswe.thread_ids import pr_comment_thread_id
 
 
 def github_login() -> str:

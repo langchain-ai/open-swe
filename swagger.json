@@ -894,7 +894,7 @@
         "properties": {
           "options": {
             "items": {
-              "$ref": "#/components/schemas/agent__utils__json_types__JsonObject"
+              "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
             },
             "title": "Options",
             "type": "array"
@@ -3110,7 +3110,7 @@
           "sender": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+                "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
               },
               {
                 "type": "null"
@@ -3129,7 +3129,7 @@
           "usage": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+                "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
               },
               {
                 "type": "null"
@@ -6948,7 +6948,7 @@
             "type": "boolean"
           },
           "input": {
-            "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+            "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
           },
           "message_id": {
             "anyOf": [
@@ -8857,7 +8857,7 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
-      "agent__review__assessment_feedback__FeedbackSubmission": {
+      "openswe__review__assessment_feedback__FeedbackSubmission": {
         "properties": {
           "comment": {
             "default": "",
@@ -8880,7 +8880,7 @@
         "title": "FeedbackSubmission",
         "type": "object"
       },
-      "agent__threads__feedback__FeedbackSubmission": {
+      "openswe__threads__feedback__FeedbackSubmission": {
         "properties": {
           "action": {
             "default": "submit",
@@ -8917,13 +8917,13 @@
         "title": "FeedbackSubmission",
         "type": "object"
       },
-      "agent__transcript__events__JsonObject": {
+      "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
         },
         "type": "object"
       },
-      "agent__utils__json_types__JsonObject": {
+      "openswe__utils__json_types__JsonObject": {
         "additionalProperties": true,
         "type": "object"
       }
@@ -15739,7 +15739,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/agent__review__assessment_feedback__FeedbackSubmission"
+                "$ref": "#/components/schemas/openswe__review__assessment_feedback__FeedbackSubmission"
               }
             }
           },
@@ -18536,6 +18536,16 @@
               "title": "Sort By",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "hierarchy",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hierarchy",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -19269,7 +19279,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/agent__threads__feedback__FeedbackSubmission"
+                "$ref": "#/components/schemas/openswe__threads__feedback__FeedbackSubmission"
               }
             }
           },

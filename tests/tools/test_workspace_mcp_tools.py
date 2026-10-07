@@ -6,11 +6,11 @@ import pytest
 from cryptography.fernet import Fernet
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from agent.mcp import MCPConnectionUpdate, runtime
-from agent.mcp import workspace as settings
-from agent.middleware.dynamic_tools import DynamicToolMiddleware
-from agent.tool_loaders import workspace_mcp as loader
-from agent.utils import ttl_cache
+from openswe.mcp import MCPConnectionUpdate, runtime
+from openswe.mcp import workspace as settings
+from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+from openswe.tool_loaders import workspace_mcp as loader
+from openswe.utils import ttl_cache
 
 
 @pytest.fixture(autouse=True)

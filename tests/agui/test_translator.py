@@ -1,4 +1,4 @@
-from agent.agui.translator import AgUiTranslator
+from openswe.agui.translator import AgUiTranslator
 
 
 def _message(data: dict[str, object]) -> dict[str, object]:

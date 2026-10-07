@@ -20,7 +20,7 @@ import {
 } from "@/features/agents/lib/rightPanelStore"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
 import {
-  useLocalThread,
+  useMacCheckout,
   useLocalThreadDiff,
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
@@ -49,7 +49,7 @@ export function AgentGitPanel({
   )
   // A "This Mac" thread's checkout is right here, so its terminals, files and
   // diff come from this machine; anywhere else, from the sandbox endpoints.
-  const localThread = useLocalThread(thread.id)
+  const localThread = useMacCheckout(thread)
   const cwd = localThread ? (localThread.worktreePath ?? localThread.cwd) : ""
   const terminalTarget = useMemo<TerminalTarget>(
     () =>
