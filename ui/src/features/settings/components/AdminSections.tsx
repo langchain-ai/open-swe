@@ -6,6 +6,7 @@ import type { ReactNode } from "react"
 import type { AdminUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { TablePagination } from "@/components/TablePagination"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -336,7 +337,15 @@ export function UsersSection({ enabled }: { enabled: boolean }) {
                 key={user.user_id}
                 className="flex items-center justify-between gap-2 border-b border-border py-1.5 text-xs last:border-b-0"
               >
-                <div className="flex min-w-0 flex-col">
+                <Avatar>
+                  <AvatarImage src={user.avatar_url} alt="" />
+                  <AvatarFallback>
+                    {(user.github_login || user.display_name || user.user_id)
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate font-medium">
                     {user.github_login || user.display_name || user.user_id}
                   </span>
