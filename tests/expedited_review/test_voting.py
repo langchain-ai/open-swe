@@ -7,7 +7,9 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
+from openswe.dashboard import profiles
 from openswe.expedited_review import voting
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review import lifecycle, people
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
@@ -30,8 +32,10 @@ class _Harness:
         self.agent_prompts.append(prompt)
         return self.wake_succeeds
 
-    async def mark_ready(self, owner: str, repo: str, number: int, action: object, token: str):
-        self.marked_ready.append(token)
+    async def mark_ready(self, pull: PullRequestClient, action: object) -> None:
+        self.marked_ready.append(
+            pull.repo.github.http.headers["Authorization"].removeprefix("Bearer ")
+        )
 
     async def submit_approval(
         self, approval: HumanReviewRequest, vote: HumanReviewParticipant, head_sha: str
@@ -55,6 +59,7 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
         return f"token-{login}"
 
     monkeypatch.setattr(voting, "get_valid_access_token", user_token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", user_token)
     monkeypatch.setattr(voting, "act_on_pull_request", h.mark_ready)
     monkeypatch.setattr(voting, "refresh_card", AsyncMock())
     monkeypatch.setattr(voting, "notify_agent", h.notify_agent)
