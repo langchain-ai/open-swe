@@ -1,3 +1,4 @@
+import { LogoMark } from "@/components/Branding"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import {
   Profiler,
@@ -792,8 +793,7 @@ export function AgentThreadView({
             />
           ) : isHydrating ? (
             <div className="flex flex-1 items-center justify-center px-6">
-              <img
-                src={`${import.meta.env.BASE_URL}logo-mark.png`}
+              <LogoMark
                 alt="Loading conversation"
                 className="size-12 animate-pulse"
               />

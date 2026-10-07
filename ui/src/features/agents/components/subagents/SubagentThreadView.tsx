@@ -1,3 +1,4 @@
+import { LogoMark } from "@/components/Branding"
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
 import {
@@ -82,11 +83,7 @@ export function SubagentThreadView({
   } else if (source.isHydrating) {
     body = (
       <div className="flex flex-1 items-center justify-center px-6">
-        <img
-          src={`${import.meta.env.BASE_URL}logo-mark.png`}
-          alt="Loading subagent"
-          className="size-12 animate-pulse"
-        />
+        <LogoMark alt="Loading subagent" className="size-12 animate-pulse" />
       </div>
     )
   } else if (!task) {

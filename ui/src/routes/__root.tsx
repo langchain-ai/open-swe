@@ -19,6 +19,7 @@ import { resolveSessionOnServer } from "@/lib/session-ssr"
 import { Toaster } from "@/components/ui/sonner"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
+import { Favicon } from "@/components/Branding"
 import { PageTracking } from "@/lib/PageTracking"
 import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
 import { THEME_COLOR } from "@/lib/theme"
@@ -64,11 +65,6 @@ export const Route = createRootRouteWithContext<{
         href: `${import.meta.env.BASE_URL}manifest.webmanifest`,
       },
       {
-        rel: "icon",
-        type: "image/png",
-        href: `${import.meta.env.BASE_URL}favicon.png`,
-      },
-      {
         rel: "apple-touch-icon",
         href: `${import.meta.env.BASE_URL}apple-touch-icon.png`,
       },
@@ -109,6 +105,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <ThemeSync />
         <Toaster position="bottom-right" closeButton />
         <QueryClientProvider client={queryClient}>
+          <Favicon />
           <PageTracking />
           <InvalidationStream />
           <VersionMismatchBanner />
