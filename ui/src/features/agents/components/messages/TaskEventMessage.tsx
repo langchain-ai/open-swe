@@ -6,6 +6,7 @@ import { ExpandableMessageChip } from "./ExpandableMessageChip"
 
 import { MessageTimestamp } from "./MessageTimestamp"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
+import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 
 const COMPLETION_LABELS = {
   success: "Completed",
@@ -26,12 +27,84 @@ export function TaskEventMessage({
   messageId: string
   timestamp?: string
 }) {
-  const label =
-    event.sender_label ??
-    `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${event.sender_thread_id.slice(0, 8)}`
-  const status =
-    event.kind === "message" ? "Message" : COMPLETION_LABELS[event.status]
+  return (
+    <TaskMessageChip
+      label={
+        event.sender_label ??
+        `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${event.sender_thread_id.slice(0, 8)}`
+      }
+      status={
+        event.kind === "message" ? "Message" : COMPLETION_LABELS[event.status]
+      }
+      threadId={event.sender_thread_id}
+      content={event.content}
+      messageId={messageId}
+      timestamp={timestamp}
+    />
+  )
+}
 
+export function WorkerSpawnMessage({ chunk }: { chunk: ToolExecutionChunk }) {
+  let result: unknown
+  try {
+    result = JSON.parse(chunk.output ?? "null")
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error
+  }
+  const success =
+    result !== null && typeof result === "object" && "success" in result
+      ? result.success
+      : undefined
+  const threadId =
+    success === true &&
+    result !== null &&
+    typeof result === "object" &&
+    "worker_thread_id" in result &&
+    typeof result.worker_thread_id === "string" &&
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
+      result.worker_thread_id
+    )
+      ? result.worker_thread_id
+      : undefined
+  const status =
+    chunk.status === "error" || success === false
+      ? "Launch failed"
+      : chunk.status === "pending" || chunk.status === "in_progress"
+        ? "Starting…"
+        : threadId
+          ? "Started"
+          : "Launch status unknown"
+  return (
+    <TaskMessageChip
+      label={threadId ? `Worker ${threadId.slice(0, 8)}` : "Worker"}
+      status={status}
+      threadId={status === "Started" ? threadId : undefined}
+      content={
+        typeof chunk.input?.instructions === "string"
+          ? chunk.input.instructions
+          : "Worker assignment unavailable."
+      }
+      messageId={chunk.toolCallId}
+      timestamp={chunk.timestamp}
+    />
+  )
+}
+
+function TaskMessageChip({
+  label,
+  status,
+  threadId,
+  content,
+  messageId,
+  timestamp,
+}: {
+  label: string
+  status: string
+  threadId?: string
+  content: string
+  messageId: string
+  timestamp?: string
+}) {
   return (
     <div
       className="my-space-3 flex flex-col items-start gap-space-1"
@@ -49,24 +122,23 @@ export function TaskEventMessage({
           </>
         }
         actions={
-          <IconButton
-            asChild
-            icon={ArrowSquareOutIcon}
-            label={`Open ${label} thread`}
-            size="xs"
-            color="secondary"
-            variant="plain"
-          >
-            <Link
-              to="/agents/$threadId"
-              params={{ threadId: event.sender_thread_id }}
-            />
-          </IconButton>
+          threadId && (
+            <IconButton
+              asChild
+              icon={ArrowSquareOutIcon}
+              label={`Open ${label} thread`}
+              size="xs"
+              color="secondary"
+              variant="plain"
+            >
+              <Link to="/agents/$threadId" params={{ threadId }} />
+            </IconButton>
+          )
         }
       >
         <div className="mt-space-1 max-w-full rounded-xl border border-default bg-surface-level-2 p-space-3">
           <div className="text-xs leading-relaxed break-words whitespace-pre-wrap text-primary">
-            {event.content}
+            {content}
           </div>
           {timestamp && (
             <MessageTimestamp timestamp={timestamp} className="mt-space-2" />

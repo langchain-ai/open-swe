@@ -11,6 +11,7 @@ import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
+import { WorkerSpawnMessage } from "@/features/agents/components/messages/TaskEventMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
 import {
   buildRenderItems,
@@ -252,6 +253,9 @@ export function AgentTurn({
             defaultExpanded={item.chunk.status === "pending"}
           />
         )
+
+      case "worker-spawn-item":
+        return <WorkerSpawnMessage key={item.key} chunk={item.chunk} />
 
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />

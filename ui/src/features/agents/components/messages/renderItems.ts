@@ -36,12 +36,14 @@ export type RenderItem =
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
+  | { type: "worker-spawn-item"; key: string; chunk: ToolExecutionChunk }
 
 const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "managed-tools-item",
   "iframe-item",
+  "worker-spawn-item",
 ])
 
 /** A run of work that folds behind one row, or a reply shown between such runs. */
@@ -251,6 +253,15 @@ export function buildRenderItems(
     if (!chunk) continue
 
     if (chunk.kind === "tool-execution") {
+      if (chunk.toolName === "spawn_worker") {
+        flushGroups()
+        items.push({
+          type: "worker-spawn-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+        })
+        continue
+      }
       if (chunk.display?.type === "output_iframe") {
         flushGroups()
         items.push({
