@@ -6,8 +6,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import ToolMessage
 
-from agent.middleware.subdir_agents import SubdirAgentsReadMiddleware
-from agent.sandboxes import state as sandbox_state
+from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
+from openswe.sandboxes import state as sandbox_state
 
 
 class FakeReadResult:

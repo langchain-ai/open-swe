@@ -7,11 +7,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.act_as import gate
-from agent.act_as.records import ThreadActAs
-from agent.users import User, UserPreferences
-from agent.utils.json_types import JsonObject
-from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from openswe.act_as import gate
+from openswe.act_as.records import ThreadActAs
+from openswe.slack.http import SlackRequestError
+from openswe.users import User, UserPreferences
+from openswe.utils.json_types import JsonObject
+from openswe.utils.thread_participants import (
+    PARTICIPANT_EMAILS_KEY,
+    PARTICIPANT_LOGINS_KEY,
+    participant_metadata,
+)
 
 
 @pytest.fixture
@@ -21,9 +26,10 @@ def dm(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) -> AsyncMoc
     async def author_login(requested: str | None = None) -> str:
         return requested or "alice"
 
+    monkeypatch.setattr(gate, "get_active_slack_thread", AsyncMock(return_value=None))
     monkeypatch.setattr(gate, "pr_author_login", author_login)
     monkeypatch.setattr(gate, "open_dm", AsyncMock(return_value="D-ALICE"))
-    send = AsyncMock(return_value=("123.456", None))
+    send = AsyncMock(return_value="123.456")
     monkeypatch.setattr(gate, "post_slack_top_level_message_with_ts", send)
     send.concierge = AsyncMock()
     monkeypatch.setattr(gate, "note_for_concierge", send.concierge)
@@ -63,25 +69,40 @@ async def _answer(approved: bool) -> None:
 
 
 @pytest.mark.asyncio
-async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monkeypatch):
+@pytest.mark.parametrize("slack_url", [None, "https://example.slack.com/archives/C123/p123456"])
+async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monkeypatch, slack_url):
     _alice(monkeypatch, "U-ALICE")
+    monkeypatch.setattr(
+        gate, "dashboard_thread_url", lambda _: "https://example.com/agents/thread-1"
+    )
+    if slack_url:
+        monkeypatch.setattr(
+            gate, "get_active_slack_thread", AsyncMock(return_value={"permalink": slack_url})
+        )
 
     refusal = await _open()
 
     assert refusal is not None and refusal["act_as"] == "pending"
     dm.assert_awaited_once()
     assert dm.await_args.args[0] == "D-ALICE"
+    assert dm.await_args.kwargs["unfurl_links"] is False
+    assert dm.await_args.kwargs["unfurl_media"] is False
+    expected_url = slack_url or "https://example.com/agents/thread-1"
+    assert f"<{expected_url}|this thread>" in dm.await_args.args[1]
     value = json.loads(dm.await_args.kwargs["blocks"][1]["elements"][0]["value"])
     assert (value["type"], value["action"], value["thread_id"]) == ("act_as", "approve", "thread-1")
     user_id, channel_id, note = dm.concierge.await_args.args
     assert (user_id, channel_id) == ("U-ALICE", "D-ALICE")
-    assert "thread-1" in note and '"t"' not in note
+    assert expected_url in note and '"t"' not in note
 
 
 @pytest.mark.asyncio
 async def test_single_participant_thread_never_asks(dm, thread_metadata, monkeypatch):
     _alice(monkeypatch, "U-ALICE")
     thread_metadata[PARTICIPANT_LOGINS_KEY] = {"alice": True}
+    thread_metadata[PARTICIPANT_EMAILS_KEY] = {"alice@example.com": True}
+    monkeypatch.setattr(User, "for_person", AsyncMock(return_value=User()))
+    thread_metadata.update(await participant_metadata(thread_metadata))
 
     assert await _open() is None
     dm.assert_not_awaited()
@@ -138,7 +159,7 @@ async def test_person_without_slack_is_never_acted_as(dm, monkeypatch):
 @pytest.mark.asyncio
 async def test_failed_dm_refuses_instead_of_waiting(dm, monkeypatch):
     _alice(monkeypatch, "U-ALICE")
-    dm.return_value = (None, "channel_not_found")
+    dm.side_effect = SlackRequestError("channel_not_found")
 
     refusal = await _open()
 

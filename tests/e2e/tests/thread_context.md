@@ -20,7 +20,15 @@ web_url: http://127.0.0.1:3100/agents/<thread-id>
 ```
 
 ```xml
-<input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-1>">
+<dynamic-context kind="system" id="system:slack-context">
+display_name: Slack context
+platform: slack
+content: This is a non-kitchen Slack channel. Always respond when a human explicitly tags you, even if the message is a question, comment, or ambiguous request rather than an implementation task. Do not ignore a message that tags you. Respond appropriately with `slack_reply`, unless another tool has already responded visibly, such as an approval card or a breakout thread; in those flows, follow their instructions for `slack_no_reply_needed`. Responding does not mean turning discussion into a code-change task.
+</dynamic-context>
+```
+
+```xml
+<input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-1>" explicit_bot_mention="true">
 @open-swe add a greet() helper
 </input-message>
 ```
@@ -30,6 +38,7 @@ web_url: http://127.0.0.1:3100/agents/<thread-id>
 <dynamic-context kind="person" id="user:<alice>">
 display_name: Alice
 github_login: alice
+slack_user_id: U_ALICE
 commit_name: Alice
 commit_email: alice@users.noreply.github.com
 email: alice@example.com
@@ -46,7 +55,7 @@ Then: her envelope alone — the channel is described, her turn-1 message and th
 
 ### dispatch appends
 ```xml
-<input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-2>">
+<input-message sender="user:<alice>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-2>" explicit_bot_mention="true">
 @open-swe also add a docstring
 </input-message>
 ```
@@ -61,7 +70,7 @@ Then: the run adds his block; Alice's is not re-sent, and dispatch does not desc
 
 ### dispatch appends
 ```xml
-<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-3>">
+<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-3>" explicit_bot_mention="true">
 @open-swe make it return bytes
 </input-message>
 ```
@@ -71,6 +80,7 @@ Then: the run adds his block; Alice's is not re-sent, and dispatch does not desc
 <dynamic-context kind="person" id="user:<bob>">
 display_name: Bob
 github_login: bob
+slack_user_id: U_BOB
 commit_name: Bob
 commit_email: bob@users.noreply.github.com
 email: bob@example.com
@@ -115,7 +125,7 @@ Then: only Bob's block is re-sent, now carrying his instructions
 
 ### dispatch appends
 ```xml
-<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-4>">
+<input-message sender="user:<bob>" channel="slack:C_DEMO" surface="slack" kind="human" timestamp="<slack-ts-4>" explicit_bot_mention="true">
 @open-swe open the PR
 </input-message>
 ```
@@ -125,6 +135,7 @@ Then: only Bob's block is re-sent, now carrying his instructions
 <dynamic-context kind="person" id="user:<bob>">
 display_name: Bob
 github_login: bob
+slack_user_id: U_BOB
 commit_name: Bob
 commit_email: bob@users.noreply.github.com
 email: bob@example.com

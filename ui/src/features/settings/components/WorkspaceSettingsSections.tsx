@@ -1,6 +1,5 @@
 "use client"
 
-import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState, type ReactNode } from "react"
 import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
@@ -136,36 +135,6 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
   )
 }
 
-export function FableSection({ scope }: { scope: SettingsScope }) {
-  const qc = useQueryClient()
-  // Refresh the pickers so Fable appears or disappears.
-  const settings = useScopedSettings(scope, () =>
-    qc.invalidateQueries({ queryKey: ["options"] })
-  )
-  return (
-    <SettingsSection
-      title="Fable"
-      description="Claude Fable 5.1 runs safety classifiers that inspect and may retain requests, so it is not compatible with Zero Data Retention (ZDR). Off by default; enable only where ZDR is not required."
-    >
-      <div className="divide-y divide-border">
-        <TierRow
-          settings={settings}
-          fields={["fable_enabled"]}
-          label="Allow Fable models"
-          description="When on, Fable 5.1 is selectable for individual agent, reviewer, and chat runs, but cannot be saved as a default. When off, it is hidden and any run that resolves to Fable falls back to Opus."
-          control={
-            <Switch
-              checked={!!settings.data?.fable_enabled}
-              onCheckedChange={(next) => settings.save({ fable_enabled: next })}
-              disabled={!settings.data}
-            />
-          }
-        />
-      </div>
-    </SettingsSection>
-  )
-}
-
 export function DefaultRepoSection({
   scope,
   repositories,
@@ -289,8 +258,8 @@ export function ModelDefaultsSection({
       title="Model defaults"
       description={
         scoped
-          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Per-user Cloud Agent selections override the agent defaults."
-          : "Models for runs in every workspace that does not override them. Per-user Cloud Agent selections override the agent defaults."
+          ? "Models for runs in this workspace. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
+          : "Models for runs in every workspace that does not override them. Each user's Agent settings override the agent defaults."
       }
     >
       <div className="divide-y divide-border">
@@ -409,7 +378,7 @@ interface ModelPairControlProps {
 const INHERIT_VALUE = "__inherit__"
 
 /** A model and reasoning-effort pair. */
-function ModelPairControl({
+export function ModelPairControl({
   models,
   model,
   effort,

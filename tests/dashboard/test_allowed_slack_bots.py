@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import oauth, profiles, routes
+from openswe.dashboard import oauth, profiles, routes
 
 
 @pytest.fixture
@@ -110,6 +110,14 @@ def test_non_admin_cannot_manage_bots(
 ) -> None:
     client.app.dependency_overrides[oauth.require_session] = lambda: {"sub": "mallory"}
     assert client.request(method, path, json=body).status_code == 403
+
+
+def test_any_user_can_read_the_bot_directory(client: TestClient) -> None:
+    assert client.post("/dashboard/api/slack/allowed-bots", json={"bot_id": "B123"}).is_success
+    client.app.dependency_overrides[oauth.require_session] = lambda: {"sub": "mallory"}
+    response = client.get("/dashboard/api/slack/allowed-bots/directory")
+    assert response.status_code == 200, response.text
+    assert response.json() == [{"key": "T123:B123", "name": "Release bot", "image_url": ""}]
 
 
 def test_cannot_supply_another_execution_identity(client: TestClient) -> None:

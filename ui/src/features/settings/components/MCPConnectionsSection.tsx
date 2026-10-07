@@ -39,7 +39,6 @@ function editableValues(connection?: MCPConnectionUpdate): string {
 export type MCPScope = "instance" | "workspace" | "user"
 
 type MCPScopeConfig = {
-  title: string
   description: string
   queryKey: string[]
   list: () => Promise<MCPConnection[]>
@@ -52,7 +51,6 @@ type MCPScopeConfig = {
 function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
   const scopes: Record<MCPScope, MCPScopeConfig> = {
     instance: {
-      title: "Instance MCPs",
       description:
         "Connect remote MCP servers that every workspace inherits. A workspace or personal connection with the same name replaces one of these in its runs. New connections preselect all discovered tools; review the selection and save to enable them.",
       queryKey: ["instanceMCPs"],
@@ -63,7 +61,6 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
       discover: api.discoverInstanceMCP,
     },
     workspace: {
-      title: "Workspace MCPs",
       description:
         "Connect remote MCP servers for this workspace's runs. A connection here replaces an inherited instance connection with the same name. New connections preselect all discovered tools; review the selection and save to enable them.",
       queryKey: ["workspaceMCPs", workspace],
@@ -74,7 +71,6 @@ function scopeConfig(scope: MCPScope, workspace: string): MCPScopeConfig {
       discover: (body) => api.discoverWorkspaceMCP(workspace, body),
     },
     user: {
-      title: "Personal MCPs",
       description:
         "Connect remote MCP servers with your own credentials. They load only in your private threads, never in threads other people can prompt. A personal connection replaces a workspace connection with the same name in your runs. New connections preselect all discovered tools; review the selection and save to enable them.",
       queryKey: ["myMCPs"],
@@ -96,10 +92,7 @@ export function MCPConnectionsSection({
   /** Only meaningful for `scope: "workspace"`; ignored for personal MCPs. */
   workspace?: string
 }) {
-  const { title, description, queryKey, ...client } = scopeConfig(
-    scope,
-    workspace
-  )
+  const { description, queryKey, ...client } = scopeConfig(scope, workspace)
   const qc = useQueryClient()
   const connections = useQuery({ queryKey, queryFn: client.list })
   // What this workspace inherits; shown so an admin can see what a same-named
@@ -716,7 +709,7 @@ export function MCPConnectionsSection({
   ) : null
 
   return (
-    <SettingsSection title={title} description={description}>
+    <SettingsSection title="MCP servers" description={description}>
       <div className="space-y-4 p-4">
         {connections.isLoading && (
           <p className="text-sm text-muted-foreground">Loading connections…</p>

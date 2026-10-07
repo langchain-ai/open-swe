@@ -1,6 +1,8 @@
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import {
   Profiler,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -11,20 +13,28 @@ import {
   ArrowUpRight,
   CircleAlert as CircleAlertIcon,
   GitMerge as GitMergeIcon,
+  Laptop as LaptopIcon,
+  TriangleAlert as TriangleAlertIcon,
 } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
+import { formatRelativeTime } from "@/lib/utils"
 
 import type {
   AgentPullRequest,
   AgentThread,
   ImageChunk,
   Message,
+  ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
+import {
+  type ThreadTarget,
+  ThreadTargetMenu,
+} from "@/features/agents/components/ThreadTargetMenu"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
@@ -40,7 +50,10 @@ import type {
   LoadEarlier,
   MessagesScrollControl,
 } from "@/features/agents/components/messages"
-import { useSubmitAgentMessage } from "@/features/agents/lib/provider/useSubmitAgentMessage"
+import {
+  type ThreadHandoff,
+  useSubmitAgentMessage,
+} from "@/features/agents/lib/provider/useSubmitAgentMessage"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { createAutoSelectionIntent } from "@/features/agents/lib/autoSelectionIntent"
 import {
@@ -49,7 +62,7 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
 } from "@/features/agents/lib/queries"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   materializeImages,
@@ -61,6 +74,13 @@ import type {
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
 import { agentsApi } from "@/features/agents/lib/api"
+import {
+  localThreadKeys,
+  runsOnAMac,
+  useLocalRepoRefs,
+  useLocalThread,
+  useLocalThreadPr,
+} from "@/features/agents/lib/desktopLocal"
 import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -75,6 +95,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
+  composerDraft?: { key: number; text: string }
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -106,16 +127,120 @@ function CodeChannelLink({ url }: { url?: string | null }) {
   )
 }
 
-export function AgentThreadView({ thread }: AgentThreadViewProps) {
+export function AgentThreadView({
+  thread,
+  composerDraft,
+}: AgentThreadViewProps) {
+  const reviewChat = useContext(ReviewChatActionsContext)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
+  const [dismissedWarning, setDismissedWarning] = useState("")
+  const workspaceWarningKey = JSON.stringify([
+    thread.id,
+    source.kind === "transcript" ? source.workspaceStale : null,
+  ])
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
+  // A "This Mac" thread runs in its checkout on the Mac whose app started it,
+  // so elsewhere it is read-only while that Mac is not serving it.
+  const localRecord = useLocalThread(thread.id)
+  const localThread = runsOnAMac(thread) ? localRecord : null
+  const runsElsewhere =
+    runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
+  // A move takes effect with the next message, whose run carries the checkout over.
+  const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
+  // A thread its Mac isn't serving can still move to the cloud, from its pushed work.
+  const macOffline = runsElsewhere && handoff !== "cloud"
+  // A Slack bot's thread is steered from its Slack thread, never from here.
+  const botThread = thread.triggerKind === "slack_bot"
   const canPost =
-    (thread.threadCategory !== "automation" && !thread.adminThread) ||
-    session.data?.is_admin === true
+    !macOffline &&
+    !botThread &&
+    ((thread.threadCategory !== "automation" && !thread.adminThread) ||
+      session.data?.is_admin === true)
+  // The bridge outlives a thread view but not the app; serve the checkout
+  // again for whatever this thread runs next, wherever that run is started.
+  const localBridge = useQuery({
+    queryKey: ["local-bridge", thread.id],
+    queryFn: async () =>
+      (await window.openSweDesktop?.ensureLocalBridge(thread.id)) ?? false,
+    // Also kept up for a thread moving off this Mac, until its checkout is carried over.
+    enabled: Boolean(localRecord),
+    retry: false,
+    refetchOnWindowFocus: "always",
+  })
+  const refetchLocalBridge = localBridge.refetch
+  const ensureLocalBridge = useCallback(async () => {
+    if (!localThread) return
+    const result = await refetchLocalBridge({ throwOnError: true })
+    if (result.isError) throw result.error
+  }, [localThread, refetchLocalBridge])
+  // A "This Mac" thread works in a checkout other threads on this machine may
+  // share, so its branch and worktree are shown, and switched, from here.
+  const localRefsQuery = useLocalRepoRefs(localThread?.cwd)
+  const localRepoRefs = localRefsQuery.data
+  const refetchLocalRepoRefs = localRefsQuery.refetch
+  const localWorktreePath = localThread?.worktreePath ?? null
+  const localBranch = localThread
+    ? (localRepoRefs.find((candidate) =>
+        localWorktreePath
+          ? candidate.worktreePath === localWorktreePath
+          : candidate.current
+      )?.name ?? null)
+    : null
+  const localPr = useLocalThreadPr(thread.id, Boolean(localThread)).data ?? null
+  const queryClient = useQueryClient()
+  const selectLocalBranch = useCallback(
+    async (branch: string) => {
+      try {
+        await window.openSweDesktop?.setLocalBranch({
+          threadId: thread.id,
+          branch,
+        })
+      } catch (error) {
+        reportError({ title: "Couldn't switch the thread's branch", error })
+      }
+      void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+      void queryClient.invalidateQueries({
+        queryKey: localThreadKeys.pr(thread.id),
+      })
+      await refetchLocalRepoRefs()
+    },
+    [queryClient, refetchLocalRepoRefs, thread.id]
+  )
+  const bridgeError =
+    localThread && localBridge.error
+      ? localBridge.error instanceof Error
+        ? localBridge.error.message
+        : "This Mac could not be reached"
+      : null
+  const runsHere: ThreadTarget = runsOnAMac(thread) ? "local" : "cloud"
+  const canMove =
+    (runsElsewhere || Boolean(window.openSweDesktop)) &&
+    thread.sandboxBridgeClient !== "cli" &&
+    Boolean(thread.repoFullName) &&
+    thread.visibility === "private" &&
+    thread.ownerLogin?.toLowerCase() === session.data?.login.toLowerCase()
+  const prepareHandoff = useCallback(async (): Promise<
+    ThreadHandoff | undefined
+  > => {
+    if (handoff === "cloud")
+      return {
+        configurable: { sandbox_target: "cloud" },
+        sandboxBridgeClient: null,
+      }
+    if (handoff !== "local" || !window.openSweDesktop) return undefined
+    const bridgeId = await window.openSweDesktop.takeOverThread({
+      threadId: thread.id,
+      repo: thread.repoFullName,
+    })
+    return {
+      configurable: { sandbox_bridge_id: bridgeId },
+      sandboxBridgeClient: "desktop",
+    }
+  }, [handoff, thread.id, thread.repoFullName])
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
     (thread.pullRequests?.length ?? 0) > 0
@@ -186,6 +311,8 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       )
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
+        await ensureLocalBridge()
+        const moving = await prepareHandoff()
         await sendMessage.mutateAsync({
           content,
           images,
@@ -194,16 +321,35 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
           enqueue: isStreaming && queue,
+          ...(moving ? { handoff: moving } : {}),
           ...(carriesAutoSelection
             ? { onStartError: restoreAutoSelection }
             : {}),
         })
+        if (moving) {
+          setHandoff(null)
+          void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+        }
       } catch (error) {
         restoreAutoSelection()
         throw error
       }
     },
-    [activeSelection, autoIntent, followUpBehavior, isStreaming, sendMessage]
+    [
+      activeSelection,
+      autoIntent,
+      ensureLocalBridge,
+      followUpBehavior,
+      isStreaming,
+      prepareHandoff,
+      queryClient,
+      sendMessage,
+    ]
+  )
+
+  const commentOnDiff = useCallback(
+    (content: string) => submitMessage(content, []),
+    [submitMessage]
   )
 
   const restoreQueuedAutoSelection = autoIntent.restore
@@ -216,8 +362,19 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
   const queuedImages = (entry: QueuedTurn) =>
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
-  const queryClient = useQueryClient()
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const [appliedComposerDraft, setAppliedComposerDraft] =
+    useState<typeof composerDraft>(undefined)
+  if (composerDraft !== appliedComposerDraft) {
+    setAppliedComposerDraft(composerDraft)
+    if (composerDraft) {
+      setRestoreDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: composerDraft.text,
+        images: [],
+      }))
+    }
+  }
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>
@@ -378,11 +535,12 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
     thread.pendingMessages,
   ])
   const fixPullRequest = useCallback(
-    async (pullRequest: AgentPullRequest) => {
+    async (pullRequest: AgentPullRequest, scope: ThreadFixScope) => {
       const result = await agentsApi.getThreadPullRequestContext(
         thread.id,
         pullRequest.repoFullName,
-        pullRequest.number
+        pullRequest.number,
+        scope
       )
       await submitMessage(result.prompt, [])
     },
@@ -548,11 +706,42 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
             renameThread.mutateAsync({ threadId: thread.id, title })
           }
           target={
-            thread.sandboxId?.startsWith("bridge:") ? "Local CLI" : "Cloud"
+            localThread || thread.sandboxBridgeClient === "desktop"
+              ? "This Mac"
+              : thread.sandboxBridgeClient === "cli"
+                ? "Local CLI"
+                : "Cloud"
+          }
+          targetMenu={
+            canMove ? (
+              <ThreadTargetMenu
+                value={handoff ?? runsHere}
+                pending={handoff !== null}
+                disabled={isStreaming}
+                onChange={(next) => setHandoff(next === runsHere ? null : next)}
+              />
+            ) : undefined
           }
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
+        {(macOffline || bridgeError) && (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
+            <Alert
+              variant={bridgeError ? "error" : "info"}
+              controlAlignment="first-line"
+            >
+              <LaptopIcon />
+              <AlertDescription>
+                <span>
+                  {bridgeError
+                    ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
+                    : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
+                </span>
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
         {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert variant="error" controlAlignment="first-line">
@@ -575,6 +764,36 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                   </a>
                 </AlertAction>
               )}
+            </Alert>
+          </div>
+        )}
+        {source.kind === "transcript" && source.workspaceStale && (
+          <div
+            hidden={dismissedWarning === workspaceWarningKey}
+            className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
+          >
+            <Alert variant="warning">
+              <TriangleAlertIcon />
+              <AlertDescription>
+                <span>
+                  The {source.workspaceStale.workspaceName} workspace image this
+                  sandbox started from{" "}
+                  {source.workspaceStale.capturedAt
+                    ? `was captured ${formatRelativeTime(Date.parse(source.workspaceStale.capturedAt))}`
+                    : "has never been refreshed"}
+                  , so its repositories may be out of date. Open SWE continued
+                  anyway and is refreshing the image in the background.
+                </span>
+              </AlertDescription>
+              <AlertAction>
+                <button
+                  type="button"
+                  onClick={() => setDismissedWarning(workspaceWarningKey)}
+                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  Dismiss
+                </button>
+              </AlertAction>
             </Alert>
           </div>
         )}
@@ -709,20 +928,34 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              <ThreadPullRequests
-                pullRequests={thread.pullRequests ?? []}
-                health={pullRequestHealth}
-                healthUnavailable={pullRequestStatus.isError}
-                onFix={fixPullRequest}
-                fixDisabled={!canPost || sendMessage.isPending}
-              />
+              {!reviewChat && (
+                <ThreadPullRequests
+                  pullRequests={
+                    // A local branch's PR may come from `gh`, which the thread
+                    // record never hears about.
+                    thread.pullRequests?.length
+                      ? thread.pullRequests
+                      : localPr
+                        ? [localPr]
+                        : []
+                  }
+                  health={pullRequestHealth}
+                  healthUnavailable={pullRequestStatus.isError}
+                  onFix={fixPullRequest}
+                  fixDisabled={!canPost || sendMessage.isPending}
+                />
+              )}
               <AgentPromptBar
                 placeholder={
-                  canPost
-                    ? hasConversation
-                      ? "Add a follow up"
-                      : "Send the first message"
-                    : "Only workspace admins can send messages in this thread"
+                  macOffline
+                    ? "This thread's Mac isn't serving it right now"
+                    : botThread
+                      ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
+                      : canPost
+                        ? hasConversation
+                          ? "Add a follow up"
+                          : "Send the first message"
+                        : "Only workspace admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
                 compact
@@ -741,6 +974,22 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
                 onSelectionChange={handleSelectionChange}
                 mentionPaths={mentionPaths}
                 skills={skills.data}
+                {...(localThread
+                  ? {
+                      runTarget: "local" as const,
+                      selectedLocalRepoPath: localThread.cwd,
+                      localRepoBranches: localRepoRefs,
+                      selectedLocalRepoBranch: localBranch,
+                      onRefreshLocalRepoBranch: () =>
+                        void refetchLocalRepoRefs(),
+                      onSelectLocalRepoBranch: (branch: string) =>
+                        void selectLocalBranch(branch),
+                      localWorkspaceMode: localWorktreePath
+                        ? ("worktree" as const)
+                        : ("local" as const),
+                      localWorktreeLabel: "Worktree",
+                    }
+                  : {})}
                 contextUsage={{
                   usedTokens,
                   contextWindow: activeModel?.context_window ?? null,
@@ -752,6 +1001,7 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
       </div>
       <AgentGitPanel
         thread={thread}
+        onComment={canPost ? commentOnDiff : undefined}
         revealFilePath={revealFilePath}
         revealChangesKey={revealChangesKey}
         collapsed={panelCollapsed}

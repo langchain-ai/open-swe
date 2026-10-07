@@ -20,6 +20,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -148,6 +149,18 @@ function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
       />
     </QueryClientProvider>
   )
+}
+
+/** What `InvalidationTab` does when the stream invalidates `workspaces`. */
+async function invalidateWorkspaces() {
+  await act(async () => {
+    await clients.at(-1)?.invalidateQueries({
+      predicate: (query) =>
+        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
+        false,
+    })
+    await vi.advanceTimersByTimeAsync(1)
+  })
 }
 
 describe("WorkspaceSettingsPanel", () => {
@@ -306,7 +319,6 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
-        breakout_channel_id: null,
         prompt: "Run make test.",
       })
     )
@@ -318,36 +330,6 @@ describe("WorkspaceSettingsPanel", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
-  it("clears the breakout destination when its channel is unbound", async () => {
-    mockApis({ ...RECORD, breakout_channel_id: "C1" })
-    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
-      ...RECORD,
-      slack_channel_ids: [],
-      breakout_channel_id: null,
-    })
-    renderPage()
-
-    const destination = await screen.findByRole("combobox", {
-      name: "Breakout destination",
-    })
-    await waitFor(() => expect(destination.textContent).toContain("#oss-help"))
-    fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    fireEvent.click(await screen.findByRole("checkbox", { name: "#oss-help" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
-    expect(destination.textContent).toContain("Current channel")
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    await waitFor(() =>
-      expect(update).toHaveBeenCalledWith(
-        "oss",
-        expect.objectContaining({
-          slack_channel_ids: [],
-          breakout_channel_id: null,
-        })
-      )
-    )
-  })
-
   it.each([
     ["refreshing", "success"],
     ["refreshing", "failed"],
@@ -356,7 +338,7 @@ describe("WorkspaceSettingsPanel", () => {
     ["refreshing", "unknown"],
     ["success", "unknown"],
   ] as const)(
-    "follows a repository rebuild from a %s save response through stale polls to %s",
+    "follows a repository rebuild from a %s save response through invalidations to %s",
     async (savedStatus, outcome) => {
       const initial = {
         ...RECORD,
@@ -420,9 +402,7 @@ describe("WorkspaceSettingsPanel", () => {
           .mocked(api.getWorkspace)
           .mockResolvedValue(saved)
         const reads = getWorkspace.mock.calls.length
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
         expect(screen.getByRole("status").textContent).toContain(
           "rebuild queued"
@@ -432,6 +412,7 @@ describe("WorkspaceSettingsPanel", () => {
           ...saved,
           refresh_status: outcome === "unknown" ? "success" : "refreshing",
         })
+        await invalidateWorkspaces()
         await act(async () => {
           await vi.advanceTimersByTimeAsync(65_001)
         })
@@ -453,9 +434,7 @@ describe("WorkspaceSettingsPanel", () => {
               : "2026-01-01T00:01:00Z",
           refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
         })
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(
           within(general).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
@@ -795,26 +774,32 @@ describe("WorkspaceSettingsPanel", () => {
       })
     renderPage()
 
-    const fable = (
-      await screen.findByRole("heading", { name: "Fable" })
-    ).closest("section")
-    if (!fable) throw new Error("no Fable section")
-    const toggle = within(fable).getByRole("switch")
+    const row = (await screen.findByText("Review Draft PRs")).closest(
+      "label"
+    )!.parentElement!
+    const toggle = within(row).getByRole("switch")
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false))
-    expect(within(fable).getByText("Inherited")).toBeTruthy()
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
 
     fireEvent.click(toggle)
     await waitFor(() =>
-      expect(save).toHaveBeenCalledWith("oss", { fable_enabled: true })
+      expect(save).toHaveBeenCalledWith("oss", { review_draft_prs: true })
     )
-    expect(await within(fable).findByText("Overridden")).toBeTruthy()
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
 
     fireEvent.click(
-      within(fable).getByRole("button", {
-        name: "Reset Allow Fable models to the instance value",
+      await screen.findByRole("button", {
+        name: "Reset Review Draft PRs to the instance value",
       })
     )
     await waitFor(() => expect(save).toHaveBeenLastCalledWith("oss", {}))
-    expect(await within(fable).findByText("Inherited")).toBeTruthy()
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe("false")
+    )
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset Review Draft PRs to the instance value",
+      })
+    ).toBeNull()
   })
 })

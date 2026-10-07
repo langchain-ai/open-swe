@@ -3,12 +3,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.run_config import Repo
-from agent.slack import failures as slack_failures
-from agent.slack import webhook as slack_webhook
-from agent.slack.payloads import SlackChannelContext
-from agent.slack.request import SlackRequest
-from agent.webhooks import common as webhook_common
+from openswe.run_config import Repo
+from openswe.slack import failures as slack_failures
+from openswe.slack import webhook as slack_webhook
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.request import SlackRequest
+from openswe.webhooks import common as webhook_common
 
 
 class _FakeThreads:

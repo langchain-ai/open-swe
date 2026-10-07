@@ -75,7 +75,7 @@ test.describe("thread pull requests", () => {
     await expectTranscriptVisible(page);
 
     const summary = page.getByTestId("pr-summary-fakeorg/demo-1");
-    const fixButton = page.getByRole("button", { name: "Fix PR #1 issues" });
+    const fixButton = page.getByRole("button", { name: "Fix PR #1" });
     await expect(summary).toHaveAttribute(
       "data-pr-tone",
       "text-muted-foreground",
@@ -232,30 +232,32 @@ test.describe("thread pull requests", () => {
 
     await page.keyboard.press("Escape");
     await fixButton.click();
+    await expect(
+      page.getByRole("menuitem", { name: "Fix conflicts on PR #1" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitem", { name: "Address comments on PR #1" }),
+    ).toBeVisible();
+    await page.getByRole("menuitem", { name: "Fix checks on PR #1" }).click();
     const fixPrompt = "Fresh GitHub scan:";
     await waitForStateToContain(page, threadId, fixPrompt);
     const state = await page.request.get(`/threads/${threadId}/state`);
     const stateText = JSON.stringify(await state.json());
     expect(stateText).toContain("[required] unit-tests: FAILURE");
     expect(stateText).toContain("[optional] browser-e2e: TIMED_OUT");
-    expect(stateText).toContain(
+    // A check fix is never handed the review comments to act on.
+    expect(stateText).not.toContain(
       "The fallback must preserve the original exception.",
     );
-    expect(stateText).toContain(
-      "Handle the null response before reading the payload.",
-    );
-    expect(stateText).toContain(
-      "I handled null but still need to retain the retry reason.",
-    );
     expect(stateText).not.toContain(
-      "This resolved comment must not be counted.",
+      "Handle the null response before reading the payload.",
     );
     await expect(page.getByText(new RegExp(fixPrompt)).first()).toBeVisible();
   });
 
   // Public and private need separate runs: the PR body is written at
   // open_pull_request time, so the repo's visibility has to be set before it.
-  test("keeps the originating Slack thread out of public PR bodies", async ({
+  test("includes the originating Slack thread in public PR bodies", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -263,7 +265,7 @@ test.describe("thread pull requests", () => {
 
     await openThreadActionsMenu(page);
     await expect(page.getByText("Open in Slack")).toBeVisible();
-    await expect.poll(() => latestPrBody(page)).not.toContain("Slack thread");
+    await expect.poll(() => latestPrBody(page)).toContain("Slack thread");
   });
 
   test("exposes the originating Slack thread for private repos", async ({

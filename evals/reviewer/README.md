@@ -66,27 +66,19 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
-### From the GitHub Action (recommended for full runs)
+### From the dashboard (recommended for full runs)
 
-Trigger the **Reviewer eval** workflow (`.github/workflows/reviewer_eval.yml`)
-from the Actions UI or `gh workflow run reviewer_eval.yml --ref prod -f limit=3`.
-Run it on the **prod** branch so the harness/judge match the deployed reviewer it
-scores. Running it on a durable runner (instead of inside the serving deployment)
-means a deploy or container recycle can't kill a long run.
+Admins start a run from **Evals** in the sidebar (`/admin/evals`): set the
+dataset, run name, reviewer model and effort, concurrency, limit, score mode and
+severity threshold, then **Start eval**. The deployment boots a LangSmith
+sandbox at its own commit, runs `run_eval` there against itself, and the sandbox
+stops itself when the eval finishes. The deployment's LangSmith keys are
+injected by the sandbox proxy; they never enter the sandbox.
 
-The Action sets `REVIEWER_EVAL_REPORT_STORE=1`, so `run_eval` publishes live
-status/progress/logs to the LangGraph store record the dashboard reads — watch it
-at **Admin → Reviewer eval** (`/admin/evals`), which is now a read-only progress
-view (status, `completed / total`, log tail, LangSmith experiment link, and a link
-back to the GitHub run). If the Action is cancelled/killed, the heartbeat goes
-stale and the dashboard flips the run to `failed` within ~60s.
-
-Required repository config:
-
-- secrets: `LANGSMITH_API_KEY`, plus `LANGSMITH_GATEWAY_API_KEY` when that key
-  lacks `gateway:invoke` (the judge runs in-process through the gateway;
-  reviewer-model keys are **not** needed — the reviewer runs in the deployment).
-- secret or var: `LANGGRAPH_URL` — the deployment URL the eval drives and reports to.
+Progress, the log tail and the LangSmith experiment link stream to the same
+page. The full log is at `/root/reviewer-eval.log` in the sandbox named on the
+page. Stop that sandbox to cancel; the dashboard flips the run to `failed`
+within ~60s.
 
 ### Tracing project
 

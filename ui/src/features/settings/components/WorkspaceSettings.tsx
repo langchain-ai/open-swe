@@ -44,11 +44,11 @@ import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
 import { WorkspaceProxySection } from "./WorkspaceProxySection"
 import {
   DefaultRepoSection,
-  FableSection,
   LLMGatewaySection,
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { useOptions, useRepos } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
@@ -83,7 +83,6 @@ function GeneralSection({
         repos: draft.repos,
         slack_channel_ids: draft.slackChannelIds,
         kitchen_channel_ids: draft.kitchenChannelIds,
-        breakout_channel_id: draft.breakoutChannelId,
         prompt: draft.prompt,
       })
       onSaved(saved)
@@ -179,14 +178,7 @@ export function WorkspaceSettingsPanel({
   const record = useQuery({
     queryKey: workspaceRecordKey(slug),
     queryFn: () => api.getWorkspace(slug),
-    // A rebuild runs in the background; keep the image state and the rebuild
-    // button following it until it settles.
-    refetchInterval: (query) =>
-      query.state.data?.refresh_status === "refreshing" ||
-      (!repositoryRebuildTimedOut &&
-        awaitingRepositoryRebuild(query.state.data))
-        ? 5000
-        : false,
+    meta: { invalidatedBy: [invalidationTopic("workspaces")] },
   })
   const options = useWorkspaceOptions(true)
   const repositories = useRepos()
@@ -318,7 +310,6 @@ export function WorkspaceSettingsPanel({
         <WorkspaceApiKeysSection key={`api-keys:${slug}`} slug={slug} />
       )}
       <LLMGatewaySection scope={scope} />
-      <FableSection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
