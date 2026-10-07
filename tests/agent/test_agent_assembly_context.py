@@ -144,7 +144,10 @@ async def test_existing_task_keeps_controls_after_opt_out(
     context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
     with (
         patch.object(User, "preferences_for_login", return_value=UserPreferences()),
-        patch("agent.middleware.task_coordination.load_context", return_value=context),
+        patch(
+            "agent.middleware.task_coordination.TaskMembership.context_for_thread",
+            return_value=context,
+        ),
     ):
         captured = await _capture_create_deep_agent_kwargs()
     tools = captured["tools"]

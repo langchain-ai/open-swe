@@ -36,8 +36,8 @@ def capability_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_task_event_preserves_latest_human_actor(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent.input_messages import build_input_messages
+    from agent.tasks.messages import TaskMessage
     from agent.tools import threads
-    from agent.webhooks.event_matches import EventMatch
 
     monkeypatch.setattr(
         threads,
@@ -49,12 +49,11 @@ async def test_task_event_preserves_latest_human_actor(monkeypatch: pytest.Monke
         "Change the assignment", {"sender_id": "github:bob", "surface": "web", "kind": "human"}
     )
     messages.extend(
-        EventMatch.messages(
+        TaskMessage.messages(
             [
-                EventMatch(
+                TaskMessage(
                     thread_id="coordinator",
-                    subscription_id=uuid4(),
-                    source="task",
+                    task_id=uuid4(),
                     delivery_id="finished:worker:run",
                     content="Worker finished",
                     run_config={},

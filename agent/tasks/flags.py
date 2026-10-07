@@ -1,10 +1,15 @@
 from collections.abc import Mapping
+from uuid import UUID
 
 from agent.bridge.constants import SANDBOX_ID_PREFIX
+from agent.tasks.schemas import ThreadMetadata
 from agent.users import User
 
 
-async def task_coordination_enabled(login: str) -> bool:
+async def task_coordination_enabled(login: str, *, owner_user_id: UUID | None = None) -> bool:
+    if owner_user_id is not None:
+        owner = await User.get(owner_user_id)
+        return owner is not None and owner.typed_preferences.experimental_task_coordination
     return bool(login) and (await User.preferences_for_login(login)).experimental_task_coordination
 
 
@@ -24,5 +29,8 @@ def task_coordination_supported(metadata: Mapping[str, object]) -> bool:
 async def require_task_coordination(metadata: Mapping[str, object]) -> None:
     if not task_coordination_supported(metadata):
         raise ValueError("Asynchronous task coordination is unavailable on a one-shot CLI bridge")
-    if not await task_coordination_enabled(task_owner_login(metadata)):
+    owner = ThreadMetadata.model_validate(metadata)
+    if owner.owner_type != "user" or not await task_coordination_enabled(
+        owner.owner_login or "", owner_user_id=owner.owner_user_id
+    ):
         raise PermissionError("Asynchronous task coordination is disabled in the owner's settings")

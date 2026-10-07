@@ -1,4 +1,4 @@
-import { Bot, ChevronDown, ChevronRight } from "lucide-react"
+import { Bot } from "lucide-react"
 import { IoLogoSlack } from "react-icons/io5"
 import { useEffect, useRef, useState } from "react"
 
@@ -7,6 +7,7 @@ import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
+import { ExpandableMessageChip } from "./ExpandableMessageChip"
 import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
@@ -53,6 +54,79 @@ function StandardUserMessage({ message }: { message: Message }) {
     return () => observer.disconnect()
   }, [text])
 
+  const body = (
+    <>
+      {hasBody && (
+        <div
+          className={`relative overflow-hidden rounded-2xl p-3 ${
+            isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
+          }`}
+        >
+          {excerpts.map((excerpt, i) => (
+            <CodeBlock
+              key={i}
+              title={excerpt.location}
+              language={excerpt.language}
+              text={excerpt.code}
+            />
+          ))}
+          {images.length > 0 && (
+            <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+              {images.map((img, i) => (
+                <div
+                  key={i}
+                  className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                >
+                  <MessageImage
+                    chunk={img}
+                    className="block h-auto max-h-[220px] w-full object-cover"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          {text && (
+            <div
+              ref={textRef}
+              className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground ${
+                !isSystem && !expanded ? "overflow-hidden" : ""
+              }`}
+              style={
+                !isSystem && !expanded
+                  ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX }
+                  : undefined
+              }
+            >
+              {isSlack ? (
+                <SlackMrkdwn text={text} />
+              ) : (
+                <SkillPromptText text={text} />
+              )}
+            </div>
+          )}
+          {!isSystem && isTruncated && (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              aria-expanded={expanded}
+              data-testid="user-message-show-more"
+              className="mt-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {expanded ? "Show less" : "Show more"}
+            </button>
+          )}
+        </div>
+      )}
+      {!message.timestampIsFallback && (
+        <MessageTimestamp
+          timestamp={message.timestamp}
+          align={isSystem ? "left" : "right"}
+          className="mt-1 pr-1"
+        />
+      )}
+    </>
+  )
+
   return (
     <div
       className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
@@ -63,27 +137,7 @@ function StandardUserMessage({ message }: { message: Message }) {
       data-message-surface={message.structuredSurface}
     >
       <div className="max-w-[80%]">
-        {isSystem ? (
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            aria-expanded={expanded}
-            data-testid="system-message-toggle"
-            className="flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/30"
-          >
-            {expanded ? (
-              <ChevronDown className="size-3" />
-            ) : (
-              <ChevronRight className="size-3" />
-            )}
-            <span>{message.structuredSenderName || "Context"}</span>
-            {message.structuredSenderNote && (
-              <span className="text-muted-foreground/70">
-                · {message.structuredSenderNote}
-              </span>
-            )}
-          </button>
-        ) : (
+        {!isSystem &&
           (message.structuredSenderName ||
             isSlack ||
             message.structuredSenderIsBot) && (
@@ -109,66 +163,25 @@ function StandardUserMessage({ message }: { message: Message }) {
                 </span>
               )}
             </div>
-          )
-        )}
-        {(!isSystem || expanded) && hasBody && (
-          <div
-            className={`relative overflow-hidden rounded-2xl p-3 ${
-              isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
-            }`}
-          >
-            {excerpts.map((excerpt, i) => (
-              <CodeBlock
-                key={i}
-                title={excerpt.location}
-                language={excerpt.language}
-                text={excerpt.code}
-              />
-            ))}
-            {images.length > 0 && (
-              <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                {images.map((img, i) => (
-                  <div
-                    key={i}
-                    className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                  >
-                    <MessageImage
-                      chunk={img}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-            {text && (
-              <div
-                ref={textRef}
-                className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground ${
-                  !expanded ? "overflow-hidden" : ""
-                }`}
-                style={
-                  !expanded ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX } : undefined
-                }
-              >
-                {isSlack ? (
-                  <SlackMrkdwn text={text} />
-                ) : (
-                  <SkillPromptText text={text} />
+          )}
+        {isSystem ? (
+          <ExpandableMessageChip
+            testId="system-message-toggle"
+            label={
+              <>
+                <span>{message.structuredSenderName || "Context"}</span>
+                {message.structuredSenderNote && (
+                  <span className="text-muted-foreground/70">
+                    · {message.structuredSenderNote}
+                  </span>
                 )}
-              </div>
-            )}
-            {isTruncated && (
-              <button
-                type="button"
-                onClick={() => setExpanded((value) => !value)}
-                aria-expanded={expanded}
-                data-testid="user-message-show-more"
-                className="mt-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {expanded ? "Show less" : "Show more"}
-              </button>
-            )}
-          </div>
+              </>
+            }
+          >
+            {body}
+          </ExpandableMessageChip>
+        ) : (
+          body
         )}
         {message.deliveryStatus && (
           <div
@@ -191,13 +204,6 @@ function StandardUserMessage({ message }: { message: Message }) {
               </span>
             )}
           </div>
-        )}
-        {!message.timestampIsFallback && (!isSystem || expanded) && (
-          <MessageTimestamp
-            timestamp={message.timestamp}
-            align={isSystem ? "left" : "right"}
-            className="mt-1 pr-1"
-          />
         )}
       </div>
     </div>

@@ -1,5 +1,6 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
@@ -9,6 +10,8 @@ from agent.sandboxes import lifecycle
 from agent.sandboxes.providers.registry import SandboxGoneError
 from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
 from agent.tasks.store import Task, TaskContext, TaskMembership
+from agent.users import User
+from agent.users.models import UserIdentity
 from agent.workspaces.rows import WorkspaceRow
 
 
@@ -21,6 +24,10 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
         workspace_id=workspace.id,
     )
     task.workspace = workspace
+    owner = User(identities=[UserIdentity(provider="github", external_id="1", login="owner")])
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=owner))
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=owner))
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
     metadata: dict[str, dict[str, object]] = {
         "coordinator": {
             "owner_type": "user",
@@ -53,7 +60,7 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
         shared_metadata[thread_id].update(metadata)
 
     shared_metadata = metadata
-    monkeypatch.setattr(lifecycle, "load_context", context)
+    monkeypatch.setattr(TaskMembership, "context_for_thread", context)
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", read_metadata)
     monkeypatch.setattr(lifecycle.client.threads, "update", update)
     monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
@@ -169,7 +176,9 @@ async def test_worker_does_not_replace_a_deleted_host_sandbox(
     assert shared_sandbox["worker"]["sandbox_id"] == "sb-old"
 
 
-@pytest.mark.parametrize("invalid_binding", ["membership", "repository_scope", "workspace"])
+@pytest.mark.parametrize(
+    "invalid_binding", ["membership", "repository_scope", "workspace", "owner"]
+)
 async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
     shared_sandbox: dict[str, dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
@@ -179,6 +188,9 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
         shared_sandbox["worker"]["sandbox_host_thread_id"] = "another-coordinator"
     elif invalid_binding == "workspace":
         shared_sandbox["worker"]["workspace"] = "another-workspace"
+    elif invalid_binding == "owner":
+        shared_sandbox["worker"]["owner_user_id"] = str(uuid4())
+        monkeypatch.setattr(User, "get", AsyncMock(return_value=User()))
     else:
         shared_sandbox["worker"]["github_token_repositories"] = []
     connect = AsyncMock()

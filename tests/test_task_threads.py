@@ -11,10 +11,14 @@ from sqlalchemy import func, select
 
 from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.database import postgres
-from agent.tasks import presentation, service, store
+from agent.tasks import flags, presentation, service, store
+from agent.tasks import messages as task_messages
+from agent.tasks.messages import TaskMessage
 from agent.tasks.presentation import TaskEventMetadata
+from agent.tasks.schemas import ThreadMetadata
 from agent.threads import access, creation, handlers
-from agent.users import User, UserPreferences
+from agent.users import User
+from agent.users.models import UserIdentity
 from agent.webhooks import event_matches
 from agent.webhooks.event_matches import EventMatch
 from agent.webhooks.event_subscriptions import EventSubscription
@@ -170,6 +174,23 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     client.fail_after_accept = False
     client.threads.get = AsyncMock(side_effect=get)
     client.threads.create = AsyncMock(side_effect=create)
+
+    async def update(thread_id: str, *, metadata: dict[str, JsonValue]) -> None:
+        client.metadata[thread_id].update(metadata)
+
+    client.threads.update = AsyncMock(side_effect=update)
+    owner = User(
+        identities=[UserIdentity(provider="github", external_id="1", login=OWNER)],
+        preferences={"experimental_task_coordination": True},
+    )
+    client.owner = owner
+    monkeypatch.setattr(
+        User,
+        "for_login",
+        AsyncMock(side_effect=lambda provider, login: owner if login == OWNER else None),
+    )
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=owner))
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
     client.threads.get_state = AsyncMock(return_value={"values": {"messages": []}})
     client.runs.create = AsyncMock(side_effect=run_create)
     client.runs.list = AsyncMock(side_effect=list_runs)
@@ -177,6 +198,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(service, "langgraph_client", lambda: client)
     monkeypatch.setattr(presentation, "langgraph_client", lambda: client)
     monkeypatch.setattr(event_matches, "dispatch_client", lambda: client)
+    monkeypatch.setattr(task_messages, "dispatch_client", lambda: client)
     monkeypatch.setattr(service, "enforce_github_login_gate", AsyncMock())
     monkeypatch.setattr(service, "get_profile", AsyncMock(return_value={}))
     monkeypatch.setattr(service, "resolve_run_email", AsyncMock(return_value=None))
@@ -189,11 +211,6 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(thinking, "sync_slack_background_status", AsyncMock())
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
     monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
-    )
     return client
 
 
@@ -201,7 +218,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 async def test_default_off_rejects_delegation_without_creating_a_task(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    client.owner.preferences = {"experimental_task_coordination": False}
     with pytest.raises(PermissionError, match="disabled"):
         await service.spawn_worker(
             service.Actor(COORDINATOR, OWNER),
@@ -210,7 +227,7 @@ async def test_default_off_rejects_delegation_without_creating_a_task(
             effort=None,
             request_id="disabled-call",
         )
-    assert await store.load_context(COORDINATOR) is None
+    assert await store.TaskMembership.context_for_thread(COORDINATOR) is None
     assert not client.created_runs
 
 
@@ -221,9 +238,9 @@ async def test_cli_bridge_rejects_delegation_before_reserving_a_worker(
     client.metadata[COORDINATOR]["sandbox_id"] = "bridge:cli"
     if bridge_client is not None:
         client.metadata[COORDINATOR]["sandbox_bridge_client"] = bridge_client
-    monkeypatch.setattr(store, "load_context", AsyncMock(return_value=None))
+    monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=None))
     reserve = AsyncMock()
-    monkeypatch.setattr(store, "reserve_worker", reserve)
+    monkeypatch.setattr(store.Task, "reserve_worker", reserve)
 
     with pytest.raises(ValueError, match="one-shot CLI bridge"):
         await service.spawn_worker(
@@ -241,6 +258,55 @@ async def test_cli_bridge_rejects_delegation_before_reserving_a_worker(
 async def test_public_thread_does_not_allow_using_owners_credentials(client: MagicMock) -> None:
     with pytest.raises(PermissionError, match="thread owner"):
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    metadata = await service.authorized_metadata(service.Actor(COORDINATOR, OWNER))
+    owner_id = metadata.owner_user_id
+    assert owner_id is not None
+    assert client.metadata[COORDINATOR]["owner_user_id"] == str(owner_id)
+    owner = User(
+        id=owner_id,
+        identities=[UserIdentity(provider="github", external_id="1", login="renamed-owner")],
+        preferences={"experimental_task_coordination": enabled},
+    )
+    replacement = User(
+        identities=[UserIdentity(provider="github", external_id="2", login=OWNER)],
+        preferences={"experimental_task_coordination": not enabled},
+    )
+    monkeypatch.setattr(
+        User,
+        "for_login",
+        AsyncMock(
+            side_effect=lambda provider, login: owner if login == "renamed-owner" else replacement
+        ),
+    )
+    monkeypatch.setattr(
+        User,
+        "for_identity",
+        AsyncMock(
+            side_effect=lambda provider, external_id: owner if external_id == "1" else replacement
+        ),
+    )
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
+    client.metadata[COORDINATOR]["visibility"] = "private"
+    assert (
+        await service.authorized_metadata(service.Actor(COORDINATOR, "renamed-owner"))
+    ).owner_user_id == owner_id
+    assert await flags.task_coordination_enabled(OWNER, owner_user_id=owner_id) is enabled
+    if enabled:
+        await flags.require_task_coordination(client.metadata[COORDINATOR])
+    else:
+        with pytest.raises(PermissionError, match="disabled"):
+            await flags.require_task_coordination(client.metadata[COORDINATOR])
+    with pytest.raises(PermissionError, match="thread owner"):
+        await service.authorized_metadata(service.Actor(COORDINATOR, OWNER))
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=None))
+    with pytest.raises(PermissionError, match="disabled"):
+        await flags.require_task_coordination(client.metadata[COORDINATOR])
 
 
 async def test_task_owner_still_needs_admin_permission(client: MagicMock) -> None:
@@ -290,11 +356,13 @@ async def test_desktop_worker_cannot_be_shared(
         effort="low",
     )
     monkeypatch.setattr(service, "record_event", AsyncMock())
-    monkeypatch.setattr(EventMatch, "deliver", AsyncMock())
+    monkeypatch.setattr(TaskMessage, "deliver", AsyncMock())
     for module in (access, handlers):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
 
-    await service.launch_worker(current_task, delegation, client.metadata[COORDINATOR])
+    await service.launch_worker(
+        current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
+    )
 
     with pytest.raises(HTTPException, match="owner's Mac") as error:
         await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
@@ -310,7 +378,7 @@ async def test_worker_cannot_spawn_siblings(
         current_task,
         store.TaskMembership(thread_id=COORDINATOR, task_id=current_task.id, role="worker"),
     )
-    monkeypatch.setattr(store, "load_context", AsyncMock(return_value=context))
+    monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=context))
     with pytest.raises(PermissionError, match="coordinator"):
         await service.spawn_worker(
             service.Actor(COORDINATOR, OWNER),
@@ -330,10 +398,10 @@ async def test_control_rejects_worker_from_another_task(
         current_task,
         store.TaskMembership(thread_id=COORDINATOR, task_id=current_task.id, role="coordinator"),
     )
-    monkeypatch.setattr(store, "load_context", AsyncMock(return_value=context))
+    monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=context))
     monkeypatch.setattr(
-        store,
-        "get_delegation",
+        store.TaskDelegation,
+        "get",
         AsyncMock(
             return_value=store.TaskDelegation(
                 worker_thread_id="other-worker",
@@ -362,7 +430,7 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
         session.add(workspace)
     client.metadata[COORDINATOR]["workspace"] = workspace.slug
     client.metadata[COORDINATOR]["title"] = "Fix login"
-    assert await store.load_context(COORDINATOR) is None
+    assert await store.TaskMembership.context_for_thread(COORDINATOR) is None
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     client.fail_after_accept = True
     with pytest.raises(service.WorkerLaunchError) as failed:
@@ -378,28 +446,25 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
         )
     assert failed.value.retryable
     worker_id = failed.value.worker_thread_id
-    context = await store.load_context(COORDINATOR)
+    context = await store.TaskMembership.context_for_thread(COORDINATOR)
     assert context is not None
     assert context.membership.role == "coordinator"
     assert context.task.coordinator_thread_id == COORDINATOR
     assert context.task.title == "Fix login"
     assert context.task.workspace_id == workspace.id
     assert context.task.delegated is True
-    worker_context = await store.load_context(worker_id)
+    worker_context = await store.TaskMembership.context_for_thread(worker_id)
     assert worker_context is not None
     assert worker_context.task.id == context.task.id
     assert worker_context.membership.role == "worker"
     assert client.created_runs[0]["status"] == "pending"
-    assert (await store.get_delegation(worker_id)).launch_error
-    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    delegation = await store.TaskDelegation.get(worker_id)
+    assert delegation is not None and delegation.launch_error
+    client.owner.preferences = {"experimental_task_coordination": False}
     with pytest.raises(PermissionError, match="disabled"):
         await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
     assert len(client.created_runs) == 1
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
-    )
+    client.owner.preferences = {"experimental_task_coordination": True}
     retried = await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
     replayed = await service.spawn_worker(
         actor,
@@ -419,7 +484,7 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert worker_config["workspace"] == workspace.slug
     assert client.metadata[worker_id]["workspace"] == workspace.slug
     assert "slack_thread" not in worker_config
-    assert len(await store.list_delegations(context.task.id)) == 1
+    assert len(await store.TaskDelegation.for_task(context.task.id)) == 1
     assert client.metadata[worker_id]["sandbox_id"] == "shared-sandbox"
     assert client.metadata[worker_id]["github_token_repositories"] == ["langchain-ai/open-swe"]
     assert "source_context" not in client.metadata[worker_id]
@@ -427,8 +492,8 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
         assert (
             await session.scalar(
                 select(func.count())
-                .select_from(EventMatch)
-                .where(EventMatch.thread_id == worker_id)
+                .select_from(TaskMessage)
+                .where(TaskMessage.thread_id == worker_id)
             )
             == 1
         )
@@ -451,11 +516,11 @@ async def test_concurrent_first_spawns_and_replay_share_one_task(
     assert all(result["success"] for result in results)
     assert results[0]["worker_thread_id"] == results[2]["worker_thread_id"]
     assert results[0]["worker_thread_id"] != results[1]["worker_thread_id"]
-    context = await store.load_context(COORDINATOR)
+    context = await store.TaskMembership.context_for_thread(COORDINATOR)
     assert context is not None
     assert {result["task_id"] for result in results} == {str(context.task.id)}
     assert context.task.title == "Delegated work"
-    assert len(await store.list_delegations(context.task.id)) == 2
+    assert len(await store.TaskDelegation.for_task(context.task.id)) == 2
     assert len(client.created_runs) == 2
     async with postgres.session() as session:
         assert await session.scalar(select(func.count()).select_from(store.Task)) == 1
@@ -500,15 +565,13 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
     async with postgres.session() as session:
         session.add(subscription)
         await event.record(session)
-    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    client.owner.preferences = {"experimental_task_coordination": False}
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True
     assert await EventMatch.owed(worker_id, []) == []
     assert await EventSubscription.for_thread(worker_id) == []
     assert await EventMatch.deliver(worker_id, "enqueue") is False
-    async with postgres.session() as session:
-        await event.record(session)
-    assert await EventMatch.deliver(worker_id, "interrupt") is False
+    assert await TaskMessage.deliver(worker_id, "interrupt") is False
     assert client.created_runs[0]["status"] == "interrupted"
     with pytest.raises(ValueError, match="uncancelled"):
         await service.control_worker(actor, worker_thread_id=worker_id, action="retry")
@@ -525,7 +588,7 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
         actor, instructions="Implement login fix", model=None, effort=None, request_id="first"
     )
     worker_id = str(first["worker_thread_id"])
-    initial_messages = EventMatch.messages(await EventMatch.owed(worker_id, []))
+    initial_messages = TaskMessage.messages(await TaskMessage.owed(worker_id, []))
     client.threads.get_state.return_value = {"values": {"messages": initial_messages}}
     client.created_runs[0]["status"] = "success"
     client.statuses[worker_id] = "idle"
@@ -547,7 +610,7 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     )
     assert sent["success"] is True
     assert sent["recipient_thread_id"] == worker_id
-    (follow_up,) = await EventMatch.owed(worker_id, initial_messages)
+    (follow_up,) = await TaskMessage.owed(worker_id, initial_messages)
     assert "Check logout too" in follow_up.content
     follow_up_display = TaskEventMetadata.model_validate(follow_up.task_event)
     assert follow_up_display.sender_role == "coordinator"
@@ -566,13 +629,13 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert sibling["task_id"] == first["task_id"]
     assert sibling["worker_thread_id"] != worker_id
     assert len(client.created_runs) == 3
-    context = await store.load_context(worker_id)
+    context = await store.TaskMembership.context_for_thread(worker_id)
     assert context is not None
     assert str(context.task.id) == first["task_id"]
     assert context.membership.role == "worker"
-    assert len(await store.list_delegations(context.task.id)) == 2
+    assert len(await store.TaskDelegation.for_task(context.task.id)) == 2
 
-    monkeypatch.setattr(User, "preferences_for_login", AsyncMock(return_value=UserPreferences()))
+    client.owner.preferences = {"experimental_task_coordination": False}
     with pytest.raises(PermissionError, match="disabled"):
         await service.spawn_worker(
             actor, instructions="Another worker", model=None, effort=None, request_id="disabled"
@@ -588,7 +651,7 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
             request_id="report",
         )
     assert len(client.created_runs) == 3
-    owed = await EventMatch.owed(COORDINATOR, [])
+    owed = await TaskMessage.owed(COORDINATOR, [])
     displays = [TaskEventMetadata.model_validate(event.task_event) for event in owed]
     assert [str(display.sender_thread_id) for display in displays] == senders
     assert [display.content for display in displays] == reports
@@ -596,7 +659,7 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert all(display.kind == "message" and display.status is None for display in displays)
     message_ids = [f"event-match:{event.id}" for event in owed]
     client.statuses[COORDINATOR] = "idle"
-    assert await EventMatch.deliver(COORDINATOR, "enqueue")
+    assert await TaskMessage.deliver(COORDINATOR, "enqueue")
     assert len(client.created_runs) == 4
     wake = client.created_runs[-1]
     assert wake["thread_id"] == COORDINATOR

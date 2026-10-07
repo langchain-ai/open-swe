@@ -53,8 +53,10 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
     monkeypatch.setattr(
         task_coordination, "task_coordination_enabled", AsyncMock(return_value=True)
     )
-    monkeypatch.setattr(task_coordination, "load_context", AsyncMock(return_value=context))
-    monkeypatch.setattr(task_coordination, "get_delegation", AsyncMock(return_value=delegation))
+    monkeypatch.setattr(
+        task_coordination.TaskMembership, "context_for_thread", AsyncMock(return_value=context)
+    )
+    monkeypatch.setattr(task_coordination.TaskDelegation, "get", AsyncMock(return_value=delegation))
     monkeypatch.setattr(server, "graph_loaded_for_execution", lambda _: True)
     monkeypatch.setattr(server, "resolve_github_login", AsyncMock(return_value="owner"))
     monkeypatch.setattr(server, "private_credential_login", AsyncMock(return_value="owner"))

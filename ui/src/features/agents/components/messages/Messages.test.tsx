@@ -3,6 +3,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router"
+
 import { HumanMessage } from "@langchain/core/messages"
 
 import { Messages } from "./Messages"
@@ -26,7 +33,7 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
 afterEach(() => cleanup())
 
 describe("Messages", () => {
-  it("renders attributed task activity with safe expandable details", () => {
+  it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,
       task_id: "d505b040-c025-4b52-a27e-339803281cfb",
@@ -41,7 +48,7 @@ describe("Messages", () => {
       {
         ...source,
         sender_thread_id: "7db1bbf5-0623-5a35-a5a4-db372cfc31d4",
-        sender_label: "Untitled",
+        sender_label: null,
         kind: "completion",
         status: "success",
       },
@@ -61,9 +68,14 @@ describe("Messages", () => {
           })
       )
     )
-    const { container } = render(
-      <Messages messages={messages} isStreaming={false} />
-    )
+    const router = createRouter({
+      routeTree: createRootRoute({
+        component: () => <Messages messages={messages} isStreaming={false} />,
+      }),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    await router.load()
+    const { container } = render(<RouterProvider router={router} />)
 
     const details = screen.getByRole("button", {
       name: "Investigate login · Message",
@@ -88,6 +100,31 @@ describe("Messages", () => {
     expect(container.textContent).not.toContain("hidden model text")
     fireEvent.click(details)
     expect(container.textContent).not.toContain("Can I change")
+  })
+
+  it("expands system context with the shared chip", () => {
+    render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "system-context",
+            author: "user",
+            timestamp: "2026-09-03T10:30:00.000Z",
+            structuredSenderKind: "system",
+            structuredSenderName: "Scheduler",
+            chunks: [{ kind: "text", text: "Check the latest deployment" }],
+          },
+        ]}
+      />
+    )
+    const toggle = screen.getByRole("button", { name: "Scheduler" })
+    expect(screen.queryByText("Check the latest deployment")).toBeNull()
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-expanded")).toBe("true")
+    expect(screen.getByText("Check the latest deployment")).toBeTruthy()
+    fireEvent.click(toggle)
+    expect(screen.queryByText("Check the latest deployment")).toBeNull()
   })
 
   it("shows run activity while a stream is starting with no messages", () => {

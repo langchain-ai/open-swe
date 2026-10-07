@@ -1,20 +1,13 @@
-"""Events owed to a thread, delivered by being in its state.
-
-A matched event is written here before any run is started for it, and it counts
-as delivered only once a message in the thread's checkpointed state carries its
-id. LangGraph's own run queue is never trusted with it: an ``interrupt`` run
-cancels every queued run on the thread, so whichever run comes next delivers
-everything still owed, oldest first.
-"""
+"""Durable task messages, retained until checkpointed by their recipient."""
 
 import logging
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Literal, Self
-from uuid import UUID, uuid7
+from uuid import NAMESPACE_URL, UUID, uuid5, uuid7
 
-from pydantic import BaseModel, JsonValue
-from sqlalchemy import Text, delete, func, select, text, update
+from pydantic import BaseModel, JsonValue, ValidationError
+from sqlalchemy import ForeignKey, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -28,20 +21,18 @@ from agent.input_messages import (
     build_input_messages,
     delivered_event_match_ids,
 )
-from agent.webhooks.event_log import RETAINED_DAYS, WebhookSource
+from agent.tasks.presentation import TaskEventMetadata
+from agent.tasks.store import TaskDelegation
 
 logger = logging.getLogger(__name__)
-
-type MultitaskStrategy = Literal["enqueue", "interrupt"]
-
+TASK_MESSAGE_KIND = "task_message"
+_RETAINED = timedelta(days=7)
+_MAX_ATTEMPTS = 3
 _SYSTEM: SystemIdentity = {
     "id": "system:event-subscription",
-    "display_name": "Event listener",
+    "display_name": "Task coordination",
     "platform": "open-swe",
 }
-_RETAINED = timedelta(days=RETAINED_DAYS)
-EVENT_MATCH_KIND = "event_match"
-_MAX_ATTEMPTS = 3
 
 
 class _ThreadValues(BaseModel):
@@ -56,65 +47,69 @@ class _Thread(BaseModel):
     status: str = ""
 
 
-class EventMatch(Base):
-    __tablename__ = "event_match"
+class TaskMessage(Base):
+    __tablename__ = "task_message"
 
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("task.id", ondelete="CASCADE"))
     thread_id: Mapped[str]
-    subscription_id: Mapped[UUID]
-    source: Mapped[WebhookSource] = mapped_column(Text)
     delivery_id: Mapped[str]
     content: Mapped[str]
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
+    task_event: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB, default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delivery_attempts: Mapped[int] = mapped_column(server_default="0", init=False)
     matched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
 
     async def record(self, session: AsyncSession) -> bool:
-        """Save in ``session``; ``False`` when the thread already owes or holds this delivery."""
         cls = type(self)
-        await session.execute(delete(cls).where(cls.matched_at < func.now() - _RETAINED))
+        self.id = uuid5(
+            NAMESPACE_URL, f"task-message:{self.task_id}:{self.thread_id}:{self.delivery_id}"
+        )
+        await session.execute(delete(cls).where(cls.delivered_at < func.now() - _RETAINED))
         recorded = await session.scalar(
             insert(cls)
             .values(
                 id=self.id,
+                task_id=self.task_id,
                 thread_id=self.thread_id,
-                subscription_id=self.subscription_id,
-                source=self.source,
                 delivery_id=self.delivery_id,
                 content=self.content,
                 run_config=self.run_config,
+                task_event=self.task_event,
             )
-            .on_conflict_do_nothing(
-                index_elements=["thread_id", "source", "delivery_id"],
-                index_where=cls.delivery_id != "",
-            )
+            .on_conflict_do_nothing(index_elements=["thread_id", "delivery_id"])
             .returning(cls.id)
         )
         return recorded is not None
 
     @classmethod
     async def owed(cls, thread_id: str, messages: Sequence[object]) -> list[Self]:
-        """Matches no message in ``messages`` carries yet, oldest first."""
         delivered: list[UUID] = []
-        for match_id in delivered_event_match_ids(messages):
+        for message_id in delivered_event_match_ids(messages):
             try:
-                delivered.append(UUID(match_id))
+                delivered.append(UUID(message_id))
             except ValueError:
                 logger.warning(
-                    "Ignoring a malformed delivered event-match id",
-                    extra={"agent_thread_id": thread_id, "event_match_id": match_id},
+                    "Ignoring a malformed delivered task-message id",
+                    extra={"agent_thread_id": thread_id, "message_id": message_id},
                 )
         async with postgres.session() as session:
-            rows = await session.scalars(
-                select(cls)
+            await session.execute(
+                update(cls)
                 .where(
-                    cls.thread_id == thread_id,
-                    cls.matched_at >= func.now() - _RETAINED,
-                    cls.id.not_in(delivered),
+                    cls.thread_id == thread_id, cls.id.in_(delivered), cls.delivered_at.is_(None)
                 )
-                .order_by(cls.matched_at, cls.id)
+                .values(delivered_at=func.now())
             )
-            return list(rows)
+            await session.execute(delete(cls).where(cls.delivered_at < func.now() - _RETAINED))
+            return list(
+                await session.scalars(
+                    select(cls)
+                    .where(cls.thread_id == thread_id, cls.delivered_at.is_(None))
+                    .order_by(cls.matched_at, cls.id)
+                )
+            )
 
     @classmethod
     def messages(cls, matches: Sequence[Self]) -> list[RunMessage]:
@@ -122,11 +117,22 @@ class EventMatch(Base):
         messages: list[RunMessage] = []
         for match in matches:
             data: dict[str, object] = {"event_match": str(match.id)}
+            if match.task_event is not None:
+                try:
+                    data["task_event"] = TaskEventMetadata.model_validate(
+                        match.task_event
+                    ).model_dump_json()
+                except ValidationError:
+                    logger.warning(
+                        "Delivering a task message without unreadable display metadata",
+                        exc_info=True,
+                        extra={"message_id": str(match.id), "agent_thread_id": match.thread_id},
+                    )
             built = build_input_messages(
                 match.content,
                 {
                     "sender_id": _SYSTEM["id"],
-                    "surface": match.source,
+                    "surface": "automation",
                     "kind": "system",
                     "data": data,
                 },
@@ -138,30 +144,46 @@ class EventMatch(Base):
         return messages
 
     @classmethod
-    async def deliver(cls, thread_id: str, strategy: MultitaskStrategy) -> bool:
-        """Start a run carrying everything the thread is owed; ``False`` when none was needed.
+    async def deliver_to(cls, thread_id: str) -> None:
+        if not postgres.configured():
+            return
+        try:
+            await cls.deliver(thread_id, "enqueue")
+        except Exception:
+            logger.warning(
+                "Could not deliver pending task messages",
+                extra={"agent_thread_id": thread_id},
+                exc_info=True,
+            )
 
-        ``enqueue`` leaves a busy thread alone: its next model call takes what is
-        owed, and the completion webhook calls this again once it finishes. A match
-        that ``_MAX_ATTEMPTS`` runs failed to deliver no longer starts one, so a
-        thread whose runs keep failing is not retried forever.
-        Raises ``NotFoundError`` when the thread is gone.
-        """
+    @classmethod
+    async def deliver(cls, thread_id: str, strategy: Literal["enqueue", "interrupt"]) -> bool:
+        async with postgres.session() as session:
+            pending = await session.scalar(
+                select(cls.id)
+                .where(cls.thread_id == thread_id, cls.delivered_at.is_(None))
+                .limit(1)
+            )
+        if pending is None:
+            return False
         client = dispatch_client()
         async with postgres.transaction() as lock:
             await lock.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-                {"key": f"{EVENT_MATCH_KIND}:{thread_id}"},
+                {"key": f"event_match:{thread_id}"},
             )
+            delegation = await TaskDelegation.get(thread_id)
+            if delegation is not None and delegation.cancelled:
+                return False
             if strategy == "enqueue":
                 thread = _Thread.model_validate(await client.threads.get(thread_id))
                 if thread.status == "busy":
                     return False
             state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
             owed = await cls.owed(thread_id, state.values.messages if state.values else [])
-            if all(match.delivery_attempts >= _MAX_ATTEMPTS for match in owed):
+            if all(message.delivery_attempts >= _MAX_ATTEMPTS for message in owed):
                 return False
-            owed_ids = [match.id for match in owed]
+            owed_ids = [message.id for message in owed]
             async with postgres.session() as session:
                 await session.execute(
                     update(cls)
@@ -169,22 +191,16 @@ class EventMatch(Base):
                     .values(delivery_attempts=cls.delivery_attempts + 1)
                 )
             latest = owed[-1]
-            turn_id = uuid7()
             await create_durable_run(
                 thread_id,
                 "agent",
                 input={"messages": cls.messages(owed)},
-                config={
-                    "configurable": {
-                        **latest.run_config,
-                        "transcript_turn_id": str(turn_id),
-                    }
-                },
+                config={"configurable": {**latest.run_config, "transcript_turn_id": str(uuid7())}},
                 metadata={
-                    "kind": EVENT_MATCH_KIND,
-                    "event_match_ids": [str(match_id) for match_id in owed_ids],
+                    "kind": TASK_MESSAGE_KIND,
+                    "event_match_ids": [str(message_id) for message_id in owed_ids],
                 },
-                source=latest.source,
+                source="task",
                 thread_title=None,
                 client=client,
                 multitask_strategy=strategy,

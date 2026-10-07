@@ -1,19 +1,11 @@
-import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react"
-import { useState } from "react"
+import { ExternalLink } from "lucide-react"
+import { Link } from "@tanstack/react-router"
+
+import { Button } from "@/components/ui/button"
+import { ExpandableMessageChip } from "./ExpandableMessageChip"
 
 import { MessageTimestamp } from "./MessageTimestamp"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
-
-const GENERIC_LABELS = new Set([
-  "untitled",
-  "untitled thread",
-  "new thread",
-  "new chat",
-  "new conversation",
-  "untitled conversation",
-  "worker",
-  "coordinator",
-])
 
 const COMPLETION_LABELS = {
   success: "Completed",
@@ -34,12 +26,9 @@ export function TaskEventMessage({
   messageId: string
   timestamp?: string
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const providedLabel = event.sender_label?.trim()
   const label =
-    providedLabel && !GENERIC_LABELS.has(providedLabel.toLowerCase())
-      ? providedLabel
-      : `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${event.sender_thread_id.slice(0, 8)}`
+    event.sender_label ??
+    `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${event.sender_thread_id.slice(0, 8)}`
   const status =
     event.kind === "message" ? "Message" : COMPLETION_LABELS[event.status]
 
@@ -49,35 +38,36 @@ export function TaskEventMessage({
       data-testid="task-event"
       data-message-id={messageId}
     >
-      <div className="flex max-w-full items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          aria-expanded={expanded}
-          aria-label={`${label} · ${status}`}
-          className="flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/30"
-        >
-          {expanded ? (
-            <ChevronDown className="size-3 shrink-0" />
-          ) : (
-            <ChevronRight className="size-3 shrink-0" />
-          )}
-          <span className="truncate" title={label}>
-            {label}
-          </span>
-          <span className="shrink-0">{` · ${status}`}</span>
-        </button>
-        <a
-          href={`/agents/${event.sender_thread_id}`}
-          aria-label={`Open ${label} thread`}
-          title={`Open ${label} thread`}
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground"
-        >
-          <ExternalLink className="size-3" />
-        </a>
-      </div>
-      {expanded && (
-        <div className="max-w-full rounded-xl border border-border bg-muted/50 p-3">
+      <ExpandableMessageChip
+        accessibleLabel={`${label} · ${status}`}
+        label={
+          <>
+            <span className="truncate" title={label}>
+              {label}
+            </span>
+            <span className="shrink-0">{` · ${status}`}</span>
+          </>
+        }
+        actions={
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            nativeButton={false}
+            role="link"
+            render={
+              <Link
+                to="/agents/$threadId"
+                params={{ threadId: event.sender_thread_id }}
+              />
+            }
+            aria-label={`Open ${label} thread`}
+            title={`Open ${label} thread`}
+          >
+            <ExternalLink className="size-3" />
+          </Button>
+        }
+      >
+        <div className="mt-1 max-w-full rounded-xl border border-border bg-muted/50 p-3">
           <div className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-foreground">
             {event.content}
           </div>
@@ -85,7 +75,7 @@ export function TaskEventMessage({
             <MessageTimestamp timestamp={timestamp} className="mt-2" />
           )}
         </div>
-      )}
+      </ExpandableMessageChip>
     </div>
   )
 }

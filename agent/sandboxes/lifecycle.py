@@ -19,7 +19,6 @@ from agent.bridge.store import Bridge
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
-from agent.github.token_scope import token_repositories_from_metadata
 from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
@@ -34,8 +33,9 @@ from agent.sandboxes.state import (
     thread_token_repositories,
     unwrap_sandbox_backend,
 )
-from agent.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, SANDBOX_PROXY_CONFIG_METADATA_KEY
-from agent.tasks.store import load_context
+from agent.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
+from agent.tasks.schemas import ThreadMetadata
+from agent.tasks.store import TaskMembership
 from agent.users import User
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
@@ -355,47 +355,42 @@ async def _attach_task_worker_sandbox(
     github_proxy_repositories: Sequence[str] | None,
     workspace_slug: str | None,
 ) -> SandboxBackendProtocol:
-    context = await load_context(thread_id)
-    host_id = metadata.get(SANDBOX_HOST_THREAD_KEY)
+    worker = ThreadMetadata.model_validate(metadata)
+    context = await TaskMembership.context_for_thread(thread_id)
+    host_id = worker.sandbox_host_thread_id
     if (
         context is None
-        or not isinstance(host_id, str)
+        or not host_id
         or context.membership.role != "worker"
-        or str(context.task.id) != metadata.get("task_id")
+        or context.task.id != worker.task_id
         or host_id != context.task.coordinator_thread_id
         or host_id == thread_id
     ):
         raise PermissionError("The shared sandbox host does not match this worker's task")
-    host_context = await load_context(host_id)
+    host_context = await TaskMembership.context_for_thread(host_id)
     if (
         host_context is None
         or host_context.task.id != context.task.id
         or host_context.membership.role != "coordinator"
     ):
         raise PermissionError("The shared sandbox host is not this task's coordinator")
-    host = await get_sandbox_metadata(host_id)
-    owner = metadata.get("owner_login")
-    host_owner = host.get("owner_login")
+    host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
+    owner = await worker.owner()
+    host_owner = await host.owner()
     if (
-        host.get(SANDBOX_HOST_THREAD_KEY)
-        or host.get("task_id")
-        or metadata.get("owner_type") != "user"
-        or host.get("owner_type") != "user"
-        or not isinstance(owner, str)
-        or not owner.strip()
-        or not isinstance(host_owner, str)
-        or owner.strip().lower() != host_owner.strip().lower()
-        or metadata.get("workspace") != context.task.workspace.slug
-        or (host.get("workspace") or host.get("environment") or "default")
-        != context.task.workspace.slug
+        host.sandbox_host_thread_id
+        or host.task_id
+        or owner.id != host_owner.id
+        or worker.workspace != context.task.workspace.slug
+        or (host.workspace or host.environment or "default") != context.task.workspace.slug
         or (workspace_slug is not None and workspace_slug != context.task.workspace.slug)
-        or metadata.get("admin_thread", False) != host.get("admin_thread", False)
-        or metadata.get("visibility", "public") != host.get("visibility", "public")
+        or worker.admin_thread != host.admin_thread
+        or worker.visibility != host.visibility
     ):
         raise PermissionError("The shared sandbox host has different ownership or permissions")
-    host_repositories = token_repositories_from_metadata(host)
+    host_repositories = host.github_token_repositories
     worker_repositories = narrowed_repositories(
-        github_proxy_repositories, token_repositories_from_metadata(metadata)
+        github_proxy_repositories, worker.github_token_repositories
     )
     if worker_repositories is not None and (
         host_repositories is None
@@ -404,23 +399,24 @@ async def _attach_task_worker_sandbox(
         )
     ):
         raise PermissionError("The shared sandbox grants repositories outside this worker's scope")
+    for target_id, binding, person in ((thread_id, worker, owner), (host_id, host, host_owner)):
+        if binding.owner_user_id is None:
+            await client.threads.update(target_id, metadata={"owner_user_id": str(person.id)})
     backend = await ensure_sandbox_for_thread(
         host_id, workspace_slug=context.task.workspace.slug, require_existing=True
     )
-    current_host = await get_sandbox_metadata(host_id)
-    if current_host.get("sandbox_id") != backend.id:
+    current_host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
+    if current_host.sandbox_id != backend.id:
         raise RuntimeError("The coordinator's sandbox changed while the worker was attaching")
     await client.threads.update(
         thread_id=thread_id,
         metadata={
             "sandbox_id": backend.id,
-            SANDBOX_PROXY_CONFIG_METADATA_KEY: current_host.get(SANDBOX_PROXY_CONFIG_METADATA_KEY),
+            SANDBOX_PROXY_CONFIG_METADATA_KEY: current_host.sandbox_base_proxy_config,
         },
     )
-    from agent.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
-
     published = set_sandbox_backend(thread_id, unwrap_sandbox_backend(backend))
-    if metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
+    if worker.running_background_tasks:
         from agent.background_tasks import reconcile_background_tasks
 
         # Ensuring the host's sandbox reconciles only its own commands; reconcile this worker's.

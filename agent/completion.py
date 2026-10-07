@@ -34,6 +34,7 @@ from agent.slack.client import post_slack_thread_reply
 from agent.slack.code_channels import is_code_channel_session, set_session_status
 from agent.slack.thinking import sync_slack_background_status
 from agent.source_context import SourceContext
+from agent.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from agent.thread_feedback import schedule_answer_feedback
 from agent.transcript.turns import TurnOutcome, settle_run_turn
 from agent.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
@@ -535,9 +536,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     ):
         pickup_allowed = True
         if is_worker:
-            from agent.tasks.store import get_delegation
+            from agent.tasks.store import TaskDelegation
 
-            delegation = await get_delegation(thread_id)
+            delegation = await TaskDelegation.get(thread_id)
             pickup_allowed = delegation is not None and not delegation.cancelled
         if pickup_allowed:
             await _start_run_for_pending_follow_ups(thread_id)
@@ -546,6 +547,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}
     if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
+        await TaskMessage.deliver_to(thread_id)
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
         return await _handle_successful_run(thread_id, run_id, payload)
@@ -587,9 +589,10 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
 
     # Only event-woken runs count: a failure on a run a person started always replies
     # and lets later event-woken failures report again.
-    event_woken = (
-        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == EVENT_MATCH_KIND
-    )
+    event_woken = isinstance(payload_metadata, dict) and payload_metadata.get("kind") in {
+        EVENT_MATCH_KIND,
+        TASK_MESSAGE_KIND,
+    }
     failures = _consecutive_failures(metadata) + 1 if event_woken else 0
     counter = (
         {_CONSECUTIVE_FAILURES: failures} if failures or _consecutive_failures(metadata) else {}

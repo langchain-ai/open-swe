@@ -38,7 +38,18 @@ async def sender_label(thread_id: str) -> str | None:
         title = metadata.get("title")
         if not isinstance(title, str) or not title.strip():
             return None
-        delegation = await store.get_delegation(thread_id)
+        if title.strip().lower() in {
+            "untitled",
+            "untitled thread",
+            "new thread",
+            "new chat",
+            "new conversation",
+            "untitled conversation",
+            "worker",
+            "coordinator",
+        }:
+            return None
+        delegation = await store.TaskDelegation.get(thread_id)
         if delegation is not None and title == delegation.instructions[:80]:
             return None
         return title.strip()[:160]

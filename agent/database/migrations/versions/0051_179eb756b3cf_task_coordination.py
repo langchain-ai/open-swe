@@ -14,7 +14,7 @@ def upgrade() -> None:
             id uuid PRIMARY KEY,
             coordinator_thread_id text UNIQUE,
             title text NOT NULL,
-            workspace_id uuid NOT NULL REFERENCES workspace(id),
+            workspace_id uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
             delegated boolean NOT NULL DEFAULT false,
             UNIQUE (id, coordinator_thread_id)
         )
@@ -22,7 +22,7 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE task_membership (
             thread_id text PRIMARY KEY,
-            task_id uuid NOT NULL REFERENCES task(id),
+            task_id uuid NOT NULL REFERENCES task(id) ON DELETE CASCADE,
             role text NOT NULL CHECK (role IN ('coordinator', 'worker')),
             UNIQUE (task_id, thread_id)
         )
@@ -48,9 +48,9 @@ def upgrade() -> None:
             launch_error text,
             cancelled boolean NOT NULL DEFAULT false,
             FOREIGN KEY (task_id, worker_thread_id)
-                REFERENCES task_membership(task_id, thread_id),
+                REFERENCES task_membership(task_id, thread_id) ON DELETE CASCADE,
             FOREIGN KEY (task_id, coordinator_thread_id)
-                REFERENCES task(id, coordinator_thread_id),
+                REFERENCES task(id, coordinator_thread_id) ON DELETE CASCADE,
             CHECK (worker_thread_id <> coordinator_thread_id)
         )
     """)

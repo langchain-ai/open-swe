@@ -5,10 +5,11 @@ from collections.abc import Mapping
 from typing import cast
 from uuid import UUID
 
-from agent.invocation import resolve_invocation_id
 from agent.prompts import prompt
 from agent.tasks import presentation, store
+from agent.tasks.messages import TaskMessage
 from agent.tasks.presentation import TaskEventMetadata, TaskEventStatus
+from agent.tasks.schemas import RunPayload, StateSnapshot
 from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.event_subscriptions import EventSubscription
@@ -18,81 +19,42 @@ _TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 _MAX_RESULT_CHARS = 16_000
 
 
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return "\n".join(
-            block["text"]
-            for block in value
-            if isinstance(block, Mapping) and isinstance(block.get("text"), str)
-        )
-    return ""
-
-
-def _answer(values: object) -> str:
-    if not isinstance(values, Mapping):
-        return ""
-    messages = values.get("messages")
-    if not isinstance(messages, list):
-        return ""
-    for message in reversed(messages):
-        if not isinstance(message, Mapping):
-            continue
-        role = message.get("type", message.get("role"))
-        if role in {"human", "user"}:
-            break
-        if role in {"ai", "assistant"} and not message.get("tool_calls"):
-            answer = _text(message.get("content")).strip()
-            if answer:
-                return answer[:_MAX_RESULT_CHARS]
-    return ""
-
-
-def _error(status: str, error: object) -> str:
-    if isinstance(error, Mapping):
-        detail = ": ".join(
-            value for key in ("error", "message") if isinstance(value := error.get(key), str)
-        )
-    else:
-        detail = error if isinstance(error, str) else ""
-    return (detail.strip() or f"Worker invocation ended with status {status}.")[:_MAX_RESULT_CHARS]
-
-
 async def worker_result(
     thread_id: str, run_id: str, status: str, payload: Mapping[str, object]
 ) -> str:
+    parsed = RunPayload.parse(payload)
     if status != "success":
-        return _error(status, payload.get("error"))
-    if answer := _answer(payload.get("values")):
+        return parsed.failure(status, _MAX_RESULT_CHARS)
+    if parsed.values is not None and (answer := parsed.values.answer(_MAX_RESULT_CHARS)):
         return answer
-    metadata = payload.get("metadata")
-    invocation_id = resolve_invocation_id(metadata if isinstance(metadata, Mapping) else None)
+    invocation_id = parsed.metadata.invocation()
     client = langgraph_client()
     if invocation_id is None:
-        run = await client.runs.get(thread_id, run_id)
-        invocation_id = resolve_invocation_id(run.get("metadata"))
+        run = RunPayload.parse(await client.runs.get(thread_id, run_id))
+        invocation_id = run.metadata.invocation()
     history = await client.threads.get_history(
         thread_id,
         limit=1,
         metadata={"invocation_id": invocation_id} if invocation_id else {"run_id": run_id},
     )
-    if history and (answer := _answer(history[0].get("values"))):
-        return answer
+    if history:
+        state = StateSnapshot.model_validate(history[0])
+        if answer := state.values.answer(_MAX_RESULT_CHARS):
+            return answer
     return "The invocation completed without a final answer. Inspect the worker thread for details."
 
 
 async def worker_finished(
     thread_id: str, run_id: str, status: str, payload: Mapping[str, object]
 ) -> bool:
-    context = await store.load_context(thread_id)
+    context = await store.TaskMembership.context_for_thread(thread_id)
     if context is None or context.membership.role != "worker":
         return False
     if status not in _TERMINAL_STATUSES:
         return True
     from agent.tasks.service import notify
 
-    delegation = await store.get_delegation(thread_id)
+    delegation = await store.TaskDelegation.get(thread_id)
     if delegation is not None and delegation.cancelled and status != "interrupted":
         logger.info(
             "Suppressed a cancelled worker's run outcome",
@@ -110,7 +72,7 @@ async def worker_finished(
         result = "The worker finished, but its final answer could not be read. Inspect the worker thread."
     await notify(
         context.task,
-        store.require_coordinator(context.task),
+        context.task.require_coordinator(),
         f"finished:{thread_id}:{run_id}",
         prompt(
             "tasks/finished",
@@ -131,7 +93,8 @@ async def worker_finished(
             content=result,
         ),
     )
-    delegation = await store.get_delegation(thread_id)
+    delegation = await store.TaskDelegation.get(thread_id)
     if status != "interrupted" and delegation is not None and not delegation.cancelled:
+        await TaskMessage.deliver_to(thread_id)
         await EventSubscription.deliver_to(thread_id, "enqueue")
     return True
