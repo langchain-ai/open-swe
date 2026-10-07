@@ -4594,6 +4594,29 @@
         ],
         "type": "string"
       },
+      "ReviewChat": {
+        "properties": {
+          "assistant_id": {
+            "title": "Assistant Id",
+            "type": "string"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "assistant_id",
+          "thread_id"
+        ],
+        "title": "ReviewChat",
+        "type": "object"
+      },
       "ReviewCommentUpdate": {
         "properties": {
           "body": {
@@ -13004,9 +13027,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Review Chat Dashboard Api Reviews  Owner   Repo   Pr Number  Chat Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewChat"
                 }
               }
             },
