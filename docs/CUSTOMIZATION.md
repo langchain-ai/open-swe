@@ -635,7 +635,7 @@ Open SWE supports a `default_prompt.md` file for org-level instructions that app
 
 The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
 
-**Location:** [`openswe/resources/default_prompt.md`](../agent/resources/default_prompt.md) for the bundled default.
+**Location:** [`openswe/resources/default_prompt.md`](../openswe/resources/default_prompt.md) for the bundled default.
 
 **Override:** Set the `DEFAULT_PROMPT_PATH` environment variable to use a different file:
 

@@ -34,7 +34,7 @@
     "# pnpm hashes every patchedDependencies file on install, even ones outside the filtered packages.",
     "COPY desktop/patches /tmp/dashboard-src/desktop/patches",
     "# The dashboard build bakes SOURCE_COMMIT into the bundle's compile-time constants and its sidecar; the backend stamps its own sidecar from the same value.",
-    "# These lines run before the source copy, so the backend sidecar goes to a location created here and read at runtime, not into the agent package.",
+    "# These lines run before the source copy, so the backend sidecar goes to a location created here and read at runtime, not into the openswe package.",
     "ARG SOURCE_COMMIT=",
     "COPY scripts/stamp_build_info.py /tmp/stamp_build_info.py",
     "ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
