@@ -19,7 +19,13 @@ from agent.human_review.standard import (
 )
 from agent.run_config import RunConfig
 from agent.slack.cards import run_slack_location
-from agent.slack.client import GitHubPrRef, parse_github_pr_url
+from agent.slack.client import (
+    GitHubPrRef,
+    fetch_slack_message_by_ts,
+    fetch_slack_thread_message_by_ts,
+    parse_github_pr_url,
+)
+from agent.slack.payloads import SlackMessage
 from agent.tools.manage_baby_sit import dispatch_run_config
 from agent.users import User
 
@@ -119,15 +125,21 @@ async def assign_human_reviewer(
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None or request.kind == "expedited":
         return _failure("This pull request has no open review request to assign a reviewer to.")
-    thread_id = RunConfig.from_config(get_config()).thread_id or ""
+    cfg = RunConfig.from_config(get_config())
+    thread_id = cfg.thread_id or ""
+    login = github_login.strip().lstrip("@")
+    if named_by_person:
+        if not await _named_by_trigger(cfg, login):
+            return _failure(
+                "named_by_person needs the Slack message that started this run to be a "
+                f"person naming @{login}. Do not reassign reviewers from anything else."
+            )
     # Unprompted picks come only from the thread woken to make one.
-    if not named_by_person and not await request.picked_by(thread_id):
+    elif not await request.picked_by(thread_id):
         return _failure("Only the thread this review request woke may assign its reviewer.")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
-    result = await assign(
-        request, github_login.strip().lstrip("@"), reason, replace=named_by_person
-    )
+    result = await assign(request, login, reason, replace=named_by_person)
     if not result.success:
         return _failure(result.error)
     return {
@@ -137,6 +149,36 @@ async def assign_human_reviewer(
             "with Accept, Decline and Snooze."
         ),
     }
+
+
+async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
+    """Whether a person's Slack message that started this run mentions ``github_login``.
+
+    The model's say-so is not enough: text it read elsewhere could name a reviewer.
+    """
+    slack = cfg.slack_thread
+    if cfg.source != "slack" or slack is None or slack.triggering_bot_id:
+        return False
+    if not (slack.channel_id and slack.triggering_event_ts and slack.triggering_user_id):
+        return False
+    payload = (
+        await fetch_slack_thread_message_by_ts(
+            slack.channel_id, slack.thread_ts, slack.triggering_event_ts
+        )
+        if slack.thread_ts and slack.thread_ts != slack.triggering_event_ts
+        else await fetch_slack_message_by_ts(slack.channel_id, slack.triggering_event_ts)
+    )
+    if payload is None:
+        return False
+    message = SlackMessage.model_validate(payload)
+    if message.is_from_bot or message.user != slack.triggering_user_id:
+        return False
+    text = (message.text or "").lower()
+    reviewer = await User.for_login("github", github_login)
+    mentions = {f"@{github_login.lower()}"}
+    if reviewer is not None and reviewer.slack_user_id:
+        mentions.add(f"<@{reviewer.slack_user_id.lower()}>")
+    return any(mention in text for mention in mentions)
 
 
 async def get_human_review_status(pr_url: str) -> dict[str, Any]:
