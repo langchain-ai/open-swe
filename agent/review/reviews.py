@@ -24,12 +24,11 @@ from agent.database import postgres
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
 from agent.github.ci import list_check_runs, list_commit_statuses
-from agent.github.http import github_client
+from agent.github.http import GitHubClient, github_client
 from agent.github.pull_request_diff import (
     build_pr_diff_files,
     fetch_file_versions,
 )
-from agent.github.pull_request_status import fetch_unresolved_review_threads
 from agent.github.webhook import trigger_pr_review_from_ref
 from agent.review.assessment_feedback import ASSESSMENTS
 from agent.review.findings import (
@@ -1207,7 +1206,7 @@ async def get_pull_request_preview(
                 token,
                 params={"per_page": _PREVIEW_FILES_PER_PAGE},
             ),
-            fetch_unresolved_review_threads(client, owner, repo, pr_number),
+            GitHubClient(client).repo(owner, repo).pull_request(pr_number).unresolved_threads(),
         )
     pull = _GithubPreviewPull.model_validate(pull_payload if isinstance(pull_payload, dict) else {})
     raw_files = file_payload if isinstance(file_payload, list) else []
