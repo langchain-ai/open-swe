@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx2
 import pytest
 
-from agent.github import http as github_http
-from agent.github import repo_merge_methods as merge_methods
+from openswe.github import http as github_http
+from openswe.github import repo_merge_methods as merge_methods
 
 
 @pytest.mark.parametrize(

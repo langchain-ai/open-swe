@@ -3,8 +3,8 @@ from typing import Any
 
 import pytest
 
-from agent.slack import stop as slack_stop
-from agent.slack.stop import process_slack_stop_reaction
+from openswe.slack import stop as slack_stop
+from openswe.slack.stop import process_slack_stop_reaction
 
 
 class FakeStore:

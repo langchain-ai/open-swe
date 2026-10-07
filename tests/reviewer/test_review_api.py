@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.review.reviews import (
+from openswe.review.reviews import (
     _ALLOWED_IMAGE_CONTENT_TYPES,
     _image_request_headers,
     _is_allowed_image_url,
@@ -54,9 +54,9 @@ async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
         return {"body": "see ![diagram](https://x.githubusercontent.com/a.png)"}
 
     monkeypatch.setattr(
-        "agent.github.app.get_github_app_installation_token", AsyncMock(return_value="tok")
+        "openswe.github.app.get_github_app_installation_token", AsyncMock(return_value="tok")
     )
-    monkeypatch.setattr("agent.review.reviews._github_get", fake_github_get)
+    monkeypatch.setattr("openswe.review.reviews._github_get", fake_github_get)
 
     # A URL not present in the PR body (cross-repo IDOR attempt) is rejected.
     with pytest.raises(HTTPException) as exc:

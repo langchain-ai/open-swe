@@ -10,7 +10,7 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 
-from agent.middleware.model_fallback import (
+from openswe.middleware.model_fallback import (
     ModelFallbackMiddleware,
 )
 
@@ -88,9 +88,11 @@ class TestModelFallbackMiddleware:
             return span
 
         with (
-            patch("agent.middleware.model_fallback.trace", side_effect=make_span) as traced,
-            patch("agent.middleware.model_fallback.asyncio.sleep", new_callable=AsyncMock) as sleep,
-            patch("agent.middleware.model_fallback.random.uniform", return_value=0),
+            patch("openswe.middleware.model_fallback.trace", side_effect=make_span) as traced,
+            patch(
+                "openswe.middleware.model_fallback.asyncio.sleep", new_callable=AsyncMock
+            ) as sleep,
+            patch("openswe.middleware.model_fallback.random.uniform", return_value=0),
         ):
             result = await ModelFallbackMiddleware(
                 fallback, backoff_schedule=(0.0, 5.0)

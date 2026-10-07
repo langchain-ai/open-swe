@@ -4,10 +4,10 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github import pull_request_actions as actions
-from agent.github import squash_message
-from agent.github.http import GitHubClient
-from agent.github.pull_request_status import PullRequestClient
+from openswe.github import pull_request_actions as actions
+from openswe.github import squash_message
+from openswe.github.http import GitHubClient
+from openswe.github.pull_request_status import PullRequestClient
 
 
 def _pull(number: int) -> PullRequestClient:

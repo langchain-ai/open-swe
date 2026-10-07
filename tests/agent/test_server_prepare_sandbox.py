@@ -3,10 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langsmith.sandbox import SandboxRetryableConnectionError
 
-import agent.server as server
-from agent.middleware import task_coordination
-from agent.tasks.store import Task, TaskContext, TaskDelegation, TaskMembership
-from agent.workspaces.rows import WorkspaceRow
+import openswe.server as server
+from openswe.middleware import task_coordination
+from openswe.tasks.store import Task, TaskContext, TaskDelegation, TaskMembership
+from openswe.workspaces.rows import WorkspaceRow
 
 
 def _middleware() -> server.PrepareAgentRunMiddleware:

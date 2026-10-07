@@ -3,7 +3,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi import HTTPException
 
-from agent.slack import oauth as slack_oauth
+from openswe.slack import oauth as slack_oauth
 
 
 def test_build_authorize_url_includes_team_when_configured(

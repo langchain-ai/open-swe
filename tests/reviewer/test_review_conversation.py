@@ -6,11 +6,11 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import profiles
-from agent.github import http as github_http
-from agent.github.checks import github_headers
-from agent.review import conversation
-from agent.review.conversation import (
+from openswe.dashboard import profiles
+from openswe.github import http as github_http
+from openswe.github.checks import github_headers
+from openswe.review import conversation
+from openswe.review.conversation import (
     ConversationComment,
     ConversationCommentCreate,
     ConversationReview,

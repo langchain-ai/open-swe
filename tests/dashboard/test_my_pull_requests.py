@@ -4,12 +4,12 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import profiles
-from agent.github import http as github_http
-from agent.github import pull_request_dashboard_routes as pr_routes
-from agent.github import pull_request_status as prs
-from agent.github.ci import RequiredCheck
-from agent.review import routes as review_routes
+from openswe.dashboard import profiles
+from openswe.github import http as github_http
+from openswe.github import pull_request_dashboard_routes as pr_routes
+from openswe.github import pull_request_status as prs
+from openswe.github.ci import RequiredCheck
+from openswe.review import routes as review_routes
 
 
 def _client(number: int) -> prs.PullRequestClient:

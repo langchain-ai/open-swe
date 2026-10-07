@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import profiles
-from agent.github import pull_request_context
-from agent.threads import handlers
+from openswe.dashboard import profiles
+from openswe.github import pull_request_context
+from openswe.threads import handlers
 from tests.conftest import patch_thread_module
 
 _BROKEN_PR = {
