@@ -115,6 +115,26 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_breakout_tool, "get_slack_permalink", AsyncMock(return_value=None))
 
 
+async def test_web_breakout_does_not_post_or_bind_slack(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agent.run_config.get_config", _config)
+    dispatch = AsyncMock(return_value=True)
+    post = AsyncMock()
+    bind = AsyncMock()
+    monkeypatch.setattr(slack_breakout_tool.webhook, "process_slack_web_mention", dispatch)
+    monkeypatch.setattr(slack_breakout_tool, "post_slack_top_level_message_with_ts", post)
+    monkeypatch.setattr(slack_breakout_tool, "bind_slack_thread_id", bind)
+    result = await slack_breakout_tool.slack_breakout_thread(
+        "Side question", "Explain this", web_only=True
+    )
+    assert result["success"] is True
+    assert "slack_url" not in result
+    request = dispatch.await_args.args[0]
+    assert request.context_thread_ts == _config()["configurable"]["slack_thread"]["thread_ts"]
+    assert request.text == "Explain this"
+    post.assert_not_awaited()
+    bind.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     ("explicit", "target"),
     [(None, "C1"), ("C3", "C3")],
