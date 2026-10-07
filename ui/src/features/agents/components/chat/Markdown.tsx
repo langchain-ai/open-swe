@@ -333,16 +333,20 @@ export const Markdown = memo(function Markdown({
           if (!open) setImage(null)
         }}
       >
-        <DialogPopup className="max-w-[95vw]">
-          <div className="flex items-center justify-between gap-4 p-4">
+        <DialogPopup className="h-[calc(100dvh-2rem)] max-w-[95vw]">
+          <div className="flex shrink-0 items-center justify-between gap-4 p-4">
             <DialogTitle>{image?.alt || "Image preview"}</DialogTitle>
             <DialogClose className="rounded-md border px-3 py-1">
               Close
             </DialogClose>
           </div>
-          <div className="overflow-auto p-4">
+          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
             {image && (
-              <img src={image.src} alt={image.alt} className="max-w-none" />
+              <img
+                src={image.src}
+                alt={image.alt}
+                className="h-full w-full object-contain"
+              />
             )}
           </div>
         </DialogPopup>
