@@ -13,6 +13,7 @@ import {
   optimisticThread,
   setAgentThreadStatus,
   setAgentThreadResolved,
+  useAgentThread,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useRenameAgentThread,
@@ -822,6 +823,32 @@ describe("sidebar task families", () => {
     expect(
       client.getQueryData<ThreadsPage>(key)?.items[0]?.taskWorkers
     ).toEqual([])
+  })
+
+  it("refreshes worker status in an idle coordinator's detail and discovers restarts", async () => {
+    vi.useFakeTimers()
+    let current = coordinator
+    vi.spyOn(agentsApi, "getThread").mockImplementation(async () => current)
+    const client = testClient()
+    const { result } = renderHook(() => useAgentThread("coordinator"), {
+      wrapper: wrapperFor(client),
+    })
+    await vi.waitFor(() =>
+      expect(result.current.data?.taskWorkers?.[0]?.status).toBe("running")
+    )
+    current = {
+      ...coordinator,
+      taskWorkers: [{ ...worker, status: "finished" }],
+    }
+    await act(() => vi.advanceTimersByTimeAsync(2100))
+    await vi.waitFor(() =>
+      expect(result.current.data?.taskWorkers?.[0]?.status).toBe("finished")
+    )
+    current = coordinator
+    await act(() => vi.advanceTimersByTimeAsync(30_000))
+    await vi.waitFor(() =>
+      expect(result.current.data?.taskWorkers?.[0]?.status).toBe("running")
+    )
   })
 
   it("keeps the existing page poll alive for idle coordinators and discovers new workers", async () => {
