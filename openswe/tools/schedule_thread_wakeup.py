@@ -14,7 +14,7 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.dispatch import COMPLETION_WEBHOOK_URL, prepare_run_config
 from openswe.input_messages import build_run_input
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.client import get_active_slack_thread
 from openswe.utils.thread_ops import langgraph_url
@@ -34,7 +34,7 @@ _WAKEUP_COUNT_METADATA_KEY = "thread_wakeup_count"
 _WAKEUP_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _PURGE_PAGE_SIZE = 100
 
-_DEFAULT_WAKEUP_PROMPT = load_prompt("runs/thread-wakeup.md")
+_DEFAULT_WAKEUP_PROMPT = prompt("runs/thread-wakeup")
 
 
 def _ceil_to_next_minute(value: datetime) -> datetime:

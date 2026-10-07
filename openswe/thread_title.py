@@ -9,7 +9,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from openswe.input_messages import dynamic_context_hash, human_input, input_message_text
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
 from openswe.slack.client import update_slack_message
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from openswe.slack.http import SlackRequestError
@@ -30,7 +30,7 @@ class _ThreadTitle(BaseModel):
     title: str = Field(description="Concise, outcome-focused thread title, 3-8 words")
 
 
-_TITLE_SYSTEM_PROMPT = load_prompt("thread-title.md")
+_TITLE_SYSTEM_PROMPT = prompt("thread-title")
 
 
 def _thread_metadata(thread: Any) -> dict[str, Any]:

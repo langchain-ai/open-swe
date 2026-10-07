@@ -27,7 +27,7 @@ from openswe.input_messages import (
     system_input,
     system_introduction,
 )
-from openswe.prompts import load_prompt, prompt
+from openswe.prompts import prompt
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
@@ -121,7 +121,7 @@ def build_github_pr_review_prompt(
     head_sha: str,
 ) -> str:
     """Build the reviewer instruction text; PR metadata is serialized separately."""
-    return load_prompt("runs/github-pr-review.md")
+    return prompt("runs/github-pr-review")
 
 
 def _github_person(login: str, user_id: object = None) -> PersonIdentity:

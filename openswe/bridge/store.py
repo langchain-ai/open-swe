@@ -293,6 +293,15 @@ class BridgeStore:
         return Bridge.of(rows[0]) if rows else None
 
     @classmethod
+    async def is_connected(cls, sandbox_id: str | None) -> bool:
+        """Whether the bridge a thread's ``sandbox_id`` names is being served right now."""
+        bridge_id = Bridge.bridge_id_of(sandbox_id)
+        if bridge_id is None or not postgres.configured():
+            return False
+        bridge = await cls.load(bridge_id)
+        return bridge is not None and bridge.is_alive
+
+    @classmethod
     async def require_open(cls, bridge_id: str, *, owner_id: str) -> Bridge:
         """The caller's open bridge, or an HTTP error that leaks no other user's ids."""
         if not postgres.configured():

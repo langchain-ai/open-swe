@@ -65,6 +65,7 @@ from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import BridgeClient
 from openswe.bridge.store import Bridge
 from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
+from openswe.bridge.worktree_handoff import worktree_handoff
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.agent_overrides import (
     load_profile,
@@ -153,7 +154,7 @@ from openswe.model_request import (
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import construct_system_prompt
-from openswe.prompts import apply_tool_descriptions, load_prompt
+from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -642,7 +643,7 @@ class _SubagentToolGuard(AgentMiddleware):
     ) -> ToolMessage | Command:
         if _is_subagent_excluded_tool(request.tool_call["name"]):
             return ToolMessage(
-                content=load_prompt("tools/subagent-unavailable.md"),
+                content=prompt("tools/subagent-unavailable"),
                 tool_call_id=request.tool_call["id"],
             )
         return await handler(request)
@@ -663,7 +664,7 @@ def _general_purpose_subagent(
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": (
             f"{GENERAL_PURPOSE_SUBAGENT['description']} "
-            f"{load_prompt('system/general-purpose-subagent-suffix.md')}"
+            f"{prompt('system/general-purpose-subagent-suffix')}"
         ),
         "mode": "fork",
         "model": model,
@@ -1798,6 +1799,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         propose_pr_review,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
+        *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
         read_only_sql,
         read_store_item,
         manage_feature_flags,

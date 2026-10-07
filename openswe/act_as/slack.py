@@ -151,6 +151,8 @@ async def _close_card(interaction: SlackInteraction, label: str, thread_id: str)
             interaction.channel_id,
             interaction.message_ts,
             text,
+            unfurl_links=False,
+            unfurl_media=False,
             blocks=block_payload(
                 [
                     section(text),

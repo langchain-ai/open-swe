@@ -18,14 +18,14 @@ def _prompt_path(name: str) -> PurePosixPath:
 
 
 @cache
-def load_prompt(name: str) -> str:
+def _load_prompt(name: str) -> str:
     path = _prompt_path(name)
     resource = _PROMPT_ROOT.joinpath(*path.parts)
     return resource.read_text(encoding="utf-8").strip()
 
 
 _JINJA = Environment(
-    loader=FunctionLoader(load_prompt),
+    loader=FunctionLoader(_load_prompt),
     autoescape=False,
     undefined=StrictUndefined,
     trim_blocks=True,
@@ -46,7 +46,7 @@ def prompt(name: str, values: Mapping[str, object] | None = None, /, **kwargs: o
         return _JINJA.get_template(f"{name}.md.jinja").render(substitutions).strip()
     if substitutions:
         raise ValueError(f"prompt {name!r} does not accept variables without a Jinja template")
-    return load_prompt(f"{name}.md")
+    return _load_prompt(f"{name}.md")
 
 
 def apply_tool_descriptions(
