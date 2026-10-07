@@ -4,7 +4,7 @@ import asyncio
 import logging
 import posixpath
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from fastapi import HTTPException
@@ -343,7 +343,11 @@ async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> 
 
 
 async def cancel_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    on_interrupted: Callable[[], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Interrupt every live run on a thread on behalf of its owner.
 
@@ -369,6 +373,8 @@ async def cancel_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
+    if on_interrupted is not None:
+        await on_interrupted()
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
     metadata_update: dict[str, Any] = {
