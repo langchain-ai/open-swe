@@ -298,11 +298,18 @@ async function grantWrite(request: APIRequestContext) {
   }
 }
 
-/** Open the mock Slack UI on ``channel``, so a trace shows what people see there. */
-async function showSlack(page: Page, channel: string) {
+/** Open the mock Slack UI on ``channel`` and screenshot it as ``name``. */
+async function showSlack(page: Page, channel: string, name: string) {
   await page.goto("/mock/slack");
   await page.locator(`[data-channel-id="${channel}"]`).click();
   await expect(page.locator(".msg").last()).toBeVisible({ timeout: 15_000 });
+  // The mock UI re-renders every poll, so a screenshot can land mid-render.
+  await expect(async () => {
+    await page.screenshot({
+      path: `test-results/human-review-${name}.png`,
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 15_000 });
 }
 
 async function shootCard(page: Page, name: string) {
@@ -903,12 +910,12 @@ test.describe("Human review in Slack", () => {
     const declining = first === BOB.login ? BOB : DANA;
     const next = first === BOB.login ? DANA : BOB;
     const dmChannel = `D_${declining.slack.replace(/^U_/, "")}`;
-    await showSlack(page, REVIEW_CHANNEL);
+    await showSlack(page, REVIEW_CHANNEL, "decline-1-card-picked");
 
     // 2. The pick's DM offers Accept, Decline and Snooze.
     const picked = await pickedDm(request, dmChannel);
     expect(buttons(picked)).toEqual(["Accept", "Decline", "Snooze"]);
-    await showSlack(page, dmChannel);
+    await showSlack(page, dmChannel, "decline-2-dm-picked");
 
     // 3. Snooze asks how long, from half an hour to two days, an hour by default;
     //    closing it changes nothing.
@@ -978,7 +985,7 @@ test.describe("Human review in Slack", () => {
         ),
       )
       .toBe(false);
-    await showSlack(page, dmChannel);
+    await showSlack(page, dmChannel, "decline-3-dm-declined");
 
     // 6. The card thread's agent is told why and picks the other code owner, whom
     //    Open SWE suggests now that the first one is out.
@@ -987,21 +994,24 @@ test.describe("Human review in Slack", () => {
         timeout: 90_000,
       })
       .toEqual([next.login]);
-    const replies = await channelMessages(
-      request,
-      REVIEW_CHANNEL,
-      posted.slack_message_ts,
-    );
-    expect(
-      replies.some(
-        (m) =>
-          m.is_bot &&
-          m.text.includes(`<@${next.slack}>`) &&
-          m.text.includes("Open SWE picked you"),
-      ),
-    ).toBe(true);
+    await expect
+      .poll(async () =>
+        (
+          await channelMessages(
+            request,
+            REVIEW_CHANNEL,
+            posted.slack_message_ts,
+          )
+        ).some(
+          (m) =>
+            m.is_bot &&
+            m.text.includes(`<@${next.slack}>`) &&
+            m.text.includes("Open SWE picked you"),
+        ),
+      )
+      .toBe(true);
     await pickedDm(request, `D_${next.slack.replace(/^U_/, "")}`);
-    await showSlack(page, REVIEW_CHANNEL);
+    await showSlack(page, REVIEW_CHANNEL, "decline-4-card-repicked");
   });
 
   test("the agent dismisses the review request its thread posted", async ({
