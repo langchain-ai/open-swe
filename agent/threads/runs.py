@@ -699,6 +699,7 @@ async def _attributed_run_messages(
     creating: bool,
     email: str | None,
     client: Any,
+    review_chat_pr_url: str | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -740,7 +741,6 @@ async def _attributed_run_messages(
         notices.append(
             (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
         )
-    review_chat_pr_url = metadata.get("review_chat_pr_url")
     if isinstance(review_chat_pr_url, str):
         notices.append(
             (
@@ -881,6 +881,7 @@ async def _enrich_run_start_command(
         creating=creating,
         email=email,
         client=client,
+        review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.

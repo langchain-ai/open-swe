@@ -20,7 +20,7 @@ export function AgentThreadPage(props: {
   active?: boolean
   /** Show this subagent's transcript instead of the thread's own. */
   subagentId?: string
-  composerText?: string
+  composerDraft?: { key: number; text: string }
 }) {
   return (
     <CatchBoundary
@@ -43,12 +43,12 @@ function AgentThreadContent({
   threadId,
   active = true,
   subagentId,
-  composerText,
+  composerDraft,
 }: {
   threadId: string
   active?: boolean
   subagentId?: string
-  composerText?: string
+  composerDraft?: { key: number; text: string }
 }) {
   const threadQuery = useAgentThread(threadId)
   const transcript = threadQuery.data?.transcript === "v2"
@@ -111,7 +111,7 @@ function AgentThreadContent({
         ) : (
           <AgentThreadView
             thread={threadQuery.data}
-            composerText={composerText}
+            composerDraft={composerDraft}
           />
         )}
       </ThreadSourceProvider>

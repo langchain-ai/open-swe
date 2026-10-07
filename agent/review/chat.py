@@ -14,7 +14,6 @@ from agent.threads.proxy import (
     proxy_dashboard_thread_stream_events,
     require_json_content_type,
 )
-from agent.utils.thread_ops import langgraph_client
 
 
 class ReviewChat(TypedDict):
@@ -35,10 +34,6 @@ async def get_review_chat(
         intent=pr_fixes.OpenThreadIntent(
             intent="open", title=f"Discuss {owner}/{repo}#{pr_number}"
         ),
-    )
-    await langgraph_client().threads.update(
-        thread_id=thread.thread_id,
-        metadata={"review_chat_pr_url": f"https://github.com/{owner}/{repo}/pull/{pr_number}"},
     )
     return {"available": True, "assistant_id": "agent", "thread_id": thread.thread_id}
 

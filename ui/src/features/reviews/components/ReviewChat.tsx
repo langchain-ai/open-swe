@@ -79,7 +79,10 @@ export function ReviewChat({
   reviewed: boolean
 }) {
   const composer = useReviewChatComposer()
-  const [composerText, setComposerText] = useState("")
+  const [composerDraft, setComposerDraft] = useState<{
+    key: number
+    text: string
+  }>()
   const reviewActions = useMemo(
     () => ({
       owner,
@@ -91,9 +94,10 @@ export function ReviewChat({
   )
   useEffect(() => {
     composer?.registerSink((attachment) =>
-      setComposerText((text) =>
-        `${text}\n\n\`${attachment.path}:${attachment.lineLabel}\`\n\`\`\`${attachment.language}\n${attachment.snippet}\n\`\`\``.trim()
-      )
+      setComposerDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: `\`${attachment.path}:${attachment.lineLabel}\`\n\`\`\`${attachment.language}\n${attachment.snippet}\n\`\`\``.trim(),
+      }))
     )
     return () => composer?.registerSink(null)
   }, [composer])
@@ -105,7 +109,7 @@ export function ReviewChat({
     <ReviewChatActionsContext.Provider value={reviewActions}>
       <AgentThreadPage
         threadId={meta.data.thread_id}
-        composerText={composerText}
+        composerDraft={composerDraft}
       />
     </ReviewChatActionsContext.Provider>
   )

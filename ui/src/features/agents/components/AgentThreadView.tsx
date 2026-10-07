@@ -1,6 +1,8 @@
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import {
   Profiler,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -86,7 +88,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
-  composerText?: string
+  composerDraft?: { key: number; text: string }
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -120,8 +122,9 @@ function CodeChannelLink({ url }: { url?: string | null }) {
 
 export function AgentThreadView({
   thread,
-  composerText,
+  composerDraft,
 }: AgentThreadViewProps) {
+  const reviewChat = useContext(ReviewChatActionsContext)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
@@ -312,6 +315,18 @@ export function AgentThreadView({
     entry.message.chunks.filter((chunk) => chunk.kind === "image")
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const [appliedComposerDraft, setAppliedComposerDraft] =
+    useState<typeof composerDraft>(undefined)
+  if (composerDraft !== appliedComposerDraft) {
+    setAppliedComposerDraft(composerDraft)
+    if (composerDraft) {
+      setRestoreDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: composerDraft.text,
+        images: [],
+      }))
+    }
+  }
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>
@@ -855,21 +870,23 @@ export function AgentThreadView({
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              <ThreadPullRequests
-                pullRequests={
-                  // A local branch's PR may come from `gh`, which the thread
-                  // record never hears about.
-                  thread.pullRequests?.length
-                    ? thread.pullRequests
-                    : localPr
-                      ? [localPr]
-                      : []
-                }
-                health={pullRequestHealth}
-                healthUnavailable={pullRequestStatus.isError}
-                onFix={fixPullRequest}
-                fixDisabled={!canPost || sendMessage.isPending}
-              />
+              {!reviewChat && (
+                <ThreadPullRequests
+                  pullRequests={
+                    // A local branch's PR may come from `gh`, which the thread
+                    // record never hears about.
+                    thread.pullRequests?.length
+                      ? thread.pullRequests
+                      : localPr
+                        ? [localPr]
+                        : []
+                  }
+                  health={pullRequestHealth}
+                  healthUnavailable={pullRequestStatus.isError}
+                  onFix={fixPullRequest}
+                  fixDisabled={!canPost || sendMessage.isPending}
+                />
+              )}
               <AgentPromptBar
                 placeholder={
                   runsElsewhere
@@ -891,15 +908,7 @@ export function AgentThreadView({
                 onSubmit={submitMessage}
                 onEmptySubmit={steerNextQueuedMessage}
                 followUpBehavior={followUpBehavior}
-                restoreDraft={
-                  composerText
-                    ? {
-                        key: composerText.length,
-                        text: composerText,
-                        images: [],
-                      }
-                    : restoreDraft
-                }
+                restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
                 models={models}
                 routed={routed}

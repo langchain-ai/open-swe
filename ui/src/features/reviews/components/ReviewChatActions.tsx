@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo } from "react"
+import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import type { Message } from "@/features/agents/lib/types"
 import { chatDiffAction } from "@/features/reviews/lib/chatDiffActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
@@ -17,6 +17,30 @@ export function ReviewChatActions({ messages }: { messages: Array<Message> }) {
   const review = useContext(ReviewChatActionsContext)
   const drafts = useChatDrafts()
   const register = drafts?.register
+  const [outputs, setOutputs] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let cancelled = false
+    for (const message of messages) {
+      for (const chunk of message.chunks) {
+        if (chunk.kind !== "tool-execution" || !chunk.loadOutput) continue
+        void chunk
+          .loadOutput()
+          .then((output) => {
+            if (!cancelled)
+              setOutputs((previous) => ({
+                ...previous,
+                [chunk.toolCallId]: output,
+              }))
+          })
+          .catch((error: unknown) =>
+            console.error("Could not load review draft", error)
+          )
+      }
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [messages])
   const actions = useMemo(
     () =>
       review
@@ -27,13 +51,15 @@ export function ReviewChatActions({ messages }: { messages: Array<Message> }) {
                 type: "tool",
                 name: chunk.title.toLowerCase().replaceAll(" ", "_"),
                 tool_call_id: chunk.toolCallId,
-                content: chunk.output,
+                content:
+                  outputs[chunk.toolCallId] ??
+                  (chunk.loadOutput ? undefined : chunk.output),
               })
               return action ? [action] : []
             })
           )
         : [],
-    [messages, review]
+    [messages, review, outputs]
   )
   useEffect(() => {
     for (const action of actions) register?.(action)
