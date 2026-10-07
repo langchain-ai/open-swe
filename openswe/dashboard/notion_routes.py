@@ -1,10 +1,11 @@
 """Notion connect/disconnect endpoints and the Notion OAuth browser legs."""
 
 import hmac
-from typing import Any
+import logging
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.notion_oauth import (
@@ -29,10 +30,15 @@ from openswe.dashboard.oauth import (
     redeem_connect_handoff,
     require_session,
     sanitize_redirect_to,
+    session_user_id,
     valid_handoff_challenge,
 )
 from openswe.dashboard.user_credentials import connect_notion, disconnect_notion, get_notion_status
+from openswe.slack.dm import send_dm
+from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_api_base_url
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["notion"])
 
@@ -57,7 +63,7 @@ def _clear_notion_state_cookie(response: Response) -> None:
     )
 
 
-async def _complete_notion_connection(login: str, nonce_hash: str, code: str) -> None:
+async def _complete_notion_connection(login: str, nonce_hash: str, code: str) -> bool:
     flow = await pop_notion_oauth_flow(login, nonce_hash)
     if flow is None:
         raise HTTPException(400, "oauth flow expired — please retry")
@@ -68,6 +74,7 @@ async def _complete_notion_connection(login: str, nonce_hash: str, code: str) ->
         raise HTTPException(exc.status_code, exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    return flow.get("slack_origin") is True
 
 
 @router.get("/my-credentials/notion")
@@ -89,6 +96,7 @@ async def disconnect_my_notion(
 @router.get("/notion/login")
 async def notion_login(
     redirect_to: str | None = None,
+    source: Literal["slack"] | None = None,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     session: dict[str, Any] = SESSION_DEP,
@@ -110,6 +118,7 @@ async def notion_login(
             nonce_hash,
             redirect_uri=redirect_uri,
             state=state,
+            slack_origin=source == "slack",
         )
     except NotionOAuthError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
@@ -125,7 +134,7 @@ async def notion_callback(
     code: str | None = None,
     error: str | None = None,
     error_description: str | None = None,
-) -> RedirectResponse:
+) -> Response:
     state_payload = decode_state(state)
     nonce_hash = state_payload.get("nonce_hash")
     handoff = desktop_handoff_from_state(state_payload)
@@ -147,7 +156,9 @@ async def notion_callback(
             challenge=challenge,
             claims={"nonce_hash": nonce_hash, "code": code},
         )
-        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+        response: Response = RedirectResponse(
+            desktop_callback_url(port, handoff_code), status_code=302
+        )
         _clear_notion_state_cookie(response)
         return response
 
@@ -156,10 +167,33 @@ async def notion_callback(
     if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
         raise HTTPException(400, "oauth state mismatch — please retry")
 
-    await _complete_notion_connection(session["sub"], nonce_hash, code)
+    slack_origin = await _complete_notion_connection(session["sub"], nonce_hash, code)
 
-    redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
-    response = RedirectResponse(redirect_to, status_code=302)
+    if slack_origin:
+        notified = False
+        try:
+            user_id = session_user_id(session)
+            user = await User.get(user_id) if user_id is not None else None
+            if user is not None and user.slack_user_id:
+                notified = await send_dm(
+                    user.slack_user_id,
+                    "Notion is now connected to your Open SWE account. "
+                    "Return to your conversation and ask me to continue when you're ready. "
+                    "This personal connection is only available in your private threads.",
+                )
+        except Exception:
+            logger.exception("Notion connected but Slack confirmation failed")
+        if not notified:
+            logger.warning("Notion connected without Slack confirmation")
+        message = (
+            "Notion connected. A confirmation was sent to your linked Slack account. "
+            if notified
+            else "Notion connected, but we couldn't send a Slack confirmation. "
+        )
+        response = PlainTextResponse(message + "You can close this tab and return to Slack.")
+    else:
+        redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
+        response = RedirectResponse(redirect_to, status_code=302)
     _clear_notion_state_cookie(response)
     return response
 

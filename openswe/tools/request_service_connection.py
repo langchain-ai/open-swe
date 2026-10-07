@@ -1,5 +1,4 @@
 from typing import Annotated, Literal
-from urllib.parse import urlencode
 
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
@@ -8,7 +7,7 @@ from openswe.middleware.require_user_reply import current_reply_surface
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, button, section
 from openswe.slack.tools.reply import slack_reply
-from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
+from openswe.utils.dashboard_links import dashboard_api_base_url
 
 
 async def request_service_connection(
@@ -22,17 +21,12 @@ async def request_service_connection(
     surface = current_reply_surface(state) if state is not None else cfg.source
     if surface != "slack":
         return {"success": True}
-    target = dashboard_thread_url(cfg.thread_id or "")
-    if target is None:
-        return {"success": False, "error": "Dashboard thread URL unavailable"}
-    url = f"{dashboard_api_base_url()}/dashboard/api/notion/login?" + urlencode(
-        {"redirect_to": target}
-    )
+    url = f"{dashboard_api_base_url()}/dashboard/api/notion/login?source=slack"
     message = (
         "Connect Notion to your Open SWE account. The button opens Notion's external "
         "consent screen; sign in to Open SWE in your browser before clicking. After "
-        "consent, it returns you to this "
-        "chat on the web. This personal connection is only available in your private "
+        "consent, we'll send a confirmation to your linked Slack account by DM. "
+        "This personal connection is only available in your private "
         "threads; it does not grant access in shared channels."
     )
     result = await slack_reply(

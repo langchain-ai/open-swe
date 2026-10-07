@@ -169,6 +169,7 @@ async def store_notion_oauth_flow(
     *,
     redirect_uri: str,
     state: str,
+    slack_origin: bool = False,
 ) -> str:
     """Create and store a short-lived Notion OAuth flow."""
     metadata = await discover_notion_oauth_metadata()
@@ -189,6 +190,7 @@ async def store_notion_oauth_flow(
         "token_endpoint": str(metadata["token_endpoint"]),
         "redirect_uri": redirect_uri,
         "created_at": now_iso(),
+        "slack_origin": slack_origin,
     }
     await put_value([*NOTION_OAUTH_FLOW_NAMESPACE, login], nonce_hash, value)
     return build_notion_authorize_url(

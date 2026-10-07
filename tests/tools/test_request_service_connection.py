@@ -32,7 +32,7 @@ async def test_connection_card_follows_current_surface_and_reports_delivery_fail
     link = post.await_args.kwargs["blocks"][1]["elements"][0]["url"]
     parsed = urlparse(link)
     assert (parsed.netloc, parsed.path) == ("api.example", "/dashboard/api/notion/login")
-    assert parse_qs(parsed.query) == {"redirect_to": ["https://dashboard.example/agents/thread-1"]}
+    assert parse_qs(parsed.query) == {"source": ["slack"]}
     post.return_value = {"success": False, "error": "not_in_channel"}
     assert await connection.request_service_connection("notion", {"reply_surface": "slack"}) == {
         "success": False,
