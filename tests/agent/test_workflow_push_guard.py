@@ -6,8 +6,8 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
-from agent.middleware import workflow_push_guard as guard
-from agent.sandboxes.state import SandboxBackendProxy
+from openswe.middleware import workflow_push_guard as guard
+from openswe.sandboxes.state import SandboxBackendProxy
 
 
 class _Response:
@@ -170,7 +170,7 @@ async def test_workflow_change_does_not_misattribute_preexisting_workflows() -> 
 
 
 def test_workflow_approval_response_serializes_review_fields() -> None:
-    from agent.threads.workflow_approval import workflow_push_approval_response
+    from openswe.threads.workflow_approval import workflow_push_approval_response
 
     response = workflow_push_approval_response(
         {

@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, patch
 import langgraph_sdk
 import pytest
 
-from agent.dashboard.personal_settings import SettingValue, patch_personal_settings
-from agent.tools.read_user_settings import read_user_settings
-from agent.tools.save_user_settings import save_user_settings
+from openswe.dashboard.personal_settings import SettingValue, patch_personal_settings
+from openswe.tools.read_user_settings import read_user_settings
+from openswe.tools.save_user_settings import save_user_settings
 from tests.conftest import FakeStore
 
 
@@ -21,9 +21,9 @@ def requester(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "github_login": "Alice",
     }
     for module in (
-        "agent.run_config",
-        "agent.tools.save_user_settings",
-        "agent.tools.read_user_settings",
+        "openswe.run_config",
+        "openswe.tools.save_user_settings",
+        "openswe.tools.read_user_settings",
     ):
         monkeypatch.setattr(
             import_module(module), "get_config", lambda: {"configurable": configurable}
@@ -122,7 +122,7 @@ async def test_unauthorized_calls_never_read_or_write_settings(
     requester.update(config_patch)
     saved_scope.update(metadata_patch)
     with patch(
-        "agent.tools.save_user_settings.patch_personal_settings", new_callable=AsyncMock
+        "openswe.tools.save_user_settings.patch_personal_settings", new_callable=AsyncMock
     ) as save:
         result = await save_user_settings({"draft_prs": False})
     assert result["ok"] is False
@@ -138,7 +138,7 @@ async def test_unavailable_thread_scope_fails_closed(
         lambda: SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(side_effect=TimeoutError))),
     )
     with patch(
-        "agent.tools.save_user_settings.patch_personal_settings", new_callable=AsyncMock
+        "openswe.tools.save_user_settings.patch_personal_settings", new_callable=AsyncMock
     ) as save:
         assert (await save_user_settings({"draft_prs": False}))["ok"] is False
     save.assert_not_awaited()
@@ -197,7 +197,7 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
 async def test_sandbox_memory_flag_requires_user_and_validates_before_writing(
     fake_store: FakeStore, requester: dict[str, object], saved_scope: dict[str, object]
 ) -> None:
-    from agent.users import User, UserPreferences
+    from openswe.users import User, UserPreferences
 
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
@@ -236,7 +236,7 @@ async def test_first_setting_does_not_pin_inherited_model_defaults(fake_store: F
 async def test_preference_read_failure_does_not_overwrite_saved_defaults(
     fake_store: FakeStore,
 ) -> None:
-    with patch("agent.dashboard.personal_settings.get_value", side_effect=TimeoutError):
+    with patch("openswe.dashboard.personal_settings.get_value", side_effect=TimeoutError):
         with pytest.raises(TimeoutError):
             await patch_personal_settings("alice", {"draft_prs": False, "default_workspace": "new"})
     assert not fake_store.items
@@ -278,6 +278,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "pr_review_links": False,
                 "pr_failure_reactions": False,
                 "prefer_tools_in_sandbox": False,
+                "experimental_task_coordination": False,
             },
             "preferences": {
                 "default_workspace": "mine",
@@ -299,7 +300,7 @@ async def test_private_read_rejects_unverified_requesters(
     requester: dict[str, object], saved_scope: dict[str, object], login: str | None
 ) -> None:
     requester["github_login"] = login
-    with patch("agent.tools.read_user_settings.get_profile", new_callable=AsyncMock) as profile:
+    with patch("openswe.tools.read_user_settings.get_profile", new_callable=AsyncMock) as profile:
         assert "error" in await read_user_settings()
     profile.assert_not_awaited()
 

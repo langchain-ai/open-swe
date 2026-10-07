@@ -64,15 +64,15 @@ describe("BotThreadsList", () => {
       },
     ])
 
-    render(<BotThreadsList onBotChange={vi.fn()} />)
+    render(<BotThreadsList bot={BOT_KEY} onBotChange={vi.fn()} />)
 
     expect(vi.mocked(useThreadsPage).mock.calls[0]?.[0]).toMatchObject({
       scope: "bot",
-      bot: undefined,
+      bot: BOT_KEY,
     })
     expect(screen.getByText("Flaky test alert")).toBeTruthy()
     expect(screen.queryByText("Manage allowed bots")).toBeNull()
-    expect(screen.getAllByText("Release bot")).toHaveLength(2)
+    expect(screen.getAllByText("Release bot")).toHaveLength(1)
     expect(
       screen
         .getByRole("link", { name: "Open the Slack thread" })
@@ -91,8 +91,20 @@ describe("BotThreadsList", () => {
       bot: BOT_KEY,
     })
     expect(screen.getByText(/No bot threads yet/)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "All bots" }))
+    fireEvent.click(screen.getByRole("button", { name: "← Bots" }))
     expect(onBotChange).toHaveBeenCalledWith(undefined)
+  })
+
+  it("opens a bot from the directory without listing aggregate threads", () => {
+    mockPage([])
+    const onBotChange = vi.fn()
+    render(<BotThreadsList onBotChange={onBotChange} />)
+    expect(vi.mocked(useThreadsPage).mock.calls[0]?.[1]).toMatchObject({
+      enabled: false,
+    })
+    expect(screen.queryByText(/No bot threads yet/)).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /Release bot/ }))
+    expect(onBotChange).toHaveBeenCalledWith(BOT_KEY)
   })
 
   it("lets admins manage the allowlist on the same page", () => {

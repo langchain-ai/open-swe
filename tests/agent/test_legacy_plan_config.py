@@ -65,7 +65,7 @@ def dashboard_run_client(monkeypatch: pytest.MonkeyPatch) -> _FakeLangGraphClien
 
 @pytest.mark.parametrize("legacy_mode", [True, False])
 def test_persisted_turn_with_legacy_plan_field_remains_readable(legacy_mode: bool) -> None:
-    from agent.transcript.events import TurnRequested
+    from openswe.transcript.events import TurnRequested
 
     event = TurnRequested.model_validate(
         {

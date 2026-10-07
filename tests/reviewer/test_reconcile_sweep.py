@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent import reconcile
+from openswe import reconcile
 
 
 def _run(run_id: str, thread_id: str, age_seconds: float) -> dict[str, Any]:

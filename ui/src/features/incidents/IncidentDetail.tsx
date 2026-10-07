@@ -21,6 +21,7 @@ import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { cn } from "@/lib/utils"
 import { pageTitle } from "@/lib/pageTitle"
 import { incidentsApi } from "./api"
@@ -92,7 +93,12 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
   const detail = useQuery({
     queryKey: ["incidents", "detail", incidentId],
     queryFn: () => incidentsApi.detail(incidentId),
-    refetchInterval: 5000,
+    meta: {
+      invalidatedBy: [
+        invalidationTopic("incidents", incidentId),
+        invalidationTopic("incident-settings"),
+      ],
+    },
     retry: false,
   })
   const incidentTitle = detail.data?.incident.title

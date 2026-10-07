@@ -23,6 +23,11 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
+          field="experimental_task_coordination"
+          label="Asynchronous task coordination (experimental)"
+          description="Let your agent delegate to workers that run independently. Turning this off prevents new workers; existing workers can finish and remain available to message or cancel."
+        />
+        <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks (experimental)"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."

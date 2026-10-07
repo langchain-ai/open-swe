@@ -2,8 +2,8 @@
 
 import pytest
 
-from agent.github.merge_reminders import qualifies
-from agent.github.pull_request_status import OpenPullRequest
+from openswe.github.merge_reminders import qualifies
+from openswe.github.pull_request_status import OpenPullRequest
 
 
 @pytest.mark.parametrize(
