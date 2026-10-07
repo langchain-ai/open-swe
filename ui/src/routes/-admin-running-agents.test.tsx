@@ -28,8 +28,18 @@ vi.mock(import("@/features/agents/lib/queries"), async (importOriginal) => ({
     ({
       data: {
         items: [
-          { id: "t1", title: "First", repoFullName: "acme/api" },
-          { id: "t2", title: "Second", repoFullName: "acme/web" },
+          {
+            id: "t1",
+            title: "First",
+            repoFullName: "acme/api",
+            createdAt: Date.parse("2026-10-07T14:35:12Z"),
+          },
+          {
+            id: "t2",
+            title: "Second",
+            repoFullName: "acme/web",
+            createdAt: Date.parse("2026-10-07T14:29:43Z"),
+          },
         ],
       },
       isLoading: false,
