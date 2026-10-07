@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack.http import SlackRequestError
+from openswe.slack.http import SlackRequestError
 
-slack_reply_tool = importlib.import_module("agent.slack.tools.reply")
+slack_reply_tool = importlib.import_module("openswe.slack.tools.reply")
 
 
 @pytest.fixture(autouse=True)

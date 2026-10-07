@@ -4,17 +4,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.audit_logs import tools as audit_tools
-from agent.audit_logs.context import current_audit_log
-from agent.audit_logs.models import AuditLog
-from agent.dashboard.workspace_settings import (
+from openswe.audit_logs import tools as audit_tools
+from openswe.audit_logs.context import current_audit_log
+from openswe.audit_logs.models import AuditLog
+from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_workspace_settings,
     upsert_instance_settings,
 )
-from agent.tools import access as tool_access
-from agent.tools.manage_feature_flags import manage_feature_flags
-from agent.workspaces.store import WORKSPACES, Workspace
+from openswe.tools import access as tool_access
+from openswe.tools.manage_feature_flags import manage_feature_flags
+from openswe.workspaces.store import WORKSPACES, Workspace
 from tests.conftest import FakeStore
 
 real_resolve_access = tool_access.resolve_access
@@ -99,7 +99,7 @@ async def test_private_admin_gate_rejects_other_surfaces(
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
     monkeypatch.setattr(tool_access, "resolve_access", real_resolve_access)
-    with patch("agent.run_config.get_config", return_value={"configurable": config}):
+    with patch("openswe.run_config.get_config", return_value={"configurable": config}):
         result = await manage_feature_flags("set", {"gateway_enabled": True})
     assert "not available in this thread" in str(result["error"])
     assert not fake_store.items

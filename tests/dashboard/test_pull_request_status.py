@@ -5,10 +5,10 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github import http as github_http
-from agent.github import pull_request_status
-from agent.threads import access as thread_access
-from agent.threads import handlers
+from openswe.github import http as github_http
+from openswe.github import pull_request_status
+from openswe.threads import access as thread_access
+from openswe.threads import handlers
 from tests.conftest import patch_thread_module
 
 

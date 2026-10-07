@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.act_as.records import ActAsRequest, ThreadActAs
-from agent.users import User, UserPreferences, UserPreferencesPatch
-from agent.utils.json_types import JsonObject
-from agent.utils.thread_participants import (
+from openswe.act_as.records import ActAsRequest, ThreadActAs
+from openswe.users import User, UserPreferences, UserPreferencesPatch
+from openswe.utils.json_types import JsonObject
+from openswe.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
     PARTICIPANT_LOGINS_KEY,
     participant_metadata,

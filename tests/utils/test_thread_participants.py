@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.input_messages import PersonIdentity
-from agent.users import User
-from agent.utils import thread_participants as participants
+from openswe.input_messages import PersonIdentity
+from openswe.users import User
+from openswe.utils import thread_participants as participants
 
 
 @pytest.mark.asyncio
