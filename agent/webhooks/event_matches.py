@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import Text, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,17 +102,27 @@ class EventMatch(Base):
     @classmethod
     async def owed(cls, thread_id: str, messages: Sequence[object]) -> list[Self]:
         """Matches no message in ``messages`` carries yet, oldest first."""
-        delivered = delivered_event_match_ids(messages)
+        delivered: list[UUID] = []
+        for match_id in delivered_event_match_ids(messages):
+            try:
+                delivered.append(UUID(match_id))
+            except ValueError:
+                logger.warning(
+                    "Ignoring a malformed delivered event-match id",
+                    extra={"agent_thread_id": thread_id, "event_match_id": match_id},
+                )
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
                 .where(
                     cls.thread_id == thread_id,
+                    # Task events never expire: they are the only copy of an assignment or result.
                     (cls.source == "task") | (cls.matched_at >= func.now() - _RETAINED),
+                    cls.id.not_in(delivered),
                 )
                 .order_by(cls.matched_at, cls.id)
             )
-            return [row for row in rows if str(row.id) not in delivered]
+            return list(rows)
 
     @classmethod
     def messages(cls, matches: Sequence[Self]) -> list[RunMessage]:
@@ -121,9 +131,17 @@ class EventMatch(Base):
         for match in matches:
             data: dict[str, object] = {"event_match": str(match.id)}
             if match.source == "task" and match.task_event is not None:
-                data["task_event"] = TaskEventMetadata.model_validate(
-                    match.task_event
-                ).model_dump_json()
+                try:
+                    data["task_event"] = TaskEventMetadata.model_validate(
+                        match.task_event
+                    ).model_dump_json()
+                except ValidationError:
+                    # The content still carries the event; only its display metadata is lost.
+                    logger.warning(
+                        "Delivering a task event without unreadable display metadata",
+                        exc_info=True,
+                        extra={"event_match_id": str(match.id), "agent_thread_id": match.thread_id},
+                    )
             built = build_input_messages(
                 match.content,
                 {
