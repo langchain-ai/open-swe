@@ -17,6 +17,7 @@ from langgraph.typing import StateT
 from langgraph_sdk import get_client
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_data import ToolContext, load_context, save_context
@@ -123,8 +124,16 @@ class ToolSurface:
             if not all(term in f"{name} {tool.description}".casefold() for term in terms):
                 continue
             parameters = tool_parameters(tool)
+            provenance = (tool.metadata or {}).get("mcp_provenance")
             results.append(
-                ToolDescription(name=name, description=tool.description, parameters=parameters)
+                ToolDescription(
+                    name=name,
+                    description=tool.description,
+                    parameters=parameters,
+                    mcp_provenance=provenance
+                    if isinstance(provenance, MCPToolProvenance)
+                    else None,
+                )
             )
         return results
 

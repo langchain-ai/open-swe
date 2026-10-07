@@ -250,6 +250,10 @@ async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
         "linear_list_issues",
         "notion_notion-search",
     ]
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    catalog = ToolSurface(tools={tool.name: tool for tool in tools}).catalog()
+    assert all("mcp_provenance" not in entry.model_dump() for entry in catalog)
     metadata["visibility"] = "public"
     assert "MCP call failed" in await tools[0].ainvoke({})
     assert await runtime.load_mcp_tools(managed.managed_mcp_source("bob", GATEWAY_ID)) == []
@@ -282,7 +286,9 @@ async def test_langsmith_outage_drops_only_the_gateway(monkeypatch):
     async def get_workspace(name):
         return workspace_record if name == "linear" else None
 
-    workspace = runtime.MCPSource(("workspace_mcps",), list_workspace, get_workspace)
+    workspace = runtime.MCPSource(
+        ("workspace_mcps",), list_workspace, get_workspace, scope="workspace"
+    )
     tools = await runtime.load_mcp_tools(workspace, managed.managed_mcp_source("alice", GATEWAY_ID))
     assert [tool.metadata["mcp_tool_name"] for tool in tools] == ["search"]
 
