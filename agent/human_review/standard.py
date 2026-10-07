@@ -88,6 +88,14 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
+SNOOZE_DURATIONS = {
+    "30 minutes": timedelta(minutes=30),
+    "1 hour": timedelta(hours=1),
+    "2 hours": timedelta(hours=2),
+    "4 hours": timedelta(hours=4),
+    "1 day": timedelta(days=1),
+    "2 days": timedelta(days=2),
+}
 
 
 async def _assignment_minutes(request: HumanReviewRequest) -> int:
@@ -515,10 +523,12 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
-async def snooze(request: HumanReviewRequest, user: User | None) -> Outcome:
+async def snooze(request: HumanReviewRequest, user: User | None, length: str) -> Outcome:
+    """Hold ``user``'s pending pick for ``length``, one of ``SNOOZE_DURATIONS``, then remind them."""
     if user is None:
         return Outcome("Link your Open SWE account before snoozing a review.")
-    until = datetime.now(UTC) + timedelta(hours=1)
+    duration = SNOOZE_DURATIONS[length]
+    until = datetime.now(UTC) + duration
     async with HumanReviewRequest.locked(request.id) as (_, row):
         participant = row.participant(user.id) if row else None
         if (
@@ -531,10 +541,10 @@ async def snooze(request: HumanReviewRequest, user: User | None) -> Outcome:
         participant.joined_at = until
         row.run_config = {**row.run_config, f"review_snoozed:{user.id}": until.isoformat()}
     await _schedule(
-        request, "pick_expiry", timedelta(hours=1, minutes=await _assignment_minutes(request))
+        request, "pick_expiry", duration + timedelta(minutes=await _assignment_minutes(request))
     )
-    await _schedule(request, f"snooze:{user.id}", timedelta(hours=1))
-    return Outcome("Review snoozed for 1 hour; your pick stays reserved until then.")
+    await _schedule(request, f"snooze:{user.id}", duration)
+    return Outcome(f"Review snoozed for {length}; your pick stays reserved until then.")
 
 
 async def decline(request: HumanReviewRequest, user: User | None, reason: str) -> Outcome:

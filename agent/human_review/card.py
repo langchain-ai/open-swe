@@ -103,7 +103,7 @@ def decline_button(request: HumanReviewRequest) -> ButtonElement:
 
 def snooze_button(request: HumanReviewRequest) -> ButtonElement:
     return button(
-        "Snooze 1 hour",
+        "Snooze",
         action_id="open_swe_option_select_snooze",
         value=_button_value("snooze", request),
     )

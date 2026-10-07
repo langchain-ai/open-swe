@@ -118,9 +118,9 @@ async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
         patch("agent.human_review.standard._schedule", AsyncMock(return_value=True)),
         patch("agent.human_review.standard._assignment_minutes", AsyncMock(return_value=120)),
     ):
-        await snooze(request, User())
+        await snooze(request, User(), "1 hour")
         assert pick.joined_at is None
-        await snooze(request, user)
+        await snooze(request, user, "2 days")
         assert pick.joined_at is not None and pick.joined_at > datetime.now(UTC)
         assert await expire_picks(request) == "accepted"
         assert pick.decision == "picked"

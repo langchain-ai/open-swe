@@ -21,6 +21,14 @@ const REVIEW_CHANNEL = "CREVIEWS01";
 const ALICE = { login: "alice", email: "alice@example.com", slack: "U_ALICE" };
 const BOB = { login: "bob", email: "bob@example.com", slack: "U_BOB" };
 const DANA = { login: "dana", email: "dana@example.com", slack: "U_DANA" };
+const SNOOZE_LENGTHS = [
+  "30 minutes",
+  "1 hour",
+  "2 hours",
+  "4 hours",
+  "1 day",
+  "2 days",
+];
 const DECLINE_REASONS = [
   "Too many reviews / not enough time",
   "Away or unavailable",
@@ -84,7 +92,12 @@ type ReviewRequest = {
 type SlackView = {
   id: string;
   callback_id: string;
-  blocks: Array<{ element: { options: Array<{ value: string }> } }>;
+  blocks: Array<{
+    element: {
+      options: Array<{ value: string }>;
+      initial_option?: { value: string };
+    };
+  }>;
 };
 
 type PullRequest = {
@@ -894,42 +907,55 @@ test.describe("Human review in Slack", () => {
 
     // 2. The pick's DM offers Accept, Decline and Snooze.
     const picked = await pickedDm(request, dmChannel);
-    expect(buttons(picked)).toEqual(["Accept", "Decline", "Snooze 1 hour"]);
+    expect(buttons(picked)).toEqual(["Accept", "Decline", "Snooze"]);
     await showSlack(page, dmChannel);
 
-    // 3. Decline opens a modal asking why, with every reason to choose from.
-    const decline = (picked.blocks ?? [])
-      .filter((block) => block.type === "actions")
-      .flatMap((block) => block.elements ?? [])
-      .find(
-        (element) =>
-          (typeof element.text === "string"
-            ? element.text
-            : element.text?.text) === "Decline",
-      );
-    await control(request, "/mock/slack/action", {
-      action: decline,
-      channel: dmChannel,
-      message_ts: picked.ts,
-      thread_ts: picked.thread_ts,
-      user: declining.slack,
-    });
-    const views = (await (
-      await request.get("/mock/slack/views")
-    ).json()) as Array<SlackView>;
-    const modal = views.at(-1);
-    expect(modal?.callback_id).toBe("human_review_decline");
-    expect(modal?.blocks[0].element.options.map((item) => item.value)).toEqual(
+    // 3. Snooze asks how long, from half an hour to two days, an hour by default;
+    //    closing it changes nothing.
+    const openModal = async (label: string): Promise<SlackView> => {
+      const action = (picked.blocks ?? [])
+        .filter((block) => block.type === "actions")
+        .flatMap((block) => block.elements ?? [])
+        .find(
+          (element) =>
+            (typeof element.text === "string"
+              ? element.text
+              : element.text?.text) === label,
+        );
+      await control(request, "/mock/slack/action", {
+        action,
+        channel: dmChannel,
+        message_ts: picked.ts,
+        thread_ts: picked.thread_ts,
+        user: declining.slack,
+      });
+      const views = (await (
+        await request.get("/mock/slack/views")
+      ).json()) as Array<SlackView>;
+      return views.at(-1)!;
+    };
+    const snoozeModal = await openModal("Snooze");
+    expect(snoozeModal.callback_id).toBe("human_review_snooze");
+    expect(
+      snoozeModal.blocks[0].element.options.map((item) => item.value),
+    ).toEqual(SNOOZE_LENGTHS);
+    expect(snoozeModal.blocks[0].element.initial_option?.value).toBe("1 hour");
+
+    // 4. Decline asks why, with every reason to choose from.
+    const modal = await openModal("Decline");
+    expect(modal.callback_id).toBe("human_review_decline");
+    expect(modal.blocks[0].element.options.map((item) => item.value)).toEqual(
       DECLINE_REASONS,
     );
+    expect(modal.blocks[0].element.initial_option).toBeUndefined();
 
-    // 4. Submitting a reason withdraws the pick on Slack and GitHub and tells them.
+    // 5. Submitting a reason withdraws the pick on Slack and GitHub and tells them.
     await control(request, "/mock/slack/view-submit", {
-      view_id: modal!.id,
+      view_id: modal.id,
       user: declining.slack,
       values: {
-        reason: {
-          reason: { selected_option: { value: "Away or unavailable" } },
+        choice: {
+          choice: { selected_option: { value: "Away or unavailable" } },
         },
       },
     });
@@ -954,7 +980,7 @@ test.describe("Human review in Slack", () => {
       .toBe(false);
     await showSlack(page, dmChannel);
 
-    // 5. The card thread's agent is told why and picks the other code owner, whom
+    // 6. The card thread's agent is told why and picks the other code owner, whom
     //    Open SWE suggests now that the first one is out.
     await expect
       .poll(async () => (await latestRequest(request)).picks, {
