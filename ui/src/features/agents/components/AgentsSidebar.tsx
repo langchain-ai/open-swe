@@ -1,3 +1,4 @@
+import { LogoMark } from "@/components/Branding"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import {
   CaretDownIcon,
@@ -720,11 +721,7 @@ export function AgentsSidebar({
           to="/my-settings"
           className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
         >
-          <img
-            src={`${import.meta.env.BASE_URL}logo-mark.png`}
-            alt=""
-            className="size-5"
-          />
+          <LogoMark alt="" className="size-5" />
           Open SWE
         </Link>
         <div className="flex items-center gap-1">
