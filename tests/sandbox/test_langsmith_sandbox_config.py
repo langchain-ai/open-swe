@@ -9,8 +9,8 @@ import httpx2
 import pytest
 from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
-from agent.sandboxes.providers import langsmith as langsmith_provider
-from agent.sandboxes.providers.langsmith import (
+from openswe.sandboxes.providers import langsmith as langsmith_provider
+from openswe.sandboxes.providers.langsmith import (
     _create_sandbox_with_retry,
     _install_create_extra_fields,
     _reuse_existing_sandbox,
@@ -18,7 +18,7 @@ from agent.sandboxes.providers.langsmith import (
     create_langsmith_sandbox,
     create_workspace_service_url,
 )
-from agent.sandboxes.providers.registry import SandboxGoneError
+from openswe.sandboxes.providers.registry import SandboxGoneError
 
 
 @pytest.mark.asyncio
@@ -38,10 +38,10 @@ async def test_create_langsmith_sandbox_derives_partial_cpu_memory_overrides(
     provider.get_or_create = AsyncMock(return_value=AsyncMock())
     with (
         patch(
-            "agent.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
+            "openswe.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
             return_value=(100, 2, 200, 300, 400),
         ),
-        patch("agent.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
+        patch("openswe.sandboxes.providers.langsmith.LangSmithProvider", return_value=provider),
     ):
         await create_langsmith_sandbox(
             mem_bytes=overrides.get("mem_bytes"),
@@ -73,7 +73,7 @@ class _FakeSandboxClient:
 @pytest.mark.asyncio
 async def test_create_sandbox_with_retry_retries_transient_errors(monkeypatch) -> None:  # noqa: ANN001
     client = _FakeSandboxClient(failures=2)
-    monkeypatch.setattr("agent.sandboxes.providers.langsmith.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("openswe.sandboxes.providers.langsmith.asyncio.sleep", AsyncMock())
 
     result = await _create_sandbox_with_retry(
         cast(AsyncSandboxClient, client),

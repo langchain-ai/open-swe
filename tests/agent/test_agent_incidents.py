@@ -10,12 +10,12 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from agent.incidents import runtime, service, turns
-from agent.incidents.models import Incident, IncidentPolicy
-from agent.mcp.instance import instance_mcp_source
-from agent.mcp.workspace import workspace_mcp_source
-from agent.slack.channels import SlackChannel
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
+from openswe.incidents import runtime, service, turns
+from openswe.incidents.models import Incident, IncidentPolicy
+from openswe.mcp.instance import instance_mcp_source
+from openswe.mcp.workspace import workspace_mcp_source
+from openswe.slack.channels import SlackChannel
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from tests.agent.test_agent_assembly_context import (
     _capture_create_deep_agent_kwargs,
 )
@@ -67,9 +67,9 @@ def _incident_config(**extra: Any) -> dict[str, Any]:
 async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     fake_store, monkeypatch, saved_thread_scope, explicit
 ):
-    from agent.middleware.dynamic_tools import DynamicToolMiddleware
-    from agent.sandboxes.state import SandboxBackendProxy
-    from agent.server import _registered_tool_name
+    from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+    from openswe.sandboxes.state import SandboxBackendProxy
+    from openswe.server import _registered_tool_name
 
     saved_thread_scope.update(source="incidents_agent", owner_type="system", visibility="public")
     session = runtime.IncidentSession(
@@ -88,8 +88,8 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         coroutine=update_incident, name="incident_update", description="Update incident status"
     )
     with (
-        patch("agent.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps,
-        patch("agent.server._notion_tools_for", AsyncMock(return_value=[])) as notion,
+        patch("openswe.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps,
+        patch("openswe.server._notion_tools_for", AsyncMock(return_value=[])) as notion,
     ):
         result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(_incident_config()))
     mcps.assert_awaited_once()
@@ -113,8 +113,8 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         assert write_tools <= names
     else:
         assert not write_tools & names
-        from agent.middleware.exclude_tools import ExcludeToolsMiddleware
-        from agent.server import INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+        from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
+        from openswe.server import INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
 
         excluded = next(
             item for item in result["middleware"] if isinstance(item, ExcludeToolsMiddleware)
@@ -184,7 +184,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     # The scripted model ends its turn in plain text, so the reply requirement
     # posts on its behalf; that path is covered in its own suite.
     monkeypatch.setattr(
-        "agent.slack.tools.reply.slack_reply", AsyncMock(return_value={"success": True})
+        "openswe.slack.tools.reply.slack_reply", AsyncMock(return_value={"success": True})
     )
     config = _incident_config(
         **({"incident_request": "Open a PR for the confirmed fix"} if requested_action else {})
@@ -248,7 +248,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     kwargs["store"] = InMemoryStore()
     agent = create_deep_agent(**kwargs)
     with patch(
-        "agent.server.PrepareAgentRunMiddleware._prepare",
+        "openswe.server.PrepareAgentRunMiddleware._prepare",
         AsyncMock(
             return_value={
                 "work_dir": "/workspace",

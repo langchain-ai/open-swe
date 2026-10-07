@@ -10,15 +10,15 @@ from sqlalchemy import select
 from starlette.datastructures import URL
 from starlette.requests import Request
 
-from agent.database import postgres
-from agent.slack import events as slack_events
-from agent.slack import failures as slack_failures
-from agent.slack import routes as slack_routes
-from agent.slack import webhook as slack_service
-from agent.slack.payloads import SlackChannelContext
-from agent.slack.pr_links import SlackPullRequestLink
-from agent.slack.request import SlackRequest
-from agent.webhooks import common as webhook_common
+from openswe.database import postgres
+from openswe.slack import events as slack_events
+from openswe.slack import failures as slack_failures
+from openswe.slack import routes as slack_routes
+from openswe.slack import webhook as slack_service
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.pr_links import SlackPullRequestLink
+from openswe.slack.request import SlackRequest
+from openswe.webhooks import common as webhook_common
 
 
 class _FakeThreads:
@@ -107,7 +107,9 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
@@ -178,8 +180,9 @@ async def test_a_watched_channel_message_checks_automations(
 
 
 @pytest.mark.parametrize("reply", [False, True])
-async def test_kitchen_messages_start_and_continue_threads_without_tag(
-    monkeypatch: pytest.MonkeyPatch, reply: bool
+@pytest.mark.parametrize("event_type", ["message", "app_mention"])
+async def test_kitchen_messages_preserve_explicit_mentions(
+    monkeypatch: pytest.MonkeyPatch, reply: bool, event_type: str
 ) -> None:
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         return SlackChannelContext(
@@ -188,7 +191,8 @@ async def test_kitchen_messages_start_and_continue_threads_without_tag(
 
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", channel_context)
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=True))
-    payload = _message_payload("please fix this", f"Ev-kitchen-{reply}")
+    payload = _message_payload("please fix this", f"Ev-kitchen-{reply}-{event_type}")
+    payload["event"]["type"] = event_type
     if not reply:
         del payload["event"]["thread_ts"]
     background_tasks = _FakeBackgroundTasks()
@@ -200,8 +204,9 @@ async def test_kitchen_messages_start_and_continue_threads_without_tag(
     assert response["status"] == "accepted"
     request = cast(SlackRequest, background_tasks.tasks[0][1][0])
     assert request.thread_ts == ("1786573300.000000" if reply else "1786573369.551099")
-    assert request.treat_all_messages_as_mentions is True
-    assert request.kitchen_channel is True
+    assert request.treat_all_messages_as_mentions is (event_type == "message")
+    assert request.kitchen_channel is (event_type == "message")
+    assert request.explicit_mention is (event_type == "app_mention")
 
 
 @pytest.mark.parametrize("kitchen", [False, True])

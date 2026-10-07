@@ -1,4 +1,4 @@
-from agent.expedited_review.eligibility import (
+from openswe.expedited_review.eligibility import (
     ACCEPTED_CHANGED_LINES,
     MAX_CHANGED_LINES,
     ChangedFile,

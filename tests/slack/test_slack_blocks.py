@@ -1,10 +1,10 @@
-from agent.slack.blocks import (
+from openswe.slack.blocks import (
     CODE_TEXT_MAX_CHARS,
     SECTION_TEXT_MAX_CHARS,
     code_block,
     code_blocks,
 )
-from agent.slack.payloads import SlackViewSubmission
+from openswe.slack.payloads import SlackViewSubmission
 
 
 def test_code_block_escapes_fences_and_fits_the_limit() -> None:

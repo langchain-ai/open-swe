@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.utils import agents_md
+from openswe.utils import agents_md
 
 
 def _make_response(status: int, text: str = "") -> MagicMock:

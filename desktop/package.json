@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
@@ -30,7 +30,6 @@
     "asarUnpack": [
       "node_modules/node-pty/**/*"
     ],
-    "afterSign": "build/notarize.cjs",
     "npmRebuild": true,
     "icon": "resources/icon.png",
     "directories": {
@@ -90,6 +89,10 @@
       "entitlements": "entitlements.mac.plist",
       "extendInfo": { "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"] },
       "entitlementsInherit": "entitlements.mac.inherit.plist",
+      "signIgnore": [
+        "\\.pyc$",
+        "/share/terminfo/"
+      ],
       "target": [
         "dmg",
         "zip"
@@ -114,7 +117,6 @@
   "license": "MIT",
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
-    "@electron/notarize": "3.1.1",
     "@types/node": "26.6.3",
     "electron": "44.4.5",
     "electron-builder": "26.15.3",

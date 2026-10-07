@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from agent.github import app as github_app
+from openswe.github import app as github_app
 from tests.support.github_sdk import mock_github_sdk
 
 

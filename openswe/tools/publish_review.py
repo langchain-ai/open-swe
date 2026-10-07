@@ -1,0 +1,1165 @@
+"""Tool: ``publish_review``. Post the findings list to GitHub as a PR Review."""
+
+import logging
+from collections.abc import Mapping
+from typing import Annotated, Any
+
+from langgraph.config import get_config
+from langgraph.prebuilt import InjectedState
+
+from openswe.analytics.usage import record_reviewer_publication
+from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.github.checks import review_check_conclusion
+from openswe.github.pull_requests import PullRequest
+from openswe.github.thread_token import (
+    GitHubAuthError,
+    invalidate_cached_github_token,
+    resolve_thread_github_token,
+)
+from openswe.review.approvals import approval_mode_for
+from openswe.review.assessment_feedback import ASSESSMENTS, PublishedAssessment
+from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from openswe.review.findings import (
+    REVIEWER_EVAL_PUBLICATION_KEY,
+    SEVERITY_ORDER,
+    Finding,
+    ReviewerThreadMissingError,
+    Severity,
+    comment_ids_for_finding,
+    filter_findings_for_publish,
+    get_thread_id_from_runtime,
+    get_thread_last_reviewed_sha,
+    get_thread_metadata,
+    get_thread_slack_ref,
+    mark_surfaced,
+    mutate_findings,
+    posted_resolution_comment_ids_for_finding,
+    replace_findings,
+    resolve_review_head_sha,
+    resolved_thread_ids_for_finding,
+    review_id_for_finding,
+    set_reviewer_thread_metadata,
+    set_surface_state,
+    thread_ids_for_finding,
+    thread_missing_tool_result,
+)
+from openswe.review.findings import (
+    list_findings as list_findings_async,
+)
+from openswe.review.publish import (
+    ReviewAssessment,
+    approval_allowed_for_head,
+    clear_review_started_comment,
+    fetch_pr_review_threads,
+    fetch_review_comments,
+    fetch_review_thread_id_for_comment,
+    open_swe_review_exists,
+    parse_review_comment_marker,
+    post_pull_request_review,
+    render_inline_comment_payload,
+    render_resolution_comment,
+    render_review_body,
+    reply_to_review_comment,
+    resolve_review_thread,
+    settle_review_check_run,
+)
+from openswe.review.reconcile import reconcile_findings_with_review_threads
+from openswe.run_config import RunConfig
+from openswe.slack.client import post_slack_thread_reply
+from openswe.utils.dashboard_links import dashboard_review_url
+from openswe.utils.langsmith import get_langsmith_trace_url
+
+logger = logging.getLogger(__name__)
+
+
+async def _record_reviewer_usage(**kwargs: Any) -> None:
+    try:
+        await record_reviewer_publication(**kwargs)
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to record reviewer usage", exc_info=True)
+
+
+async def publish_review(
+    ranking: list[str],
+    severity_threshold: Severity = "medium",
+    state: Annotated[dict[str, Any] | None, InjectedState] = None,
+    assessment: ReviewAssessment | None = None,
+) -> dict[str, Any]:
+    """Implement the `publish_review` tool."""
+    if _has_sibling_tool_calls(state):
+        return {
+            "success": False,
+            "error": (
+                "publish_review must be the only tool call in its turn. Wait for your other "
+                "tool calls to return, then call publish_review alone. Nothing was published."
+            ),
+        }
+    if severity_threshold not in {"low", "medium", "high", "critical"}:
+        return {"success": False, "error": f"Invalid severity_threshold: {severity_threshold}"}
+
+    config = get_config()
+    cfg = RunConfig.from_config(config)
+    pr_number = cfg.pr_number
+    head_sha = cfg.head_sha
+    is_re_review = bool(cfg.re_review)
+
+    if not cfg.repo:
+        return {"success": False, "error": "Missing repo info in run config"}
+    if pr_number is None:
+        return {"success": False, "error": "Missing pr_number in run config"}
+    if not head_sha:
+        return {"success": False, "error": "Missing head_sha in run config"}
+
+    try:
+        if ranking_error := await _record_ranking(ranking, cfg):
+            return ranking_error
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
+
+    if cfg.is_eval:
+        if cfg.reviewer_eval_severity_threshold in {"low", "medium", "high", "critical"}:
+            severity_threshold = cfg.reviewer_eval_severity_threshold
+        try:
+            return await _publish_review_eval_dry_run_async(
+                head_sha=head_sha,
+                severity_threshold=severity_threshold,
+            )
+        except ReviewerThreadMissingError as exc:
+            return thread_missing_tool_result(exc)
+
+    token = await resolve_thread_github_token()
+    if not token:
+        return {"success": False, "error": "No GitHub token available"}
+
+    try:
+        return await _publish_review_async(
+            owner=cfg.repo.owner,
+            repo=cfg.repo.name,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            token=token,
+            severity_threshold=severity_threshold,
+            is_re_review=is_re_review,
+            langgraph_run_id=_current_run_id(config),
+            trace_link_config_override=cfg.review_trace_link_enabled,
+            state=state,
+            assessment=assessment,
+        )
+    except ReviewerThreadMissingError as exc:
+        return thread_missing_tool_result(exc)
+    except GitHubAuthError as exc:
+        thread_id = get_thread_id_from_runtime()
+        if thread_id:
+            await invalidate_cached_github_token(thread_id)
+        return {
+            "success": False,
+            "error": (
+                "GitHub returned 401 — the cached OAuth token is invalid or revoked. "
+                "Please re-authenticate and trigger the review again."
+            ),
+            "auth_error": str(exc),
+        }
+
+
+def _has_sibling_tool_calls(state: dict[str, Any] | None) -> bool:
+    messages = (state or {}).get("messages") or []
+    return bool(messages) and len(getattr(messages[-1], "tool_calls", None) or []) > 1
+
+
+async def _record_ranking(ranking: list[str], cfg: RunConfig) -> dict[str, Any] | None:
+    """Store the reviewer's best-first order over the findings this publish would post.
+
+    Returns a tool error instead when ``ranking`` is not exactly that set, once each.
+    """
+    thread_id = get_thread_id_from_runtime()
+    findings = await list_findings_async(thread_id)
+    head_sha = await resolve_review_head_sha(thread_id, cfg) if cfg.re_review else ""
+
+    def is_candidate(finding: Finding) -> bool:
+        if finding.get("status", "open") != "open" or not finding.get("in_diff", True):
+            return False
+        if cfg.is_eval:
+            return not _has_publication_identity(finding)
+        if comment_ids_for_finding(finding):
+            return False
+        return not cfg.re_review or finding.get("first_seen_sha") == head_sha
+
+    expected = [finding["id"] for finding in findings if is_candidate(finding)]
+    known = {finding["id"] for finding in findings}
+    duplicates = sorted({finding_id for finding_id in ranking if ranking.count(finding_id) > 1})
+    unknown = [finding_id for finding_id in ranking if finding_id not in known]
+    missing = [finding_id for finding_id in expected if finding_id not in ranking]
+    if duplicates or unknown or missing:
+        return {
+            "success": False,
+            "error": (
+                "ranking must list every finding in expected_finding_ids exactly once, "
+                "most important first. Nothing was published."
+            ),
+            "expected_finding_ids": expected,
+            "missing": missing,
+            "unknown": unknown,
+            "duplicates": duplicates,
+        }
+
+    expected_ids = set(expected)
+    ranks = {
+        finding_id: position
+        for position, finding_id in enumerate(
+            (finding_id for finding_id in ranking if finding_id in expected_ids), start=1
+        )
+    }
+
+    def _assign(latest: list[Finding]) -> bool:
+        changed = False
+        for finding in latest:
+            rank = ranks.get(finding["id"])
+            if rank is not None and finding.get("rank") != rank:
+                finding["rank"] = rank
+                changed = True
+        return changed
+
+    if ranks:
+        await mutate_findings(thread_id, _assign)
+    return None
+
+
+async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:
+    if config_override is False:
+        return None
+    if not (await get_workspace_settings()).review_trace_links_enabled:
+        return None
+    if not thread_id:
+        return None
+    return await get_langsmith_trace_url(thread_id)
+
+
+async def _publish_review_eval_dry_run_async(
+    *,
+    head_sha: str,
+    severity_threshold: Severity,
+) -> dict[str, Any]:
+    """Simulate publish_review for benchmark runs without posting to GitHub."""
+    thread_id = get_thread_id_from_runtime()
+    findings = await list_findings_async(thread_id)
+    unpublished_findings = [f for f in findings if not _has_publication_identity(f)]
+    open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
+    # Out-of-diff findings are disabled: only in-diff findings are surfaced.
+    in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
+    eligible = filter_findings_for_publish(
+        in_diff_unpublished,
+        severity_threshold=severity_threshold,
+    )
+    eligible_with_payload = [
+        (finding, payload)
+        for finding in eligible
+        if (payload := render_inline_comment_payload(finding)) is not None
+    ]
+    finding_ids = [
+        finding["id"]
+        for finding, _payload in eligible_with_payload
+        if isinstance(finding.get("id"), str)
+    ]
+    publication = {
+        "finding_ids": finding_ids,
+        "findings": [finding for finding, _payload in eligible_with_payload],
+        "severity_threshold": severity_threshold,
+    }
+
+    await set_reviewer_thread_metadata(
+        thread_id,
+        last_reviewed_sha=head_sha,
+        extra={REVIEWER_EVAL_PUBLICATION_KEY: publication},
+    )
+
+    return {
+        "success": True,
+        "dry_run": True,
+        "review_id": None,
+        "surfaced_count": len(eligible_with_payload),
+        "hidden_count": max(len(open_unpublished) - len(eligible_with_payload), 0),
+        "resolved_thread_count": 0,
+    }
+
+
+async def _publish_review_async(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    token: str,
+    severity_threshold: Severity,
+    is_re_review: bool,
+    langgraph_run_id: str | None = None,
+    trace_link_config_override: bool | None = None,
+    state: dict[str, Any] | None = None,
+    assessment: ReviewAssessment | None = None,
+) -> dict[str, Any]:
+    thread_id = get_thread_id_from_runtime()
+    dry_run = True
+    if assessment is not None:
+        # The policy was read at the base commit when the run started; the mode is
+        # read now so an admin switching a repository off or to dry run wins mid-review.
+        policy = state.get("review_approval_policy") if state else None
+        mode = await approval_mode_for(owner, repo)
+        if not policy or mode == "off":
+            assessment = None
+        dry_run = mode != "approve"
+    # The run config's head_sha is frozen at run creation; a push that arrived
+    # mid-run updated the live head in thread metadata. Prefer that so the
+    # review anchors to (and last_reviewed_sha advances to) the commit actually
+    # reviewed, not the stale one this run was created for.
+    head_sha = await resolve_review_head_sha(thread_id, RunConfig(head_sha=head_sha))
+    if assessment is not None and assessment.head_sha != head_sha:
+        return {
+            "success": False,
+            "error": "Assessment commit differs from the current review head. Review it again.",
+        }
+    review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
+    review_ui_url = dashboard_review_url(owner, repo, pr_number)
+    findings = await _backfill_findings_from_pr_threads(
+        thread_id=thread_id,
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+    )
+    if (
+        assessment is not None
+        and assessment.decision == "would_approve"
+        and any(f.get("status", "open") == "open" for f in findings)
+    ):
+        assessment = assessment.model_copy(
+            update={
+                "decision": "needs_human_review",
+                "explanation": f"Unresolved findings remain. {assessment.explanation}",
+            }
+        )
+
+    # Re-reviews only post NEW findings. Anything with a recorded review comment
+    # id already lives on GitHub from a prior publish — reposting would create
+    # duplicate inline comments and break the resolve-on-fix flow (only
+    # whichever duplicate id we'd cache last would resolve later).
+    unpublished_findings = [f for f in findings if not comment_ids_for_finding(f)]
+    if is_re_review:
+        unpublished_findings = [
+            f for f in unpublished_findings if f.get("first_seen_sha") == head_sha
+        ]
+    open_unpublished = [f for f in unpublished_findings if f.get("status", "open") == "open"]
+    # In-diff findings become inline comments. Out-of-diff findings are disabled:
+    # they are never surfaced on the PR (any legacy in-state ones are treated as
+    # hidden).
+    in_diff_unpublished = [f for f in unpublished_findings if f.get("in_diff", True)]
+    eligible = filter_findings_for_publish(
+        in_diff_unpublished, severity_threshold=severity_threshold
+    )
+
+    severity_rank = SEVERITY_ORDER[severity_threshold]
+    eligible_ids = {f.get("id") for f in eligible}
+    additional_findings_count = sum(
+        1
+        for f in in_diff_unpublished
+        if f.get("id") not in eligible_ids
+        and f.get("status", "open") == "open"
+        and SEVERITY_ORDER.get(f.get("severity", "low"), 0) < severity_rank
+    )
+
+    inline_comments: list[dict[str, Any]] = []
+    eligible_with_payload: list[tuple[Finding, dict[str, Any]]] = []
+    for finding in eligible:
+        payload = render_inline_comment_payload(finding)
+        if payload is None:
+            continue
+        inline_comments.append(payload)
+        eligible_with_payload.append((finding, payload))
+
+    # With nothing new to surface, skip the "no issues found" summary if Open
+    # SWE has already reviewed this PR — the user already saw the previous
+    # result, and posting another summary on every push is noise. We can't rely
+    # on the static re_review flag alone: a push that lands mid-run is delivered
+    # as a queued message into the still-running first-review run, whose
+    # configurable still says re_review=False, so that path would post a
+    # duplicate "No issues found". Key off the actual PR state (an existing Open
+    # SWE review summary) instead. Still resolve threads for findings that just
+    # moved to resolved, and advance last_reviewed_sha so subsequent pushes
+    # don't redo the same diff.
+    if (
+        assessment is None
+        and not inline_comments
+        and await _open_swe_already_reviewed(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            is_re_review=is_re_review,
+        )
+    ):
+        resolved_thread_count = await _resolve_threads_for_resolved_findings(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            findings=findings,
+        )
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id, head_sha=head_sha, finding_count=0
+        )
+        await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+        await _record_reviewer_usage(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            findings=await list_findings_async(thread_id),
+        )
+        await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
+        conclusion, check_title, check_summary = review_check_conclusion(0)
+        await settle_review_check_run(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            token=token,
+            conclusion=conclusion,
+            title=check_title,
+            summary=check_summary,
+        )
+        return {
+            "success": True,
+            "review_id": None,
+            "surfaced_count": 0,
+            "hidden_count": max(len(open_unpublished), 0),
+            "resolved_thread_count": resolved_thread_count,
+            "skipped_empty_re_review": True,
+        }
+
+    approved = (
+        not dry_run
+        and assessment is not None
+        and assessment.decision == "would_approve"
+        and await approval_allowed_for_head(
+            owner=owner, repo=repo, pr_number=pr_number, head_sha=head_sha, token=token
+        )
+    )
+    # GitHub forbids self-approval; publish the assessment as an advisory comment instead.
+    for _ in range(2):
+        review_body = render_review_body(
+            pr_number=pr_number,
+            surfaced_count=len(inline_comments),
+            trace_url=review_trace_url,
+            ui_url=review_ui_url,
+            additional_findings_count=additional_findings_count,
+            assessment=assessment,
+            approved=approved,
+            dry_run=dry_run,
+        )
+
+        review_response = await post_pull_request_review(
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            head_sha=head_sha,
+            body=review_body,
+            inline_comments=inline_comments,
+            token=token,
+            event="APPROVE" if approved else "COMMENT",
+        )
+        if (
+            approved
+            and isinstance(review_response, dict)
+            and review_response.get("_error_kind") == "self_approval"
+        ):
+            approved = False
+        else:
+            break
+    # If GitHub rejected the batch because one or more inline comments anchor
+    # to a file/line that's not in the PR diff, drop just those findings and
+    # retry once. Returning the bare 422 to the agent only invites it to
+    # retry publish_review with byte-identical args until findings drain.
+    unresolvable_findings: list[str] = []
+    if (
+        isinstance(review_response, dict)
+        and review_response.get("_error_kind") == "unresolved_anchor"
+    ):
+        valid_with_payload, dropped_ids = await _filter_against_pr_diff(
+            eligible_with_payload,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+            state=state,
+        )
+        if dropped_ids and valid_with_payload:
+            retry_inline = [p for _, p in valid_with_payload]
+            retry_body = render_review_body(
+                pr_number=pr_number,
+                surfaced_count=len(retry_inline),
+                trace_url=review_trace_url,
+                ui_url=review_ui_url,
+                additional_findings_count=additional_findings_count,
+            )
+            retry_response = await post_pull_request_review(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                head_sha=head_sha,
+                body=retry_body,
+                inline_comments=retry_inline,
+                token=token,
+            )
+            if isinstance(retry_response, dict) and "_error" not in retry_response:
+                review_response = retry_response
+                inline_comments = retry_inline
+                eligible_with_payload = valid_with_payload
+                unresolvable_findings = dropped_ids
+            else:
+                retry_error = (
+                    retry_response.get("_error", "unknown error")
+                    if isinstance(retry_response, dict)
+                    else "no response"
+                )
+                return {
+                    "success": False,
+                    "error": f"Failed to POST PR review: {retry_error}",
+                    "unresolvable_findings": dropped_ids,
+                    "hint": (
+                        "Call update_finding(status='resolved') on these ids "
+                        "or fix their file/line before retrying."
+                    ),
+                }
+        else:
+            # Either nothing to drop (no diff_line_set available, so we can't
+            # tell which findings are bad) or everything would be dropped.
+            # Either way, do not retry — surface the structural signal so the
+            # agent stops retrying with the same args.
+            return {
+                "success": False,
+                "error": f"Failed to POST PR review: {review_response['_error']}",
+                "unresolvable_findings": dropped_ids,
+                "hint": (
+                    "Call update_finding(status='resolved') on these ids "
+                    "or fix their file/line before retrying."
+                ),
+            }
+    if isinstance(review_response, dict) and "_error" in review_response:
+        return {
+            "success": False,
+            "error": f"Failed to POST PR review: {review_response['_error']}",
+        }
+    if review_response is None:
+        # Defensive guard: with the upstream change this should never happen,
+        # but keep a clear signal if it does so the agent doesn't retry blindly.
+        return {
+            "success": False,
+            "error": "Failed to POST PR review: no response from GitHub",
+        }
+    review_id = review_response.get("id") if isinstance(review_response, dict) else None
+
+    if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
+        # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
+        try:
+            if langgraph_run_id is None:
+                current_run_id = (await get_thread_metadata(thread_id)).get(
+                    "current_reviewer_run_id"
+                )
+                if isinstance(current_run_id, str) and current_run_id:
+                    langgraph_run_id = current_run_id
+            previous_assessment = await ASSESSMENTS.get(str(review_id))
+            if previous_assessment is not None:
+                await ASSESSMENTS.put(
+                    f"{review_id}:{previous_assessment.head_sha}", previous_assessment
+                )
+            await ASSESSMENTS.put(
+                str(review_id),
+                PublishedAssessment(
+                    **assessment.model_dump(),
+                    review_id=review_id,
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                    approved=approved,
+                    dry_run=dry_run,
+                    run_id=langgraph_run_id,
+                ),
+            )
+            await set_reviewer_thread_metadata(thread_id, extra={"review_assessment_id": review_id})
+        except Exception:
+            logger.exception("Failed to save published assessment", extra={"review_id": review_id})
+
+    if review_id is not None and inline_comments:
+        # Record the GitHub review id AND inline comment ids in a single
+        # findings write. Previously these were three separate read-replace
+        # cycles (out-of-diff review id, inline review id, comment ids); each
+        # extra write widened the window where a crash could leave findings
+        # half-stamped — surfaced on GitHub but with no recorded comment id, so
+        # a later resolve-on-fix couldn't find the thread.
+        comment_records: list[dict[str, Any]] = []
+        if inline_comments:
+            comment_records = await fetch_review_comments(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                review_id=review_id,
+                token=token,
+            )
+            if langgraph_run_id is None:
+                metadata = await get_thread_metadata(thread_id)
+                current_run_id = metadata.get("current_reviewer_run_id")
+                if isinstance(current_run_id, str) and current_run_id:
+                    langgraph_run_id = current_run_id
+        await _record_review_publication(
+            thread_id=thread_id,
+            review_id=review_id,
+            inline_with_payload=eligible_with_payload,
+            comment_records=comment_records,
+            langgraph_run_id=langgraph_run_id,
+        )
+
+    if review_id is not None and inline_comments:
+        current_findings = await list_findings_async(thread_id)
+        if _missing_comment_ids_for_published_findings(current_findings, eligible_with_payload):
+            await _backfill_findings_from_pr_threads(
+                thread_id=thread_id,
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                token=token,
+            )
+        await _store_thread_ids_on_findings(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            token=token,
+        )
+
+    resolved_thread_count = await _resolve_threads_for_resolved_findings(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+        findings=await list_findings_async(thread_id),
+    )
+
+    try:
+        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+            reviewer_thread_id=thread_id,
+            github_review_id=review_id if isinstance(review_id, int) else None,
+            head_sha=head_sha,
+            finding_count=len(inline_comments),
+        )
+    except Exception:
+        if assessment is None:
+            raise
+        logger.exception(
+            "Failed to record completion of published assessment",
+            extra={"review_id": review_id, "pr_number": pr_number},
+        )
+        return {
+            "success": True,
+            "review_id": review_id,
+            "surfaced_count": len(inline_comments),
+            "completion_recorded": False,
+            "warning": "GitHub review published, but completion was not saved; merge remains blocked.",
+        }
+
+    if not is_re_review:
+        await _maybe_post_slack_completion_reply(
+            thread_id=thread_id,
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            review_id=review_id,
+            surfaced_count=len(inline_comments),
+        )
+
+    await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
+    await _record_reviewer_usage(
+        thread_id=thread_id,
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        findings=await list_findings_async(thread_id),
+    )
+    await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
+    conclusion, check_title, check_summary = review_check_conclusion(len(inline_comments))
+    await settle_review_check_run(
+        thread_id=thread_id,
+        owner=owner,
+        repo=repo,
+        token=token,
+        conclusion=conclusion,
+        title=check_title,
+        summary=check_summary,
+    )
+
+    result: dict[str, Any] = {
+        "success": True,
+        "review_id": review_id,
+        "surfaced_count": len(inline_comments),
+        "hidden_count": max(len(open_unpublished) - len(inline_comments), 0),
+        "resolved_thread_count": resolved_thread_count,
+    }
+    if unresolvable_findings:
+        result["unresolvable_findings"] = unresolvable_findings
+        result["hint"] = (
+            "Some findings had anchors not in the PR diff; "
+            "call update_finding to fix or resolve them."
+        )
+    return result
+
+
+async def _open_swe_already_reviewed(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    is_re_review: bool,
+) -> bool:
+    """Decide whether to suppress a duplicate empty "no issues found" summary.
+
+    Suppress only when we are *certain* a prior Open SWE review exists, so a
+    transient GitHub failure never causes a double-post:
+
+    - ``is_re_review`` is a durable signal (the dispatching webhook set it from
+      the persisted ``last_reviewed_sha``), so trust it outright.
+    - Otherwise consult durable reviewer state (``last_reviewed_sha`` on thread
+      metadata): a non-empty value means this thread already published once.
+    - Only as a last resort hit the GitHub reviews API. That call is tri-state:
+      ``True``/``False`` are authoritative, but ``None`` means "unknown"
+      (pagination or the request failed). On ``None`` we do NOT suppress — a
+      possible duplicate summary is better than silently swallowing the only
+      review the user will ever see, and re-posting is the safe failure mode.
+    """
+    if is_re_review:
+        return True
+    metadata = await get_thread_metadata(thread_id)
+    if get_thread_last_reviewed_sha(metadata):
+        return True
+    exists = await open_swe_review_exists(owner=owner, repo=repo, pr_number=pr_number, token=token)
+    return exists is True
+
+
+def _has_publication_identity(finding: Finding) -> bool:
+    return bool(comment_ids_for_finding(finding)) or review_id_for_finding(finding) is not None
+
+
+async def _backfill_findings_from_pr_threads(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> list[Finding]:
+    findings = await list_findings_async(thread_id)
+    if not findings:
+        return findings
+    review_threads = await fetch_pr_review_threads(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+    )
+    if not review_threads:
+        return findings
+    return await reconcile_findings_with_review_threads(thread_id, review_threads)
+
+
+def _missing_comment_ids_for_published_findings(
+    findings: list[Finding],
+    eligible_with_payload: list[tuple[Finding, dict[str, Any]]],
+) -> bool:
+    finding_ids = {
+        finding.get("id")
+        for finding, _payload in eligible_with_payload
+        if isinstance(finding.get("id"), str)
+    }
+    for finding in findings:
+        if finding.get("id") in finding_ids and not comment_ids_for_finding(finding):
+            return True
+    return False
+
+
+def _apply_review_id(
+    findings: list[Finding],
+    *,
+    finding_ids: set[str],
+    review_id: int,
+) -> bool:
+    updated = False
+    for finding in findings:
+        if finding.get("id") in finding_ids and review_id_for_finding(finding) != review_id:
+            finding["github_review_id"] = review_id
+            mark_surfaced(finding)
+            updated = True
+    return updated
+
+
+def _apply_comment_ids(
+    findings: list[Finding],
+    *,
+    comment_id_by_finding_id: dict[str, int],
+    langgraph_run_id: str | None,
+) -> bool:
+    updated = False
+    for finding in findings:
+        finding_id = finding.get("id")
+        if not isinstance(finding_id, str):
+            continue
+        comment_id = comment_id_by_finding_id.get(finding_id)
+        if comment_id is None:
+            continue
+        comment_ids = comment_ids_for_finding(finding)
+        if comment_id not in comment_ids:
+            comment_ids.append(comment_id)
+            finding["github_review_comment_ids"] = comment_ids
+        mark_surfaced(finding)
+        if langgraph_run_id:
+            finding["github_review_run_id"] = langgraph_run_id
+        updated = True
+    return updated
+
+
+def _comment_id_by_finding_id(
+    eligible_with_payload: list[tuple[Finding, dict[str, Any]]],
+    comment_records: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Map each surfaced finding id to its GitHub comment id via the marker.
+
+    The embedded Open SWE marker is the *only* source of truth. Every comment
+    this reviewer posts carries a ``<!-- open-swe-review-comment {...} -->``
+    marker keyed by finding id (see ``render_inline_comment_body``), so the
+    match is exact. The old ``(path, line, body)`` fallback collided whenever
+    two findings shared a path/line/body — it cached the same comment id on
+    both, which corrupts resolve-on-fix (resolving one would target the wrong
+    thread). Findings whose comment lacks a parseable marker are left out here;
+    ``_backfill_findings_from_pr_threads`` recovers them via the same marker
+    against the PR's review threads.
+    """
+    by_marker_id: dict[str, int] = {}
+    for record in comment_records:
+        body = record.get("body", "")
+        comment_id = record.get("id")
+        if isinstance(body, str) and isinstance(comment_id, int):
+            marker = parse_review_comment_marker(body)
+            if marker is not None:
+                by_marker_id[marker["id"]] = comment_id
+
+    out: dict[str, int] = {}
+    for finding_snapshot, _payload in eligible_with_payload:
+        finding_id = finding_snapshot.get("id")
+        if isinstance(finding_id, str) and finding_id in by_marker_id:
+            out[finding_id] = by_marker_id[finding_id]
+    return out
+
+
+async def _record_review_publication(
+    *,
+    thread_id: str,
+    review_id: int,
+    inline_with_payload: list[tuple[Finding, dict[str, Any]]],
+    comment_records: list[dict[str, Any]],
+    langgraph_run_id: str | None,
+) -> None:
+    """Stamp the review id and inline comment ids onto findings in one write.
+
+    Collapsing the review-id and comment-id updates into a single
+    read-modify-write keeps publication identity atomic: a finding is never
+    persisted carrying a review id without also carrying whatever comment id
+    GitHub returned for it in the same record.
+    """
+    review_finding_ids = {
+        finding.get("id")
+        for finding, _payload in inline_with_payload
+        if isinstance(finding.get("id"), str)
+    }
+    comment_id_by_finding_id = _comment_id_by_finding_id(inline_with_payload, comment_records)
+
+    latest = await list_findings_async(thread_id)
+    changed = _apply_review_id(
+        latest,
+        finding_ids={fid for fid in review_finding_ids if isinstance(fid, str)},
+        review_id=review_id,
+    )
+    changed = (
+        _apply_comment_ids(
+            latest,
+            comment_id_by_finding_id=comment_id_by_finding_id,
+            langgraph_run_id=langgraph_run_id,
+        )
+        or changed
+    )
+    if changed:
+        await replace_findings(thread_id, latest)
+
+
+async def _resolve_diff_line_set(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    state: dict[str, Any] | None = None,
+) -> dict[str, dict[str, set[int]]] | None:
+    """Return the new-side line set for the PR diff, fetching it if needed.
+
+    Reviewer runs clear ``configurable['diff_line_set']`` before the agent
+    starts (so ``add_finding`` trusts the agent's anchors), which means the
+    publish-time retry path can't rely on it being populated. Fetch the PR's
+    unified diff from the GitHub REST API and recompute the line set on the
+    fly. Returns ``None`` if the fetch fails — caller treats that as "we
+    can't tell which finding is bad, don't retry blindly".
+    """
+    if isinstance(state, dict):
+        state_cached = state.get("diff_line_set")
+        if isinstance(state_cached, dict):
+            return state_cached
+    cached = RunConfig.from_runtime().diff_line_set
+    if cached is not None:
+        return cached
+
+    diff_text = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token)
+    if diff_text is None:
+        return None
+    return compute_diff_line_set(diff_text)
+
+
+async def _filter_against_pr_diff(
+    eligible_with_payload: list[tuple[Finding, dict[str, Any]]],
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    state: dict[str, Any] | None = None,
+) -> tuple[list[tuple[Finding, dict[str, Any]]], list[str]]:
+    """Drop findings whose path/line range is not in the current PR diff.
+
+    Returns ``(valid_with_payload, dropped_finding_ids)``. When the diff
+    cannot be resolved (fetch failed and no cached set), we return everything
+    unchanged and an empty drop list — the caller will then surface the
+    original error rather than retry blindly.
+    """
+    diff_line_set = await _resolve_diff_line_set(
+        owner=owner, repo=repo, pr_number=pr_number, token=token, state=state
+    )
+    if diff_line_set is None:
+        return list(eligible_with_payload), []
+
+    valid: list[tuple[Finding, dict[str, Any]]] = []
+    dropped: list[str] = []
+    for finding, payload in eligible_with_payload:
+        path = payload.get("path")
+        # Prefer the finding's recorded range; fall back to the payload line.
+        start_line = finding.get("start_line")
+        end_line = finding.get("end_line")
+        if end_line is None:
+            payload_line = payload.get("line")
+            if isinstance(payload_line, int):
+                end_line = payload_line
+                if start_line is None:
+                    start_line = payload_line
+        side = finding.get("side") if finding.get("side") in {"LEFT", "RIGHT"} else "RIGHT"
+        if isinstance(path, str) and is_range_in_diff(
+            diff_line_set, path, start_line, end_line, side=side
+        ):
+            valid.append((finding, payload))
+        else:
+            finding_id = finding.get("id")
+            if isinstance(finding_id, str):
+                dropped.append(finding_id)
+    return valid, dropped
+
+
+async def _maybe_post_slack_completion_reply(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    review_id: int | None,
+    surfaced_count: int,
+) -> None:
+    """Post a one-line completion summary to the Slack thread that started this review.
+
+    Only fires for first reviews (gated by the caller). No-op if the reviewer
+    thread has no ``slack_thread`` metadata — i.e. the review wasn't started
+    from Slack.
+    """
+    metadata = await get_thread_metadata(thread_id)
+    slack_ref = get_thread_slack_ref(metadata)
+    if slack_ref is None:
+        return
+    channel_id = slack_ref.get("channel_id")
+    thread_ts = slack_ref.get("thread_ts")
+    if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
+        return
+
+    if surfaced_count == 0:
+        headline = "*Open SWE Review*: No issues found."
+    else:
+        issue_word = "issue" if surfaced_count == 1 else "issues"
+        headline = f"*Open SWE Review* found {surfaced_count} potential {issue_word}."
+
+    review_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
+    if isinstance(review_id, int):
+        review_url = f"{review_url}#pullrequestreview-{review_id}"
+    text = f"{headline} <{review_url}|View review>"
+
+    await post_slack_thread_reply(channel_id, thread_ts, text, agent_thread_id=thread_id)
+
+
+async def _store_thread_ids_on_findings(
+    *,
+    thread_id: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+) -> None:
+    findings = await list_findings_async(thread_id)
+    comment_ids_by_finding_id: dict[str, list[int]] = {}
+    for finding in findings:
+        finding_id = finding.get("id")
+        comment_ids = comment_ids_for_finding(finding)
+        if isinstance(finding_id, str) and comment_ids and not thread_ids_for_finding(finding):
+            comment_ids_by_finding_id[finding_id] = comment_ids
+    if not comment_ids_by_finding_id:
+        return
+
+    threads = await fetch_pr_review_threads(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+    )
+    thread_id_by_comment_id: dict[int, str] = {}
+    for thread in threads:
+        github_thread_id = thread.get("id")
+        if not isinstance(github_thread_id, str) or not github_thread_id:
+            continue
+        for comment in thread.get("comments") or []:
+            if not isinstance(comment, dict):
+                continue
+            comment_id = comment.get("id")
+            if isinstance(comment_id, int):
+                thread_id_by_comment_id[comment_id] = github_thread_id
+
+    updated = False
+    for finding in findings:
+        finding_id = finding.get("id")
+        if not isinstance(finding_id, str):
+            continue
+        thread_ids = thread_ids_for_finding(finding)
+        for comment_id in comment_ids_by_finding_id.get(finding_id, []):
+            github_thread_id = thread_id_by_comment_id.get(comment_id)
+            if not github_thread_id or github_thread_id in thread_ids:
+                continue
+            thread_ids.append(github_thread_id)
+            finding["github_review_thread_ids"] = thread_ids
+            mark_surfaced(finding)
+            updated = True
+
+    if updated:
+        await replace_findings(thread_id, findings)
+
+
+async def _resolve_threads_for_resolved_findings(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    findings: list[Finding],
+) -> int:
+    """Resolve GitHub review threads for findings that just transitioned to resolved.
+
+    Posts a resolution comment to the thread, then resolves it. Multiple threads
+    can exist when an earlier run duplicated a comment before publication identity
+    was backfilled.
+    """
+    resolved_count = 0
+    mutated = False
+    for finding in findings:
+        status = finding.get("status")
+        if status not in {"resolved", "dismissed"}:
+            continue
+
+        thread_node_ids = thread_ids_for_finding(finding)
+        comment_ids = comment_ids_for_finding(finding)
+
+        for comment_id in comment_ids:
+            thread_node_id = await fetch_review_thread_id_for_comment(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                review_comment_id=comment_id,
+                token=token,
+            )
+            if thread_node_id and thread_node_id not in thread_node_ids:
+                thread_node_ids.append(thread_node_id)
+
+        if not thread_node_ids:
+            continue
+
+        resolved_thread_ids = resolved_thread_ids_for_finding(finding)
+        posted_resolution_comment_ids = posted_resolution_comment_ids_for_finding(finding)
+
+        for idx, thread_node_id in enumerate(thread_node_ids):
+            if thread_node_id in resolved_thread_ids:
+                continue
+
+            primary_comment_id = comment_ids[idx] if idx < len(comment_ids) else None
+            resolution_body = render_resolution_comment(finding, status)
+            if (
+                primary_comment_id
+                and primary_comment_id not in posted_resolution_comment_ids
+                and resolution_body is not None
+            ):
+                reply_response = await reply_to_review_comment(
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                    review_comment_id=primary_comment_id,
+                    body=resolution_body,
+                    token=token,
+                )
+                if reply_response and isinstance(reply_response.get("id"), int):
+                    posted_resolution_comment_ids.append(primary_comment_id)
+                    mutated = True
+
+            ok = await resolve_review_thread(thread_node_id=thread_node_id, token=token)
+            if ok:
+                resolved_thread_ids.append(thread_node_id)
+                resolved_count += 1
+                mutated = True
+
+        if resolved_thread_ids:
+            finding["github_resolved_thread_ids"] = resolved_thread_ids
+        if posted_resolution_comment_ids:
+            finding["github_posted_resolution_comment_ids"] = posted_resolution_comment_ids
+        finding["github_review_thread_ids"] = thread_node_ids
+        if all(thread_id in resolved_thread_ids for thread_id in thread_node_ids):
+            set_surface_state(finding, "resolved")
+        else:
+            mark_surfaced(finding)
+
+    if mutated:
+        thread_id = get_thread_id_from_runtime()
+        await replace_findings(thread_id, findings)
+
+    return resolved_count
+
+
+def _current_run_id(config: Mapping[str, Any]) -> str | None:
+    candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None

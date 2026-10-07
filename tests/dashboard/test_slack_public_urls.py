@@ -6,10 +6,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import routes
-from agent.dashboard.oauth import COOKIE_NAME, issue_session
-from agent.slack import connect, oauth
-from agent.users import User
+from openswe.dashboard import routes
+from openswe.dashboard.oauth import COOKIE_NAME, issue_session
+from openswe.slack import connect, oauth
+from openswe.users import User
 
 
 @pytest.mark.parametrize("public_url", [None, "https://example.ngrok-free.dev/"])
@@ -71,7 +71,7 @@ def test_slack_public_url_applies_to_manifest_and_oauth_without_changing_local_c
             follow_redirects=False,
         )
         assert callback.status_code == 302, callback.text
-        assert callback.headers["location"] == f"{local_url}/my-settings"
+        assert callback.headers["location"] == f"{local_url}/my-settings/connections"
     exchange.assert_awaited_once_with("code", expected_callback)
     link.assert_awaited_once_with("slack", "U123", email="alice@example.com", team_id="T123")
 

@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from agent.review.assessment_feedback import ASSESSMENTS, FeedbackSubmission, PublishedAssessment
-from agent.review.routes import get_assessment_feedback, submit_assessment_feedback
-from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
+from openswe.review.assessment_feedback import ASSESSMENTS, FeedbackSubmission, PublishedAssessment
+from openswe.review.routes import get_assessment_feedback, submit_assessment_feedback
+from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from tests.conftest import FakeStore
 
 
@@ -27,11 +27,11 @@ async def test_feedback_is_per_person_and_published_assessment(fake_store: FakeS
     )
     with (
         patch(
-            "agent.review.assessment_feedback.require_repo_access_for_user",
+            "openswe.review.assessment_feedback.require_repo_access_for_user",
             AsyncMock(return_value="t"),
         ),
         patch(
-            "agent.review.assessment_feedback.create_langsmith_feedback", new_callable=AsyncMock
+            "openswe.review.assessment_feedback.create_langsmith_feedback", new_callable=AsyncMock
         ) as trace_feedback,
     ):
         first = await submit_assessment_feedback(
@@ -106,7 +106,7 @@ async def test_trace_failure_does_not_lose_saved_feedback(fake_store: FakeStore)
     assessment = await ASSESSMENTS.get("123")
     with (
         patch(
-            "agent.review.assessment_feedback.require_repo_access_for_user",
+            "openswe.review.assessment_feedback.require_repo_access_for_user",
             AsyncMock(return_value="t"),
         ),
         patch.object(
@@ -115,7 +115,7 @@ async def test_trace_failure_does_not_lose_saved_feedback(fake_store: FakeStore)
             AsyncMock(side_effect=[assessment, RuntimeError("store unavailable")]),
         ),
         patch(
-            "agent.review.assessment_feedback.create_langsmith_feedback",
+            "openswe.review.assessment_feedback.create_langsmith_feedback",
             AsyncMock(side_effect=RuntimeError("trace unavailable")),
         ),
     ):
@@ -123,7 +123,7 @@ async def test_trace_failure_does_not_lose_saved_feedback(fake_store: FakeStore)
             "o", "r", 1, 123, FeedbackSubmission(rating="unhelpful"), {"sub": "alice"}
         )
     with patch(
-        "agent.review.assessment_feedback.require_repo_access_for_user",
+        "openswe.review.assessment_feedback.require_repo_access_for_user",
         AsyncMock(return_value="t"),
     ):
         assert await get_assessment_feedback("o", "r", 1, 123, {"sub": "alice"}) == saved
@@ -145,7 +145,7 @@ async def test_feedback_cannot_cross_repository_scope(fake_store: FakeStore) -> 
     )
     with (
         patch(
-            "agent.review.assessment_feedback.require_repo_access_for_user",
+            "openswe.review.assessment_feedback.require_repo_access_for_user",
             AsyncMock(return_value="t"),
         ),
         pytest.raises(HTTPException) as error,
@@ -156,7 +156,7 @@ async def test_feedback_cannot_cross_repository_scope(fake_store: FakeStore) -> 
     assert error.value.status_code == 404
     with (
         patch(
-            "agent.review.assessment_feedback.require_repo_access_for_user",
+            "openswe.review.assessment_feedback.require_repo_access_for_user",
             AsyncMock(side_effect=HTTPException(403)),
         ),
         pytest.raises(HTTPException) as error,
@@ -168,7 +168,7 @@ async def test_feedback_cannot_cross_repository_scope(fake_store: FakeStore) -> 
 async def test_feedback_tool_uses_private_owner_and_repo_permission(fake_store: FakeStore) -> None:
     with (
         patch(
-            "agent.tools.submit_review_assessment_feedback.private_credential_login",
+            "openswe.tools.submit_review_assessment_feedback.private_credential_login",
             AsyncMock(return_value=None),
         ),
         pytest.raises(ValueError, match="authenticated owner"),
@@ -192,11 +192,11 @@ async def test_feedback_tool_uses_private_owner_and_repo_permission(fake_store: 
     )
     with (
         patch(
-            "agent.tools.submit_review_assessment_feedback.private_credential_login",
+            "openswe.tools.submit_review_assessment_feedback.private_credential_login",
             AsyncMock(return_value="Alice"),
         ),
         patch(
-            "agent.review.assessment_feedback.require_repo_access_for_user",
+            "openswe.review.assessment_feedback.require_repo_access_for_user",
             AsyncMock(return_value="t"),
         ),
     ):
@@ -207,11 +207,11 @@ async def test_feedback_tool_uses_private_owner_and_repo_permission(fake_store: 
         assert await get_assessment_feedback("o", "r", 1, 123, {"sub": "ALICE"}) == saved
     with (
         patch(
-            "agent.tools.submit_review_assessment_feedback.private_credential_login",
+            "openswe.tools.submit_review_assessment_feedback.private_credential_login",
             AsyncMock(return_value="alice"),
         ),
         patch(
-            "agent.review.assessment_feedback.require_repo_access_for_user",
+            "openswe.review.assessment_feedback.require_repo_access_for_user",
             AsyncMock(side_effect=HTTPException(403)),
         ),
         pytest.raises(HTTPException) as error,
