@@ -9,9 +9,9 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 
-from agent.bridge.backend import BridgeSandboxBackend
-from agent.bridge.protocol import JsonObject
-from agent.bridge.store import Bridge, BridgeStore, ClaimedRequest
+from openswe.bridge.backend import BridgeSandboxBackend
+from openswe.bridge.protocol import JsonObject
+from openswe.bridge.store import Bridge, BridgeStore, ClaimedRequest
 
 OWNER = "test-user"
 THREAD_ID = "thread-1"

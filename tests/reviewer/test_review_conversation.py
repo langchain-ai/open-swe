@@ -5,9 +5,9 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github.checks import github_headers
-from agent.review import conversation
-from agent.review.conversation import (
+from openswe.github.checks import github_headers
+from openswe.review import conversation
+from openswe.review.conversation import (
     ConversationComment,
     ConversationCommentCreate,
     ConversationReview,

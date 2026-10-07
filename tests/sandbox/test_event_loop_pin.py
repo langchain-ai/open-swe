@@ -7,7 +7,7 @@ from typing import cast
 
 import pytest
 
-from agent.utils.event_loop import ISOLATED_LOOPS_ENV, pin_single_event_loop
+from openswe.utils.event_loop import ISOLATED_LOOPS_ENV, pin_single_event_loop
 
 
 def test_pin_clears_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,6 +11,18 @@ Open SWE may approve a pull request when it fits one of these and has no unresol
    log or error message fixes, type-only changes, lint fixes, or removing dead code
    that no supported user flow can reach.
 
+4. **Stricter approval policy only.** Changes confined to this file that solely
+   narrow the set of PRs eligible for automatic approval (for example, adding an
+   exclusion or tightening a limit). Any project member may propose restrictions
+   on what they would approve. Compare the whole diff against the base policy:
+   every PR eligible under the proposed policy must already be eligible under the
+   base policy, and at least some previously eligible PRs must become ineligible.
+   If that cannot be established, require human review. Mixed changes, relaxed
+   rules, new exceptions, and changes to authorization or human approval
+   requirements do not qualify. This exception waives only the instruction-file
+   exclusion for this file; all other human-review requirements still apply.
+   Evaluate this PR using the base policy, not the policy it proposes.
+
 Always require human review when a pull request touches:
 
 - removal or restriction of existing user-facing functionality, including hiding
@@ -20,13 +32,14 @@ Always require human review when a pull request touches:
   functionality is being removed or restricted; a rationale does not waive human
   review;
 - authentication, sessions, permissions, credentials, or tokens (for example
-  `agent/dashboard/oauth.py`, `agent/dashboard/repo_access.py`, `agent/api_keys/`,
-  `agent/github/`);
+  `openswe/dashboard/oauth.py`, `openswe/dashboard/repo_access.py`, `openswe/api_keys/`,
+  `openswe/github/`);
 - sandboxes, webhooks and their signature checks, or database migrations
-  (`agent/sandboxes/`, `agent/webhooks/`, `agent/database/migrations/`);
-- the reviewer or approval logic itself (`agent/review/`, `agent/tools/publish_review.py`);
-- instructions agents follow: anything under `.open-swe/` (including this file),
-  `AGENTS.md`, `CLAUDE.md`, `.agents/`, `.claude/`, or `agent/resources/prompts/`;
+  (`openswe/sandboxes/`, `openswe/webhooks/`, `openswe/database/migrations/`);
+- the reviewer or approval logic itself (`openswe/review/`, `openswe/tools/publish_review.py`);
+- instructions agents follow: anything under `.open-swe/` (including this file,
+  unless criterion 4 applies), `AGENTS.md`, `CLAUDE.md`, `.agents/`, `.claude/`,
+  or `openswe/resources/prompts/`;
 - CI, build, or deployment files (`.github/`, `Dockerfile`, `compose.yaml`,
   `langgraph*.json`), or dependency manifests and lockfiles;
 - generated pages under `openwiki/`.

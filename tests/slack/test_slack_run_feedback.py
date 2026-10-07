@@ -8,9 +8,9 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, HTTPException, Request
 
-from agent.slack import routes, run_feedback
-from agent.slack.payloads import SlackChannelContext, SlackInteraction
-from agent.utils.json_types import JsonObject
+from openswe.slack import routes, run_feedback
+from openswe.slack.payloads import SlackChannelContext, SlackInteraction
+from openswe.utils.json_types import JsonObject
 
 
 def interaction(rating: Literal["up", "down"] = "up") -> SlackInteraction:

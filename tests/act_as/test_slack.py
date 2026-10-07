@@ -12,12 +12,12 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.act_as import slack as act_as_slack
-from agent.act_as.records import ThreadActAs
-from agent.slack import routes as slack_routes
-from agent.slack.payloads import SlackChannelContext
-from agent.users import User, UserPreferences, UserPreferencesPatch
-from agent.utils.json_types import JsonObject
+from openswe.act_as import slack as act_as_slack
+from openswe.act_as.records import ThreadActAs
+from openswe.slack import routes as slack_routes
+from openswe.slack.payloads import SlackChannelContext
+from openswe.users import User, UserPreferences, UserPreferencesPatch
+from openswe.utils.json_types import JsonObject
 
 _SECRET = "test-signing-secret"
 
@@ -124,6 +124,28 @@ async def test_the_persons_answer_is_recorded_and_announced(stack, action, statu
         )
     else:
         stack.preferences.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gave_up", [True, False])
+async def test_an_answer_after_the_tool_gave_up_wakes_the_thread(stack, monkeypatch, gave_up):
+    thread = await ThreadActAs.load("thread-1")
+    request = thread.requests[stack.fingerprint]
+    await thread.set_wake_on_answer(request, gave_up)
+    dispatch = AsyncMock()
+    monkeypatch.setattr(act_as_slack, "dispatch_followup", dispatch)
+    monkeypatch.setattr(act_as_slack, "fetch_thread_metadata", AsyncMock(return_value={}))
+    tasks = BackgroundTasks()
+
+    await slack_routes.slack_interactivity(_request("approve", stack.fingerprint), tasks)
+    await tasks()
+
+    if gave_up:
+        dispatch.assert_awaited_once()
+        assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
+        assert "alice approved" in dispatch.await_args.args[2]
+    else:
+        dispatch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -13,9 +13,8 @@ for (const viewport of [
     await loginAs(page, SAME_USER);
     await page.goto("/admin");
     await expect(
-      page.getByRole("heading", { name: "Users", exact: true }),
+      page.getByRole("heading", { name: /Expedited Slack review/ }),
     ).toBeAttached();
-    await expect(page.locator("#policy-enabled")).toBeAttached();
 
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollHeight))
@@ -25,7 +24,7 @@ for (const viewport of [
       element.scrollTop = element.scrollHeight;
     });
     await expect(
-      page.getByRole("heading", { name: "Users", exact: true }),
+      page.getByRole("heading", { name: /Expedited Slack review/ }),
     ).toBeVisible();
     await expect
       .poll(() => page.locator("main").evaluate((element) => element.scrollTop))

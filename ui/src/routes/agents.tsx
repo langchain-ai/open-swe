@@ -15,9 +15,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { isDesktopLocalModeEnabled } from "@/lib/desktop-local-mode"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
+import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents")({
@@ -75,13 +75,19 @@ function AgentsLayout() {
   const [desktopSource] = useDesktopThreadSource()
   const localHome =
     Boolean(homeMatch) &&
-    (!session.data ||
-      Boolean(homeMatch?.search.localRepo) ||
+    (Boolean(homeMatch?.search.localRepo) ||
       (typeof window !== "undefined" &&
         Boolean(window.openSweDesktop) &&
         desktopSource === "local" &&
         !homeMatch?.search.repo &&
         !homeMatch?.search.noRepo))
+  // A "This Mac" thread needs this app's bridge and git controls, which only
+  // the agents view has.
+  const localThreads = useLocalThreads()
+  const thisMacThread = Boolean(
+    activeThreadId &&
+    localThreads.data?.some((thread) => thread.id === activeThreadId)
+  )
   const runtimeThreadId = activeLocalSessionId ?? activeThreadId ?? null
   // Only a thread route has to wait for the profile: mounting the runtime the
   // profile does not select hydrates that thread's transcript a second time.
@@ -91,16 +97,10 @@ function AgentsLayout() {
   const pathname = location.pathname
   const awaitingRuntimeChoice =
     Boolean(session.data) &&
-    profile.isPending &&
+    (profile.isPending || localThreads.isLoading) &&
     (runtimeThreadId !== null ||
       pathname === "/agents" ||
       pathname === "/agents/")
-  const localOnly = !session.data && isDesktopLocalModeEnabled()
-  const isLocalRoute =
-    pathname === "/agents" ||
-    pathname === "/agents/" ||
-    Boolean(activeLocalSessionId)
-
   useEffect(() => {
     rememberAppLocation(location.href)
   }, [location.href])
@@ -113,9 +113,9 @@ function AgentsLayout() {
     )
   }
 
-  if (!session.data && (!localOnly || !isLocalRoute)) return <RequireLogin />
+  if (!session.data) return <RequireLogin />
   if (!awaitingRuntimeChoice && experimentalAssistantUi && !localHome) {
-    if (activeThreadId)
+    if (activeThreadId && !thisMacThread)
       return (
         <Navigate
           to="/assistant/$threadId"
@@ -138,8 +138,7 @@ function AgentsLayout() {
 
   return (
     <AgentsShell
-      user={session.data ?? null}
-      localOnly={localOnly}
+      user={session.data}
       activeThreadId={activeThreadId ?? activeReviewThreadId}
       activeLocalSessionId={activeLocalSessionId}
     >
