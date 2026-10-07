@@ -1,10 +1,14 @@
-import { memo, useCallback, useEffect, useMemo } from "react"
+import { memo, useCallback, useEffect, useMemo, useState } from "react"
 import {
   FileTree,
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import { ListBulletsIcon, TreeViewIcon } from "@phosphor-icons/react"
+import {
+  ListBulletsIcon,
+  MagnifyingGlassIcon,
+  TreeViewIcon,
+} from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 
 import type {
@@ -13,6 +17,11 @@ import type {
   GitStatusEntry,
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   TREE_UNSAFE_CSS,
@@ -311,10 +320,14 @@ function ReviewFileTreeExplorer({
     [files]
   )
 
+  const [filter, setFilter] = useState("")
+
   const { model } = useFileTree({
     paths,
     gitStatus,
     flattenEmptyDirectories: true,
+    initialExpansion: "open",
+    fileTreeSearchMode: "hide-non-matches",
     density: "default",
     icons: "complete",
     unsafeCSS: TREE_UNSAFE_CSS,
@@ -323,6 +336,10 @@ function ReviewFileTreeExplorer({
   useEffect(() => {
     model.resetPaths(paths)
   }, [model, paths])
+
+  useEffect(() => {
+    model.setSearch(filter.trim() || null)
+  }, [model, filter])
 
   useEffect(() => {
     model.setGitStatus(gitStatus)
@@ -345,19 +362,35 @@ function ReviewFileTreeExplorer({
   }, [model, selected])
 
   return (
-    <div className="min-h-0 flex-1">
-      <FileTree
-        model={model}
-        style={
-          {
-            height: "100%",
-            ...treeThemeStyle(),
-            // Must stay opaque: the tree's truncation marker ("…") paints
-            // this color behind itself to hide the overflowing filename.
-            "--trees-theme-sidebar-bg": "var(--sidebar)",
-          } as React.CSSProperties
-        }
-      />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="px-3 pt-1 pb-1.5">
+        <InputGroup>
+          <InputGroupAddon>
+            <MagnifyingGlassIcon />
+          </InputGroupAddon>
+          <InputGroupInput
+            type="search"
+            aria-label="Filter files"
+            placeholder="Filter files"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+        </InputGroup>
+      </div>
+      <div className="min-h-0 flex-1">
+        <FileTree
+          model={model}
+          style={
+            {
+              height: "100%",
+              ...treeThemeStyle(),
+              // Must stay opaque: the tree's truncation marker ("…") paints
+              // this color behind itself to hide the overflowing filename.
+              "--trees-theme-sidebar-bg": "var(--sidebar)",
+            } as React.CSSProperties
+          }
+        />
+      </div>
     </div>
   )
 }

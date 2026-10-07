@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack import channel_memory
+from openswe.slack import channel_memory
 
 
 @pytest.mark.parametrize(

@@ -15,8 +15,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.utils.model import make_model
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.utils.model import make_model
 from tests.agent.test_agent_assembly_context import (
     _MODEL_DEFAULTS,
     _base_config,
@@ -91,7 +91,7 @@ async def _run(
     model_route: str | None = None,
 ) -> None:
     config = _base_config()
-    with patch("agent.server._notion_tools_for", AsyncMock(return_value=[_NOTION_SEARCH])):
+    with patch("openswe.server._notion_tools_for", AsyncMock(return_value=[_NOTION_SEARCH])):
         kwargs = await _capture_create_deep_agent_kwargs(
             config,
             thread_settings={"owner_login": "octocat", **thread_settings},
@@ -119,7 +119,9 @@ async def _run(
         return await providers.answer(model, messages, stop, **kwargs)
 
     with (
-        patch("agent.server.PrepareAgentRunMiddleware._prepare", AsyncMock(return_value=prepared)),
+        patch(
+            "openswe.server.PrepareAgentRunMiddleware._prepare", AsyncMock(return_value=prepared)
+        ),
         patch.object(ChatAnthropic, "_agenerate", generate),
         patch.object(ChatOpenAI, "_agenerate", generate),
     ):

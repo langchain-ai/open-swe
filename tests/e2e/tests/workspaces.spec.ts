@@ -194,6 +194,16 @@ test.describe("Workspaces", () => {
         await page.getByRole("button", { name: "Done", exact: true }).click();
       }
       await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.route("**/dashboard/api/workspaces", async (route) => {
+        const request = route.request();
+        if (request.method() !== "POST") return route.continue();
+        await route.continue({
+          postData: JSON.stringify({
+            ...request.postDataJSON(),
+            inherit_default_sandbox: false,
+          }),
+        });
+      });
       await page
         .getByRole("button", { name: "Create workspace", exact: true })
         .click();
@@ -491,7 +501,7 @@ test.describe("Workspaces", () => {
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
     await page.goto("/workspaces");
-    await expect(page.getByText("Default")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Default")).toBeVisible();
     await expect(page.getByText("Snapshot ready")).toBeVisible();
     // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
     await expect(page.getByText(/^Rebuilt /)).toBeVisible();

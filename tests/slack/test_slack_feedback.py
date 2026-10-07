@@ -2,8 +2,8 @@ from typing import Any
 
 import pytest
 
-from agent.slack import feedback as slack_feedback
-from agent.slack.feedback import (
+from openswe.slack import feedback as slack_feedback
+from openswe.slack.feedback import (
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
@@ -90,7 +90,7 @@ async def test_reaction_from_non_triggering_user_is_ignored(
 
     monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
-    monkeypatch.setattr("agent.store.store_client", lambda: client)
+    monkeypatch.setattr("openswe.store.store_client", lambda: client)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
 

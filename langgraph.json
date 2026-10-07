@@ -3,18 +3,18 @@
   "python_version": "3.14",
   "api_version": ">~=0.15.0rc1",
   "graphs": {
-    "agent": "agent.graphs.agent:traced_agent",
-    "reviewer": "agent.graphs.reviewer:traced_reviewer_agent",
-    "analyzer": "agent.graphs.analyzer:traced_analyzer",
-    "review-scout": "agent.graphs.review_scout:traced_review_scout",
-    "chat": "agent.graphs.chat:traced_chat_agent",
-    "scheduler": "agent.graphs.scheduler:get_scheduler"
+    "agent": "openswe.graphs.agent:traced_agent",
+    "reviewer": "openswe.graphs.reviewer:traced_reviewer_agent",
+    "analyzer": "openswe.graphs.analyzer:traced_analyzer",
+    "review-scout": "openswe.graphs.review_scout:traced_review_scout",
+    "chat": "openswe.graphs.chat:traced_chat_agent",
+    "scheduler": "openswe.graphs.scheduler:get_scheduler"
   },
   "dependencies": [
     "."
   ],
   "http": {
-    "app": "agent.webapp:app"
+    "app": "openswe.webapp:app"
   },
   "checkpointer": {
     "ttl": {
@@ -28,12 +28,13 @@
     "# Bundle the dashboard so the deployment serves it at / (docs/INSTALLATION.md).",
     "# The build is made for http.mount_prefix from langgraph.json, so the UI's asset URLs and router match where the server mounts it.",
     "# Best effort: a failed UI build leaves the backend deployable without the bundled UI.",
+    "RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*",
     "COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json langgraph.json /tmp/dashboard-src/",
     "COPY ui /tmp/dashboard-src/ui",
     "# pnpm hashes every patchedDependencies file on install, even ones outside the filtered packages.",
     "COPY desktop/patches /tmp/dashboard-src/desktop/patches",
     "# The dashboard build bakes SOURCE_COMMIT into the bundle's compile-time constants and its sidecar; the backend stamps its own sidecar from the same value.",
-    "# These lines run before the source copy, so the backend sidecar goes to a location created here and read at runtime, not into the agent package.",
+    "# These lines run before the source copy, so the backend sidecar goes to a location created here and read at runtime, not into the openswe package.",
     "ARG SOURCE_COMMIT=",
     "COPY scripts/stamp_build_info.py /tmp/stamp_build_info.py",
     "ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0",

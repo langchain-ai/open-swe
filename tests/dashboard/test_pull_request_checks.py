@@ -1,5 +1,5 @@
-import agent.github.pull_request_checks as checks_module
-from agent.github.pull_request_checks import get_pull_request_check_states
+import openswe.github.pull_request_checks as checks_module
+from openswe.github.pull_request_checks import get_pull_request_check_states
 
 
 def _rollup(state: str | None, pr_state: str = "OPEN", is_draft: bool = False) -> dict[str, object]:
