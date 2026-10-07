@@ -32,13 +32,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderSection() {
+function renderSection(onBotChange?: (bot: string) => void) {
   const client = makeQueryClient()
   client.setDefaultOptions({ queries: { retry: false } })
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
-      <AllowedSlackBotsSection />
+      <AllowedSlackBotsSection onBotChange={onBotChange} />
     </QueryClientProvider>
   )
 }
@@ -64,7 +64,8 @@ describe("Allowed Slack bots", () => {
         return new Response(JSON.stringify(bots))
       })
     )
-    renderSection()
+    const onBotChange = vi.fn()
+    renderSection(onBotChange)
     await screen.findByText("No Slack bots are allowed.")
     expect(
       screen.queryByRole("textbox", { name: "Search Slack bots" })
@@ -77,7 +78,11 @@ describe("Allowed Slack bots", () => {
     expect(screen.queryByRole("button", { name: "Allow Build bot" })).toBeNull()
     fireEvent.click(await screen.findByText("Release bot"))
     await screen.findByRole("button", { name: "Remove Release bot" })
-    expect(await screen.findByText("Release bot")).toBeTruthy()
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Release bot B123 Enabled/ })
+    )
+    expect(onBotChange).toHaveBeenCalledWith("T123:B123")
+    onBotChange.mockClear()
     expect(
       screen.queryByRole("textbox", { name: "Search Slack bots" })
     ).toBeNull()
@@ -96,6 +101,7 @@ describe("Allowed Slack bots", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add bot" }))
     fireEvent.click(screen.getByRole("button", { name: "Remove Release bot" }))
     await screen.findByText("No Slack bots are allowed.")
+    expect(onBotChange).not.toHaveBeenCalled()
     expect(
       requests.find(({ init }) => init.method === "DELETE")?.url
     ).toContain("/slack/allowed-bots/T123/B123")

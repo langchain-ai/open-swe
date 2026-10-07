@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.act_as import records
-from agent.utils.json_types import JsonObject
-from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from openswe.act_as import records
+from openswe.utils.json_types import JsonObject
+from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY
 
 
 @pytest.fixture

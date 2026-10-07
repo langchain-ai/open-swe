@@ -12,17 +12,17 @@ from sqlalchemy import text
 from starlette.requests import Request
 from starlette.types import Message
 
-from agent.database import transaction
-from agent.slack import routes
-from agent.slack.channels import SlackChannel
-from agent.slack.payloads import SlackChannelContext
-from agent.webhooks import common, event_log
-from agent.webhooks.event_log import EventLog, EventRefs
+from openswe.database import transaction
+from openswe.slack import routes
+from openswe.slack.channels import SlackChannel
+from openswe.slack.payloads import SlackChannelContext
+from openswe.webhooks import common, event_log
+from openswe.webhooks.event_log import EventLog, EventRefs
 
 
 async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
-    from agent.analytics import segment
-    from agent.webhooks.event_log import LoggedEvent
+    from openswe.analytics import segment
+    from openswe.webhooks.event_log import LoggedEvent
 
     monkeypatch.setenv("SEGMENT_WRITE_KEY", "test-key")
     monkeypatch.setenv("DD_ENV", "staging")
@@ -56,7 +56,7 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
     assert requests[0]["properties"]["action"] == "created"
     assert requests[0]["properties"]["environment"] == "staging"
     user_id = uuid4()
-    from agent.users import User
+    from openswe.users import User
 
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User(id=user_id)))
     await segment.record_webhook(event.model_copy(update={"user_id": user_id}))
@@ -87,16 +87,16 @@ async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
 async def test_inactivity_emits_once_per_idle_period(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent.transcript.engine import Command, append
-    from agent.transcript.events import (
+    from openswe.transcript.engine import Command, append
+    from openswe.transcript.events import (
         MessageSender,
         ThreadCreated,
         TranscriptEvent,
         TurnCompleted,
         TurnRequested,
     )
-    from agent.webhooks.event_subscriptions import EventSubscription
-    from agent.webhooks.thread_inactivity import emit_inactivity_events
+    from openswe.webhooks.event_subscriptions import EventSubscription
+    from openswe.webhooks.thread_inactivity import emit_inactivity_events
 
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(EventSubscription, "deliver", AsyncMock())
@@ -216,7 +216,7 @@ async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) ->
 async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent.analytics import segment
+    from openswe.analytics import segment
 
     started = asyncio.Event()
     release = asyncio.Event()
@@ -228,7 +228,7 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     monkeypatch.setattr(segment, "record_webhook", slow_export)
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
-        "agent.slack.channels.SlackChannel.load",
+        "openswe.slack.channels.SlackChannel.load",
         AsyncMock(
             return_value=SlackChannel.from_payload(
                 {
@@ -339,7 +339,7 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
 ) -> None:
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
-        "agent.slack.channels.SlackChannel.load",
+        "openswe.slack.channels.SlackChannel.load",
         AsyncMock(
             return_value=SlackChannel.from_payload(
                 {
@@ -354,7 +354,9 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
         ),
     )
     monkeypatch.setattr(common, "verify_slack_signature", lambda **kwargs: True)
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(
         common,
         "resolve_slack_channel_context",
