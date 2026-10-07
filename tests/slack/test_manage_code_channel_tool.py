@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack.http import SlackRequestError
+from openswe.slack.http import SlackRequestError
 
-manage_tool = import_module("agent.slack.tools.manage_code_channel")
+manage_tool = import_module("openswe.slack.tools.manage_code_channel")
 
 
 async def test_sandbox_content_reader_enforces_source_and_size(

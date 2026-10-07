@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 from langchain.agents.middleware.types import ModelRequest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.review_guide.middleware import ReviewGuideMiddleware
+from openswe.review_guide.middleware import ReviewGuideMiddleware
 
 
 async def test_a_resumed_run_keeps_the_walkthrough_rules_from_its_checkpoint() -> None:

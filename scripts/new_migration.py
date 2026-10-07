@@ -7,7 +7,7 @@ import sys
 from alembic.script import ScriptDirectory
 from alembic.util import rev_id
 
-from agent.database.postgres import MIGRATION_DIR
+from openswe.database.postgres import MIGRATION_DIR
 
 message = " ".join(sys.argv[1:]).strip()
 if not message:

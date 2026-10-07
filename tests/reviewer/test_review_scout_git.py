@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agent.review.walkthrough import FileLines, StepDraft
-from agent.review_scout.git import OTHER_TITLE, ScoutCheckout
+from openswe.review.walkthrough import FileLines, StepDraft
+from openswe.review_scout.git import OTHER_TITLE, ScoutCheckout
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 

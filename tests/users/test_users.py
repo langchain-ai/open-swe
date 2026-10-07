@@ -5,8 +5,8 @@ import asyncio
 import pytest
 from sqlalchemy import func, select, update
 
-from agent.database import postgres
-from agent.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
+from openswe.database import postgres
+from openswe.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 

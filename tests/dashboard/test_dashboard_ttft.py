@@ -1,4 +1,4 @@
-from agent.dashboard import ttft
+from openswe.dashboard import ttft
 
 
 def _event(

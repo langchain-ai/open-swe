@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from agent.review_guide.diff import FileChange, parse, unseen
-from agent.review_guide.render import MessageRenderer, RenderError, render_chunk
-from agent.review_guide.walk import FileRanges, Group, LineRef, RangeError, Walk, claim
+from openswe.review_guide.diff import FileChange, parse, unseen
+from openswe.review_guide.render import MessageRenderer, RenderError, render_chunk
+from openswe.review_guide.walk import FileRanges, Group, LineRef, RangeError, Walk, claim
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 

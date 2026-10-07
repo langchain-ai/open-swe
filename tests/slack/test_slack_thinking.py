@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, call
 import httpx
 import pytest
 
-from agent.slack import thinking as slack_thinking
+from openswe.slack import thinking as slack_thinking
 
 
 @pytest.fixture(autouse=True)

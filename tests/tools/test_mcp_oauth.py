@@ -8,11 +8,11 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 
-from agent.mcp import MCPConnectionUpdate, runtime
-from agent.mcp import oauth as mcp_oauth
-from agent.mcp import transport as mcp_transport
-from agent.mcp import workspace as settings
-from agent.tool_loaders import workspace_mcp as loader
+from openswe.mcp import MCPConnectionUpdate, runtime
+from openswe.mcp import oauth as mcp_oauth
+from openswe.mcp import transport as mcp_transport
+from openswe.mcp import workspace as settings
+from openswe.tool_loaders import workspace_mcp as loader
 
 
 @pytest.fixture

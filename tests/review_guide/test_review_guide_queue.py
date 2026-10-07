@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.review_guide import advance as advance_module
-from agent.review_guide.diff import parse, unseen
-from agent.review_guide.github import PullRequestHead
-from agent.review_guide.walk import Group, LineRef, Walk
+from openswe.review_guide import advance as advance_module
+from openswe.review_guide.diff import parse, unseen
+from openswe.review_guide.github import PullRequestHead
+from openswe.review_guide.walk import Group, LineRef, Walk
 
 DIFF = (
     "diff --git a/a.py b/a.py\nnew file mode 100644\n--- /dev/null\n+++ b/a.py\n"

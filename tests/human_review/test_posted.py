@@ -3,14 +3,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.expedited_review.eligibility import ChangedFile
-from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
-from agent.github.codeowners import CodeOwners
-from agent.github.pull_requests import PullRequest
-from agent.human_review import lifecycle, posted, standard
-from agent.human_review.posted import linked_pull_request
-from agent.human_review.requests import HumanReviewRequest
-from agent.users import User, UserPreferences
+from openswe.expedited_review.eligibility import ChangedFile
+from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
+from openswe.github.codeowners import CodeOwners
+from openswe.github.pull_requests import PullRequest
+from openswe.human_review import lifecycle, posted, standard
+from openswe.human_review.posted import linked_pull_request
+from openswe.human_review.requests import HumanReviewRequest
+from openswe.users import User, UserPreferences
 from tests.support.slack_api import SlackAPI
 
 
@@ -30,7 +30,7 @@ def test_a_message_linking_several_pull_requests_is_not_watched() -> None:
 
 
 async def test_external_authors_are_not_watched(monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent.github.pull_requests import PullRequestPayload
+    from openswe.github.pull_requests import PullRequestPayload
 
     monkeypatch.setattr(posted, "skip_on_preview", lambda _: False)
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=User()))
@@ -162,7 +162,7 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
 async def test_each_owned_path_needs_an_approval_including_team_owners(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.github import codeowners
+    from openswe.github import codeowners
 
     monkeypatch.setattr(codeowners, "team_members", AsyncMock(return_value=["Grace"]))
     owners = CodeOwners.parse("* @ada\n/api/ @lc/backend @bob\n/docs/\n")
