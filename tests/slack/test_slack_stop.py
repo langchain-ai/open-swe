@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack import client as slack_client
-from agent.slack import http as slack_http
-from agent.slack import stop as slack_stop
-from agent.slack import thinking
-from agent.slack.stop import process_slack_stop_reaction
-from agent.threads import handlers
-from agent.users.models import User, UserIdentity
+from openswe.slack import client as slack_client
+from openswe.slack import http as slack_http
+from openswe.slack import stop as slack_stop
+from openswe.slack import thinking
+from openswe.slack.stop import process_slack_stop_reaction
+from openswe.threads import handlers
+from openswe.users.models import User, UserIdentity
 
 
 class FakeStore:

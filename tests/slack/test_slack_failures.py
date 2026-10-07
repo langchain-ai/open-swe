@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack import failures
+from openswe.slack import failures
 
 
 @pytest.fixture(autouse=True)

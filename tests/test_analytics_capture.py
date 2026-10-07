@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from agent.analytics import emitter
-from agent.database import analytics as database
+from openswe.analytics import emitter
+from openswe.database import analytics as database
 
 
 @pytest.fixture
