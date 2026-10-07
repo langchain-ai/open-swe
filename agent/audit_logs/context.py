@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from starlette.requests import HTTPConnection
@@ -13,6 +14,8 @@ if TYPE_CHECKING:
     from agent.workspaces.store import Workspace
 
 logger = logging.getLogger(__name__)
+
+current_audit_log: ContextVar[AuditLog | None] = ContextVar("current_audit_log", default=None)
 
 
 async def enrich_workspace(entry: AuditLog, workspace: Workspace | str) -> None:

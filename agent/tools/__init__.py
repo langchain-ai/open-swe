@@ -37,6 +37,7 @@ _TOOL_MODULES = {
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
     "read_only_sql": ".read_only_sql",
+    "read_store_item": ".read_store_item",
     "read_repo_file": "agent.github.tools.read_repo_file",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
@@ -116,6 +117,7 @@ __all__ = [
     "output_iframe",
     "publish_review",
     "read_only_sql",
+    "read_store_item",
     "read_repo_file",
     "read_user_settings",
     "record_human_input",
@@ -207,6 +209,7 @@ if TYPE_CHECKING:
     from agent.tools.output_iframe import output_iframe
     from agent.tools.publish_review import publish_review
     from agent.tools.read_only_sql import read_only_sql
+    from agent.tools.read_store_item import read_store_item
     from agent.tools.read_user_settings import read_user_settings
     from agent.tools.record_human_input import record_human_input
     from agent.tools.recreate_sandbox import recreate_sandbox
