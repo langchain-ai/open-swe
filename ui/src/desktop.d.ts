@@ -211,7 +211,9 @@ declare global {
         callback: (projects: Array<DesktopProject>) => void
       ) => () => void
       openExternal: (url: string) => Promise<boolean>
-      connectService: (provider: "slack" | "notion") => Promise<boolean>
+      connectService: (
+        provider: "slack" | "notion" | "langsmith"
+      ) => Promise<boolean>
       resolveLocalProjectPath: (input: {
         localSessionId: string
         path: string

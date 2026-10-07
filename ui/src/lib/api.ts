@@ -2038,8 +2038,12 @@ export function loginUrl(redirectTo?: string): string {
  */
 /** Starts Sign in with LangSmith, returning to `redirectTo` afterwards. */
 export function connectLangSmith(redirectTo: string) {
-  const query = new URLSearchParams({ redirect_to: redirectTo })
-  window.location.assign(`${API_BASE}/dashboard/api/langsmith/login?${query}`)
+  const pending = window.openSweDesktop?.connectService("langsmith")
+  if (!pending) {
+    const query = new URLSearchParams({ redirect_to: redirectTo })
+    window.location.assign(`${API_BASE}/dashboard/api/langsmith/login?${query}`)
+  }
+  return pending
 }
 
 export function connectService(

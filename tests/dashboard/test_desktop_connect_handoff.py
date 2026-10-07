@@ -19,7 +19,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import routes
+from agent.dashboard import langsmith_routes, routes
 from agent.dashboard.oauth import COOKIE_NAME, issue_session
 from agent.slack import connect
 from agent.slack.oauth import SlackIdentity
@@ -157,3 +157,63 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
         "iat",
         "exp",
     }
+
+
+def test_desktop_langsmith_connect_completes_under_the_session_the_app_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
+
+    async def fake_start(login: str, nonce_hash: str, *, redirect_uri: str, state: str) -> str:
+        return f"https://langsmith.example/authorize?state={state}"
+
+    completed: list[tuple[str, str]] = []
+
+    async def fake_complete(login: str, nonce_hash: str, code: str) -> None:
+        completed.append((login, code))
+
+    monkeypatch.setattr(langsmith_routes, "start_langsmith_oauth", fake_start)
+    monkeypatch.setattr(langsmith_routes, "complete_langsmith_oauth", fake_complete)
+    monkeypatch.setattr(
+        langsmith_routes, "langsmith_status", AsyncMock(return_value={"connected": True})
+    )
+
+    with _client() as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(login="alice", email=None, avatar_url=None, user_id=str(uuid7())),
+        )
+        login = client.get(
+            "/dashboard/api/langsmith/login",
+            params={"desktop_handoff": _CHALLENGE, "desktop_port": 51234},
+            follow_redirects=False,
+        )
+        state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+
+        callback = _client().get(
+            "/dashboard/api/langsmith/callback",
+            params={"code": "langsmith-code", "state": state},
+            follow_redirects=False,
+        )
+        assert callback.status_code == 302
+        location = urlparse(callback.headers["location"])
+        assert location.netloc == "127.0.0.1:51234"
+        handoff = parse_qs(location.query)["code"][0]
+        assert completed == []
+
+        wrong_verifier = client.post(
+            "/dashboard/api/langsmith/desktop/exchange",
+            json={"code": handoff, "verifier": "not-the-verifier"},
+            headers=_APP_ORIGIN,
+        )
+        assert wrong_verifier.status_code == 400
+
+        exchange = client.post(
+            "/dashboard/api/langsmith/desktop/exchange",
+            json={"code": handoff, "verifier": _VERIFIER},
+            headers=_APP_ORIGIN,
+        )
+        assert exchange.status_code == 200
+        assert completed == [("alice", "langsmith-code")]

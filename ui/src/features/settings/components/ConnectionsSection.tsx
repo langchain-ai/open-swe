@@ -161,6 +161,7 @@ export function ConnectLangSmithButton({
 }: {
   size?: "sm" | "default"
 }) {
+  const qc = useQueryClient()
   const status = useLangSmithConnection()
   const [connecting, setConnecting] = useState(false)
   return (
@@ -168,7 +169,10 @@ export function ConnectLangSmithButton({
       size={size}
       onClick={() => {
         setConnecting(true)
-        connectLangSmith(window.location.href)
+        void connectLangSmith(window.location.href)?.finally(() => {
+          setConnecting(false)
+          void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
+        })
       }}
       disabled={connecting || status.isLoading}
     >

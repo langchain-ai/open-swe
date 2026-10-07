@@ -3,7 +3,7 @@
 import hmac
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
 from agent.dashboard.deps import SESSION_DEP
@@ -17,14 +17,20 @@ from agent.dashboard.langsmith_oauth import (
 )
 from agent.dashboard.oauth import (
     STATE_TTL_SECONDS,
+    DesktopConnectExchange,
     cookie_security,
     decode_state,
+    desktop_callback_url,
+    desktop_handoff_from_state,
     frontend_base_url,
     hash_state_nonce,
+    issue_connect_handoff,
     issue_state,
     new_state_nonce,
+    redeem_connect_handoff,
     require_session,
     sanitize_redirect_to,
+    valid_handoff_challenge,
 )
 from agent.utils.dashboard_links import dashboard_api_base_url
 
@@ -37,6 +43,13 @@ def _clear_state_cookie(response: Response) -> None:
     response.delete_cookie(
         LANGSMITH_STATE_COOKIE_NAME, path=_COOKIE_PATH, samesite="lax", secure=secure
     )
+
+
+async def _complete_connection(login: str, nonce_hash: str, code: str) -> None:
+    try:
+        await complete_langsmith_oauth(login, nonce_hash, code)
+    except LangSmithOAuthError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
 
 
 @router.get("/my-credentials/langsmith")
@@ -53,6 +66,8 @@ async def disconnect_my_langsmith(session: dict[str, Any] = SESSION_DEP) -> dict
 @router.get("/langsmith/login")
 async def langsmith_login(
     redirect_to: str | None = None,
+    desktop_handoff: str | None = None,
+    desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     session: dict[str, Any] = SESSION_DEP,
 ) -> RedirectResponse:
     nonce = new_state_nonce()
@@ -62,6 +77,8 @@ async def langsmith_login(
             redirect_to or f"{frontend_base_url()}/my-settings/connections"
         ),
         nonce_hash=nonce_hash,
+        handoff_challenge=valid_handoff_challenge(desktop_handoff),
+        handoff_port=desktop_port,
     )
     try:
         url = await start_langsmith_oauth(
@@ -102,15 +119,40 @@ async def langsmith_callback(
         raise HTTPException(400, f"LangSmith OAuth failed: {error_description or error}")
     if not code:
         raise HTTPException(400, "LangSmith OAuth callback missing code")
+    handoff = desktop_handoff_from_state(state_payload)
+    if handoff is not None:
+        # The desktop app's browser has neither its session nor the state
+        # cookie, so hand the code back to the app to redeem under its session.
+        challenge, port = handoff
+        handoff_code = issue_connect_handoff(
+            provider="langsmith",
+            challenge=challenge,
+            claims={"nonce_hash": nonce_hash, "code": code},
+        )
+        response = RedirectResponse(desktop_callback_url(port, handoff_code), status_code=302)
+        _clear_state_cookie(response)
+        return response
     session = require_session(request)
     cookie_nonce = request.cookies.get(LANGSMITH_STATE_COOKIE_NAME)
     if not cookie_nonce or not hmac.compare_digest(hash_state_nonce(cookie_nonce), nonce_hash):
         raise HTTPException(400, "oauth state mismatch — please retry")
-    try:
-        await complete_langsmith_oauth(session["sub"], nonce_hash, code)
-    except LangSmithOAuthError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
+    await _complete_connection(session["sub"], nonce_hash, code)
     redirect_to = sanitize_redirect_to(state_payload.get("redirect_to")) or frontend_base_url()
     response = RedirectResponse(redirect_to, status_code=302)
     _clear_state_cookie(response)
     return response
+
+
+@router.post("/langsmith/desktop/exchange")
+async def langsmith_desktop_exchange(
+    body: DesktopConnectExchange,
+    session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    """Finish a desktop LangSmith connection with the app's own session."""
+    claims = redeem_connect_handoff(provider="langsmith", code=body.code, verifier=body.verifier)
+    nonce_hash = claims.get("nonce_hash")
+    code = claims.get("code")
+    if not isinstance(nonce_hash, str) or not isinstance(code, str):
+        raise HTTPException(400, "malformed handoff code")
+    await _complete_connection(session["sub"], nonce_hash, code)
+    return await langsmith_status(session["sub"])
