@@ -140,28 +140,51 @@ class RepoSettings(BaseModel):
 
     @classmethod
     async def fetch(
-        cls, owner: str, repo: str, *, token: str | None, ref: str | None = None
+        cls,
+        owner: str,
+        repo: str,
+        *,
+        token: str | None,
+        ref: str | None = None,
+        strict: bool = False,
     ) -> RepoSettings:
-        """The settings at ``ref``, or the default branch's when ``ref`` has none."""
+        """The settings at ``ref``, or the default branch's when ``ref`` has none.
+
+        With ``strict``, an unreadable or invalid file raises instead of reading as empty.
+        """
         content = None
         if ref:
             content = await fetch_repo_file(
-                owner, repo, SETTINGS_PATH, ref, token=token, max_chars=SETTINGS_MAX_CHARS
+                owner,
+                repo,
+                SETTINGS_PATH,
+                ref,
+                token=token,
+                max_chars=SETTINGS_MAX_CHARS,
+                strict=strict,
             )
         if content is None:
             content = await fetch_repo_file(
-                owner, repo, SETTINGS_PATH, None, token=token, max_chars=SETTINGS_MAX_CHARS
+                owner,
+                repo,
+                SETTINGS_PATH,
+                None,
+                token=token,
+                max_chars=SETTINGS_MAX_CHARS,
+                strict=strict,
             )
         if content is None:
             return cls()
         try:
             return cls.model_validate_json(content)
-        except ValidationError:
+        except ValidationError as exc:
             logger.warning(
                 "repository settings file is invalid; ignoring it",
                 extra={"repository": f"{owner}/{repo}"},
                 exc_info=True,
             )
+            if strict:
+                raise RepoFileUnreadableError(f"{SETTINGS_PATH} is invalid") from exc
             return cls()
 
     @classmethod

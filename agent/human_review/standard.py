@@ -90,12 +90,25 @@ _DEADLINE_RETRY = timedelta(minutes=5)
 _AUTO_ASSIGN_ASKED = "auto_assign_asked"
 
 
+class ReviewChannelUnknownError(Exception):
+    """The repository's review channels could not be read, so membership is unknown."""
+
+
 async def in_review_channel(owner: str, repo: str, channel_id: str, token: str) -> bool:
     """Whether ``channel_id`` is one of the repository's configured review channels."""
-    for configured in (await RepoSettings.cached(owner, repo, token=token)).review_channels:
+    try:
+        settings = await RepoSettings.fetch(owner, repo, token=token, strict=True)
+    except RepoFileUnreadableError as exc:
+        raise ReviewChannelUnknownError(str(exc)) from exc
+    unresolved: list[str] = []
+    for configured in settings.review_channels:
         channel = await SlackChannel.resolve(configured)
-        if channel is not None and channel.id == channel_id:
+        if channel is None:
+            unresolved.append(configured)
+        elif channel.id == channel_id:
             return True
+    if unresolved:
+        raise ReviewChannelUnknownError(f"Could not resolve review channels {unresolved}")
     return False
 
 
@@ -1123,23 +1136,40 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     return "rotated"
 
 
-async def _may_auto_assign(request: HumanReviewRequest) -> bool:
-    """Whether Open SWE picks reviewers unasked; releases its picks if not.
+async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | None:
+    """Why Open SWE does not pick reviewers unasked for ``request`` now; ``None`` if it may.
 
-    A pull request merely linked outside a review channel only gets reactions.
+    A pull request merely linked outside a review channel only gets reactions, so
+    its unaccepted picks are withdrawn.
     """
     if request.kind != "posted" or _AUTO_ASSIGN_ASKED in request.run_config:
-        return True
+        return None
     pr = request.pull_request
     token = await repo_token(pr.owner, pr.repo)
-    if token is None or await in_review_channel(pr.owner, pr.repo, request.slack_channel_id, token):
-        return True
+    if token is None:
+        return None
+    try:
+        if await in_review_channel(pr.owner, pr.repo, request.slack_channel_id, token):
+            return None
+    except ReviewChannelUnknownError:
+        logger.warning(
+            "Could not tell whether a posted pull request is in a review channel",
+            extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
+            exc_info=True,
+        )
+        await _schedule(request, step, _DEADLINE_RETRY)
+        return "retrying"
     logger.info(
         "Not auto-assigning a pull request posted outside its review channels",
         extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
     )
-    await release_picks(request, "nobody asked Open SWE to find a reviewer for it")
-    return False
+    await drop_picks(
+        request,
+        {pick.user_id for pick in request.picks},
+        f"You no longer need to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
+        f"*{escape(pr.title)}*: nobody asked Open SWE to find a reviewer for it.",
+    )
+    return "not_asked"
 
 
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
@@ -1150,8 +1180,6 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
-    if step != "auto_merge" and not await _may_auto_assign(request):
-        return {"status": "not_asked"}
     if step.startswith("remind:"):
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
 
@@ -1159,6 +1187,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         "run_deadline"
     ):
         return {"status": "disabled_in_preview"}
+    if step in ("unclaimed", "pick_expiry") and (hold := await _auto_assign_hold(request, step)):
+        return {"status": hold}
     if step == "pick_expiry":
         return {"status": await expire_picks(request)}
     if step == "unclaimed":
