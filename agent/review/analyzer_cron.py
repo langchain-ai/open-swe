@@ -14,14 +14,14 @@ from agent.review.style_jobs import (
     build_continual_run_input,
     langgraph_client,
 )
-from agent.review.styles import REVIEW_STYLES
+from agent.review.styles import REVIEW_STYLES, RepoFullName
 
 logger = logging.getLogger(__name__)
 
 _ASSISTANT_ID = "analyzer"
 
 
-def _daily_schedule(full_name: str) -> str:
+def _daily_schedule(full_name: RepoFullName) -> str:
     """Daily cron expression, staggered per repo to avoid a thundering herd."""
     digest = int(hashlib.sha256(full_name.encode()).hexdigest(), 16)
     minute = digest % 60
@@ -29,7 +29,7 @@ def _daily_schedule(full_name: str) -> str:
     return f"{minute} {hour} * * *"
 
 
-async def ensure_continual_cron(full_name: str) -> str | None:
+async def ensure_continual_cron(full_name: RepoFullName) -> str | None:
     """Idempotently register the per-repo nightly continual-learning cron."""
     record = await REVIEW_STYLES.get(full_name)
     if record and record.continual_cron_id:
@@ -54,7 +54,7 @@ async def ensure_continual_cron(full_name: str) -> str | None:
     return None
 
 
-async def remove_continual_cron(full_name: str) -> None:
+async def remove_continual_cron(full_name: RepoFullName) -> None:
     """Delete the per-repo continual-learning cron, if one is registered."""
     record = await REVIEW_STYLES.get(full_name)
     cron_id = record.continual_cron_id if record else None

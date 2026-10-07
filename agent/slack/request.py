@@ -35,6 +35,7 @@ class SlackRequest(BaseModel):
     code_channel: bool = False
     concierge_mode: bool = False
     explicit_request: bool = False
+    explicit_mention: bool = False
 
     @property
     def target(self) -> SlackRequestTarget:

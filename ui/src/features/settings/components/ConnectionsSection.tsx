@@ -227,10 +227,7 @@ function LangSmithRow() {
 
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
-    <SettingsSection
-      title="Personal connections"
-      description="Accounts and credentials Open SWE can use on your behalf. Workspace MCP tools configured by an admin are shared with everyone."
-    >
+    <SettingsSection title="Accounts">
       <SlackRow user={user} />
       <NotionRow />
       <LangSmithRow />

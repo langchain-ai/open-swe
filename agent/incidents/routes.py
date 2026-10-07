@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.dashboard.admin import is_admin
 from agent.dashboard.oauth import require_session
+from agent.incidents.models import IncidentId
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -104,7 +105,7 @@ async def list_incidents(
 
 @router.get("/records/{incident_id}")
 async def get_incident(
-    incident_id: str,
+    incident_id: IncidentId,
     session: Annotated[dict[str, Any], Depends(_responder)],
 ) -> dict[str, Any]:
     from agent.incidents import service
@@ -116,7 +117,7 @@ async def get_incident(
 
 @router.post("/records/{incident_id}/commands", status_code=202)
 async def submit_command(
-    incident_id: str,
+    incident_id: IncidentId,
     body: IncidentCommandBody,
     session: Annotated[dict[str, Any], Depends(_responder)],
 ) -> dict[str, Any]:

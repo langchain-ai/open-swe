@@ -15,6 +15,50 @@ import {
   newRequestId,
 } from "./dashboard-fetch"
 
+export interface AuditLogFilters {
+  start_time: string
+  end_time: string
+  operation_name?: string
+  user_id?: string
+  api_key_id?: string
+  workspace_id?: string
+}
+
+export interface AuditLog {
+  id: string
+  request_time: string
+  operation_name: string
+  operation_succeeded: boolean | null
+  api_key_id: string | null
+  user_id: string | null
+  workspace_id: string | null
+  enrichments: {
+    source: "http" | "tool"
+    actor_kind: "person" | "api_key" | "github_actions" | "agent" | null
+    actor_login: string | null
+    request_method: string | null
+    request_path: string | null
+    response_status_code: number | null
+    resource_ids: string[]
+    workspace: string | null
+    thread_id: string | null
+    delegated_from_sandbox_id: string | null
+    settings_scope: "instance" | "workspace" | null
+    settings_changes: Record<
+      string,
+      {
+        before: boolean | number | "[REDACTED]" | null
+        after: boolean | number | "[REDACTED]" | null
+      }
+    > | null
+  }
+}
+
+export interface AuditLogsPage {
+  items: AuditLog[]
+  cursor: string | null
+}
+
 export interface WorkspaceApiKey {
   id: string
   workspace: string
@@ -247,6 +291,7 @@ export interface Profile {
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
+  pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
@@ -273,6 +318,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
+  pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
@@ -296,6 +342,13 @@ export interface AllowedSlackBot {
   name: string
   created_by: string
   created_at: string
+  image_url: string
+}
+
+/** What any signed-in user may see of an allowed bot; `key` is `team_id:bot_id`. */
+export interface AllowedSlackBotEntry {
+  key: string
+  name: string
   image_url: string
 }
 
@@ -438,6 +491,7 @@ export type UsageLeaderboardSort =
   | "merged_prs_per_thread"
   | "agent_loc"
   | "feedback_given"
+  | "prs_reviewed"
 export type SortDirection = "asc" | "desc"
 
 export interface AnalyticsMetadata {
@@ -453,14 +507,16 @@ export interface AnalyticsMetadata {
   build_info?: BuildInfo
 }
 
+export interface LeaderboardUser {
+  name: string
+  github_login: string | null
+  email?: string | null
+  avatar_url?: string | null
+}
+
 export interface UsageLeaderboardRow {
   rank: number
-  user: {
-    name: string
-    github_login: string | null
-    email: string | null
-    avatar_url?: string | null
-  }
+  user: LeaderboardUser
   favorite_model: string
   favorite_model_effort?: string | null
   invocations: number
@@ -471,6 +527,7 @@ export interface UsageLeaderboardRow {
   merged_prs: number
   merged_prs_per_thread?: number
   agent_loc: number
+  prs_reviewed?: number
   feedback_given: number
   is_top_feedback_contributor?: boolean
   additions: number
@@ -992,6 +1049,7 @@ export interface PullRequestActionResult {
 
 export type PullRequestThreadIntent =
   | { intent: "open"; title: string }
+  | { intent: "message"; title: string; message: string }
   | {
       intent: "fix"
       scope: PullRequestFixScope
@@ -1578,6 +1636,8 @@ export const api = {
       `/slack/channels${refresh ? "?refresh=true" : ""}`
     ),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
+  listAllowedSlackBotDirectory: () =>
+    request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
   allowSlackBot: (body: { bot_id: string }) =>
     request<AllowedSlackBot>("/slack/allowed-bots", {
       method: "POST",
@@ -1702,6 +1762,11 @@ export const api = {
     request<PRMergeRatePayload>(
       `/analytics/pr-merge-rate-by-model?period=${encodeURIComponent(period)}${maturityDays == null ? "" : `&maturity_days=${maturityDays}`}`
     ).then((payload) => ({ payload, fetchedAt: new Date().toISOString() })),
+  listAuditLogs: (filters: AuditLogFilters, cursor?: string) => {
+    const params = new URLSearchParams({ ...filters, limit: "50" })
+    if (cursor) params.set("cursor", cursor)
+    return request<AuditLogsPage>(`/audit-logs?${params}`)
+  },
   adminListUsers: (page = 1, pageSize = 20, search = "") =>
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
@@ -1751,6 +1816,12 @@ export const api = {
     ),
   openPullRequestThread: (repo: string, number: number, title: string) =>
     pullRequestThread(repo, number, { intent: "open", title }),
+  messagePullRequestThread: (
+    repo: string,
+    number: number,
+    title: string,
+    message: string
+  ) => pullRequestThread(repo, number, { intent: "message", title, message }),
   mergePullRequest: (
     pr: OpenPullRequest,
     method: MergeMethod
@@ -1776,6 +1847,10 @@ export const api = {
     pr: OpenPullRequest
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
+  humanReviewAvailability: (pr: OpenPullRequest) =>
+    request<{ available: boolean }>(
+      `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
+    ),
   requestHumanReview: (pr: OpenPullRequest) =>
     request<HumanReviewRequestResult>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,

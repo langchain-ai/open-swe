@@ -1,6 +1,6 @@
 {
   "name": "open-swe-desktop",
-  "version": "0.2.14",
+  "version": "0.3.2",
   "private": true,
   "description": "Experimental Open SWE desktop client",
   "main": "build/main.cjs",
@@ -90,6 +90,10 @@
       "entitlements": "entitlements.mac.plist",
       "extendInfo": { "NSUserActivityTypes": ["NSUserActivityTypeBrowsingWeb"] },
       "entitlementsInherit": "entitlements.mac.inherit.plist",
+      "signIgnore": [
+        "\\.pyc$",
+        "/share/terminfo/"
+      ],
       "target": [
         "dmg",
         "zip"

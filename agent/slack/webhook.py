@@ -64,6 +64,7 @@ from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_wor
 _CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
 _CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
 _KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
+_NON_KITCHEN_CONTEXT = load_prompt("runs/slack-non-kitchen.md")
 _MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
 
 
@@ -379,6 +380,13 @@ def _slack_sender(
     return person["id"], person, "human"
 
 
+def _mentions_open_swe(text: object, bot_user_id: str) -> bool:
+    return isinstance(text, str) and bool(
+        (bot_user_id and f"<@{bot_user_id}>" in text)
+        or (common.SLACK_BOT_USERNAME and f"@{common.SLACK_BOT_USERNAME}" in text)
+    )
+
+
 def _label_slack_mentions(
     text: str, user_names_by_id: dict[str, str], channel_names_by_id: dict[str, str]
 ) -> str:
@@ -434,6 +442,7 @@ def _slack_context_input(
     run_described_person_ids: set[str] | None = None,
     visible_context_hashes: set[str] | None = None,
     trigger_bot: AllowedSlackBot | None = None,
+    explicit_mention: bool = False,
 ) -> RunInput:
     channel_entity_id = channel["id"]
     channel_names = channel_names_by_id or {}
@@ -497,7 +506,12 @@ def _slack_context_input(
             "channel_id": channel_entity_id,
             "surface": "slack",
             "kind": kind,
-            "data": {"timestamp": timestamp},
+            "data": {
+                "timestamp": timestamp,
+                "explicit_bot_mention": str(
+                    _mentions_open_swe(message.get("text"), bot_user_id)
+                ).lower(),
+            },
         }
         text = _slack_message_text(message, bot_user_id, user_names_by_id, channel_names)
         run_messages.append(
@@ -514,7 +528,12 @@ def _slack_context_input(
                     "channel_id": channel_entity_id,
                     "surface": "slack",
                     "kind": "human",
-                    "data": {"timestamp": event_ts},
+                    "data": {
+                        "timestamp": event_ts,
+                        "explicit_bot_mention": str(
+                            _mentions_open_swe(prior_message_text, bot_user_id)
+                        ).lower(),
+                    },
                 },
             )
         )
@@ -569,7 +588,10 @@ def _slack_context_input(
                 "channel_id": channel_entity_id,
                 "surface": "slack",
                 "kind": trigger_kind,
-                "data": {"timestamp": event_ts},
+                "data": {
+                    "timestamp": event_ts,
+                    "explicit_bot_mention": str(explicit_mention).lower(),
+                },
             },
         )
     )
@@ -1106,7 +1128,7 @@ async def _process_slack_mention_impl(
         for section in (
             _CODE_CHANNEL_CONTEXT if code_channel else "",
             _CONCIERGE_CONTEXT if concierge_mode else "",
-            _KITCHEN_CONTEXT if request.kitchen_channel else "",
+            _KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT,
         )
         if section
     )
@@ -1261,6 +1283,7 @@ async def _process_slack_mention_impl(
         },
         visible_context_hashes=visible_context_hashes,
         trigger_bot=allowed_bot,
+        explicit_mention=request.explicit_mention or _mentions_open_swe(text, bot_user_id),
     )
     if code_channel:
         await common.set_session_status(channel_id, "processing")

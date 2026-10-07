@@ -195,7 +195,9 @@ export function AgentInstructionsPanel() {
                   <ComboboxEmpty>No matches</ComboboxEmpty>
                   {suggestedRepos.map((r) => (
                     <ComboboxItem key={r.full_name} value={r.full_name}>
-                      <span className="truncate">{r.full_name}</span>
+                      <span className="truncate" title={r.full_name}>
+                        {r.full_name}
+                      </span>
                       {r.private && (
                         <span className="ml-auto text-[10px] text-muted-foreground">
                           private

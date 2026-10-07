@@ -1,5 +1,9 @@
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import httpx
 import httpx2
@@ -15,12 +19,75 @@ from agent.human_review.standard import (
     SUMMARY_MAX_CHARS,
     merge_wait,
     request_blockers,
+    review_reminder_at,
     summary_line,
 )
 from agent.slack.blocks import block_payload
 from agent.users import User, UserIdentity
 
 _NOW = datetime(2026, 9, 28, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize("decision", [None, "picked", "review"])
+async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -> None:
+    from agent.human_review.people import Outcome, Participant
+    from agent.human_review.standard import _add_reviewer
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    if decision is not None:
+        request.participants.append(
+            HumanReviewParticipant(
+                user_id=User().id, decision="picked" if decision == "picked" else "review"
+            )
+        )
+    lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        async with lock:
+            yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("agent.human_review.standard.refresh_card", AsyncMock()),
+    ):
+        results = await asyncio.gather(
+            *(
+                _add_reviewer(request, Participant(User(), login), picked=True)
+                for login in ("grace", "linus")
+            )
+        )
+    assert len(request.participants) == 1
+    assert sum(not isinstance(result, Outcome) for result in results) == (
+        1 if decision is None else 0
+    )
+
+
+async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
+    from agent.human_review.picking import Pick
+    from agent.human_review.standard import RequestResult, _auto_assign
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(User, "for_login", AsyncMock(return_value=User())),
+        patch(
+            "agent.human_review.standard.choose_reviewer",
+            AsyncMock(return_value=Pick("grace", "owner")),
+        ),
+        patch(
+            "agent.human_review.standard.assign",
+            AsyncMock(return_value=RequestResult(success=False, claimed=True)),
+        ),
+        patch("agent.human_review.standard._wake_picker", AsyncMock()) as wake,
+    ):
+        assert (await _auto_assign(request, asked=True)).status == "claimed"
+    wake.assert_not_awaited()
 
 
 @pytest.mark.parametrize("status", [200, 503])
@@ -61,6 +128,22 @@ def _snapshot(**overrides: object) -> PullRequestSnapshot:
     return base
 
 
+@pytest.mark.parametrize(
+    ("start", "expected"),
+    [
+        ("2026-09-28T08:00:00", "2026-09-28T11:00:00"),
+        ("2026-09-28T17:00:00", "2026-09-29T10:00:00"),
+        ("2026-10-30T17:00:00", "2026-11-02T10:00:00"),
+        ("2026-10-31T12:00:00", "2026-11-02T11:00:00"),
+    ],
+)
+def test_review_reminders_count_only_local_business_hours(start: str, expected: str) -> None:
+    timezone = ZoneInfo("America/New_York")
+    assert review_reminder_at(datetime.fromisoformat(start).replace(tzinfo=timezone), timezone) == (
+        datetime.fromisoformat(expected).replace(tzinfo=timezone).astimezone(UTC)
+    )
+
+
 def test_a_ready_pull_request_can_be_put_up_for_review() -> None:
     assert request_blockers(_snapshot()) == []
 
@@ -95,6 +178,32 @@ def test_a_failing_check_github_does_not_require_does_not_block_the_request() ->
         failing_checks=["x"],
     )
     assert request_blockers(snapshot) == []
+
+
+@pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
+async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expected: str) -> None:
+    from agent.human_review.standard import AutoAssignResult, run_deadline
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        state="open",
+    )
+    request.created_at = datetime.now(UTC) - timedelta(minutes=30)
+    request.pull_request = pr
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("agent.human_review.standard._assignment_minutes", AsyncMock(return_value=minutes)),
+        patch("agent.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("agent.human_review.standard._github_approvers", AsyncMock(return_value=[])),
+        patch(
+            "agent.human_review.standard.start_auto_assign",
+            AsyncMock(return_value=AutoAssignResult("woken")),
+        ),
+    ):
+        assert await run_deadline(str(request.id), "unclaimed") == {"status": expected}
 
 
 def test_nothing_merges_without_an_approval() -> None:
@@ -145,6 +254,7 @@ async def test_merged_card_names_only_actual_approvers(states: dict[str, str] | 
     rendered = str(payload)
     for message in (text, rendered):
         assert "merged" in message
+        assert "by @ada" in message
         if states:
             assert "approved by <@U_grace>, @hopper" in message
         else:
@@ -187,11 +297,14 @@ async def test_approved_card_collapses_without_closing_the_request(
     request.requested_by = None
     with (
         patch("agent.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)),
-        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
         text, blocks = await _render_standard(request, None, "token")
     assert ("Review request: approved" in text) is collapsed
     assert (len(blocks) == 1) is collapsed
+    assert "<@U_ada>" in str(block_payload(blocks))
+    if collapsed:
+        assert "by <@U_ada>" in text
     assert request.state == "open"
 
 

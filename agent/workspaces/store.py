@@ -59,8 +59,7 @@ from agent.database import postgres
 from agent.github.repositories import Repository
 from agent.review.styles import normalize_repo_full_name
 from agent.store import now_iso
-from agent.ui_invalidations.outbox import invalidate
-from agent.ui_invalidations.topics import WORKSPACES as WORKSPACES_TOPIC
+from agent.ui_invalidations import Topic
 from agent.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -160,7 +159,6 @@ SNAPSHOT_TAG = "latest"
 # produced it — readable in place, without the dashboard.
 DEFAULT_SCRIPT_ROOT = "/open-swe/environment"
 WORKSPACE_REPOS_ENV_VAR = "OPENSWE_WORKSPACE_REPOS"
-DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS = 120
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _SENSITIVE_CREATE_PARAM_KEYS = frozenset(
@@ -290,18 +288,6 @@ def script_command(script: str, label: str, repos: Sequence[str] = ()) -> str:
         f"bash -x {shlex.quote(path)} > {shlex.quote(log_path)} 2>&1; }}; "
         f"rc=$?; cat {shlex.quote(log_path)} 2>/dev/null; exit $rc"
     )
-
-
-def sandbox_update_timeout() -> int:
-    """Deadline for the update script when it runs in a run's own sandbox.
-
-    Tighter than the builder's: this one is on the critical path before the first
-    model call, and a ``git pull`` that takes minutes is broken rather than slow.
-    """
-    seconds = ENV.WORKSPACE_SANDBOX_UPDATE_TIMEOUT_SECONDS.get_int(
-        DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
-    )
-    return seconds if seconds > 0 else DEFAULT_SANDBOX_UPDATE_TIMEOUT_SECONDS
 
 
 def log_excerpt(log: str | None, *, lines: int = LOG_EXCERPT_LINES) -> str | None:
@@ -843,7 +829,7 @@ class WorkspaceStore:
                 await session.flush()
                 stored_repos = await _bound_repos(session, row.id)
                 stored_channels = await _bound_channels(session, row.id)
-                await invalidate(session, WORKSPACES_TOPIC)
+                await Topic.WORKSPACES.invalidate(session)
                 if definition_only:
                     await session.refresh(row)
                     return to_workspace(
@@ -888,7 +874,7 @@ class WorkspaceStore:
     async def delete(self, slug: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(WorkspaceRow).where(WorkspaceRow.slug == slug))
-            await invalidate(session, WORKSPACES_TOPIC)
+            await Topic.WORKSPACES.invalidate(session)
 
     async def owner_of_repo(self, full_name: str) -> str | None:
         """The slug of the workspace this repository belongs to, if any."""
@@ -1093,7 +1079,7 @@ class WorkspaceStore:
             record.updated_at = now_iso()
             apply_state(row, record)
             stamp_updated(row, record)
-            await invalidate(session, WORKSPACES_TOPIC)
+            await Topic.WORKSPACES.invalidate(session)
             return record
 
     async def assert_publishable(

@@ -13,6 +13,7 @@ from agent.incidents import documents, runtime, service
 from agent.incidents.models import Incident, IncidentPolicy
 from agent.incidents.report import CONTEXT_MARKER
 from agent.slack.channels import SlackChannel
+from agent.slack.http import SlackRequestError
 
 CHANNEL = {
     "id": "C1",
@@ -45,9 +46,7 @@ async def incident(fake_store, monkeypatch):
         ),
     )
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
-    monkeypatch.setattr(
-        runtime, "post_slack_thread_reply_with_ts", AsyncMock(return_value=("7.0", None))
-    )
+    monkeypatch.setattr(runtime, "post_slack_thread_reply_with_ts", AsyncMock(return_value="7.0"))
     return SimpleNamespace(record=record, policy=policy, metadata=metadata)
 
 
@@ -123,10 +122,11 @@ async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
         request(context_message("1.0")), AsyncMock()
     )
     draft = {"summary": [{"text": "Errors reported", "evidence_ids": ["slack:1.0"]}]}
-    runtime.post_slack_thread_reply_with_ts.return_value = (None, "channel_not_found")
+    runtime.post_slack_thread_reply_with_ts.side_effect = SlackRequestError("channel_not_found")
 
     first = await session._record_incident_report(**draft)
-    runtime.post_slack_thread_reply_with_ts.return_value = ("8.0", None)
+    runtime.post_slack_thread_reply_with_ts.side_effect = None
+    runtime.post_slack_thread_reply_with_ts.return_value = "8.0"
     second = await session._record_incident_report(**draft)
     third = await session._record_incident_report(**draft)
 

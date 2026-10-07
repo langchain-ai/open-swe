@@ -18,7 +18,7 @@ from agent.config import ENV
 from agent.database import postgres
 from agent.database.orm import NOW, Base
 from agent.slack.client import post_slack_top_level_message_with_ts
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from agent.slack.payloads import SlackChannelContext, SlackChannelPayload, SlackMessage
 from agent.utils.json_types import JsonObject
 
@@ -208,16 +208,18 @@ class SlackChannel(Base):
 
     async def post(
         self, text: str, *, blocks: list[dict[str, Any]] | None = None, login: str | None = None
-    ) -> tuple[str | None, str | None]:
+    ) -> str:
         """Post a top-level message, joining the channel when the bot is outside it."""
-        message_ts, error = await post_slack_top_level_message_with_ts(
-            self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks, login=login
-        )
-        if message_ts is None and error == "not_in_channel" and await self.join():
-            message_ts, error = await post_slack_top_level_message_with_ts(
+        try:
+            return await post_slack_top_level_message_with_ts(
                 self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks, login=login
             )
-        return message_ts, error
+        except SlackRequestError as exc:
+            if exc.code != "not_in_channel" or not await self.join():
+                raise
+        return await post_slack_top_level_message_with_ts(
+            self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks, login=login
+        )
 
     async def messages(self, limit: int = 30) -> list[SlackMessage]:
         """The most recent top-level messages, oldest first.

@@ -143,6 +143,7 @@ from agent.middleware.require_user_reply import (
     ReplySurface,
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from agent.middleware.stale_workspace import warn_stale_workspace
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
@@ -161,6 +162,7 @@ from agent.runtime.execution import bindable_config, graph_loaded_for_execution
 from agent.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
+    take_stale_boot,
 )
 from agent.sandboxes.paths import resolve_sandbox_work_dir
 from agent.sandboxes.providers.langsmith import service_identity_jwks_url
@@ -209,11 +211,11 @@ from agent.tools import (
     manage_incident,
     manage_thread,
     merge_expedited_pr,
-    notify_automation_channel,
     open_pull_request,
     output_iframe,
     publish_workspace,
     read_only_sql,
+    read_store_item,
     read_user_settings,
     recreate_sandbox,
     refresh_workspace_start,
@@ -230,6 +232,7 @@ from agent.tools import (
     search_pull_requests,
     slack_add_reaction,
     slack_attach_html,
+    slack_breakout_thread,
     slack_list_channel_members,
     slack_list_channels,
     slack_move_thread,
@@ -238,9 +241,9 @@ from agent.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
-    slack_start_new_thread,
     start_thread,
     submit_thread_feedback,
+    suggest_task,
     trigger_automation,
     update_automation,
     web_search,
@@ -252,6 +255,8 @@ from agent.tools.admin_gate import (
 )
 from agent.tools.manage_feature_flags import manage_feature_flags
 from agent.tools.manage_review_approval_mode import manage_review_approval_mode
+from agent.tools.propose_pr_review import propose_pr_review
+from agent.tools.propose_review_comment import propose_review_comment
 from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from agent.users import User
@@ -322,7 +327,7 @@ SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
         "slack_move_thread",
     }
 )
-SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_start_new_thread"})
+SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_breakout_thread"})
 
 
 def _slack_ask_excluded_tools(cfg: RunConfig) -> frozenset[str]:
@@ -538,7 +543,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_post_message",
-        "slack_start_new_thread",
+        "slack_breakout_thread",
         "publish_workspace",
         "refresh_workspace_start",
         "configure_repository",
@@ -607,7 +612,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "list_threads",
         "listen_events",
         "manage_thread",
-        "notify_automation_channel",
         "read_incident",
         "read_only_sql",
         "read_user_settings",
@@ -1185,6 +1189,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             raise
         del github_token
+        if stale_workspace := take_stale_boot(self._thread_id):
+            await warn_stale_workspace(self._config or {}, self._thread_id, stale_workspace)
         async with aphase(self._thread_id, "prepare.work_dir"):
             work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
@@ -1340,6 +1346,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_ask=_slack_ask_mode(cfg),
                 slack_by_the_way=_slack_ask_mode(cfg) and bool(cfg.slack_by_the_way_thread_ts),
                 slack_breakout=cfg.slack_breakout is True,
+                slack_follow_up_suggestions=_slack_concierge_run(cfg)
+                or (await cached_workspace_settings(workspace_slug(cfg))).get(
+                    "slack_follow_up_suggestions"
+                )
+                is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
                 prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
@@ -1399,6 +1410,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         return await ensure_sandbox_for_thread(
             _thread_id,
             workspace_slug=workspace_slug(_cfg),
+            record_stale_boot=True,
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
@@ -1704,7 +1716,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_post_message,
         slack_read_thread_messages,
         slack_reply,
-        slack_start_new_thread,
+        slack_breakout_thread,
     ]
     static_tools = [
         http_request,
@@ -1729,7 +1741,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         assign_human_reviewer,
         auto_assign_human_reviewer,
         dismiss_human_review_request,
-        notify_automation_channel,
         open_pull_request,
         link_pull_request,
         *(
@@ -1757,18 +1768,25 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_read_channel_messages,
         slack_read_thread_messages,
         slack_reply,
-        slack_start_new_thread,
+        slack_breakout_thread,
         submit_thread_feedback,
+        suggest_task,
         submit_review_assessment_feedback,
+        propose_review_comment,
+        propose_pr_review,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
         read_only_sql,
+        read_store_item,
         manage_feature_flags,
         manage_review_approval_mode,
     ]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
-        static_tools = [tool for tool in static_tools if tool not in slack_tools]
+        # An automation run has no Slack thread, but its prompt may ask it to
+        # report to a channel.
+        kept = (slack_list_channels, slack_post_message) if cfg.source == "schedule" else ()
+        static_tools = [tool for tool in static_tools if tool not in slack_tools or tool in kept]
     elif _slack_concierge_run(cfg):
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS

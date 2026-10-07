@@ -43,7 +43,6 @@
       "files": [
         "ui/src/**/*.test.ts",
         "ui/src/**/*.test.tsx",
-        "ui/src/components/ReviewStylesPanel.tsx",
         "ui/src/features/agents/components/AgentsSidebar.tsx",
         "ui/src/features/agents/components/PlanReview.tsx",
         "ui/src/features/agents/components/PlanView.tsx",
@@ -53,10 +52,6 @@
         "ui/src/features/agents/lib/prChecks.ts",
         "ui/src/features/agents/lib/queries.ts",
         "ui/src/features/assistant/AssistantProvider.tsx",
-        "ui/src/features/incidents/IncidentDetail.tsx",
-        "ui/src/features/incidents/IncidentDocuments.tsx",
-        "ui/src/features/incidents/IncidentList.tsx",
-        "ui/src/features/incidents/IncidentSettings.tsx",
         "ui/src/lib/query.ts",
         "ui/src/routes/admin_.evals.tsx",
         "ui/src/routes/agents/reviews/$owner.$repo.$number.tsx",
