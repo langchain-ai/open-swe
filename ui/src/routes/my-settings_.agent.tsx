@@ -8,7 +8,7 @@ export const Route = createFileRoute("/my-settings_/agent")({
   component: () => (
     <SettingsPage
       title="Agent"
-      description="Your defaults for agent runs you trigger. They override the workspace defaults for you only."
+      description="Your model, run defaults, and personal instructions for the agent. These settings apply only to you."
     >
       <AgentSettings />
     </SettingsPage>

@@ -57,11 +57,6 @@ const NAV: Array<NavGroup> = [
       { to: "/my-settings/agent", label: "Agent", icon: IoSparklesOutline },
       { to: "/my-settings/git", label: "Git", icon: IoGitBranchOutline },
       {
-        to: "/my-settings/instructions",
-        label: "Instructions",
-        icon: IoReaderOutline,
-      },
-      {
         to: "/my-settings/connections",
         label: "Connections",
         icon: IoLinkOutline,

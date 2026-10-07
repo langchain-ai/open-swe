@@ -55,10 +55,14 @@ export function PersonalInstructionsSection() {
   }
 
   return (
-    <SettingsSection title="Personal instructions">
+    <SettingsSection
+      id="instructions"
+      title="Personal instructions"
+      description="Standing instructions added to the agent's system prompt for every run you trigger, on any surface. Repository instructions and AGENTS.md win when they conflict."
+    >
       <SettingsPanel>
         {instructions.isLoading ? (
-          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-100 w-full" />
         ) : instructions.isError ? (
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs text-destructive">
