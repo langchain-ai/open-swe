@@ -54,9 +54,7 @@ class BreakoutCommand:
         command_re = (
             _COMMAND_RE
             if command == "breakout"
-            else re.compile(
-                r"/breakout\s+web(?:\s+(?P<instruction>.*))?", re.DOTALL | re.IGNORECASE
-            )
+            else re.compile(r"/breakout:web(?:\s+(?P<instruction>.*))?", re.DOTALL | re.IGNORECASE)
         )
         match = None
         prior_text = ""
@@ -271,7 +269,7 @@ async def process_slack_web(
 ) -> None:
     """Start an unattached web conversation with the source Slack transcript."""
     if not command.instruction:
-        await _tell_sender(request, "Add a question after `@Open SWE /breakout web`.")
+        await _tell_sender(request, "Add a question after `@Open SWE /breakout:web`.")
         return
     thread_id = str(uuid4())
     try:
