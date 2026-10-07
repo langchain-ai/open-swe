@@ -220,7 +220,7 @@ Before publishing a changed tree, the run typechecks the dashboard. On failure i
 
 The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
 
-To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every seven days, a scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
+To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every Sunday, the first scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
 
 ## Desktop app (experimental)
 
