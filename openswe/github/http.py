@@ -17,7 +17,7 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
@@ -219,14 +219,11 @@ class GitHubClient:
     answers with something other than the expected shape.
     """
 
-    def __init__(
-        self,
-        http: httpx2.AsyncClient,
-        *,
-        reauthorize: Callable[[], Awaitable[str]] | None = None,
-    ) -> None:
+    def __init__(self, http: httpx2.AsyncClient, *, login: str | None = None) -> None:
+        """``login`` is the person whose OAuth token ``http`` carries, if it is one."""
         self.http = http
-        self._reauthorize = reauthorize
+        self.login = login
+        self._refresh: asyncio.Future[str] | None = None
 
     @classmethod
     @asynccontextmanager
@@ -243,7 +240,8 @@ class GitHubClient:
     ) -> AsyncIterator[Self]:
         """Acts with ``login``'s own GitHub permissions; a rejected token is refreshed once.
 
-        Raises ``GitHubSignInRequired`` when ``login`` has no usable authorization.
+        Raises ``GitHubSignInRequired`` when ``login`` has no usable authorization,
+        including when GitHub still rejects the refreshed token.
         """
         # profiles imports this module.
         from openswe.dashboard.profiles import get_valid_access_token
@@ -251,14 +249,22 @@ class GitHubClient:
         token = await get_valid_access_token(login)
         if not token:
             raise GitHubSignInRequired(login)
+        async with github_client(token=token, timeout=timeout) as http:
+            yield cls(http, login=login)
 
-        async def reauthorize() -> str:
+    async def _refreshed_token(self, login: str) -> str:
+        """One refresh per client, shared by every request that GitHub rejected."""
+        # profiles imports this module.
+        from openswe.dashboard.profiles import get_valid_access_token
+
+        async def refresh() -> str:
             if token := await get_valid_access_token(login, force_refresh=True):
                 return token
             raise GitHubSignInRequired(login)
 
-        async with github_client(token=token, timeout=timeout) as http:
-            yield cls(http, reauthorize=reauthorize)
+        if self._refresh is None:
+            self._refresh = asyncio.ensure_future(refresh())
+        return await asyncio.shield(self._refresh)
 
     @classmethod
     @asynccontextmanager
@@ -297,9 +303,11 @@ class GitHubClient:
         """``path`` is relative to the REST API root, or an absolute URL."""
         url = path if "://" in path else f"{GITHUB_API_BASE}/{path}"
         response = await github_request(self.http, method, url, **kwargs)
-        if response.status_code == 401 and self._reauthorize is not None:
-            self.http.headers.update(github_headers(await self._reauthorize()))
+        if response.status_code == 401 and self.login is not None:
+            self.http.headers.update(github_headers(await self._refreshed_token(self.login)))
             response = await github_request(self.http, method, url, **kwargs)
+            if response.status_code == 401:
+                raise GitHubSignInRequired(self.login)
         if not response.is_success:
             raise GitHubError(response)
         return response

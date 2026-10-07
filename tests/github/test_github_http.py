@@ -1,5 +1,6 @@
 """Unit tests for the shared GitHub HTTP helper."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import httpx2
@@ -181,3 +182,21 @@ async def test_as_user_without_a_usable_token_asks_for_sign_in(
     with pytest.raises(GitHubSignInRequired):
         async with GitHubClient.as_user("octocat"):
             pass
+
+
+async def test_as_user_asks_for_sign_in_when_github_rejects_the_refreshed_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokens = AsyncMock(side_effect=["stale", "still-rejected"])
+    monkeypatch.setattr(profiles, "get_valid_access_token", tokens)
+
+    async def request(_client: httpx2.AsyncClient, method: str, url: str, **_kwargs: object):
+        return httpx2.Response(
+            401, json={"message": "Bad credentials"}, request=httpx2.Request(method, url)
+        )
+
+    monkeypatch.setattr(github_http, "github_request", request)
+    async with GitHubClient.as_user("octocat") as github:
+        with pytest.raises(GitHubSignInRequired):
+            await asyncio.gather(github.get("user"), github.get("user/repos"))
+    assert tokens.await_count == 2
