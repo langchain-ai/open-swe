@@ -5,6 +5,7 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
+from agent.github import http as github_http
 from agent.github import pull_request_dashboard_routes as pr_routes
 from agent.github import pull_request_status as prs
 from agent.github.ci import RequiredCheck
@@ -13,7 +14,7 @@ from agent.review import routes as review_routes
 
 @asynccontextmanager
 async def client(**kwargs):
-    assert kwargs == {"token": "user-token"}
+    assert kwargs["token"] == "user-token"
     yield object()
 
 
@@ -24,7 +25,7 @@ def response(payload, status=200):
 
 
 async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypatch):
-    monkeypatch.setattr(prs, "github_client", client)
+    monkeypatch.setattr(github_http, "github_client", client)
     queries = []
 
     async def request(_client, method, url, **kwargs):
@@ -86,7 +87,7 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
             }
         )
 
-    monkeypatch.setattr(prs, "github_request", request)
+    monkeypatch.setattr(github_http, "github_request", request)
     result = await prs.list_open_pull_requests("octocat", "user-token", "acme/app")
     assert queries == ["is:pr is:open author:octocat repo:acme/app"]
     assert [pr.number for pr in result.pull_requests] == [1, 3, 4]
@@ -188,7 +189,7 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
 
 
 def _client(number: int) -> prs.PullRequestClient:
-    return prs.PullRequestClient(MagicMock(), "acme", "app", number)
+    return prs.PullRequestClient(github_http.GitHubClient(MagicMock()), "acme", "app", number)
 
 
 async def _decision() -> prs.ReviewDecision:
@@ -199,7 +200,7 @@ async def _decision() -> prs.ReviewDecision:
 
 async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypatch):
     monkeypatch.setattr(
-        prs,
+        github_http,
         "github_request",
         AsyncMock(
             return_value=response(
@@ -221,7 +222,7 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
     ] == [("reviewer", "approved"), ("other", "dismissed")]
     assert await _decision() == "approved"
     monkeypatch.setattr(
-        prs,
+        github_http,
         "github_request",
         AsyncMock(
             return_value=response(
@@ -234,7 +235,7 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
     )
     assert await _decision() == "none"
     monkeypatch.setattr(
-        prs,
+        github_http,
         "github_request",
         AsyncMock(
             return_value=response(
@@ -294,7 +295,7 @@ def _patch_detail_fetchers(monkeypatch):
             return_value=[prs.PullRequestReviewer(user_id=10, login="reviewer", state="approved")]
         ),
     )
-    monkeypatch.setattr(prs, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
+    monkeypatch.setattr(github_http, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
 
 
 def _threads_response(resolved_flags, *, has_next=False, cursor=None):
@@ -317,7 +318,7 @@ def _threads_response(resolved_flags, *, has_next=False, cursor=None):
 async def test_a_graphql_failure_leaves_the_unresolved_count_unknown(monkeypatch):
     _patch_detail_fetchers(monkeypatch)
     monkeypatch.setattr(
-        prs,
+        github_http,
         "github_request",
         AsyncMock(return_value=response({"errors": [{"message": "Bad credentials"}]})),
     )

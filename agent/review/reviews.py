@@ -24,7 +24,7 @@ from agent.database import postgres
 from agent.github.app import get_github_app_installation_token
 from agent.github.checks import github_headers
 from agent.github.ci import list_check_runs, list_commit_statuses
-from agent.github.http import github_client
+from agent.github.http import GitHubClient, github_client
 from agent.github.pull_request_diff import (
     build_pr_diff_files,
     fetch_file_versions,
@@ -1205,7 +1205,7 @@ async def get_pull_request_preview(
                 token,
                 params={"per_page": _PREVIEW_FILES_PER_PAGE},
             ),
-            PullRequestClient(client, owner, repo, pr_number).unresolved_threads(),
+            PullRequestClient(GitHubClient(client), owner, repo, pr_number).unresolved_threads(),
         )
     pull = _GithubPreviewPull.model_validate(pull_payload if isinstance(pull_payload, dict) else {})
     raw_files = file_payload if isinstance(file_payload, list) else []

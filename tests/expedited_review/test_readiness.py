@@ -121,11 +121,9 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
         patch(
             "agent.expedited_review.readiness.fetch_required_checks", AsyncMock(return_value=set())
         ),
-        patch("agent.expedited_review.readiness.github_client"),
+        patch("agent.github.http.github_client"),
         patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
-        patch(
-            "agent.expedited_review.readiness._fetch_reviews", AsyncMock(return_value=live_reviews)
-        ),
+        patch.object(PullRequestClient, "reviews", AsyncMock(return_value=live_reviews)),
         patch.object(PullRequestClient, "mergeability", AsyncMock(return_value=None)),
     ):
         result = await assess_readiness(owner="lc", repo="repo", pr_number=7, token="t")

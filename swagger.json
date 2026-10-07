@@ -547,6 +547,58 @@
             ],
             "title": "Response Status Code"
           },
+          "settings_changes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "const": "[REDACTED]",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "propertyNames": {
+                    "enum": [
+                      "before",
+                      "after"
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Changes"
+          },
+          "settings_scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "instance",
+                  "workspace"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Scope"
+          },
           "source": {
             "default": "http",
             "enum": [
@@ -4381,6 +4433,11 @@
             "default": "",
             "title": "Channel",
             "type": "string"
+          },
+          "claimed": {
+            "default": false,
+            "title": "Claimed",
+            "type": "boolean"
           },
           "error": {
             "default": "",

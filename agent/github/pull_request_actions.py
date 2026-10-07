@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 from agent.github.http import (
     GITHUB_API_BASE,
     GITHUB_GRAPHQL,
+    GitHubClient,
     github_client,
     github_request,
 )
@@ -353,7 +354,9 @@ async def resolve_review_threads(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     async with github_client(token=token) as client:
-        threads = await PullRequestClient(client, owner, repo, number).unresolved_threads()
+        threads = await PullRequestClient(
+            GitHubClient(client), owner, repo, number
+        ).unresolved_threads()
         if threads is None:
             logger.warning(
                 "Review threads unavailable for resolve",

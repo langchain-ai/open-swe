@@ -18,7 +18,7 @@ from agent.expedited_review.readiness import assess_readiness
 from agent.expedited_review.reviews import submit_approval
 from agent.github.ci import fetch_pr
 from agent.github.comments import post_github_comment
-from agent.github.http import github_client
+from agent.github.http import GitHubClient
 from agent.github.pull_request_status import PullRequestClient
 from agent.human_review.lifecycle import mark_merged, retire
 from agent.human_review.merging import MergeResult, merge_pull_request
@@ -138,9 +138,9 @@ async def merge_approved(
                 "The pull request's head changed while it was being checked. Call "
                 "`merge_expedited_pr` again.",
             )
-        async with github_client(token=token) as client:
+        async with GitHubClient.connect(token=token) as github:
             threads = await PullRequestClient(
-                client, pr.owner, pr.repo, pr.number
+                github, pr.owner, pr.repo, pr.number
             ).unresolved_threads()
         if threads is None:
             return MergeResult("error", "GitHub was unavailable while checking review threads.")

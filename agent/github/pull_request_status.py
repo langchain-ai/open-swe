@@ -14,12 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
 from agent.github.ci import read_required_checks, unreported_required_checks
-from agent.github.http import (
-    GITHUB_API_BASE,
-    GITHUB_GRAPHQL,
-    github_client,
-    github_request,
-)
+from agent.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +23,6 @@ _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _SEARCH_PAGE_SIZE = 100
 # GitHub search returns at most 1000 results per query.
 _SEARCH_MAX_PAGES = 10
-_REST_PAGE_SIZE = 100
 _MERGEABILITY_ATTEMPTS = 3
 _MERGEABILITY_DELAY_SECONDS = 0.7
 _SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
@@ -346,22 +340,44 @@ class ReviewState:
     review_required: bool = False
 
 
+class _CursorLoop(Exception):
+    """GitHub handed back a page cursor it had already given."""
+
+
+def _graphql_pull(data: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    repository = data.get("repository")
+    pull = repository.get("pullRequest") if isinstance(repository, Mapping) else None
+    return pull if isinstance(pull, Mapping) else None
+
+
+def _next_cursor(connection: Mapping[str, Any], seen: set[str]) -> str | None:
+    """The cursor of the next page, ``None`` on the last page."""
+    page_info = connection.get("pageInfo")
+    if not isinstance(page_info, Mapping) or page_info.get("hasNextPage") is not True:
+        return None
+    cursor = page_info.get("endCursor")
+    if not isinstance(cursor, str) or not cursor or cursor in seen:
+        raise _CursorLoop
+    seen.add(cursor)
+    return cursor
+
+
 @dataclass(frozen=True, slots=True)
 class PullRequestClient:
-    """One pull request, read from GitHub over one HTTP client.
+    """One pull request's reads on GitHub.
 
     Every read answers ``None`` (or an unknown ``ReviewState``) when GitHub
     could not answer, so one failed read degrades its part of a status rather
     than the whole of it.
     """
 
-    http: httpx2.AsyncClient
+    github: GitHubClient
     owner: str
     repo: str
     number: int
 
     @classmethod
-    def of(cls, http: httpx2.AsyncClient, record: object) -> Self | None:
+    def of(cls, github: GitHubClient, record: object) -> Self | None:
         """The client for a ``repo_full_name`` and ``number``, or for a search hit's ``repository_url``."""
         if not isinstance(record, Mapping):
             return None
@@ -377,7 +393,7 @@ class PullRequestClient:
         identity = pull_request_identity(
             {"repo_full_name": full_name, "number": record.get("number")}
         )
-        return None if identity is None else cls(http, *identity)
+        return None if identity is None else cls(github, *identity)
 
     @property
     def full_name(self) -> str:
@@ -388,11 +404,8 @@ class PullRequestClient:
         return {"pr_repo_full_name": self.full_name, "pr_number": self.number}
 
     async def pull(self) -> dict[str, Any] | None:
-        url = f"{GITHUB_API_BASE}/repos/{self.full_name}/pulls/{self.number}"
         try:
-            response = await github_request(self.http, "GET", url)
-            response.raise_for_status()
-            payload = response.json()
+            payload = await self.github.get(f"repos/{self.full_name}/pulls/{self.number}")
         except httpx2.HTTPError, ValueError:
             return None
         return payload if isinstance(payload, dict) else None
@@ -413,14 +426,22 @@ class PullRequestClient:
         return None
 
     async def check_runs(self, sha: str) -> list[dict[str, Any]] | None:
-        return await self._pages(
-            f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
-        )
+        try:
+            return await self.github.pages(
+                f"repos/{self.full_name}/commits/{sha}/check-runs",
+                key="check_runs",
+                params={"filter": "latest"},
+            )
+        except httpx2.HTTPError, ValueError:
+            return None
 
     async def commit_statuses(self, sha: str) -> list[dict[str, Any]] | None:
         """The latest status per context."""
-        statuses = await self._pages(f"commits/{sha}/status", key="statuses")
-        if statuses is None:
+        try:
+            statuses = await self.github.pages(
+                f"repos/{self.full_name}/commits/{sha}/status", key="statuses"
+            )
+        except httpx2.HTTPError, ValueError:
             return None
         latest: dict[str, dict[str, Any]] = {}
         for status in statuses:
@@ -429,9 +450,15 @@ class PullRequestClient:
                 latest.setdefault(context, status)
         return list(latest.values())
 
+    async def reviews(self) -> list[dict[str, Any]] | None:
+        try:
+            return await self.github.pages(f"repos/{self.full_name}/pulls/{self.number}/reviews")
+        except httpx2.HTTPError, ValueError:
+            return None
+
     async def reviewers(self) -> list[PullRequestReviewer] | None:
         """Each reviewer's standing review."""
-        reviews = await self._pages(f"pulls/{self.number}/reviews", key=None)
+        reviews = await self.reviews()
         if reviews is None:
             return None
         try:
@@ -448,7 +475,13 @@ class PullRequestClient:
         single read usually gets the real answer.
         """
         try:
-            payload = await self._graphql(_MERGEABILITY_QUERY)
+            data = await self.github.graphql(_MERGEABILITY_QUERY, self._variables())
+        except GraphQLError as exc:
+            logger.warning(
+                "Mergeability query answered with errors; falling back to what REST reported",
+                extra={**self._log_extra, "graphql_errors": exc.errors},
+            )
+            return None
         except httpx2.HTTPError, ValueError:
             logger.warning(
                 "Mergeability query failed; falling back to what REST reported",
@@ -456,18 +489,7 @@ class PullRequestClient:
                 exc_info=True,
             )
             return None
-        if not isinstance(payload, Mapping) or payload.get("errors"):
-            logger.warning(
-                "Mergeability query answered with errors; falling back to what REST reported",
-                extra={
-                    **self._log_extra,
-                    "graphql_errors": payload.get("errors")
-                    if isinstance(payload, Mapping)
-                    else None,
-                },
-            )
-            return None
-        pull = _graphql_pull(payload)
+        pull = _graphql_pull(data)
         if pull is None:
             logger.warning(
                 "Mergeability query answered without a pull request", extra=self._log_extra
@@ -488,10 +510,10 @@ class PullRequestClient:
         seen_cursors: set[str] = set()
         try:
             while True:
-                payload = await self._graphql(_REVIEW_THREADS_QUERY, {"cursor": cursor})
-                if not isinstance(payload, dict) or payload.get("errors"):
-                    return None
-                pull = _graphql_pull(payload)
+                data = await self.github.graphql(
+                    _REVIEW_THREADS_QUERY, self._variables(cursor=cursor)
+                )
+                pull = _graphql_pull(data)
                 threads = pull.get("reviewThreads") if pull is not None else None
                 if not isinstance(threads, dict) or not isinstance(threads.get("nodes"), list):
                     return None
@@ -550,10 +572,10 @@ class PullRequestClient:
         seen_cursors: set[str] = set()
         try:
             while True:
-                payload = await self._graphql(_THREAD_COUNT_QUERY, {"cursor": cursor})
-                if not isinstance(payload, dict) or payload.get("errors"):
-                    return ReviewState(None, review_required)
-                pull = _graphql_pull(payload)
+                data = await self.github.graphql(
+                    _THREAD_COUNT_QUERY, self._variables(cursor=cursor)
+                )
+                pull = _graphql_pull(data)
                 if pull is not None:
                     review_required = pull.get("reviewDecision") == "REVIEW_REQUIRED"
                 threads = pull.get("reviewThreads") if pull is not None else None
@@ -656,7 +678,10 @@ class PullRequestClient:
             return result
         result.head_sha = sha
         runs, statuses, reviewers, review_state = await asyncio.gather(
-            self.check_runs(sha), self.commit_statuses(sha), self.reviewers(), self.review_state()
+            self.check_runs(sha),
+            self.commit_statuses(sha),
+            self.reviewers(),
+            self.review_state(),
         )
         result.reviewers = reviewers
         result.review_decision = (
@@ -698,93 +723,22 @@ class PullRequestClient:
         # A check gated on `needs:` has no run until its upstream jobs finish.
         if base_ref is not None and result.merge_state == "blocked" and not pending:
             required = await read_required_checks(
-                self.http, owner=self.owner, repo=self.repo, branch=base_ref
+                self.github.http, owner=self.owner, repo=self.repo, branch=base_ref
             )
             if required is not None:
                 result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
 
-    async def _pages(
-        self, path: str, *, key: str | None, params: Mapping[str, str] | None = None
-    ) -> list[dict[str, Any]] | None:
-        """Every item of a paginated REST list under the repository, or ``None`` on failure.
-
-        ``key`` names the list inside each page's object; ``None`` means the page is the list.
-        """
-        url = f"{GITHUB_API_BASE}/repos/{self.full_name}/{path}"
-        items: list[dict[str, Any]] = []
-        page = 1
-        try:
-            while True:
-                response = await github_request(
-                    self.http,
-                    "GET",
-                    url,
-                    params={**(params or {}), "per_page": str(_REST_PAGE_SIZE), "page": str(page)},
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if key is None:
-                    batch = payload
-                else:
-                    batch = payload.get(key) if isinstance(payload, dict) else None
-                if not isinstance(batch, list):
-                    return None
-                items.extend(item for item in batch if isinstance(item, dict))
-                if len(batch) < _REST_PAGE_SIZE:
-                    return items
-                page += 1
-        except httpx2.HTTPError, ValueError:
-            return None
-
-    async def _graphql(self, query: str, variables: Mapping[str, object] | None = None) -> object:
-        response = await github_request(
-            self.http,
-            "POST",
-            GITHUB_GRAPHQL,
-            json={
-                "query": query,
-                "variables": {
-                    "owner": self.owner,
-                    "repo": self.repo,
-                    "number": self.number,
-                    **(variables or {}),
-                },
-            },
-        )
-        response.raise_for_status()
-        return response.json()
-
-
-class _CursorLoop(Exception):
-    """GitHub handed back a page cursor it had already given."""
-
-
-def _graphql_pull(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    data = payload.get("data")
-    repository = data.get("repository") if isinstance(data, Mapping) else None
-    pull = repository.get("pullRequest") if isinstance(repository, Mapping) else None
-    return pull if isinstance(pull, Mapping) else None
-
-
-def _next_cursor(connection: Mapping[str, Any], seen: set[str]) -> str | None:
-    """The cursor of the next page, ``None`` on the last page."""
-    page_info = connection.get("pageInfo")
-    if not isinstance(page_info, Mapping) or page_info.get("hasNextPage") is not True:
-        return None
-    cursor = page_info.get("endCursor")
-    if not isinstance(cursor, str) or not cursor or cursor in seen:
-        raise _CursorLoop
-    seen.add(cursor)
-    return cursor
+    def _variables(self, **extra: object) -> dict[str, object]:
+        return {"owner": self.owner, "repo": self.repo, "number": self.number, **extra}
 
 
 async def get_pull_request_statuses(records: Sequence[object], token: str) -> list[dict[str, Any]]:
     """Return live status for every tracked pull request record."""
-    async with github_client(token=token) as http:
+    async with GitHubClient.connect(token=token) as github:
         statuses: list[dict[str, Any]] = []
         for record in records:
-            client = PullRequestClient.of(http, record)
+            client = PullRequestClient.of(github, record)
             statuses.append(
                 await client.thread_status()
                 if client is not None
@@ -819,13 +773,11 @@ async def list_open_pull_requests(
     query = f"is:pr is:open author:{login}"
     for name in repositories:
         query += f" repo:{name}"
-    async with github_client(token=token) as http:
+    async with GitHubClient.connect(token=token) as github:
         try:
-            response = await github_request(
-                http,
-                "GET",
-                f"{GITHUB_API_BASE}/search/issues",
-                params={
+            payload = await github.get(
+                "search/issues",
+                {
                     "q": query,
                     "per_page": str(_SEARCH_PAGE_SIZE),
                     "page": str(page),
@@ -833,8 +785,6 @@ async def list_open_pull_requests(
                     "order": direction,
                 },
             )
-            response.raise_for_status()
-            payload = response.json()
         except (httpx2.HTTPError, ValueError) as exc:
             raise HTTPException(502, "Could not load open PRs from GitHub") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
@@ -851,7 +801,7 @@ async def list_open_pull_requests(
         semaphore = asyncio.Semaphore(4)
 
         async def load(item: object) -> OpenPullRequest | None:
-            client = PullRequestClient.of(http, item)
+            client = PullRequestClient.of(github, item)
             if client is None or not isinstance(item, Mapping):
                 return None
             async with semaphore:
