@@ -20,7 +20,7 @@ from agent.background_tasks import monitor_background_tasks, reconcile_backgroun
 from agent.sandboxes import tool_access, tool_routes
 from agent.slack import thinking as slack_thinking
 from agent.tasks import service as task_service
-from agent.tools import task_threads, threads
+from agent.tools import threads
 from agent.tools.background_execute import (
     TASK_ROOT,
     _launch_command,
@@ -505,6 +505,11 @@ async def test_reconcile_enqueues_one_claimed_completion(
         )
         monkeypatch.setattr(task_service, "langgraph_client", lambda: client)
         monkeypatch.setattr(task_service, "enforce_github_login_gate", AsyncMock())
+        monkeypatch.setattr(
+            task_service.ThreadMetadata,
+            "owner",
+            AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), github_login="worker-owner")),
+        )
         monkeypatch.setattr(task_service, "get_profile", AsyncMock(return_value={}))
         monkeypatch.setattr(task_service, "resolve_run_email", AsyncMock(return_value=None))
         monkeypatch.setattr(threads, "enforce_github_login_gate", AsyncMock())
@@ -536,8 +541,8 @@ async def test_reconcile_enqueues_one_claimed_completion(
     if worker:
         config = {"configurable": configurable}
         monkeypatch.setattr(threads, "get_config", lambda: config)
-        monkeypatch.setattr(task_threads, "get_config", lambda: config)
-        assert await task_threads.actor_from_state({}) == task_service.Actor(
+        monkeypatch.setattr(task_service, "get_config", lambda: config)
+        assert await task_service.Actor.resolve({}) == task_service.Actor(
             thread_id="thread-1", login="worker-owner"
         )
     assert dispatch.await_args.kwargs["context"] == {

@@ -218,4 +218,3 @@ async def sidebar_memberships(
                     launch_error=bool(delegation and delegation.launch_error),
                 )
     return memberships
-
