@@ -503,6 +503,19 @@ async def _settle_slack_thinking_status(
         if await _task_has_active_runs(client, thread_id):
             return True
         waiting = bool(metadata.get(RUNNING_BACKGROUND_TASKS_KEY))
+        if not waiting:
+            for worker in (await sidebar_memberships([thread_id], workers_of=True)).values():
+                try:
+                    worker_metadata = thread_metadata(await client.threads.get(worker.thread_id))
+                except NotFoundError:
+                    logger.debug(
+                        "Worker thread creation is incomplete",
+                        extra={"worker_thread_id": worker.thread_id},
+                    )
+                    continue
+                if worker_metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
+                    waiting = True
+                    break
         if not await set_slack_thread_status(
             channel_id, thread_ts, "Waiting for background tasks…" if waiting else ""
         ):

@@ -643,8 +643,9 @@ def test_process_github_issue_followup_keeps_the_threads_workspace(monkeypatch) 
     captured: dict[str, object] = {}
 
     class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
+        async def create(self, *args, **kwargs) -> dict[str, str]:
             captured["configurable"] = kwargs["config"]["configurable"]
+            return {"run_id": "run-1"}
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
@@ -724,8 +725,9 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
     captured: dict[str, object] = {}
 
     class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
+        async def create(self, *args, **kwargs) -> dict[str, str]:
             captured["run_created"] = True
+            return {"run_id": "run-1"}
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()

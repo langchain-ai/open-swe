@@ -248,9 +248,17 @@ async def test_status_tracks_worker_runs_while_coordinator_idle(
     monkeypatch: pytest.MonkeyPatch, worker_wakeup: bool
 ) -> None:
     client = _status_client()
-    client.threads.get.return_value = {
-        "metadata": {"source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}}
+    coordinator_metadata = {
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}
     }
+    worker_metadata: dict[str, object] = {
+        slack_thinking.RUNNING_BACKGROUND_TASKS_KEY: ["background-command"]
+    }
+
+    async def thread(thread_id: str) -> dict[str, object]:
+        return {"metadata": worker_metadata if thread_id == "worker" else coordinator_metadata}
+
+    client.threads.get.side_effect = thread
     task = Task(title="Work", workspace_id=uuid4(), coordinator_thread_id="coordinator")
     context = TaskContext(task, TaskMembership(thread_id="worker", task_id=task.id, role="worker"))
     monkeypatch.setattr(TaskMembership, "context_for_thread", AsyncMock(return_value=context))
@@ -332,6 +340,9 @@ async def test_status_tracks_worker_runs_while_coordinator_idle(
                     assert set(statuses) == {"Thinking..."}
                 worker_status = "success"
                 await observer
+                await slack_thinking.sync_slack_background_status(client, "worker")
+                assert statuses[-1] == "Waiting for background tasks…"
+                worker_metadata.clear()
                 await slack_thinking.sync_slack_background_status(client, "worker")
             finally:
                 observer.cancel()
