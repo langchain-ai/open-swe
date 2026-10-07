@@ -478,6 +478,28 @@ async def _start_run_for_pending_follow_ups(thread_id: str) -> None:
         )
 
 
+def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: object) -> None:
+    # The platform serializes the exception (class name, and the message when its
+    # type is allowlisted) — there is no traceback to attach on this side.
+    error_attributes = (
+        {"error": {"kind": error.get("error"), "message": error.get("message")}}
+        if isinstance(error, dict)
+        else {}
+    )
+    logger.error(
+        "Run failed",
+        extra={
+            **error_attributes,
+            "run_failure": {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "status": status,
+                "error": error,
+            },
+        },
+    )
+
+
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Handle a platform run-completion webhook POST.
 
@@ -520,6 +542,8 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         if pickup_allowed:
             await _start_run_for_pending_follow_ups(thread_id)
     if is_worker:
+        if status in _TERMINAL_FAILURE_STATUSES:
+            _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}
     if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
         await EventSubscription.deliver_to(thread_id, "enqueue")
@@ -535,25 +559,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": f"non-failure status: {status}"}
 
     error = payload.get("error")
-    # The platform serializes the exception (class name, and the message when its
-    # type is allowlisted) — there is no traceback to attach on this side.
-    error_attributes = (
-        {"error": {"kind": error.get("error"), "message": error.get("message")}}
-        if isinstance(error, dict)
-        else {}
-    )
-    logger.error(
-        "Run failed",
-        extra={
-            **error_attributes,
-            "run_failure": {
-                "run_id": run_id,
-                "thread_id": thread_id,
-                "status": status,
-                "error": error,
-            },
-        },
-    )
+    _log_run_failure(thread_id, run_id, status, error)
 
     client = langgraph_client()
     try:

@@ -1,5 +1,6 @@
 """Return worker invocation outcomes through the existing durable event path."""
 
+import logging
 from collections.abc import Mapping
 from typing import cast
 from uuid import UUID
@@ -12,6 +13,7 @@ from agent.utils.dashboard_links import dashboard_thread_url
 from agent.utils.thread_ops import langgraph_client
 from agent.webhooks.event_subscriptions import EventSubscription
 
+logger = logging.getLogger(__name__)
 _TERMINAL_STATUSES = frozenset({"success", "error", "timeout", "interrupted"})
 _MAX_RESULT_CHARS = 16_000
 
@@ -92,6 +94,10 @@ async def worker_finished(
 
     delegation = await store.get_delegation(thread_id)
     if delegation is not None and delegation.cancelled and status != "interrupted":
+        logger.info(
+            "Suppressed a cancelled worker's run outcome",
+            extra={"worker_thread_id": thread_id, "run_id": run_id, "run_status": status},
+        )
         return True
     result = await worker_result(thread_id, run_id, status, payload)
     await notify(
