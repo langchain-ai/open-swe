@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { Messages } from "./Messages"
+import type { Message } from "@/features/agents/lib/types"
 
 vi.stubGlobal(
   "ResizeObserver",
@@ -80,6 +81,46 @@ describe("Messages", () => {
     expect(
       reply.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it("shows thinking between tool completion and the end of the run", () => {
+    const message: Message = {
+      id: "agent-turn",
+      author: "agent",
+      timestamp: "2026-09-03T10:30:00.000Z",
+      chunks: [
+        {
+          kind: "tool-execution",
+          toolCallId: "shell",
+          title: "Shell",
+          toolKind: "execute",
+          status: "in_progress",
+        },
+      ],
+    }
+    const { rerender } = render(<Messages messages={[message]} isStreaming />)
+    expect(
+      screen.getByRole("button", { name: "Running… · 1 action" })
+    ).toBeTruthy()
+
+    const completed: Message = {
+      ...message,
+      chunks: message.chunks.map((chunk) =>
+        chunk.kind === "tool-execution"
+          ? { ...chunk, status: "completed" }
+          : chunk
+      ),
+    }
+    rerender(<Messages messages={[completed]} isStreaming />)
+    expect(
+      screen.getByRole("button", { name: "Thinking… · 1 action" })
+    ).toBeTruthy()
+
+    rerender(<Messages messages={[completed]} isStreaming={false} />)
+    expect(
+      screen.getByRole("button", { name: "Worked · 1 action" })
+    ).toBeTruthy()
+    expect(screen.queryByText("Thinking…")).toBeNull()
   })
 
   it("renders unfinished grouped work after its fold row", () => {
