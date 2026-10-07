@@ -29,15 +29,33 @@ def test_a_message_linking_several_pull_requests_is_not_watched() -> None:
     assert linked_pull_request(text) is None
 
 
-async def test_external_authors_are_not_watched(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("author", "review_channel", "watched"),
+    [("ada", "C1", True), ("ada", "C2", False), (None, "C1", False)],
+)
+async def test_only_open_swe_authors_posts_in_a_review_channel_are_watched(
+    monkeypatch: pytest.MonkeyPatch, author: str | None, review_channel: str, watched: bool
+) -> None:
     from agent.github.pull_requests import PullRequestPayload
+    from agent.github.repo_files import RepoSettings
+    from agent.slack.channels import SlackChannel
 
     monkeypatch.setattr(posted, "skip_on_preview", lambda _: False)
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=User()))
-    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        User, "for_login", AsyncMock(return_value=User() if author is not None else None)
+    )
     monkeypatch.setattr(posted, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        RepoSettings, "cached", AsyncMock(return_value=RepoSettings(reviewChannel=review_channel))
+    )
+    monkeypatch.setattr(
+        SlackChannel, "resolve", AsyncMock(side_effect=lambda ref: SlackChannel(id=ref))
+    )
     monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=None))
-    details = PullRequestPayload.model_validate({"user": {"login": "external"}, "state": "open"})
+    details = PullRequestPayload.model_validate(
+        {"user": {"login": author or "external"}, "state": "open"}
+    )
     monkeypatch.setattr(
         posted,
         "record_pull_request",
@@ -45,8 +63,9 @@ async def test_external_authors_are_not_watched(monkeypatch: pytest.MonkeyPatch)
     )
     save = AsyncMock()
     monkeypatch.setattr(HumanReviewRequest, "save", save)
+    monkeypatch.setattr(posted, "settle", AsyncMock())
     await posted.watch_post("C1", "1.0", "U1", "https://github.com/lc/repo/pull/7")
-    save.assert_not_called()
+    assert save.called is watched
 
 
 async def test_blocked_reactions_track_an_approved_posts_current_head(

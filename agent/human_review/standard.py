@@ -89,6 +89,15 @@ _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
 
 
+async def in_review_channel(owner: str, repo: str, channel_id: str, token: str) -> bool:
+    """Whether ``channel_id`` is one of the repository's configured review channels."""
+    for configured in (await RepoSettings.cached(owner, repo, token=token)).review_channels:
+        channel = await SlackChannel.resolve(configured)
+        if channel is not None and channel.id == channel_id:
+            return True
+    return False
+
+
 async def _assignment_minutes(request: HumanReviewRequest) -> int:
     workspace = RunConfig.parse(request.run_config).workspace_slug
     pr = request.pull_request
@@ -1109,6 +1118,21 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     return "rotated"
 
 
+async def _still_watched(request: HumanReviewRequest) -> bool:
+    """Whether a posted request is in a review channel; retires it, releasing its picks, if not."""
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    if token is None or await in_review_channel(pr.owner, pr.repo, request.slack_channel_id, token):
+        return True
+    logger.info(
+        "Retiring a posted review request outside the repository's review channels",
+        extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
+    )
+    request = await release_picks(request, "it was not posted in a review channel")
+    await retire(request, "cancelled", "not posted in a review channel")
+    return False
+
+
 async def run_deadline(request_id: str, step: str) -> dict[str, str]:
     """Scheduler entry point for the unclaimed, pick-expiry and auto-merge deadlines."""
     try:
@@ -1117,6 +1141,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if request.kind == "posted" and not await _still_watched(request):
+        return {"status": "cancelled"}
     if step.startswith("remind:"):
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
 

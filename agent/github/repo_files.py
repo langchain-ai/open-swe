@@ -95,6 +95,11 @@ class RepoSettings(BaseModel):
         default_factory=list, alias="reviewChannelRules"
     )
 
+    @property
+    def review_channels(self) -> set[str]:
+        configured = [self.review_channel, *(rule.channel for rule in self.review_channel_rules)]
+        return {channel.strip() for channel in configured if channel.strip()}
+
     def channel_for_files(self, filenames: list[str]) -> str:
         counts: Counter[str] = Counter()
         for filename in filenames:

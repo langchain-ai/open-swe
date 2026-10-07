@@ -1,4 +1,4 @@
-"""Watch pull requests people post in any Slack channel the bot listens in."""
+"""Watch pull requests people post in their repository's Slack review channels."""
 
 import logging
 import re
@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from agent.human_review.people import repo_token
 from agent.human_review.requests import HumanReviewRequest
-from agent.human_review.standard import record_pull_request, settle
+from agent.human_review.standard import in_review_channel, record_pull_request, settle
 from agent.slack.client import GitHubPrRef, parse_github_pr_url
 from agent.users import User
 from agent.utils.preview import skip_on_preview
@@ -46,6 +46,8 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
     token = await repo_token(pr_ref.owner, pr_ref.repo)
     if token is None:
         logger.info("Posted pull request is outside the GitHub App's reach", extra=extra)
+        return
+    if not await in_review_channel(pr_ref.owner, pr_ref.repo, channel_id, token):
         return
     if await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number) is not None:
         logger.info("Posted pull request already has an open review request", extra=extra)
