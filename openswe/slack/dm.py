@@ -121,7 +121,9 @@ class DmOrigin(BaseModel):
             return None
 
 
-async def _record_in_concierge_thread(channel_id: str, text: str, origin: DmOrigin | None) -> None:
+async def _record_in_concierge_thread(
+    channel_id: str, text: str, origin: DmOrigin | None = None
+) -> None:
     """Add a message the bot sent to the person's concierge conversation, so a reply has context."""
     thread_id = await lookup_slack_thread_id(langgraph_client(), channel_id, CONCIERGE_TS)
     if thread_id is None:
