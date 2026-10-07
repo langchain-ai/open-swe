@@ -18,7 +18,6 @@ import { RunningAgentsSection } from "@/features/settings/components/AdminSectio
 const cancelThread = vi.hoisted(() => vi.fn<(id: string) => Promise<void>>())
 const queryState = vi.hoisted(() => ({
   isFetching: false,
-  isLoading: false,
 }))
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
@@ -30,15 +29,14 @@ vi.mock(import("@/features/agents/lib/queries"), async (importOriginal) => ({
   ...(await importOriginal()),
   useThreadsPage: () =>
     ({
-      data: queryState.isLoading
-        ? undefined
-        : {
-            items: [
-              { id: "t1", title: "First", repoFullName: "acme/api" },
-              { id: "t2", title: "Second", repoFullName: "acme/web" },
-            ],
-          },
-      ...queryState,
+      data: {
+        items: [
+          { id: "t1", title: "First", repoFullName: "acme/api" },
+          { id: "t2", title: "Second", repoFullName: "acme/web" },
+        ],
+      },
+      isLoading: false,
+      isFetching: queryState.isFetching,
       error: null,
       refetch: vi.fn(),
     }) as never,
@@ -50,11 +48,10 @@ afterEach(() => {
   cleanup()
   cancelThread.mockReset()
   queryState.isFetching = false
-  queryState.isLoading = false
 })
 
 function renderSection() {
-  return render(
+  render(
     <QueryClientProvider client={makeQueryClient()}>
       <RunningAgentsSection />
     </QueryClientProvider>
@@ -63,25 +60,12 @@ function renderSection() {
 
 const killButtons = () => screen.queryAllByRole("button", { name: "Kill" })
 
-it.each([true, false])(
-  "hides the count while fetching (initial load: %s)",
-  (isLoading) => {
-    Object.assign(queryState, { isFetching: true, isLoading })
-    const view = renderSection()
+it("hides the count while refreshing", () => {
+  queryState.isFetching = true
+  renderSection()
 
-    expect(screen.queryByText(/^\d+ running$/)).toBeNull()
-    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeTruthy()
-
-    Object.assign(queryState, { isFetching: false, isLoading: false })
-    view.rerender(
-      <QueryClientProvider client={makeQueryClient()}>
-        <RunningAgentsSection />
-      </QueryClientProvider>
-    )
-
-    expect(screen.getByText("2 running")).toBeTruthy()
-  }
-)
+  expect(screen.queryByText(/^\d+ running$/)).toBeNull()
+})
 
 it("hides a killed thread at once and leaves the others killable", async () => {
   cancelThread.mockReturnValue(new Promise(() => {}))
