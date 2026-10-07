@@ -8,6 +8,7 @@ profile settings and a thread's ``configurable`` layer on top in the callers
 that honour them. Per-repo style prompts live in :mod:`agent.review.styles`.
 """
 
+import asyncio
 import logging
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
@@ -15,7 +16,8 @@ from typing import Any, Literal, TypedDict
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from agent.audit_logs.context import bind_workspace
+from agent.audit_logs.context import bind_workspace, current_audit_log
+from agent.audit_logs.models import SettingsChange
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
@@ -475,11 +477,60 @@ def _record_values(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
     return {**update.model_dump(), "updated_at": now_iso()}
 
 
+def _audit_setting_value(field: str, value: object) -> bool | int | Literal["[REDACTED]"] | None:
+    if value is None:
+        return None
+    metadata = WorkspaceSettingsUpdate.model_fields[field].json_schema_extra
+    if isinstance(metadata, dict) and metadata.get("agent_feature_flag") and type(value) is bool:
+        return value
+    if field == "human_review_auto_assign_minutes" and type(value) is int:
+        return value
+    return "[REDACTED]"
+
+
+async def _settings_changes(
+    value: Mapping[str, object], *, workspace: str | None = None
+) -> dict[str, SettingsChange] | None:
+    if current_audit_log.get() is None:
+        return None
+    try:
+        async with asyncio.timeout(2):
+            before = (
+                await _instance_record()
+                if workspace is None
+                else await _workspace_record(workspace)
+            )
+        return {
+            field: SettingsChange(
+                before=_audit_setting_value(field, before.get(field)),
+                after=_audit_setting_value(field, value.get(field)),
+            )
+            for field in WorkspaceSettingsUpdate.model_fields
+            if before.get(field) != value.get(field)
+        }
+    except Exception:
+        logger.warning("Could not read settings for audit changes", exc_info=True)
+        return None
+
+
+def _bind_settings_changes(
+    changes: dict[str, SettingsChange] | None, *, workspace: str | None = None
+) -> None:
+    entry = current_audit_log.get()
+    if entry is not None:
+        entry.enrichments.settings_scope = "instance" if workspace is None else "workspace"
+        entry.enrichments.settings_changes = changes
+        if workspace is not None:
+            entry.enrichments.workspace = workspace
+
+
 async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
     """Replace the instance record. Raises ``ValueError`` for a Fable model saved as a default."""
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
+    changes = await _settings_changes(value)
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
+    _bind_settings_changes(changes)
     await Topic.WORKSPACES.invalidate()
     return value
 
@@ -497,7 +548,9 @@ async def upsert_workspace_overrides(
         fable_enabled = (await get_instance_settings()).fable_enabled
     update.apply_fable_policy(fable_enabled=fable_enabled)
     value = {k: v for k, v in _record_values(update).items() if v is not None}
+    changes = await _settings_changes(value, workspace=slug)
     await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
+    _bind_settings_changes(changes, workspace=slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
     await Topic.WORKSPACES.invalidate()

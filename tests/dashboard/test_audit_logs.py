@@ -4,17 +4,19 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from agent.api_keys.models import ApiKey
 from agent.audit_logs import middleware, store
+from agent.audit_logs.context import current_audit_log
 from agent.audit_logs.middleware import AuditLogMiddleware
 from agent.audit_logs.models import AuditLog, AuditLogEnrichments, AuditLogsCursor
 from agent.audit_logs.routes import router
-from agent.dashboard import deps, oauth
+from agent.dashboard import deps, oauth, workspace_settings
 from agent.threads.principals import PrincipalDep
 from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import FakeStore
 
 
 class Settings(BaseModel):
@@ -26,9 +28,9 @@ def app() -> FastAPI:
     application.add_middleware(AuditLogMiddleware)
     application.include_router(router, prefix="/dashboard/api")
 
-    @application.put(
-        "/dashboard/api/settings/{resource_id}", dependencies=[Depends(oauth.require_session)]
-    )
+    settings_router = APIRouter()
+
+    @settings_router.put("/settings/{resource_id}", dependencies=[Depends(oauth.require_session)])
     async def save(resource_id: str, body: Settings) -> dict[str, bool]:
         await asyncio.sleep(0)
         if body.token == "fail":
@@ -41,6 +43,7 @@ def app() -> FastAPI:
     async def machine(principal: PrincipalDep) -> dict[str, bool]:
         return {"machine": principal.machine}
 
+    application.include_router(settings_router, prefix="/dashboard/api")
     return application
 
 
@@ -100,6 +103,105 @@ async def test_authenticated_activity_is_isolated_and_secret_free_when_mounted(
             await client.put(f"/prefix/dashboard/api/settings/{resource_id}", json={"token": "x"})
         ).status_code == 401
     assert len(entries) == 3
+
+
+@pytest.mark.parametrize("workspace", [None, "preview"])
+async def test_settings_audit_changes_are_redacted_and_track_resets(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, workspace: str | None
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
+    monkeypatch.setattr(deps, "is_admin", lambda email, *, login: login == "admin")
+    entries: list[AuditLog] = []
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    async def workspace_exists(slug: str) -> dict[str, str]:
+        return {"slug": slug}
+
+    monkeypatch.setattr(middleware, "append_safely", append)
+    monkeypatch.setattr(WORKSPACES, "get", workspace_exists)
+    application = app()
+    application.include_router(workspace_settings.router, prefix="/dashboard/api")
+    namespace = ["team_settings"] if workspace is None else ["workspace_settings"]
+    fake_store.seed(
+        namespace,
+        workspace or "default",
+        {"model_routing_enabled": False, "org_guidelines": "old-secret", "unknown": "secret"},
+    )
+    path = (
+        "/dashboard/api/settings"
+        if workspace is None
+        else f"/dashboard/api/workspaces/{workspace}/settings"
+    )
+    user_id = uuid4()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application),
+        base_url="http://test",
+        cookies=cookie("admin", str(user_id)),
+    ) as client:
+        for payload in (
+            {"model_routing_enabled": True, "org_guidelines": "new-secret"},
+            {"model_routing_enabled": True, "org_guidelines": "new-secret"},
+            {},
+        ):
+            assert (await client.put(path, json=payload)).status_code == 200
+    changed, noop, reset = entries
+    assert changed.user_id == user_id
+    assert changed.operation_succeeded is True
+    assert changed.operation_name == (
+        "put_instance_settings" if workspace is None else "put_workspace_settings"
+    )
+    assert changed.enrichments.settings_scope == ("instance" if workspace is None else "workspace")
+    assert changed.enrichments.workspace == workspace
+    assert changed.enrichments.settings_changes == {
+        "model_routing_enabled": {"before": False, "after": True},
+        "org_guidelines": {"before": "[REDACTED]", "after": "[REDACTED]"},
+    }
+    assert noop.enrichments.settings_changes == {}
+    assert reset.enrichments.model_dump(mode="json", exclude_none=True)["settings_changes"] == {
+        "model_routing_enabled": {"before": True, "after": None},
+        "org_guidelines": {"before": "[REDACTED]", "after": None},
+    }
+    assert all("secret" not in entry.model_dump_json() for entry in entries)
+    assert current_audit_log.get() is None
+
+
+@pytest.mark.parametrize("failure", ["read", "write"])
+async def test_settings_audit_does_not_invent_changes_on_store_failure(
+    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, failure: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
+    monkeypatch.setattr(deps, "is_admin", lambda email, *, login: True)
+    entries: list[AuditLog] = []
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    async def fail(*args: object) -> None:
+        raise RuntimeError("store unavailable")
+
+    monkeypatch.setattr(middleware, "append_safely", append)
+    monkeypatch.setattr(
+        workspace_settings, "_instance_record" if failure == "read" else "put_value", fail
+    )
+    application = app()
+    application.include_router(workspace_settings.router, prefix="/dashboard/api")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application, raise_app_exceptions=False),
+        base_url="http://test",
+        cookies=cookie("admin", str(uuid4())),
+    ) as client:
+        response = await client.put("/dashboard/api/settings", json={"model_routing_enabled": True})
+    assert response.status_code == (200 if failure == "read" else 500)
+    (entry,) = entries
+    assert entry.operation_succeeded is (failure == "read")
+    assert entry.enrichments.settings_changes is None
+    assert current_audit_log.get() is None
+    if failure == "read":
+        assert fake_store.values(["team_settings"])["default"]["model_routing_enabled"] is True
+    else:
+        assert not fake_store.items
 
 
 async def test_audit_failure_preserves_response(
