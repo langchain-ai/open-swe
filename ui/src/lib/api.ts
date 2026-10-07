@@ -1415,6 +1415,22 @@ function pullRequestThread(
 }
 
 export const api = {
+  sandboxEnvironment: (workspace?: string) =>
+    request<{ names: string[] }>(
+      workspace
+        ? `/workspaces/${encodeURIComponent(workspace)}/sandbox-environment`
+        : "/profile/sandbox-environment"
+    ),
+  saveSandboxEnvironment: (
+    variables: Record<string, string | null>,
+    workspace?: string
+  ) =>
+    request<{ names: string[] }>(
+      workspace
+        ? `/workspaces/${encodeURIComponent(workspace)}/sandbox-environment`
+        : "/profile/sandbox-environment",
+      { method: "PUT", body: JSON.stringify({ variables }) }
+    ),
   recordPageView: (page_name: string) =>
     request<void>("/analytics/page", {
       method: "POST",

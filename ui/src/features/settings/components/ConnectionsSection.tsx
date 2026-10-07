@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
+import { SandboxEnvironmentSection } from "./SandboxEnvironmentSection"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
@@ -231,10 +232,13 @@ function LangSmithRow() {
 
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
-    <SettingsSection title="Accounts">
-      <SlackRow user={user} />
-      <NotionRow />
-      <LangSmithRow />
-    </SettingsSection>
+    <>
+      <SettingsSection title="Accounts">
+        <SlackRow user={user} />
+        <NotionRow />
+        <LangSmithRow />
+      </SettingsSection>
+      <SandboxEnvironmentSection />
+    </>
   )
 }
