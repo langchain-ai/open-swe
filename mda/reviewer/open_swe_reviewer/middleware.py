@@ -25,14 +25,7 @@ from langgraph.runtime import Runtime
 from managed_deepagents import ManagedRuntime
 from pydantic import BaseModel, JsonValue
 
-from open_swe_reviewer.backend import (
-    DRAIN_HOOK,
-    PREPARE_HOOK,
-    SETTLE_HOOK,
-    BackendCallError,
-    call_backend,
-    current_thread_id,
-)
+from open_swe_reviewer.backend import BackendCallError, OpenSweBackend
 from open_swe_reviewer.models import ModelSpec, build_model
 
 logger = logging.getLogger(__name__)
@@ -104,9 +97,18 @@ class RunState(AgentState):
     open_swe_run: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput]]
 
 
+class _RunConfigurable(BaseModel):
+    thread_id: str
+    invocation_id: str | None = None
+
+
+class _Drained(BaseModel):
+    messages: list[JsonValue]
+
+
 def _invocation_id() -> str:
-    invocation = get_config().get("configurable", {}).get("invocation_id")
-    return invocation if isinstance(invocation, str) and invocation else current_thread_id()
+    configurable = _RunConfigurable.model_validate(get_config().get("configurable", {}))
+    return configurable.invocation_id or configurable.thread_id
 
 
 def prepared_run(state: RunState) -> PreparedRun | None:
@@ -124,6 +126,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     state_schema = RunState
 
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
     async def abefore_agent(
         self,
         state: RunState,
@@ -133,7 +138,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if state.get("open_swe_prepared_for") == invocation and prepared_run(state) is not None:
             return None
         prepared = PreparedRun.model_validate(
-            await call_backend(PREPARE_HOOK, {}, timeout_seconds=_PREPARE_TIMEOUT_SECONDS)
+            await self._backend.call("prepare", timeout_seconds=_PREPARE_TIMEOUT_SECONDS)
         )
         if prepared.checkout is not None:
             await prepared.checkout.check_out(runtime)
@@ -144,9 +149,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         state: RunState,  # noqa: ARG002
         runtime: Runtime,  # noqa: ARG002
     ) -> dict[str, JsonValue] | None:
-        drained = await call_backend(DRAIN_HOOK, {}, timeout_seconds=_HOOK_TIMEOUT_SECONDS)
-        messages = drained.get("messages")
-        return {"messages": messages} if isinstance(messages, list) and messages else None
+        drained = _Drained.model_validate(
+            await self._backend.call("drain", timeout_seconds=_HOOK_TIMEOUT_SECONDS)
+        )
+        return {"messages": drained.messages} if drained.messages else None
 
     async def awrap_model_call(
         self,
@@ -169,7 +175,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         runtime: Runtime,  # noqa: ARG002
     ) -> dict[str, JsonValue] | None:
         try:
-            await call_backend(SETTLE_HOOK, {}, timeout_seconds=_HOOK_TIMEOUT_SECONDS)
+            await self._backend.call("settle", timeout_seconds=_HOOK_TIMEOUT_SECONDS)
         except BackendCallError:
             # The backend's completion webhook settles a check this run left open.
             logger.warning("Settling the review check run failed", exc_info=True)

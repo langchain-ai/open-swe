@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "managed-deepagents>=0.9.1.dev1",
     "deepagents==0.7.21",
-    "langchain>=1.4.2",
+    "langchain[mcp]>=1.4.3",
     "langchain-anthropic>=1.7.4",
     "langchain-openai>=1.6.5,<2.0.0",
     "langsmith>=0.14.0",

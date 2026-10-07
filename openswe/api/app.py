@@ -167,6 +167,9 @@ def create_app() -> FastAPI:
     app.router.routes.append(
         Route(remote_runtime_server.PATH, REMOTE_RUNTIME.app, methods=["GET", "POST", "DELETE"])
     )
+    app.router.routes.append(
+        Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
+    )
     mount_dashboard_ui(app)
     return app
 

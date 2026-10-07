@@ -2,7 +2,7 @@
 
 The model loop and the sandbox run here. The Open SWE backend prepares every
 run, holds every credential, and serves the reviewer's tools over MCP; this
-deployment reaches it with the run token Open SWE stamps on each run it starts.
+deployment reaches it with the run token Open SWE puts in each run's context.
 """
 
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
@@ -12,8 +12,9 @@ from managed_deepagents import (
     define_deep_agent,
     define_sandbox,
 )
+from open_swe_reviewer.backend import OpenSweBackend
 from open_swe_reviewer.middleware import BackendRunMiddleware, SubagentRunMiddleware
-from open_swe_reviewer.tools import reviewer_tools, runtime_spec
+from open_swe_reviewer.tools import runtime_spec, sandbox_tools
 from pydantic import BaseModel
 
 # Matches the in-process reviewer's cap on model calls per run.
@@ -23,6 +24,7 @@ _MODEL_CALL_LIMIT = 5_000
 class ReviewerRunContext(BaseModel):
     """What Open SWE dispatch passes as the run context."""
 
+    run_token: str | None = None
     snapshot_id: str | None = None
 
 
@@ -31,6 +33,7 @@ def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     context = ReviewerRunContext.model_validate(
         execution.context if execution is not None and execution.context is not None else {}
     )
+    backend = OpenSweBackend(context.run_token)
     subagent = runtime_spec()["subagent"]
     return define_deep_agent(
         name="reviewer",
@@ -38,7 +41,8 @@ def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # only backs deepagents' own summarization.
         model="anthropic:claude-opus-5-5",
         context_schema=ReviewerRunContext,
-        tools=reviewer_tools(),
+        tools=sandbox_tools(),
+        mcp=[backend.mcp()],
         # Boots from the workspace's snapshot, as Open SWE's own reviewer sandboxes do.
         sandbox=define_sandbox(snapshot_id=context.snapshot_id)
         if context.snapshot_id
@@ -55,7 +59,7 @@ def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             }
         ],
         middleware=[
-            BackendRunMiddleware(),
+            BackendRunMiddleware(backend),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],

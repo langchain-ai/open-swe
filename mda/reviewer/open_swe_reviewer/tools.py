@@ -1,10 +1,9 @@
-"""The reviewer's tools.
+"""The reviewer tools this deployment serves itself, because they act on its sandbox.
 
-Most are calls to the Open SWE backend as the current run. The ones that act on
-the sandbox run here, because this deployment owns it. Names, descriptions and
-argument schemas come from ``spec.json``, which the backend exports from its
-tools (``scripts/export_remote_reviewer_spec.py``), so the model sees exactly
-what the in-process reviewer shows it.
+Every other reviewer tool comes from the Open SWE backend through MDA's MCP
+support. Names, descriptions and the subagent prompts come from ``spec.json``,
+which the backend exports (``scripts/export_remote_reviewer_spec.py``), so the
+model sees exactly what the in-process reviewer shows it.
 """
 
 import json
@@ -13,15 +12,12 @@ from importlib.resources import files
 from typing import Final, TypedDict
 
 from langchain.tools import ToolRuntime
-from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langchain_core.tools import BaseTool, StructuredTool
 from managed_deepagents import ManagedToolRuntime
 from pydantic import JsonValue
 
-from open_swe_reviewer.backend import BackendCallError, call_backend
 from open_swe_reviewer.middleware import RunState, prepared_run
 
-# Long enough for publish_review, which posts the review and settles the check run.
-_TOOL_TIMEOUT_SECONDS: Final = 600.0
 _MAX_CHANGED_FILES: Final = 200
 _DIFF_FILE_HEADER_RE: Final = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+?)$")
 
@@ -39,7 +35,6 @@ class SubagentSpec(TypedDict):
 
 
 class RuntimeSpec(TypedDict):
-    tools: list[ToolSpec]
     sandbox_tools: list[ToolSpec]
     subagent: SubagentSpec
 
@@ -48,31 +43,6 @@ def runtime_spec() -> RuntimeSpec:
     text = files("open_swe_reviewer").joinpath("spec.json").read_text(encoding="utf-8")
     spec: RuntimeSpec = json.loads(text)
     return spec
-
-
-def _backend_tool(spec: ToolSpec) -> BaseTool:
-    name = spec["name"]
-
-    async def call(**arguments: JsonValue) -> JsonValue:
-        try:
-            result = await call_backend(name, arguments, timeout_seconds=_TOOL_TIMEOUT_SECONDS)
-        except BackendCallError as exc:
-            raise ToolException(
-                f"The Open SWE backend did not complete {name}: {exc}. "
-                "It may already have taken effect, so check before retrying."
-            ) from exc
-        content = result.get("content")
-        if result.get("status") == "error":
-            raise ToolException(content if isinstance(content, str) else json.dumps(content))
-        return content
-
-    return StructuredTool.from_function(
-        coroutine=call,
-        name=name,
-        description=spec["description"],
-        args_schema=spec["parameters"],
-        handle_tool_error=True,
-    )
 
 
 async def fetch_review_diff(runtime: ToolRuntime[None, RunState]) -> dict[str, JsonValue]:
@@ -111,17 +81,12 @@ async def fetch_review_diff(runtime: ToolRuntime[None, RunState]) -> dict[str, J
 _SANDBOX_TOOLS: Final = {"fetch_review_diff": fetch_review_diff}
 
 
-def _sandbox_tool(spec: ToolSpec) -> BaseTool:
-    return StructuredTool.from_function(
-        coroutine=_SANDBOX_TOOLS[spec["name"]],
-        name=spec["name"],
-        description=spec["description"],
-    )
-
-
-def reviewer_tools() -> list[BaseTool]:
-    spec = runtime_spec()
+def sandbox_tools() -> list[BaseTool]:
     return [
-        *(_backend_tool(tool) for tool in spec["tools"]),
-        *(_sandbox_tool(tool) for tool in spec["sandbox_tools"]),
+        StructuredTool.from_function(
+            coroutine=_SANDBOX_TOOLS[spec["name"]],
+            name=spec["name"],
+            description=spec["description"],
+        )
+        for spec in runtime_spec()["sandbox_tools"]
     ]

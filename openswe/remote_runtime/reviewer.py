@@ -9,7 +9,7 @@ the run the token names.
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Final, TypedDict
+from typing import Final, Literal, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -20,7 +20,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from openswe.github.thread_token import resolve_thread_github_token
 from openswe.middleware import check_message_queue_before_model, settle_review_check_on_exit
 from openswe.middleware.check_message_queue import LinearNotifyState
-from openswe.prompts import load_prompt
+from openswe.prompts import load_prompt, prompt
 from openswe.remote_runtime.tokens import RemoteRun
 from openswe.review.diff import compute_diff_line_set, review_diff_path, review_diff_range
 from openswe.reviewer import (
@@ -40,10 +40,11 @@ from openswe.store import get_value, put_value
 logger = logging.getLogger(__name__)
 
 ASSISTANT_ID: Final = "reviewer"
-PREPARE_HOOK: Final = "runtime__prepare_run"
-DRAIN_HOOK: Final = "runtime__drain_message_queue"
-SETTLE_HOOK: Final = "runtime__settle_review_check"
-RUNTIME_HOOKS: Final = frozenset({PREPARE_HOOK, DRAIN_HOOK, SETTLE_HOOK})
+PREPARE_HOOK: Final = "prepare"
+DRAIN_HOOK: Final = "drain"
+SETTLE_HOOK: Final = "settle"
+# The remote deployment names this MCP server; it exposes each tool as `{server}_{tool}`.
+MCP_SERVER_NAME: Final = "openswe"
 
 # Where the remote deployment checks the repository out in its own sandbox.
 REMOTE_WORK_DIR: Final = "/workspace"
@@ -72,11 +73,22 @@ class SubagentSpec(TypedDict):
 
 
 class RuntimeSpec(TypedDict):
-    """What the remote project binds at build time, exported to its ``spec.json``."""
+    """What the remote project binds at build time, exported to its ``spec.json``.
 
-    tools: list[ToolSpec]
+    The tools this backend serves reach the remote project over MCP instead.
+    """
+
     sandbox_tools: list[ToolSpec]
     subagent: SubagentSpec
+
+
+class UnknownHookError(LookupError):
+    """A remote graph called a run hook this backend does not serve."""
+
+
+class ToolResult(BaseModel):
+    status: Literal["success", "error"]
+    content: JsonValue
 
 
 class ModelSpec(BaseModel):
@@ -119,19 +131,28 @@ class _NodeState(BaseModel):
     done: bool = False
 
 
+def _tool_specs() -> dict[str, ToolSpec]:
+    return {
+        name: {"name": name, "description": tool.description, "parameters": tool_parameters(tool)}
+        for name, tool in ToolNode(reviewer_tools()).tools_by_name.items()
+    }
+
+
 def _tool_node() -> ToolNode:
     tools = ToolNode(reviewer_tools()).tools_by_name
     return ToolNode([tool for name, tool in tools.items() if name not in REMOTE_SANDBOX_TOOLS])
 
 
+def served_tools() -> list[ToolSpec]:
+    """The tools this backend serves to the remote deployment over MCP."""
+    return [spec for name, spec in _tool_specs().items() if name not in REMOTE_SANDBOX_TOOLS]
+
+
 def runtime_spec() -> RuntimeSpec:
-    specs: dict[str, ToolSpec] = {
-        name: {"name": name, "description": tool.description, "parameters": tool_parameters(tool)}
-        for name, tool in ToolNode(reviewer_tools()).tools_by_name.items()
-    }
     return {
-        "tools": [spec for name, spec in specs.items() if name not in REMOTE_SANDBOX_TOOLS],
-        "sandbox_tools": [spec for name, spec in specs.items() if name in REMOTE_SANDBOX_TOOLS],
+        "sandbox_tools": [
+            spec for name, spec in _tool_specs().items() if name in REMOTE_SANDBOX_TOOLS
+        ],
         "subagent": {
             "name": "reviewer",
             "description": load_prompt("reviewer/subagent-description.md"),
@@ -221,7 +242,8 @@ async def prepare_run(run: RemoteRun) -> PreparedRun:
     await put_value(_RUN_CONTEXT_NAMESPACE, run.thread_id, context.model_dump())
     models = await resolve_reviewer_models(cfg)
     return PreparedRun(
-        system_prompt=system_prompt,
+        system_prompt=f"{system_prompt}\n\n"
+        + prompt("reviewer/remote-tool-names", prefix=f"{MCP_SERVER_NAME}_"),
         work_dir=REMOTE_WORK_DIR,
         checkout=_checkout_spec(cfg, context.diff_text),
         model=_model_spec(models.main),
@@ -250,9 +272,7 @@ async def _tool_state(run: RemoteRun) -> PrepareReviewerRunState:
     return state
 
 
-async def call_tool(
-    run: RemoteRun, name: str, arguments: Mapping[str, JsonValue]
-) -> dict[str, JsonValue]:
+async def call_tool(run: RemoteRun, name: str, arguments: Mapping[str, JsonValue]) -> ToolResult:
     node = _tool_node()
     tool = node.tools_by_name.get(name)
     if tool is None:
@@ -266,13 +286,15 @@ async def call_tool(
         # This replica did not prepare the run, so it holds no token for the thread yet.
         await ensure_reviewer_github_token(run.thread_id, cfg)
     # ty does not yet treat TypedDict classes as LangGraph's TypedDictLike state bound.
-    return await invoke_tool_node(
-        node,
-        PrepareReviewerRunState,  # ty: ignore[invalid-argument-type]
-        await _tool_state(run),
-        config,
-        name,
-        arguments,
+    return ToolResult.model_validate(
+        await invoke_tool_node(
+            node,
+            PrepareReviewerRunState,  # ty: ignore[invalid-argument-type]
+            await _tool_state(run),
+            config,
+            name,
+            arguments,
+        )
     )
 
 
@@ -295,14 +317,12 @@ async def settle_review_check(run: RemoteRun) -> dict[str, JsonValue]:
     return {"settled": True}
 
 
-async def call(
-    run: RemoteRun, name: str, arguments: Mapping[str, JsonValue]
-) -> dict[str, JsonValue]:
-    """Answer one tool server call for a reviewer run: a run hook or a model's tool call."""
-    if name == PREPARE_HOOK:
+async def run_hook(run: RemoteRun, hook: str) -> JsonValue:
+    """Answer one run hook the remote graph calls around its model loop."""
+    if hook == PREPARE_HOOK:
         return _json.validate_python((await prepare_run(run)).model_dump())
-    if name == DRAIN_HOOK:
+    if hook == DRAIN_HOOK:
         return await drain_message_queue(run)
-    if name == SETTLE_HOOK:
+    if hook == SETTLE_HOOK:
         return await settle_review_check(run)
-    return await call_tool(run, name, arguments)
+    raise UnknownHookError(hook)

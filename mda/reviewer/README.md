@@ -1,12 +1,13 @@
 # Reviewer on Managed Deep Agents
 
-Open SWE's pull request reviewer packaged as a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project. The model loop, its checkpoints and its sandbox run here. The Open SWE backend keeps everything else and serves it over MCP at `/remote-runtime/mcp`:
+Open SWE's pull request reviewer packaged as a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project. The model loop, its checkpoints and its sandbox run here. The Open SWE backend keeps everything else:
 
-- run preparation (diff, rendered review prompt, model choice)
-- every reviewer tool except `fetch_review_diff`, which writes into this deployment's sandbox
-- the follow-up queue and the check-run settle
+- the reviewer tools, an MCP server at `/remote-runtime/mcp` that the factory attaches with MDA's MCP support; MDA names them `openswe_{tool}`, and the prepared prompt says so
+- run hooks at `POST /remote-runtime/hooks/{prepare,drain,settle}`: run preparation (diff, rendered review prompt, model choice), the follow-up queue and the check-run settle
 
-Dispatch signs a run token into each reviewer run it starts here, and every call back presents it. The backend reads the thread, repository and pull request from the token, never from tool arguments. This deployment holds no GitHub, Slack or database credentials.
+`fetch_review_diff` runs here because it writes into this deployment's sandbox.
+
+Dispatch signs a run token into the context of each reviewer run it starts here, and every call back presents it. The backend reads the thread, repository and pull request from the token, never from tool arguments. This deployment holds no GitHub, Slack or database credentials.
 
 MDA creates the sandbox. The factory in `agent.py` boots it from the workspace snapshot that dispatch passes as the run's `snapshot_id` context, and the run's first step clones the pull request's repository into `/workspace` and writes the review diff there. Only public repositories are supported: the clone is unauthenticated.
 
@@ -40,4 +41,4 @@ mda build
 mda deploy --name open-swe-reviewer
 ```
 
-`open_swe_reviewer/spec.json` holds the tool schemas and subagent prompts this project binds at build time. The backend exports it from its reviewer tools; after changing a reviewer tool or the subagent prompts, run `uv run python -m scripts.export_remote_reviewer_spec` from the repository root. A test fails while it is stale.
+`open_swe_reviewer/spec.json` holds the subagent prompts and the description of `fetch_review_diff`, which this project binds at build time. The backend exports it; after changing `fetch_review_diff` or the subagent prompts, run `uv run python -m scripts.export_remote_reviewer_spec` from the repository root. A test fails while it is stale.

@@ -14,10 +14,6 @@ from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from openswe.config import ENV
 
-# The dunder prefix keeps the token out of LangSmith run metadata, which copies every
-# other scalar configurable value.
-RUNTIME_TOKEN_CONFIG_KEY: Final = "__open_swe_runtime_token__"
-
 _ISSUER: Final = "open-swe"
 _AUDIENCE: Final = "open-swe-remote-runtime"
 _ALGORITHM: Final = "HS256"

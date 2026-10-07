@@ -8,12 +8,7 @@ from langgraph_sdk.client import LangGraphClient
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.config import ENV
-from openswe.remote_runtime.tokens import (
-    RUNTIME_TOKEN_CONFIG_KEY,
-    RemoteRun,
-    runtime_tokens_configured,
-    sign_runtime_token,
-)
+from openswe.remote_runtime.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import SandboxCreateConfig
 
@@ -23,6 +18,7 @@ _configurable = TypeAdapter(dict[str, JsonValue])
 class RemoteRunContext(TypedDict):
     """The run context a remote deployment builds its graph from."""
 
+    run_token: str
     snapshot_id: NotRequired[str]
 
 
@@ -53,25 +49,19 @@ def remote_runtime_client(assistant_id: str) -> LangGraphClient | None:
     return get_client(url=url.rstrip("/"), api_key=ENV.REVIEWER_RUNTIME_API_KEY.optional())
 
 
-async def remote_run_context(configurable: dict[str, JsonValue]) -> RemoteRunContext:
-    """The workspace snapshot the remote deployment boots this run's sandbox from."""
-    sandbox = await SandboxCreateConfig.resolve(RunConfig.parse(configurable).workspace_slug)
-    context: RemoteRunContext = {}
-    if sandbox.snapshot_id:
-        context["snapshot_id"] = sandbox.snapshot_id
-    return context
-
-
-def stamp_runtime_token(
+async def remote_run_context(
     configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
-) -> dict[str, JsonValue]:
-    """Return ``configurable`` with the signed token its remote run presents to the tool server."""
-    claims = {key: value for key, value in configurable.items() if key != RUNTIME_TOKEN_CONFIG_KEY}
+) -> RemoteRunContext:
+    """The run token the remote run calls back with, and the snapshot its sandbox boots from."""
     token = sign_runtime_token(
         RemoteRun(
             thread_id=thread_id,
             assistant_id=assistant_id,
-            configurable=_configurable.validate_python(claims),
+            configurable=_configurable.validate_python(configurable),
         )
     )
-    return {**claims, RUNTIME_TOKEN_CONFIG_KEY: token}
+    sandbox = await SandboxCreateConfig.resolve(RunConfig.parse(configurable).workspace_slug)
+    context: RemoteRunContext = {"run_token": token}
+    if sandbox.snapshot_id:
+        context["snapshot_id"] = sandbox.snapshot_id
+    return context
