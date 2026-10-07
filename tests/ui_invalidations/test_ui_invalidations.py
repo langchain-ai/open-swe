@@ -4,12 +4,12 @@ from contextlib import aclosing
 
 from sqlalchemy import text
 
-from agent.database import postgres
-from agent.database.notifications import LISTENER
-from agent.ui_invalidations import Topic, outbox
-from agent.ui_invalidations.hub import HUB
-from agent.ui_invalidations.routes import _stream
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
+from openswe.database import postgres
+from openswe.database.notifications import LISTENER
+from openswe.ui_invalidations import Topic, outbox
+from openswe.ui_invalidations.hub import HUB
+from openswe.ui_invalidations.routes import _stream
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 
 def _parse(frame: str) -> tuple[str, dict[str, object]]:

@@ -18,16 +18,16 @@ Follow [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local startup, tunnel conf
 
 | Graph | Entrypoint | Implementation |
 |---|---|---|
-| `agent` | `agent.graphs.agent:traced_agent` | `agent/server.py` |
-| `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | `agent/reviewer.py` |
-| `analyzer` | `agent.graphs.analyzer:traced_analyzer` | `agent/analyzer.py` |
-| `review-scout` | `agent.graphs.review_scout:traced_review_scout` | `agent/review_scout/graph.py` |
-| `chat` | `agent.graphs.chat:traced_chat_agent` | `agent/chat.py` |
-| `scheduler` | `agent.graphs.scheduler:get_scheduler` | `agent/scheduler.py` |
+| `agent` | `openswe.graphs.agent:traced_agent` | `openswe/server.py` |
+| `reviewer` | `openswe.graphs.reviewer:traced_reviewer_agent` | `openswe/reviewer.py` |
+| `analyzer` | `openswe.graphs.analyzer:traced_analyzer` | `openswe/analyzer.py` |
+| `review-scout` | `openswe.graphs.review_scout:traced_review_scout` | `openswe/review_scout/graph.py` |
+| `chat` | `openswe.graphs.chat:traced_chat_agent` | `openswe/chat.py` |
+| `scheduler` | `openswe.graphs.scheduler:get_scheduler` | `openswe/scheduler.py` |
 
-The FastAPI app is `agent.webapp:app`. `agent/dashboard/routes.py` only aggregates routers under `/dashboard/api`: each feature package (`agent/threads/`, `agent/review/`, `agent/workspaces/`, `agent/schedules/`, `agent/skill_store/`, `agent/mcp/`, `agent/slack/`, `agent/analytics/`, `agent/incidents/`, `agent/github/`, `agent/bridge/`) exposes its own `router`, and `agent/dashboard/` keeps auth, session, and per-user/team settings. New endpoints go in the package that owns the feature, never in `routes.py`.
+The FastAPI app is `openswe.webapp:app`. `openswe/dashboard/routes.py` only aggregates routers under `/dashboard/api`: each feature package (`openswe/threads/`, `openswe/review/`, `openswe/workspaces/`, `openswe/schedules/`, `openswe/skill_store/`, `openswe/mcp/`, `openswe/slack/`, `openswe/analytics/`, `openswe/incidents/`, `openswe/github/`, `openswe/bridge/`) exposes its own `router`, and `openswe/dashboard/` keeps auth, session, and per-user/team settings. New endpoints go in the package that owns the feature, never in `routes.py`.
 
-The main agent is assembled in `agent/server.py` from the middleware in `agent/middleware/`, with tools from `agent/tools/` and sandboxes from `agent/sandboxes/`.
+The main agent is assembled in `openswe/server.py` from the middleware in `openswe/middleware/`, with tools from `openswe/tools/` and sandboxes from `openswe/sandboxes/`.
 
 ## Conventions
 
@@ -35,7 +35,7 @@ The main agent is assembled in `agent/server.py` from the middleware in `agent/m
 - Use strong types everywhere, in both Python and TypeScript. Prefer precise types, type aliases, TypedDicts/dataclasses/Pydantic models (Python) or interfaces/`satisfies` (TypeScript), and Literal/enum types over loose ones. Never use `Any` (Python) or `any` (TypeScript) — strongly discouraged even when it would be convenient; if a value's shape is dynamic, type it with a union, a generic, a protocol, or `object`/`unknown` plus narrowing instead. Widening a parameter or return type to `Any`/`any` is not acceptable to silence a type error. Expanding the scope of a PR to add or fix types is worth it.
 - Put behavior on the object it acts on. Before adding a module-level function, name the object it works on: if that class exists, add a method or classmethod; if several functions pass the same value around (a request, a client, a `(backend, repo_dir)` pair), that value is a missing class. Keep free functions for framework entrypoints (FastAPI routes, LangGraph nodes, tool implementations) and helpers spanning unrelated types. A new class must own real state, never be a bag of arguments.
 - Use absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
-- Keep model-facing prompts (system prompts, tool descriptions, agent wake-up prompts) in Markdown files under `agent/resources/prompts/` and render them with `prompt("<dir>/<name>")`, which uses `<name>.md.jinja` (Jinja for variables and conditional sections) when it exists and otherwise loads static `<name>.md` without substitutions; never inline prompt text in Python. This applies to instructions sent to the model, not ordinary user-facing copy: UI labels, Slack button/modal text, and Slack or GitHub notifications may remain inline.
+- Keep model-facing prompts (system prompts, tool descriptions, agent wake-up prompts) in Markdown files under `openswe/resources/prompts/` and render them with `prompt("<dir>/<name>")`, which uses `<name>.md.jinja` (Jinja for variables and conditional sections) when it exists and otherwise loads static `<name>.md` without substitutions; never inline prompt text in Python. This applies to instructions sent to the model, not ordinary user-facing copy: UI labels, Slack button/modal text, and Slack or GitHub notifications may remain inline.
 - Keep comments minimal and only explain non-obvious reasons.
 - For Slack interactions, prefer @mentions with plain-language requests and buttons for explicit actions. Keep typed commands, including slash commands, as optional shortcuts; never make them the only way to perform an action.
 - Make user-initiated UI mutations optimistic by default: update the visible state immediately, roll it back on failure, and show an error toast. Use a non-optimistic flow when an immediate update would be unsafe or misleading.

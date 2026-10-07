@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langsmith.sandbox import SandboxClientError, SandboxRetryableConnectionError
 
-from agent.sandboxes.retry import (
+from openswe.sandboxes.retry import (
     MAX_TRANSIENT_ATTEMPTS,
     is_transient_sandbox_error,
     retry_transient_sandbox_errors,
@@ -32,7 +32,7 @@ async def test_a_gateway_blip_is_retried_until_it_clears() -> None:
             raise _transient()
         return "ok"
 
-    with patch("agent.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+    with patch("openswe.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
         result = await retry_transient_sandbox_errors(operation, description="test")
 
     assert result == "ok"
@@ -58,7 +58,7 @@ async def test_retries_are_bounded() -> None:
     operation = AsyncMock(side_effect=_transient())
 
     with (
-        patch("agent.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock),
+        patch("openswe.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock),
         pytest.raises(SandboxRetryableConnectionError),
     ):
         await retry_transient_sandbox_errors(operation, description="test")
@@ -77,7 +77,7 @@ async def test_elapsed_budget_allows_more_than_default_attempts() -> None:
             raise _transient()
         return "ok"
 
-    with patch("agent.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock):
+    with patch("openswe.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock):
         result = await retry_transient_sandbox_errors(
             operation,
             description="test",

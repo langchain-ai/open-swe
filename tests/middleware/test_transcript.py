@@ -14,10 +14,10 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langchain_core.outputs import ChatGenerationChunk
 from langgraph.prebuilt.tool_node import ToolCallRequest
 
-from agent.input_messages import build_input_messages
-from agent.middleware import transcript as mw
-from agent.transcript.engine import Command, append
-from agent.transcript.events import (
+from openswe.input_messages import build_input_messages
+from openswe.middleware import transcript as mw
+from openswe.transcript.engine import Command, append
+from openswe.transcript.events import (
     MessageSender,
     MessageUsage,
     ThreadCreated,
@@ -25,8 +25,8 @@ from agent.transcript.events import (
     TurnFailed,
     TurnRequested,
 )
-from agent.transcript.rebuild import rebuild_thread_projections
-from agent.transcript.snapshot import load_events, load_snapshot
+from openswe.transcript.rebuild import rebuild_thread_projections
+from openswe.transcript.snapshot import load_events, load_snapshot
 
 THREAD_ID = "thread-under-test"
 RUN_ID = "run-under-test"

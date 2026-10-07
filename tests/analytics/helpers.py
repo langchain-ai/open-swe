@@ -3,8 +3,8 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from agent.analytics.events import EventName, RunStartedPayload, make_event
-from agent.database import analytics as database
+from openswe.analytics.events import EventName, RunStartedPayload, make_event
+from openswe.database import analytics as database
 
 DAY = datetime(2026, 9, 7, tzinfo=UTC)
 

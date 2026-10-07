@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from deepagents.backends import LocalShellBackend
 
-from agent.sandboxes import handoff
+from openswe.sandboxes import handoff
 
 
 def _git(cwd: Path, script: str) -> str:

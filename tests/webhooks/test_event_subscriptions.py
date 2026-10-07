@@ -7,16 +7,16 @@ from pydantic import JsonValue
 from sqlalchemy import text
 from starlette.requests import Request
 
-from agent.database import transaction
-from agent.github.comments import (
+from openswe.database import transaction
+from openswe.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
 )
-from agent.slack.channels import SlackChannel
-from agent.webhooks import event_log
-from agent.webhooks.event_log import EventLog, EventRefs
-from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
-from agent.webhooks.event_subscriptions import EventSubscription
+from openswe.slack.channels import SlackChannel
+from openswe.webhooks import event_log
+from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
+from openswe.webhooks.event_subscriptions import EventSubscription
 
 _THREAD = "thread-1"
 

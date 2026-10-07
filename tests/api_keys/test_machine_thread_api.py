@@ -6,12 +6,12 @@ from typing import Any
 import pytest
 from fastapi import HTTPException
 
-from agent.api_keys.models import ApiKey
-from agent.federation.github_oidc import GitHubActionsClaims
-from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
-from agent.threads import runs
-from agent.threads.principals import Principal
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.api_keys.models import ApiKey
+from openswe.federation.github_oidc import GitHubActionsClaims
+from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.threads import runs
+from openswe.threads.principals import Principal
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _FakeThreads:

@@ -6,11 +6,11 @@ import httpx2
 import pytest
 from langgraph_sdk.errors import ConflictError
 
-from agent import baby_sit
-from agent import store as agent_store
-from agent.github.ci import RequiredCheck
-from agent.slack.client import GitHubPrRef
-from agent.source_context import SourceContext
+from openswe import baby_sit
+from openswe import store as agent_store
+from openswe.github.ci import RequiredCheck
+from openswe.slack.client import GitHubPrRef
+from openswe.source_context import SourceContext
 
 
 class _Store:
