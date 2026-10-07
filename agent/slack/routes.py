@@ -58,6 +58,7 @@ from agent.slack.solo_threads import allow_solo_thread_followup
 from agent.slack.thread_feedback import handle_slack_feedback_interaction, is_slack_feedback_payload
 from agent.users import User
 from agent.utils.json_types import JsonObject
+from agent.utils.message_commands import PERFORMANCE_COMMAND, find_message_command
 from agent.utils.thread_ops import langgraph_client as get_langgraph_client
 from agent.webhooks import common
 from agent.webhooks.event_log import EventLog, EventRefs
@@ -540,11 +541,17 @@ async def slack_webhook(
     explicit_mention = bool(
         event.type == "app_mention" or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
+    performance_requested = bool(
+        not is_message_update
+        and allowed_bot is None
+        and find_message_command(PERFORMANCE_COMMAND, text)
+    )
     leading_mention = re.match(r"\s*<@([^>]+)>", text)
     if (
         not in_code_channel
         and not in_dm_channel
         and allowed_bot is None
+        and not performance_requested
         and leading_mention
         and leading_mention.group(1) != bot_user_id
     ):
@@ -576,6 +583,7 @@ async def slack_webhook(
         )
     if not (
         explicit_mention
+        or performance_requested
         or is_message_update
         or in_code_channel
         or (
