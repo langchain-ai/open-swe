@@ -8,7 +8,7 @@ export const Route = createFileRoute("/my-settings_/agent")({
   component: () => (
     <SettingsPage
       title="Agent"
-      description="Personal preferences for agent runs. Model selection is configured per thread."
+      description="Personal preferences and standing instructions for agent runs. Model selection is configured per thread."
     >
       <AgentSettings />
     </SettingsPage>

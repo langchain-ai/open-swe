@@ -56,11 +56,6 @@ const NAV: Array<NavGroup> = [
       { to: "/my-settings/agent", label: "Agent", icon: SparkleIcon },
       { to: "/my-settings/git", label: "Git", icon: GitBranchIcon },
       {
-        to: "/my-settings/instructions",
-        label: "Instructions",
-        icon: ArticleRegularIcon,
-      },
-      {
         to: "/my-settings/connections",
         label: "Connections",
         icon: LinkIcon,
