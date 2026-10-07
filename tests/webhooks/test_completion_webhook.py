@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent import completion
-from agent.slack import thinking as slack_thinking
-from agent.tasks import events, store
-from agent.threads import runs
+from openswe import completion
+from openswe.slack import thinking as slack_thinking
+from openswe.tasks import events, store
+from openswe.threads import runs
 from tests.conftest import FakeStore
 
 

@@ -7,15 +7,15 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from agent.api_keys.models import ApiKey
-from agent.audit_logs import middleware, store
-from agent.audit_logs.context import current_audit_log
-from agent.audit_logs.middleware import AuditLogMiddleware
-from agent.audit_logs.models import AuditLog, AuditLogEnrichments, AuditLogsCursor
-from agent.audit_logs.routes import router
-from agent.dashboard import deps, oauth, workspace_settings
-from agent.threads.principals import PrincipalDep
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.api_keys.models import ApiKey
+from openswe.audit_logs import middleware, store
+from openswe.audit_logs.context import current_audit_log
+from openswe.audit_logs.middleware import AuditLogMiddleware
+from openswe.audit_logs.models import AuditLog, AuditLogEnrichments, AuditLogsCursor
+from openswe.audit_logs.routes import router
+from openswe.dashboard import deps, oauth, workspace_settings
+from openswe.threads.principals import PrincipalDep
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
 
 

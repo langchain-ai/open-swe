@@ -9,13 +9,13 @@ from fastapi import HTTPException
 from langgraph_sdk.errors import ConflictError
 from pydantic import ValidationError
 
-from agent import store as agent_store
-from agent.dashboard import repo_access
-from agent.dashboard.options import fable_disabled_fallback
-from agent.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
-from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
-from agent.schedules import store as schedules
-from agent.schedules.store import (
+from openswe import store as agent_store
+from openswe.dashboard import repo_access
+from openswe.dashboard.options import fable_disabled_fallback
+from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.schedules import store as schedules
+from openswe.schedules.store import (
     GitHubTrigger,
     LinearTrigger,
     ScheduleCreateBody,
@@ -23,8 +23,8 @@ from agent.schedules.store import (
     ScheduleUpdateBody,
     SlackTrigger,
 )
-from agent.slack.payloads import SlackChannelContext, SlackEventEnvelope
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"
 SCHED_2 = "22222222-2222-4222-8222-222222222222"
@@ -1051,10 +1051,10 @@ async def test_system_schedule_can_run_without_user_credentials(
 async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     fake_client, auth, monkeypatch
 ) -> None:  # noqa: ANN001, ARG001
-    from agent import server
-    from agent.run_config import RunConfig
-    from agent.tools import automations, organization_skills, workspaces
-    from agent.users import User
+    from openswe import server
+    from openswe.run_config import RunConfig
+    from openswe.tools import automations, organization_skills, workspaces
+    from openswe.users import User
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value=None))
@@ -1068,8 +1068,8 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     await _seed(fake_client, record)
     await schedules.launch_scheduled_agent_run(record["id"])
     run_config = fake_client.runs.created[0]["config"]
-    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
-    monkeypatch.setattr("agent.tools.access.langgraph_sdk.get_client", lambda: fake_client)
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
+    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: fake_client)
 
     assert await server._admin_thread(run_config, None) is True
     assert RunConfig.from_config(run_config).github_login is None

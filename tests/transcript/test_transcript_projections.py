@@ -7,8 +7,8 @@ ending settles on — only exist against a real schema.
 
 from uuid import UUID, uuid7
 
-from agent.transcript.engine import Command, append
-from agent.transcript.events import (
+from openswe.transcript.engine import Command, append
+from openswe.transcript.events import (
     MessageSender,
     ThreadCreated,
     TurnCheckpointCompleted,
@@ -17,7 +17,7 @@ from agent.transcript.events import (
     TurnRequested,
     TurnStarted,
 )
-from agent.transcript.snapshot import load_events, load_snapshot
+from openswe.transcript.snapshot import load_events, load_snapshot
 
 
 async def _create(thread_id: str) -> None:

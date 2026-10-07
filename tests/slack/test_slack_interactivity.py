@@ -6,8 +6,8 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.slack import routes as slack_routes
-from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
+from openswe.slack import routes as slack_routes
+from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 
 
 def _request(payload: dict[str, Any]) -> Request:

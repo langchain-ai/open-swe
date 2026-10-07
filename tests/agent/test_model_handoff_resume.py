@@ -10,11 +10,11 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.pregel import Pregel
 
-import agent.server as server
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.middleware.model_selection import ModelSelectionMiddleware
-from agent.tools.access import Access
-from agent.utils.thread_settings import ThreadSettings
+import openswe.server as server
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.middleware.model_selection import ModelSelectionMiddleware
+from openswe.tools.access import Access
+from openswe.utils.thread_settings import ThreadSettings
 
 
 @pytest.fixture

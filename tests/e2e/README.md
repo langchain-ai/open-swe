@@ -14,7 +14,7 @@ code runs for real.
 
 | Piece                                                            | Real or fake                                                               |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Slack webhook → `process_slack_mention` → run dispatch           | **real** (`agent.webapp`)                                                  |
+| Slack webhook → `process_slack_mention` → run dispatch           | **real** (`openswe.webapp`)                                                  |
 | `get_agent`, deepagents loop, tools, middleware, prompt          | **real**                                                                   |
 | `open_pull_request`, `slack_reply` tools                  | **real**                                                                   |
 | Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
@@ -44,7 +44,7 @@ so what Playwright asserts on is exactly what the real agent produced.
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
 - `agent_entrypoint.py` — langgraph `agent` graph: applies patches, re-exports the
   real `traced_agent`.
-- `harness.py` — langgraph `http.app`: the real `agent.webapp` plus the fake
+- `harness.py` — langgraph `http.app`: the real `openswe.webapp` plus the fake
   GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
 - `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote. PR
   files carry a real per-file `patch`, so eligibility checks that read the diff

@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agent.analytics import distance
-from agent.analytics.distance import _insert_delete_distance, _patch_lines
+from openswe.analytics import distance
+from openswe.analytics.distance import _insert_delete_distance, _patch_lines
 
 
 def test_patch_lines_rejects_incomplete_text_patch():
