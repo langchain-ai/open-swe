@@ -45,6 +45,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 export function PlanReview({ plan }: { plan: PlanData }) {
   const [comments, setComments] = useState<Array<PlanComment>>([])
   const [anchor, setAnchor] = useState<PlanTextAnchor | null>(null)
+  const [generalComment, setGeneralComment] = useState(false)
   const [draft, setDraft] = useState("")
   const [posting, setPosting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -57,6 +58,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
   const [copied, setCopied] = useState(false)
   const commentRefs = useRef(new Map<string, HTMLElement>())
   const commentMutation = useRef(0)
+  const pendingComment = useRef<string | null>(null)
   const format = plan.html.trim() ? "html" : "markdown"
   const content = format === "html" ? plan.html : plan.markdown
   const canComment = format === "html"
@@ -67,7 +69,11 @@ export function PlanReview({ plan }: { plan: PlanData }) {
       const mutation = commentMutation.current
       try {
         const next = await getPlanComments(plan.threadId)
-        if (!cancelled && mutation === commentMutation.current)
+        if (
+          !cancelled &&
+          !pendingComment.current &&
+          mutation === commentMutation.current
+        )
           setComments(next)
       } catch {
         /* next poll retries */
@@ -83,23 +89,42 @@ export function PlanReview({ plan }: { plan: PlanData }) {
 
   const submitComment = useCallback(async () => {
     const body = draft.trim()
-    if (!body || !anchor) return
+    if (!body || pendingComment.current) return
+    const id = crypto.randomUUID()
+    pendingComment.current = id
     setPosting(true)
     setError(null)
     commentMutation.current += 1
+    setComments((current) => [
+      ...current,
+      {
+        id,
+        body,
+        anchor,
+        author: plan.user.name,
+        author_login: plan.user.login,
+        created_at: new Date().toISOString(),
+      },
+    ])
     try {
       const created = await addPlanComment(plan.threadId, body, anchor)
-      setComments((current) => [...current, created])
+      setComments((current) =>
+        current.map((comment) => (comment.id === id ? created : comment))
+      )
       setSubmitted(false)
       setAnchor(null)
+      setGeneralComment(false)
       setDraft("")
       setFocusComment({ id: created.id, key: Date.now() })
     } catch (commentError) {
-      setError((commentError as Error).message)
+      setComments((current) => current.filter((comment) => comment.id !== id))
+      reportError({ title: "Couldn't add comment", error: commentError })
     } finally {
+      pendingComment.current = null
+      commentMutation.current += 1
       setPosting(false)
     }
-  }, [anchor, draft, plan.threadId])
+  }, [anchor, draft, plan.threadId, plan.user.name, plan.user.login])
 
   const handleCommentKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -196,7 +221,9 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                 <PlanArtifactFrame
                   html={content}
                   comments={comments}
-                  onTextSelected={canComment ? setAnchor : undefined}
+                  onTextSelected={
+                    canComment && !posting ? setAnchor : undefined
+                  }
                   onCommentSelected={openComment}
                   focusCommentId={focusComment?.id ?? null}
                   focusCommentKey={focusComment?.key ?? 0}
@@ -207,22 +234,38 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   className="flex max-h-1/2 shrink-0 flex-col overflow-y-auto border-t border-border bg-background/95 @3xl:max-h-none @3xl:w-80 @3xl:border-t-0 @3xl:border-l"
                 >
                   <div className="border-b border-border p-3">
-                    <h2 className="text-sm font-semibold">Comments</h2>
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-sm font-semibold">Comments</h2>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={posting}
+                        onClick={() => {
+                          setAnchor(null)
+                          setGeneralComment(true)
+                        }}
+                      >
+                        Add comment
+                      </Button>
+                    </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Highlight text in the preview to comment.
+                      Add a general comment or highlight text to annotate.
                     </p>
                   </div>
-                  {anchor && (
+                  {(anchor || generalComment) && (
                     <div
                       data-testid="comment-composer"
                       className="border-b border-border bg-muted/30 p-3"
                     >
-                      <blockquote className="line-clamp-3 border-l-2 border-primary pl-2 text-xs text-muted-foreground">
-                        {anchor.exact}
-                      </blockquote>
+                      {anchor && (
+                        <blockquote className="line-clamp-3 border-l-2 border-primary pl-2 text-xs text-muted-foreground">
+                          {anchor.exact}
+                        </blockquote>
+                      )}
                       <textarea
                         data-testid="comment-input"
                         value={draft}
+                        disabled={posting}
                         onChange={(event) => setDraft(event.target.value)}
                         onKeyDown={handleCommentKeyDown}
                         placeholder="Leave a comment"
@@ -237,6 +280,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                           disabled={posting}
                           onClick={() => {
                             setAnchor(null)
+                            setGeneralComment(false)
                             setDraft("")
                           }}
                         >
@@ -297,16 +341,17 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                                 {comment.body}
                               </span>
                             </button>
-                            {comment.author_login === plan.user.login && (
-                              <button
-                                type="button"
-                                data-testid="comment-delete"
-                                className="mt-2 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                                onClick={() => void removeComment(comment.id)}
-                              >
-                                Delete
-                              </button>
-                            )}
+                            {comment.author_login === plan.user.login &&
+                              !posting && (
+                                <button
+                                  type="button"
+                                  data-testid="comment-delete"
+                                  className="mt-2 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                  onClick={() => void removeComment(comment.id)}
+                                >
+                                  Delete
+                                </button>
+                              )}
                           </article>
                         ))}
                       </div>
