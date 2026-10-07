@@ -10,7 +10,7 @@ Dispatch signs a run token into each reviewer run it starts here, and every call
 
 The sandbox is the backend's. This project declares no `sandbox/`; its `FilesystemMiddleware` replaces deepagents' default by name and attaches to the sandbox the backend prepared, so file and shell calls go straight to it.
 
-This directory is its own project and is never imported by the backend. Don't add it to the backend's `sys.path`: its `agent.py` shadows the backend's `agent` namespace package.
+This directory is its own project and is never imported by the backend.
 
 ## Configure
 

@@ -5,9 +5,9 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github import pull_request_actions as actions
-from agent.github import pull_request_dashboard_routes as pr_routes
-from agent.github import squash_message
+from openswe.github import pull_request_actions as actions
+from openswe.github import pull_request_dashboard_routes as pr_routes
+from openswe.github import squash_message
 
 
 @asynccontextmanager

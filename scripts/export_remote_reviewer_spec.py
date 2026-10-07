@@ -8,7 +8,7 @@ Run after changing a reviewer tool's signature or description, or the reviewer s
 import json
 from pathlib import Path
 
-from agent.remote_runtime.reviewer import runtime_spec
+from openswe.remote_runtime.reviewer import runtime_spec
 
 SPEC_PATH = Path(__file__).resolve().parents[1] / "mda/reviewer/open_swe_reviewer/spec.json"
 

@@ -1,7 +1,7 @@
 import { GitPullRequestIcon } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
 
-import { cn } from "@/lib/utils"
+import { cn, formatRelativeTime } from "@/lib/utils"
 
 const STATE_STYLES: Record<string, string> = {
   open: "border-emerald-600/40 text-emerald-500",
@@ -18,6 +18,8 @@ export interface PrHeaderProps {
   baseRef: string
   number?: number | null
   author?: string | null
+  createdAt?: string | null
+  mergedAt?: string | null
   stats?: {
     changedFiles: number
     additions: number
@@ -36,6 +38,8 @@ export function PrHeader({
   baseRef,
   number,
   author,
+  createdAt,
+  mergedAt,
   stats,
   className,
   titleClassName,
@@ -120,6 +124,30 @@ export function PrHeader({
           </>
         )}
       </div>
+      {(createdAt || mergedAt) && (
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          {(
+            [
+              ["Opened", createdAt],
+              ["Merged", mergedAt],
+            ] as const
+          ).map(
+            ([label, value]) =>
+              value && (
+                <span key={label}>
+                  {label}{" "}
+                  <time
+                    dateTime={value}
+                    title={new Date(value).toLocaleString()}
+                    suppressHydrationWarning
+                  >
+                    {formatRelativeTime(new Date(value).getTime())}
+                  </time>
+                </span>
+              )
+          )}
+        </div>
+      )}
     </div>
   )
 }

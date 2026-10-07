@@ -30,7 +30,6 @@
     "asarUnpack": [
       "node_modules/node-pty/**/*"
     ],
-    "afterSign": "build/notarize.cjs",
     "npmRebuild": true,
     "icon": "resources/icon.png",
     "directories": {
@@ -118,7 +117,6 @@
   "license": "MIT",
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
-    "@electron/notarize": "3.1.1",
     "@types/node": "26.6.3",
     "electron": "44.4.5",
     "electron-builder": "26.15.3",

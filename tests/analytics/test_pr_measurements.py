@@ -11,8 +11,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from agent.analytics import ingestion, outbox, queries, retention, revisions, usage
-from agent.analytics.events import (
+from openswe.analytics import ingestion, outbox, queries, retention, revisions, usage
+from openswe.analytics.events import (
     EventEnvelope,
     EventName,
     PRDistanceMeasuredPayload,
@@ -22,8 +22,8 @@ from agent.analytics.events import (
     make_event,
     subject_uuid,
 )
-from agent.analytics.measurements import PRDistanceConflictError, restore_pr_distance
-from agent.database import postgres
+from openswe.analytics.measurements import PRDistanceConflictError, restore_pr_distance
+from openswe.database import postgres
 
 Transaction = Callable[[], AbstractAsyncContextManager[AsyncConnection]]
 Database = tuple[UUID, Transaction]

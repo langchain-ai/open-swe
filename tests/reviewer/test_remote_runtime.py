@@ -4,8 +4,8 @@ import jwt
 import pytest
 from starlette.types import Message, Receive, Scope, Send
 
-from agent.remote_runtime.server import RunTokenMiddleware
-from agent.remote_runtime.tokens import (
+from openswe.remote_runtime.server import RunTokenMiddleware
+from openswe.remote_runtime.tokens import (
     RemoteRun,
     RuntimeTokenError,
     sign_runtime_token,
