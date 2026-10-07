@@ -215,6 +215,7 @@ from agent.tools import (
     output_iframe,
     publish_workspace,
     read_only_sql,
+    read_store_item,
     read_user_settings,
     recreate_sandbox,
     refresh_workspace_start,
@@ -1772,6 +1773,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
         read_only_sql,
+        read_store_item,
         manage_feature_flags,
         manage_review_approval_mode,
     ]
