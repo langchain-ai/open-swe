@@ -62,11 +62,7 @@ from openswe.utils.thread_ops import (
     langgraph_client,
     queue_message_for_thread,
 )
-from openswe.utils.thread_participants import (
-    PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    merge_participants,
-)
+from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.utils.thread_settings import THREAD_SETTINGS_KEY, thread_model_choice
 from openswe.utils.timing import phase
@@ -218,8 +214,7 @@ async def send_dashboard_message(
         "unlisted": False,
         "updated_at_ms": now_ms,
         "feedback_last_activity_at_ms": now_ms,
-        PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
-        PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
+        **await participant_metadata(metadata, login=login, email=email),
     }
     if chosen_model and chosen_effort:
         metadata_update["model"] = chosen_model
@@ -601,8 +596,7 @@ async def continue_thread_privately(
             "continued_from_thread_id": thread_id,
             "thread_category": "interactive",
             "trigger_kind": "user",
-            PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
-            PARTICIPANT_EMAILS_KEY: merge_participants(None, email),
+            **await participant_metadata({}, login=login, email=email),
             "title": new_metadata.get("title") or "Private continuation",
             "created_at_ms": now_ms,
             "updated_at_ms": now_ms,
