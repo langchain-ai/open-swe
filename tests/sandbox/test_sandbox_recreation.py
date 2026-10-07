@@ -21,6 +21,39 @@ def sandbox_client() -> Iterator[AsyncMock]:
 
 
 @pytest.mark.asyncio
+async def test_worker_cannot_recreate_shared_sandbox(sandbox_client: AsyncMock) -> None:
+    SANDBOX_BACKENDS.clear()
+    shared_sandbox = MagicMock(id="sandbox-shared")
+    coordinator = set_sandbox_backend("coordinator", shared_sandbox)
+    worker = set_sandbox_backend("worker", shared_sandbox)
+
+    with (
+        patch(
+            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            new_callable=AsyncMock,
+            return_value={
+                "sandbox_id": "sandbox-shared",
+                "task_id": "task-1",
+                "sandbox_host_thread_id": "coordinator",
+            },
+        ),
+        patch(
+            "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
+        ) as create,
+        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock) as update,
+    ):
+        with pytest.raises(PermissionError, match="coordinator must recover"):
+            await recreate_sandbox_for_thread("worker")
+
+    sandbox_client.stop_sandbox.assert_not_awaited()
+    create.assert_not_awaited()
+    update.assert_not_awaited()
+    assert coordinator.current is shared_sandbox
+    assert worker.current is shared_sandbox
+    SANDBOX_BACKENDS.clear()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("stop_failure", [None, RuntimeError("stop unavailable"), TimeoutError()])
 async def test_recreate_sandbox_hands_off_after_metadata_persists(
     sandbox_client: AsyncMock, stop_failure: Exception | None

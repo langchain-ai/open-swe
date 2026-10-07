@@ -264,6 +264,13 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         team_id=request.team_id,
         channel_context=channel_context,
     )
+    source_context = SourceContext(
+        slack_thread=slack_thread,
+        slack_ask=True,
+        slack_ask_response_url=request.response_url,
+        slack_by_the_way_thread_ts=request.reply_thread_ts,
+        slack_by_the_way_message_ts=request.message_ts,
+    )
     # Private, always, even when `/btw` answers publicly: a private thread is what
     # scopes the run to the asker's own credentials, skills, and instructions.
     # `slack_thread` carries no `thread_ts`, or the Slack thread would resolve here.
@@ -274,7 +281,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         github_login=login,
         user_email=user_email,
         title=request.question,
-        source_context=SourceContext(slack_thread=slack_thread),
+        source_context=source_context,
         workspace=workspace,
         visibility="private",
         owner_login=login,
@@ -285,13 +292,9 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         return
 
     configurable: dict[str, Any] = {
+        **source_context.dump(),
         "repo": repo,
-        "slack_thread": slack_thread.dump(),
         "source": "slack",
-        "slack_ask": True,
-        "slack_ask_response_url": request.response_url,
-        "slack_by_the_way_thread_ts": request.reply_thread_ts,
-        "slack_by_the_way_message_ts": request.message_ts,
         "github_login": login,
         "user_email": user_email,
         "workspace": workspace,

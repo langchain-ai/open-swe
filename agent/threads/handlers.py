@@ -24,7 +24,11 @@ from agent.threads.access import (
 )
 from agent.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from agent.threads.creation import TITLE_LOCKED_KEY, create_thread
-from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
+from agent.threads.listing import (
+    attach_task_workers,
+    list_unresolved_dashboard_threads,
+    settle_review_walkthrough,
+)
 from agent.threads.machine_reads import machine_thread
 from agent.threads.principals import Principal
 from agent.threads.runs import (
@@ -41,7 +45,6 @@ from agent.threads.summary import (
     _assert_thread_postable,
     _assert_thread_promptable,
     _is_thread_resolved,
-    _metadata_model_id,
     _now_ms,
     _refresh_latest_run_metadata,
     _thread_is_busy,
@@ -68,7 +71,7 @@ from agent.utils.thread_participants import (
     merge_participants,
 )
 from agent.utils.thread_pr_state import agent_thread_pr_state_lock
-from agent.utils.thread_settings import THREAD_SETTINGS_KEY
+from agent.utils.thread_settings import THREAD_SETTINGS_KEY, thread_model_choice
 from agent.utils.timing import phase
 
 logger = logging.getLogger(__name__)
@@ -192,6 +195,7 @@ async def get_dashboard_thread(
         )
     with phase(record, "subagents"):
         await attach_subagents([summary])
+    await attach_task_workers(client, [summary], login, email)
     return summary
 
 
@@ -234,7 +238,7 @@ async def send_dashboard_message(
             "thread is idle; start a run via the stream commands endpoint",
         )
 
-    active_model = _metadata_model_id(metadata) if body.images else None
+    active_model = thread_model_choice(metadata)[0] if body.images else None
     content = _user_message_content(prompt, body.images, model_id=active_model)
     if pr_linked or metadata.get("auto_resolved_by_prs") is True:
         async with agent_thread_pr_state_lock(client, thread_id):

@@ -46,6 +46,7 @@ class _FakeCrons:
         self,
         *,
         metadata: dict[str, Any] | None = None,
+        thread_id: str | None = None,
         limit: int = 10,
         offset: int = 0,
         **_: Any,
@@ -54,8 +55,11 @@ class _FakeCrons:
         items = [
             c
             for c in self._crons
-            if not metadata
-            or all((c.get("metadata") or {}).get(k) == v for k, v in metadata.items())
+            if (thread_id is None or c.get("thread_id") == thread_id)
+            and (
+                not metadata
+                or all((c.get("metadata") or {}).get(k) == v for k, v in metadata.items())
+            )
         ]
         return items[offset : offset + limit]
 
@@ -118,6 +122,25 @@ def _config(**overrides: Any) -> dict[str, Any]:
     }
     base["configurable"].update(overrides)
     return base
+
+
+async def test_cancel_thread_wakeups_removes_every_timer_only_for_that_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timers = [
+        {**_wakeup_cron(f"worker-{index}", None), "thread_id": "worker"} for index in range(3)
+    ]
+    unrelated = [
+        {**_wakeup_cron("host-timer", None), "thread_id": "host"},
+        {"cron_id": "background", "thread_id": "worker", "metadata": {"kind": "background_tasks"}},
+    ]
+    client = _FakeClient([*timers, *unrelated])
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "_PURGE_PAGE_SIZE", 2)
+
+    await wakeup_tool.cancel_thread_wakeups("worker")
+
+    assert await client.crons.search() == unrelated
 
 
 def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:

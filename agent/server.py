@@ -144,6 +144,7 @@ from agent.middleware.require_user_reply import (
 )
 from agent.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from agent.middleware.stale_workspace import warn_stale_workspace
+from agent.middleware.task_coordination import TaskCoordinationMiddleware
 from agent.middleware.transcript import TranscriptMiddleware
 from agent.model_request import ModelSelectionDecision, infer_requested_model, model_selection_trace
 from agent.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
@@ -259,6 +260,12 @@ from agent.tools.propose_pr_review import propose_pr_review
 from agent.tools.propose_review_comment import propose_review_comment
 from agent.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from agent.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
+from agent.tools.task_threads import (
+    control_worker,
+    message_task_thread,
+    spawn_worker,
+    task_status,
+)
 from agent.users import User
 from agent.utils import ttl_cache
 from agent.utils.authorship import (
@@ -815,9 +822,10 @@ def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
 
 
 def _slack_ask_mode(cfg: RunConfig) -> bool:
-    """A `/oswe` question: one ephemeral answer, no Slack thread to post into."""
+    """A one-off `/oswe` question (ephemeral answer, no Slack thread), until it continues on the web."""
     return (
-        cfg.slack_ask is True
+        cfg.source == "slack"
+        and cfg.slack_ask is True
         and cfg.slack_thread is not None
         and bool(cfg.slack_thread.triggering_user_id.strip())
     )
@@ -1401,6 +1409,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         except Exception:
             logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
 
+    local_run = is_desktop_run(cfg)
+    task_coordination = (
+        None if local_run else await TaskCoordinationMiddleware.for_thread(thread_id)
+    )
+
     async def reconnect_backend(
         _thread_id: str = thread_id,
         _cfg: RunConfig = cfg,
@@ -1421,7 +1434,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # authorization. Personal integrations require verified private ownership.
     # Everything else comes from the thread's own settings, seeded from the first
     # sender's profile and frozen there afterwards.
-    local_run = is_desktop_run(cfg)
     reset_model_selection = (
         cfg.source == "dashboard" and cfg.model_selection == "auto" and cfg.model_selection_changed
     )
@@ -1733,6 +1745,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         search_pull_requests,
         get_thread,
         manage_thread,
+        *(
+            [spawn_worker]
+            if task_coordination and task_coordination.enabled and not task_coordination.is_worker
+            else []
+        ),
+        *([task_status, message_task_thread, control_worker] if task_coordination else []),
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         expedite_pr_approval,
@@ -2104,7 +2122,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     ),
                     *([] if local_run else [PullRequestCreationGuardMiddleware()]),
                     WorkflowPushGuardMiddleware(),
-                    refresh_github_proxy_before_model,
+                    *([task_coordination] if task_coordination else []),
+                    *(
+                        []
+                        if task_coordination and task_coordination.is_worker
+                        else [refresh_github_proxy_before_model]
+                    ),
                     *(
                         []
                         if stop_summary_mode
