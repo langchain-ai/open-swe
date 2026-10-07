@@ -303,6 +303,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe --filter open-swe-e2e
       - name: Install Chromium
+        timeout-minutes: 5
         run: |
           sudo rm -f /etc/apt/sources.list.d/{azure-cli,google-chrome,microsoft-prod}.*
           pnpm run test:e2e:install
