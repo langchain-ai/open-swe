@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.workspaces import refresh
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.workspaces import refresh
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _Result:
@@ -48,6 +48,7 @@ async def test_the_update_script_runs_after_setup_and_gates_the_capture() -> Non
     ):
         await WORKSPACES.create(
             WorkspaceCreate(
+                inherit_default_sandbox=False,
                 name="base",
                 repos=["acme/base"],
                 setup_script="make setup",
@@ -81,7 +82,13 @@ async def test_a_failing_script_is_never_captured() -> None:
         patch.object(refresh, "capture_workspace_snapshot", capture),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
         )
         # A snapshot from an earlier refresh; runs must keep booting from it.
         await WORKSPACES.mark_captured(
@@ -114,7 +121,13 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
         patch.object(refresh, "_release_builder_sandbox", release),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
         )
         result = await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
@@ -132,7 +145,13 @@ async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
     create = AsyncMock()
     with patch.object(refresh, "_create_builder_sandbox", create):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
         )
         await WORKSPACES.mark_refreshing("base")
         result = await refresh.refresh_workspace("base")
@@ -157,6 +176,7 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
     ):
         await WORKSPACES.create(
             WorkspaceCreate(
+                inherit_default_sandbox=False,
                 name="base",
                 repos=["acme/base"],
                 setup_script="make setup",
@@ -197,7 +217,13 @@ async def test_the_step_that_broke_is_the_one_left_failed() -> None:
         patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
         )
         await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
@@ -226,7 +252,13 @@ async def test_the_builder_is_published_while_it_lives_and_cleared_after() -> No
         patch.object(refresh, "capture_workspace_snapshot", _capture),
     ):
         await WORKSPACES.create(
-            WorkspaceCreate(name="base", repos=["acme/base"], setup_script="make setup"), "ramon"
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+            ),
+            "ramon",
         )
         await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")

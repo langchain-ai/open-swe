@@ -55,6 +55,60 @@ test.describe("my pull requests", () => {
     await loginAs(page, SAME_USER);
   });
 
+  test("finds description-only matches in My PRs and the command palette", async ({
+    page,
+  }) => {
+    const own = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Improve deployment reliability",
+      body: "Prevent aardvark deployment rollback outages.",
+      ...approved,
+    });
+    const theirs = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Someone else's deployment change",
+      body: "Prevent aardvark outages too.",
+      author: "bob",
+      ...approved,
+    });
+    for (const pr of [own, theirs]) {
+      const response = await page.request.get(
+        `/fake-gh/repos/${pr.repo}/pulls/${pr.number}`,
+      );
+      const delivered = await page.request.post("/control/github-event", {
+        data: {
+          event: "pull_request",
+          payload: {
+            action: "edited",
+            repository: { full_name: pr.repo, private: false },
+            pull_request: await response.json(),
+            installation: { id: 42 },
+            sender: { login: "alice" },
+          },
+        },
+      });
+      expect(delivered.ok()).toBeTruthy();
+    }
+    await openMine(page);
+    const search = page.getByRole("textbox", { name: "Search pull requests" });
+    await search.fill("aardvark");
+    await expect(card(page, own)).toContainText(
+      "Improve deployment reliability",
+    );
+    await expect(card(page, theirs)).toHaveCount(0);
+    await search.blur();
+    await page.keyboard.press("Control+k");
+    await page.getByRole("combobox").fill("aardvark");
+    const result = page.getByRole("option", {
+      name: /Improve deployment reliability/,
+    });
+    await expect(result).toBeVisible();
+    await result.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/agents/reviews/fakeorg/demo/${own.number}`),
+    );
+  });
+
   test("lists the signed-in user's open PRs with live status", async ({
     page,
   }) => {
@@ -197,19 +251,22 @@ test.describe("my pull requests", () => {
     await expectStatus(card(page, broken), "Failing");
     await expectStatus(card(page, ok), "Approved");
 
+    const fixButtons = (pr: SeededPullRequest) =>
+      card(page, pr).getByRole("button", { name: /^Fix (conflicts|checks)$/ });
     const fix = card(page, broken).getByRole("button", {
-      name: "Fix",
+      name: "Fix checks",
       exact: true,
     });
     await expect(fix).toBeEnabled();
+    await expect(fixButtons(broken)).toHaveCount(1);
     await expect(
-      card(page, conflict).getByRole("button", { name: "Fix", exact: true }),
+      card(page, conflict).getByRole("button", {
+        name: "Fix conflicts",
+        exact: true,
+      }),
     ).toBeEnabled();
-    // Exact, like the assertions above: the title is a button that opens the
-    // preview, and "Nothing to fix" would match a substring search for "Fix".
-    await expect(
-      card(page, ok).getByRole("button", { name: "Fix", exact: true }),
-    ).toHaveCount(0);
+    await expect(fixButtons(conflict)).toHaveCount(1);
+    await expect(fixButtons(ok)).toHaveCount(0);
 
     // The fix opens a thread and dispatches a real run, so wait on the
     // response: a rejected one names the reason instead of timing out on the
@@ -224,7 +281,7 @@ test.describe("my pull requests", () => {
     const response = await dispatched;
     expect(response.status(), await response.text()).toBe(200);
     await expect(
-      page.getByText(`Fix queued for ${COMPANION}#${broken.number}`),
+      page.getByText(`Check fix queued for ${COMPANION}#${broken.number}`),
     ).toBeVisible();
   });
 
@@ -249,18 +306,7 @@ test.describe("my pull requests", () => {
     const method = card(page, mine).getByLabel(
       `Merge method for PR #${mine.number}`,
     );
-    await expect(method).toBeEnabled();
-    await expect(
-      method.getByRole("option", { name: "Rebase merge", exact: true }),
-    ).toHaveCount(1);
-    await expect(
-      method.getByRole("option", { name: "Squash merge", exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      method.getByRole("option", { name: "Merge commit", exact: true }),
-    ).toHaveCount(0);
-
-    await method.selectOption("rebase");
+    await expect(method).toBeHidden();
     await card(page, mine)
       .getByRole("button", { name: "Merge", exact: true })
       .click();

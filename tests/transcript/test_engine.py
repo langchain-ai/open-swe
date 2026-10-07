@@ -11,10 +11,10 @@ from uuid import uuid7
 import pytest
 from sqlalchemy import text
 
-from agent.database import postgres
-from agent.transcript import tool_output
-from agent.transcript.engine import Command, ThreadNotTranscribed, append
-from agent.transcript.events import (
+from openswe.database import postgres
+from openswe.transcript import tool_output
+from openswe.transcript.engine import Command, ThreadNotTranscribed, append
+from openswe.transcript.events import (
     MessageAppended,
     MessageCompleted,
     MessageSender,
@@ -23,7 +23,7 @@ from agent.transcript.events import (
     ToolStarted,
     TurnRequested,
 )
-from agent.transcript.snapshot import load_snapshot
+from openswe.transcript.snapshot import load_snapshot
 
 
 def _created(title: str = "A thread") -> ThreadCreated:

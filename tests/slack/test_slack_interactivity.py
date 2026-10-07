@@ -6,8 +6,8 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.slack import routes as slack_routes
-from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
+from openswe.slack import routes as slack_routes
+from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -57,7 +57,7 @@ def _option_payload() -> dict[str, Any]:
 @pytest.mark.asyncio
 async def test_selected_option_updates_original_message(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _option_payload()
-    update = AsyncMock(return_value=(True, None))
+    update = AsyncMock(return_value=None)
     monkeypatch.setattr(slack_routes.common, "update_slack_message", update)
 
     await slack_routes._update_selected_option_message(

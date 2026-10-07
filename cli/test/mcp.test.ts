@@ -30,6 +30,16 @@ async function connect(respond: (url: URL) => Response): Promise<{
     port: 0,
     async fetch(request) {
       const url = new URL(request.url)
+      if (url.pathname.endsWith("/cli/mcp/tools")) {
+        const response = respond(url)
+        if (
+          response.headers.get("content-type")?.includes("application/json")
+        ) {
+          const value = await response.clone().json()
+          if (Array.isArray(value)) return response
+        }
+        return Response.json([])
+      }
       queries.push(url.searchParams)
       const encoding = request.headers.get("content-encoding")
       encodings.push(encoding)
@@ -44,7 +54,7 @@ async function connect(respond: (url: URL) => Response): Promise<{
     `http://127.0.0.1:${backend.port}`,
     new SessionCredential("jwt", "session (test)")
   )
-  const server = createMcpServer("0.0.0-test", async () => api)
+  const server = await createMcpServer("0.0.0-test", async () => api)
   const client = new Client({ name: "test", version: "0" })
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
   await Promise.all([server.connect(serverSide), client.connect(clientSide)])
@@ -162,6 +172,66 @@ describe("list_threads", () => {
   })
 })
 
+describe("exposed Python tools", () => {
+  const schema = {
+    name: "manage_feature_flags",
+    description: "Manage feature flags from Python",
+    access: "admin",
+    parameters: {
+      type: "object",
+      properties: { action: { type: "string", enum: ["read", "set"] } },
+      required: ["action"],
+    },
+  }
+
+  test("uses backend schemas and calls the backend with validated arguments", async () => {
+    const { client, bodies, queries } = await connect((url) =>
+      url.pathname.endsWith("/cli/mcp/tools")
+        ? Response.json([schema])
+        : Response.json({ status: "success", content: { scope: "instance" } })
+    )
+    const catalog = await client.listTools()
+    expect(
+      catalog.tools.find((tool) => tool.name === schema.name)?.inputSchema
+    ).toMatchObject(schema.parameters)
+    expect(catalog.tools.map((tool) => tool.name)).not.toContain("execute")
+    const invalid = await client.callTool({
+      name: schema.name,
+      arguments: { action: "explode" },
+    })
+    expect(invalid.isError).toBe(true)
+    expect(queries).toHaveLength(0)
+    const result = await client.callTool({
+      name: schema.name,
+      arguments: { action: "read" },
+    })
+    expect(result.isError).toBeFalsy()
+    expect(JSON.parse(bodies[0] ?? "null")).toEqual({ action: "read" })
+  })
+
+  test("keeps no-argument tools when another remote schema is unsupported", async () => {
+    const { client } = await connect((url) =>
+      url.pathname.endsWith("/cli/mcp/tools")
+        ? Response.json([
+            { ...schema, name: "no_args", parameters: { type: "object" } },
+            { ...schema, name: "bad_schema", parameters: { type: "array" } },
+          ])
+        : Response.json({ status: "success", content: "done" })
+    )
+    const catalog = await client.listTools()
+    expect(catalog.tools.map((tool) => tool.name)).toContain("no_args")
+    expect(catalog.tools.map((tool) => tool.name)).not.toContain("bad_schema")
+    const result = await client.callTool({ name: "no_args", arguments: {} })
+    expect(result.isError).toBeFalsy()
+  })
+
+  test("does not expose tools missing from the signed-in user's catalog", async () => {
+    const { client } = await connect(() => Response.json([]))
+    const catalog = await client.listTools()
+    expect(catalog.tools.map((tool) => tool.name)).not.toContain(schema.name)
+  })
+})
+
 describe("upload_session", () => {
   test("streams a header line and the transcript verbatim as gzipped JSONL", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oswe-upload-"))
@@ -223,7 +293,7 @@ describe("human review", () => {
   test("request_human_review posts the summary to the pull request's review endpoint", async () => {
     const paths: string[] = []
     const { client, bodies } = await connect((url) => {
-      paths.push(url.pathname)
+      if (!url.pathname.endsWith("/cli/mcp/tools")) paths.push(url.pathname)
       return Response.json({
         success: true,
         error: "",
@@ -261,7 +331,7 @@ describe("human review", () => {
   test("dismiss_human_review_request posts to the dismiss endpoint", async () => {
     const paths: string[] = []
     const { client, bodies } = await connect((url) => {
-      paths.push(url.pathname)
+      if (!url.pathname.endsWith("/cli/mcp/tools")) paths.push(url.pathname)
       return Response.json({ request_id: "r-1" })
     })
 

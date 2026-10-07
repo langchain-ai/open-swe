@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack.tools.lookup_user import slack_lookup_github_user
-from agent.tools.access import Access
-from agent.tools.manage_slack_github_mapping import manage_slack_github_mapping
-from agent.users import User
+from openswe.slack.tools.lookup_user import slack_lookup_github_user
+from openswe.tools.access import Access
+from openswe.tools.manage_slack_github_mapping import manage_slack_github_mapping
+from openswe.users import User
 from tests.support.slack_api import SlackAPI
 
 
@@ -92,7 +92,7 @@ async def test_admin_can_move_mapping_without_inheriting_previous_email(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "agent.tools.access.resolve_access",
+        "openswe.tools.access.resolve_access",
         AsyncMock(return_value=Access(admin_thread=True, admin=True)),
     )
     ada = await User.sign_in("github", "1", login="ada")
@@ -116,7 +116,7 @@ async def test_reassigning_to_the_same_owner_keeps_verified_slack_metadata(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "agent.tools.access.resolve_access",
+        "openswe.tools.access.resolve_access",
         AsyncMock(return_value=Access(admin_thread=True, admin=True)),
     )
     ada = await User.sign_in("github", "1", login="ada")
@@ -137,7 +137,7 @@ async def test_admin_rejects_unknown_github_user_and_inactive_slack_member(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "agent.tools.access.resolve_access",
+        "openswe.tools.access.resolve_access",
         AsyncMock(return_value=Access(admin_thread=True, admin=True)),
     )
     assert (await manage_slack_github_mapping("U123", "unknown"))["success"] is False
@@ -150,7 +150,7 @@ async def test_admin_rejects_unknown_github_user_and_inactive_slack_member(
 async def test_non_admin_cannot_change_mapping(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("agent.tools.access.resolve_access", AsyncMock(return_value=Access()))
+    monkeypatch.setattr("openswe.tools.access.resolve_access", AsyncMock(return_value=Access()))
     result = await manage_slack_github_mapping("U123", "ada")
     assert result["ok"] is False
     assert slack_api.calls == []
@@ -160,7 +160,7 @@ async def test_sole_writer_admin_gets_only_acknowledgement(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "agent.tools.access.resolve_access", AsyncMock(return_value=Access(admin=True, sole=True))
+        "openswe.tools.access.resolve_access", AsyncMock(return_value=Access(admin=True, sole=True))
     )
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
     assert await manage_slack_github_mapping("U123", "ada") == {

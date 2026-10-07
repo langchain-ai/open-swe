@@ -1,3 +1,8 @@
+import { taskEventMetadata } from "./taskEventMetadata"
+import type { TaskEventMetadata } from "./taskEventMetadata"
+
+export type { TaskEventMetadata } from "./taskEventMetadata"
+
 export type StructuredSenderKind = "person" | "system"
 
 /** Senders that steer the model and say nothing a reader of the thread needs. */
@@ -26,6 +31,7 @@ export type ParsedStructuredInput =
       sender: string
       senderKind: StructuredSenderKind
       surface?: string
+      taskEvent?: TaskEventMetadata
     }
   | { type: "legacy"; content: string }
 
@@ -243,12 +249,14 @@ export function parseStructuredInput(
     const attributes = parseAttributes(messageMatch[1] ?? "")
     const split = splitContent(messageMatch[2] ?? "")
     if (attributes?.sender && split && consumeDataElements(split.remainder)) {
+      const taskEvent = taskEventMetadata(attributes)
       return {
         type: "message",
         content: decodeXmlText(split.content),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,
+        ...(taskEvent ? { taskEvent } : {}),
       }
     }
   }

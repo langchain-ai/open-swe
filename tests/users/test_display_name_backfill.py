@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent.users import User, persist_display_name
+from openswe.users import User, persist_display_name
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 

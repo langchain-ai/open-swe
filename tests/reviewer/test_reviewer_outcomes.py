@@ -1,8 +1,8 @@
 from typing import Any, cast
 
-from agent.review.findings import Finding
-from agent.utils import reviewer_outcomes
-from agent.utils.reviewer_outcomes import (
+from openswe.review.findings import Finding
+from openswe.utils import reviewer_outcomes
+from openswe.utils.reviewer_outcomes import (
     FALSE_POSITIVE,
     TRUE_POSITIVE,
     upsert_finding_outcome,
