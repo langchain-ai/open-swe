@@ -19,6 +19,7 @@ import logging
 import random
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any, Self
 
 import httpx2
@@ -211,9 +212,12 @@ class GitHubClient:
         async with github_client(token=token, timeout=timeout) as http:
             yield cls(http)
 
+    def repo(self, owner: str, name: str) -> RepoClient:
+        return RepoClient(self, owner, name)
+
     async def request(self, method: str, path: str, **kwargs: Any) -> httpx2.Response:
-        """``path`` is relative to the REST API root, or an absolute GitHub API URL."""
-        url = path if path.startswith(GITHUB_API_BASE) else f"{GITHUB_API_BASE}/{path}"
+        """``path`` is relative to the REST API root, or an absolute URL."""
+        url = path if "://" in path else f"{GITHUB_API_BASE}/{path}"
         response = await github_request(self.http, method, url, **kwargs)
         response.raise_for_status()
         return response
@@ -256,6 +260,53 @@ class GitHubClient:
         if not isinstance(data, Mapping):
             raise ValueError("GitHub answered GraphQL without data")
         return data
+
+
+@dataclass(frozen=True, slots=True)
+class RepoClient:
+    """One repository's calls; REST paths are relative to ``repos/<owner>/<name>/``.
+
+    Raises like ``GitHubClient``.
+    """
+
+    github: GitHubClient
+    owner: str
+    name: str
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.owner}/{self.name}"
+
+    async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
+        return await self.github.get(f"repos/{self.full_name}/{path}", params)
+
+    async def pages(
+        self, path: str, *, key: str | None = None, params: Mapping[str, str] | None = None
+    ) -> list[dict[str, Any]]:
+        return await self.github.pages(f"repos/{self.full_name}/{path}", key=key, params=params)
+
+    async def graphql(
+        self, query: str, variables: Mapping[str, object] | None = None
+    ) -> Mapping[str, Any]:
+        """``$owner`` and ``$repo`` are this repository's."""
+        return await self.github.graphql(
+            query, {"owner": self.owner, "repo": self.name, **(variables or {})}
+        )
+
+    async def check_runs(self, sha: str) -> list[dict[str, Any]]:
+        """The latest run of each check on ``sha``."""
+        return await self.pages(
+            f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
+        )
+
+    async def commit_statuses(self, sha: str) -> list[dict[str, Any]]:
+        """The latest status per context on ``sha``."""
+        latest: dict[str, dict[str, Any]] = {}
+        for status in await self.pages(f"commits/{sha}/status", key="statuses"):
+            context = status.get("context")
+            if isinstance(context, str):
+                latest.setdefault(context, status)
+        return list(latest.values())
 
 
 class GraphQLError(ValueError):

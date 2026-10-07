@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Self
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from agent.github.ci import read_required_checks, unreported_required_checks
-from agent.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError
+from agent.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +271,14 @@ class ReviewState:
     review_required: bool = False
 
 
+async def _or_none[T](read: Awaitable[T]) -> T | None:
+    """``read``'s answer, or ``None`` when GitHub could not give one."""
+    try:
+        return await read
+    except httpx2.HTTPError, ValueError:
+        return None
+
+
 class _CursorLoop(Exception):
     """GitHub handed back a page cursor it had already given."""
 
@@ -302,9 +310,7 @@ class PullRequestClient:
     than the whole of it.
     """
 
-    github: GitHubClient
-    owner: str
-    repo: str
+    repo: RepoClient
     number: int
 
     @classmethod
@@ -324,21 +330,17 @@ class PullRequestClient:
         identity = pull_request_identity(
             {"repo_full_name": full_name, "number": record.get("number")}
         )
-        return None if identity is None else cls(github, *identity)
-
-    @property
-    def full_name(self) -> str:
-        return f"{self.owner}/{self.repo}"
+        if identity is None:
+            return None
+        owner, name, number = identity
+        return cls(github.repo(owner, name), number)
 
     @property
     def _log_extra(self) -> dict[str, object]:
-        return {"pr_repo_full_name": self.full_name, "pr_number": self.number}
+        return {"pr_repo_full_name": self.repo.full_name, "pr_number": self.number}
 
     async def pull(self) -> dict[str, Any] | None:
-        try:
-            payload = await self.github.get(f"repos/{self.full_name}/pulls/{self.number}")
-        except httpx2.HTTPError, ValueError:
-            return None
+        payload = await _or_none(self.repo.get(f"pulls/{self.number}"))
         return payload if isinstance(payload, dict) else None
 
     async def mergeable_pull(self) -> dict[str, Any] | None:
@@ -356,36 +358,8 @@ class PullRequestClient:
             await asyncio.sleep(_MERGEABILITY_DELAY_SECONDS * (attempt + 1))
         return None
 
-    async def check_runs(self, sha: str) -> list[dict[str, Any]] | None:
-        try:
-            return await self.github.pages(
-                f"repos/{self.full_name}/commits/{sha}/check-runs",
-                key="check_runs",
-                params={"filter": "latest"},
-            )
-        except httpx2.HTTPError, ValueError:
-            return None
-
-    async def commit_statuses(self, sha: str) -> list[dict[str, Any]] | None:
-        """The latest status per context."""
-        try:
-            statuses = await self.github.pages(
-                f"repos/{self.full_name}/commits/{sha}/status", key="statuses"
-            )
-        except httpx2.HTTPError, ValueError:
-            return None
-        latest: dict[str, dict[str, Any]] = {}
-        for status in statuses:
-            context = status.get("context")
-            if isinstance(context, str):
-                latest.setdefault(context, status)
-        return list(latest.values())
-
     async def reviews(self) -> list[dict[str, Any]] | None:
-        try:
-            return await self.github.pages(f"repos/{self.full_name}/pulls/{self.number}/reviews")
-        except httpx2.HTTPError, ValueError:
-            return None
+        return await _or_none(self.repo.pages(f"pulls/{self.number}/reviews"))
 
     async def review_decision(self) -> ReviewDecision | None:
         """The standing decision across each reviewer's latest approval, change request or dismissal."""
@@ -417,7 +391,7 @@ class PullRequestClient:
         single read usually gets the real answer.
         """
         try:
-            data = await self.github.graphql(_MERGEABILITY_QUERY, self._variables())
+            data = await self.repo.graphql(_MERGEABILITY_QUERY, {"number": self.number})
         except GraphQLError as exc:
             logger.warning(
                 "Mergeability query answered with errors; falling back to what REST reported",
@@ -452,8 +426,8 @@ class PullRequestClient:
         seen_cursors: set[str] = set()
         try:
             while True:
-                data = await self.github.graphql(
-                    _REVIEW_THREADS_QUERY, self._variables(cursor=cursor)
+                data = await self.repo.graphql(
+                    _REVIEW_THREADS_QUERY, {"number": self.number, "cursor": cursor}
                 )
                 pull = _graphql_pull(data)
                 threads = pull.get("reviewThreads") if pull is not None else None
@@ -514,8 +488,8 @@ class PullRequestClient:
         seen_cursors: set[str] = set()
         try:
             while True:
-                data = await self.github.graphql(
-                    _THREAD_COUNT_QUERY, self._variables(cursor=cursor)
+                data = await self.repo.graphql(
+                    _THREAD_COUNT_QUERY, {"number": self.number, "cursor": cursor}
                 )
                 pull = _graphql_pull(data)
                 if pull is not None:
@@ -537,9 +511,9 @@ class PullRequestClient:
     async def thread_status(self) -> dict[str, Any]:
         """The PR health a dashboard thread shows: state, checks and unresolved threads."""
         result = _unavailable_pull_request(
-            {"repo_full_name": self.full_name, "number": self.number}
+            {"repo_full_name": self.repo.full_name, "number": self.number}
         )
-        result["url"] = f"https://github.com/{self.full_name}/pull/{self.number}"
+        result["url"] = f"https://github.com/{self.repo.full_name}/pull/{self.number}"
         pull, review_threads = await asyncio.gather(self.pull(), self.unresolved_threads())
         if review_threads is not None:
             result.update(
@@ -565,7 +539,9 @@ class PullRequestClient:
         )
         if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
             return result
-        runs, statuses = await asyncio.gather(self.check_runs(sha), self.commit_statuses(sha))
+        runs, statuses = await asyncio.gather(
+            _or_none(self.repo.check_runs(sha)), _or_none(self.repo.commit_statuses(sha))
+        )
         if runs is not None and statuses is not None:
             failing, pending, inconclusive = _normalize_checks(runs, statuses)
             result.update(
@@ -590,7 +566,7 @@ class PullRequestClient:
             return None
         source: Mapping[str, Any] = pull if pull is not None else listed or {}
         result = OpenPullRequest(
-            repo=self.full_name,
+            repo=self.repo.full_name,
             number=self.number,
             title=_as_str(source.get("title"), ""),
             created_at=_as_optional_str(source.get("created_at")),
@@ -614,8 +590,8 @@ class PullRequestClient:
             return result
         result.head_sha = sha
         runs, statuses, decision, review_state = await asyncio.gather(
-            self.check_runs(sha),
-            self.commit_statuses(sha),
+            _or_none(self.repo.check_runs(sha)),
+            _or_none(self.repo.commit_statuses(sha)),
             self.review_decision(),
             self.review_state(),
         )
@@ -656,14 +632,11 @@ class PullRequestClient:
         # A check gated on `needs:` has no run until its upstream jobs finish.
         if base_ref is not None and result.merge_state == "blocked" and not pending:
             required = await read_required_checks(
-                self.github.http, owner=self.owner, repo=self.repo, branch=base_ref
+                self.repo.github.http, owner=self.repo.owner, repo=self.repo.name, branch=base_ref
             )
             if required is not None:
                 result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
-
-    def _variables(self, **extra: object) -> dict[str, object]:
-        return {"owner": self.owner, "repo": self.repo, "number": self.number, **extra}
 
 
 async def get_pull_request_statuses(records: Sequence[object], token: str) -> list[dict[str, Any]]:
