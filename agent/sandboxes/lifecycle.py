@@ -609,6 +609,10 @@ async def recreate_sandbox_for_thread(
     """Bind a fresh sandbox, then raise with its IDs if stopping the old one failed."""
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata = await get_sandbox_metadata(thread_id)
+    if metadata.get("task_id") is not None:
+        raise PermissionError(
+            "Task workers cannot recreate the shared sandbox; the coordinator must recover it"
+        )
     raw_sandbox_id = metadata.get("sandbox_id")
     metadata_sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
     old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
