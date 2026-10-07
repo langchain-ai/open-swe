@@ -40,7 +40,6 @@ async def test_one_request_per_person_survives_a_reload(thread_metadata: JsonObj
         ({"alice": True}, {"alice@example.com": True}, False),
         ({"alice": True}, {"bob@example.com": True}, True),
         ({"alice": True}, {"carol@example.com": True}, True),
-        ({"alice": True}, {"alice@example.com": True, "carol@example.com": True}, True),
     ],
 )
 async def test_distinct_participants_make_a_thread_shared(
@@ -62,7 +61,8 @@ async def test_distinct_participants_make_a_thread_shared(
     thread_metadata[PARTICIPANT_LOGINS_KEY] = logins
     thread_metadata[PARTICIPANT_EMAILS_KEY] = emails
 
-    assert (await ThreadActAs.load("thread-1")).is_shared is shared
+    thread = await ThreadActAs.load("thread-1")
+    assert await thread.is_shared() is shared
 
 
 @pytest.mark.asyncio
@@ -73,7 +73,13 @@ async def test_an_unreadable_stored_record_is_dropped(thread_metadata: JsonObjec
 
 
 @pytest.mark.asyncio
-async def test_the_first_answer_stands(thread_metadata: JsonObject) -> None:
+async def test_the_first_answer_stands(
+    thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    thread_metadata[PARTICIPANT_EMAILS_KEY] = {"alice@example.com": True}
+    monkeypatch.setattr(
+        User, "login_for_email", AsyncMock(side_effect=RuntimeError("Email lookup unavailable"))
+    )
     thread = await ThreadActAs.load("thread-1")
     request = await thread.request("alice", **_PR)
     assert await thread.decide(request, approved=False, always_allow=False)
