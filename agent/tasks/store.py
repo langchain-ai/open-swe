@@ -14,9 +14,9 @@ type TaskRole = Literal["coordinator", "worker"]
 class Task(Base):
     __tablename__ = "task"
 
-    coordinator_thread_id: Mapped[str]
     title: Mapped[str]
     workspace: Mapped[str]
+    coordinator_thread_id: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delegated: Mapped[bool] = mapped_column(default=False)
 
@@ -40,6 +40,12 @@ class TaskDelegation(Base):
     effort: Mapped[str | None]
     launch_error: Mapped[str | None] = mapped_column(default=None)
     cancelled: Mapped[bool] = mapped_column(default=False)
+
+
+def require_coordinator(task: Task) -> str:
+    if task.coordinator_thread_id is None:
+        raise RuntimeError("Task has no coordinator")
+    return task.coordinator_thread_id
 
 
 @dataclass(frozen=True)

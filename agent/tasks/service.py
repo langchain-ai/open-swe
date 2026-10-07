@@ -265,7 +265,7 @@ async def launch_worker(
         thread_category="interactive",
         trigger_kind="task_delegation",
         workspace=task.workspace,
-        sandbox_host_thread_id=task.coordinator_thread_id,
+        sandbox_host_thread_id=delegation.coordinator_thread_id,
         task_id=str(task.id),
         model=delegation.model,
         effort=delegation.effort,
@@ -300,7 +300,7 @@ async def launch_worker(
         f"initial:{delegation.worker_thread_id}",
         prompt(
             "tasks/assignment",
-            coordinator_thread_id=task.coordinator_thread_id,
+            coordinator_thread_id=delegation.coordinator_thread_id,
             instructions=delegation.instructions,
         ),
     )
@@ -439,7 +439,7 @@ async def message_task_thread(
     else:
         if worker_thread_id is not None:
             raise PermissionError("Workers can only message their coordinator")
-        recipient = context.task.coordinator_thread_id
+        recipient = store.require_coordinator(context.task)
         await authorized_metadata(actor, recipient)
     await record_event(
         context.task,

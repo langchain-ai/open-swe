@@ -16,7 +16,7 @@ from agent.tasks.flags import (
     task_coordination_supported,
     task_owner_login,
 )
-from agent.tasks.store import TaskContext, get_delegation, load_context
+from agent.tasks.store import TaskContext, get_delegation, load_context, require_coordinator
 from agent.utils.json_types import thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     async def abefore_model(self, state: AgentState, runtime: Runtime) -> None:
         if self.context is not None and self.is_worker:
             try:
-                await maybe_refresh_proxy_token(self.context.task.coordinator_thread_id)
+                await maybe_refresh_proxy_token(require_coordinator(self.context.task))
             except Exception:
                 logger.warning(
                     "Failed to refresh the task's GitHub proxy",

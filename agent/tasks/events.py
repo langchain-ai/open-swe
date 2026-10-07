@@ -110,7 +110,7 @@ async def worker_finished(
         result = "The worker finished, but its final answer could not be read. Inspect the worker thread."
     await notify(
         context.task,
-        context.task.coordinator_thread_id,
+        store.require_coordinator(context.task),
         f"finished:{thread_id}:{run_id}",
         prompt(
             "tasks/finished",
