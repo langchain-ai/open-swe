@@ -3,8 +3,8 @@ from datetime import timedelta
 
 from sqlalchemy import text
 
-from agent import event_claims
-from agent.database.postgres import transaction
+from openswe import event_claims
+from openswe.database.postgres import transaction
 
 
 async def _keys() -> set[str]:
