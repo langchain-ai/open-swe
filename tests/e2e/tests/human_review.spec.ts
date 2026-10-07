@@ -969,6 +969,12 @@ test.describe("Human review in Slack", () => {
         { timeout: 30_000 },
       )
       .toBe(true);
+    // The pick's own message trades its buttons for the outcome.
+    const settled = (await channelMessages(request, dmChannel)).find(
+      (m) => m.ts === picked.ts,
+    );
+    expect(buttons(settled!)).toEqual([]);
+    expect(cardText(settled!)).toContain("Review declined");
     await expect
       .poll(async () =>
         (await pull(request, seeded.number)).requested_reviewers.includes(

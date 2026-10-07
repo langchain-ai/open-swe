@@ -109,6 +109,15 @@ def snooze_button(request: HumanReviewRequest) -> ButtonElement:
     )
 
 
+PICK_BUTTON_IDS = frozenset(
+    {
+        "open_swe_option_select_accept",
+        "open_swe_option_select_decline",
+        "open_swe_option_select_snooze",
+    }
+)
+
+
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     return [
         # Slack opens the URL and still delivers the click, so signing up lands on the PR.
