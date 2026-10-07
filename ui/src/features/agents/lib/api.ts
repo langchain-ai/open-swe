@@ -110,6 +110,7 @@ export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
+  hierarchy?: boolean
   limit?: number
   offset?: number
   all?: boolean
@@ -228,6 +229,8 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
 
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
+  if (params.hierarchy != null)
+    search.set("hierarchy", String(params.hierarchy))
   if (params.limit != null) search.set("limit", String(params.limit))
   if (params.offset != null) search.set("offset", String(params.offset))
   if (params.all != null) search.set("all", String(params.all))

@@ -16,6 +16,9 @@ import { makeQueryClient } from "@/lib/query"
 import { RunningAgentsSection } from "@/features/settings/components/AdminSections"
 
 const cancelThread = vi.hoisted(() => vi.fn<(id: string) => Promise<void>>())
+const queryState = vi.hoisted(() => ({
+  isFetching: false,
+}))
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
@@ -28,12 +31,22 @@ vi.mock(import("@/features/agents/lib/queries"), async (importOriginal) => ({
     ({
       data: {
         items: [
-          { id: "t1", title: "First", repoFullName: "acme/api" },
-          { id: "t2", title: "Second", repoFullName: "acme/web" },
+          {
+            id: "t1",
+            title: "First",
+            repoFullName: "acme/api",
+            createdAt: Date.parse("2026-10-07T14:35:12Z"),
+          },
+          {
+            id: "t2",
+            title: "Second",
+            repoFullName: "acme/web",
+            createdAt: Date.parse("2026-10-07T14:29:43Z"),
+          },
         ],
       },
       isLoading: false,
-      isFetching: false,
+      isFetching: queryState.isFetching,
       error: null,
       refetch: vi.fn(),
     }) as never,
@@ -44,6 +57,7 @@ vi.mock(import("@/features/agents/lib/queries"), async (importOriginal) => ({
 afterEach(() => {
   cleanup()
   cancelThread.mockReset()
+  queryState.isFetching = false
 })
 
 function renderSection() {
@@ -55,6 +69,13 @@ function renderSection() {
 }
 
 const killButtons = () => screen.queryAllByRole("button", { name: "Kill" })
+
+it("hides the count while refreshing", () => {
+  queryState.isFetching = true
+  renderSection()
+
+  expect(screen.queryByText(/^\d+ running$/)).toBeNull()
+})
 
 it("hides a killed thread at once and leaves the others killable", async () => {
   cancelThread.mockReturnValue(new Promise(() => {}))

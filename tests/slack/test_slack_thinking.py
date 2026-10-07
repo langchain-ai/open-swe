@@ -1,10 +1,13 @@
 import asyncio
 from unittest.mock import AsyncMock, call
+from uuid import uuid4
 
 import httpx
 import pytest
 
-from agent.slack import thinking as slack_thinking
+from openswe.slack import thinking as slack_thinking
+from openswe.source_context import SourceContext
+from openswe.tasks.store import SidebarTaskMembership, Task, TaskContext, TaskMembership
 
 
 @pytest.fixture(autouse=True)
@@ -238,6 +241,117 @@ async def test_status_wait_keeps_refreshing_after_repeated_failures(
             complete.set()
 
     assert statuses[-1] == ""
+
+
+@pytest.mark.parametrize("worker_wakeup", [False, True])
+async def test_status_tracks_worker_runs_while_coordinator_idle(
+    monkeypatch: pytest.MonkeyPatch, worker_wakeup: bool
+) -> None:
+    client = _status_client()
+    coordinator_metadata = {
+        "source_context": {"slack_thread": {"channel_id": "C1", "thread_ts": "1.0"}}
+    }
+    worker_metadata: dict[str, object] = {
+        slack_thinking.RUNNING_BACKGROUND_TASKS_KEY: ["background-command"]
+    }
+
+    async def thread(thread_id: str) -> dict[str, object]:
+        return {"metadata": worker_metadata if thread_id == "worker" else coordinator_metadata}
+
+    client.threads.get.side_effect = thread
+    task = Task(title="Work", workspace_id=uuid4(), coordinator_thread_id="coordinator")
+    context = TaskContext(task, TaskMembership(thread_id="worker", task_id=task.id, role="worker"))
+    monkeypatch.setattr(TaskMembership, "context_for_thread", AsyncMock(return_value=context))
+    monkeypatch.setattr(
+        slack_thinking,
+        "sidebar_memberships",
+        AsyncMock(
+            return_value={
+                "worker": SidebarTaskMembership(
+                    thread_id="worker",
+                    task_id=str(task.id),
+                    role="worker",
+                    coordinator_thread_id="coordinator",
+                )
+            }
+        ),
+    )
+    worker_status = "pending"
+    worker_done = asyncio.Event()
+
+    async def join(_thread_id: str, _run_id: str) -> dict[str, object]:
+        if worker_wakeup:
+            await worker_done.wait()
+        return {}
+
+    client.runs.join.side_effect = join
+
+    async def runs(thread_id: str, *, status: str, limit: int) -> list[dict[str, str]]:
+        return (
+            [{"run_id": "worker-run"}] if thread_id == "worker" and status == worker_status else []
+        )
+
+    client.runs.list.side_effect = runs
+    statuses: list[str] = []
+    refreshed = asyncio.Event()
+
+    async def set_status(channel_id: str, thread_ts: str, status: str) -> bool:
+        assert (channel_id, thread_ts) == ("C1", "1.0")
+        statuses.append(status)
+        if len(statuses) >= 3:
+            refreshed.set()
+        return True
+
+    monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
+    monkeypatch.setattr(slack_thinking, "_STATUS_REFRESH_SECONDS", 0.001)
+    async with asyncio.timeout(2):
+        async with asyncio.TaskGroup() as tasks:
+            if worker_wakeup:
+                await slack_thinking.sync_slack_background_status(
+                    client,
+                    "worker",
+                    resume=True,
+                    run_id="worker-run",
+                    source_context=SourceContext(),
+                )
+                observer = next(iter(slack_thinking._STATUS_OBSERVERS))
+            else:
+                observer = tasks.create_task(
+                    slack_thinking.show_slack_thinking_status(
+                        client=client,
+                        thread_id="coordinator",
+                        run_id="coordinator-run",
+                        channel_id="C1",
+                        thread_ts="1.0",
+                    )
+                )
+            try:
+                await refreshed.wait()
+                assert not observer.done()
+                assert set(statuses) == {"Thinking..."}
+                worker_status = "running"
+                await slack_thinking.clear_slack_thinking_status_if_idle(
+                    client, "coordinator", "C1", "1.0"
+                )
+                assert set(statuses) == {"Thinking..."}
+                if worker_wakeup:
+                    worker_done.set()
+                    await observer
+                    assert set(statuses) == {"Thinking..."}
+                worker_status = "success"
+                await observer
+                await slack_thinking.sync_slack_background_status(client, "worker")
+                assert statuses[-1] == "Waiting for background tasks…"
+                worker_metadata.clear()
+                await slack_thinking.sync_slack_background_status(client, "worker")
+            finally:
+                observer.cancel()
+                await asyncio.gather(observer, return_exceptions=True)
+    assert statuses[-1] == ""
+    client.runs.join.assert_awaited_once_with(
+        "worker" if worker_wakeup else "coordinator",
+        "worker-run" if worker_wakeup else "coordinator-run",
+    )
 
 
 async def test_status_wait_cancellation_propagates_and_clears_idle_status(

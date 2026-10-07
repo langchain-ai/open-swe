@@ -6,11 +6,11 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import directory, queries
-from agent.database import analytics as database
-from agent.database import postgres
-from agent.slack.users import SlackUser
-from agent.users.models import User, UserIdentity
+from openswe.analytics import directory, queries
+from openswe.database import analytics as database
+from openswe.database import postgres
+from openswe.slack.users import SlackUser
+from openswe.users.models import User, UserIdentity
 from tests.analytics.conftest import initialize_database
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)

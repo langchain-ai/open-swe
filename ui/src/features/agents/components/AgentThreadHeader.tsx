@@ -2,7 +2,7 @@ import { ContextMenu } from "@base-ui/react/context-menu"
 import { Menu } from "@base-ui/react/menu"
 import { DotsThreeIcon } from "@phosphor-icons/react"
 import { Folder } from "lucide-react"
-import { useRef, useState } from "react"
+import { type ReactNode, useRef, useState } from "react"
 
 import { useNavigate } from "@tanstack/react-router"
 import type { DesktopLegacyLocalThread } from "@/desktop"
@@ -79,6 +79,7 @@ function ThreadRepoIndicator({
 export function AgentThreadHeader({
   title,
   target,
+  targetMenu,
   panelCollapsed,
   thread,
   onRename,
@@ -88,6 +89,8 @@ export function AgentThreadHeader({
 }: {
   title?: string | null
   target: "Cloud" | "This Mac" | "Local CLI"
+  /** Replaces the target label with a control that moves the thread. */
+  targetMenu?: ReactNode
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
   localThread?: DesktopLegacyLocalThread
@@ -326,7 +329,9 @@ export function AgentThreadHeader({
           {thread && !localThread && (
             <ThreadParticipants threadId={thread.id} />
           )}
-          <span className="text-xs text-muted-foreground">{target}</span>
+          {targetMenu ?? (
+            <span className="text-xs text-muted-foreground">{target}</span>
+          )}
           {!localThread && visibilityMenu}
         </div>
       </div>

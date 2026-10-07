@@ -547,6 +547,58 @@
             ],
             "title": "Response Status Code"
           },
+          "settings_changes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "const": "[REDACTED]",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "propertyNames": {
+                    "enum": [
+                      "before",
+                      "after"
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Changes"
+          },
+          "settings_scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "instance",
+                  "workspace"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings Scope"
+          },
           "source": {
             "default": "http",
             "enum": [
@@ -614,7 +666,7 @@
         "properties": {
           "options": {
             "items": {
-              "$ref": "#/components/schemas/agent__utils__json_types__JsonObject"
+              "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
             },
             "title": "Options",
             "type": "array"
@@ -1677,6 +1729,19 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HumanReviewAvailability": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "HumanReviewAvailability",
+        "type": "object"
+      },
       "HumanReviewDismissBody": {
         "properties": {
           "reason": {
@@ -2519,7 +2584,7 @@
           "sender": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+                "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
               },
               {
                 "type": "null"
@@ -2538,7 +2603,7 @@
           "usage": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+                "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
               },
               {
                 "type": "null"
@@ -3597,6 +3662,17 @@
             ],
             "title": "Experimental Background Callbacks"
           },
+          "experimental_task_coordination": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Task Coordination"
+          },
           "model_routing_enabled": {
             "anyOf": [
               {
@@ -4304,6 +4380,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "claimed": {
+            "default": false,
+            "title": "Claimed",
+            "type": "boolean"
+          },
           "error": {
             "default": "",
             "title": "Error",
@@ -4593,6 +4674,29 @@
           "cancelled"
         ],
         "type": "string"
+      },
+      "ReviewChat": {
+        "properties": {
+          "assistant_id": {
+            "title": "Assistant Id",
+            "type": "string"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "assistant_id",
+          "thread_id"
+        ],
+        "title": "ReviewChat",
+        "type": "object"
       },
       "ReviewCommentUpdate": {
         "properties": {
@@ -5790,7 +5894,7 @@
             "type": "boolean"
           },
           "input": {
-            "$ref": "#/components/schemas/agent__transcript__events__JsonObject"
+            "$ref": "#/components/schemas/openswe__transcript__events__JsonObject"
           },
           "message_id": {
             "anyOf": [
@@ -7389,7 +7493,7 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
-      "agent__review__assessment_feedback__FeedbackSubmission": {
+      "openswe__review__assessment_feedback__FeedbackSubmission": {
         "properties": {
           "comment": {
             "default": "",
@@ -7412,7 +7516,7 @@
         "title": "FeedbackSubmission",
         "type": "object"
       },
-      "agent__threads__feedback__FeedbackSubmission": {
+      "openswe__threads__feedback__FeedbackSubmission": {
         "properties": {
           "action": {
             "default": "submit",
@@ -7449,13 +7553,13 @@
         "title": "FeedbackSubmission",
         "type": "object"
       },
-      "agent__transcript__events__JsonObject": {
+      "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
         },
         "type": "object"
       },
-      "agent__utils__json_types__JsonObject": {
+      "openswe__utils__json_types__JsonObject": {
         "additionalProperties": true,
         "type": "object"
       }
@@ -9747,6 +9851,58 @@
         ]
       }
     },
+    "/dashboard/api/langsmith/desktop/exchange": {
+      "post": {
+        "description": "Finish a desktop LangSmith connection with the app's own session.",
+        "operationId": "langsmith_desktop_exchange_dashboard_api_langsmith_desktop_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopConnectExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Langsmith Desktop Exchange Dashboard Api Langsmith Desktop Exchange Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Langsmith Desktop Exchange",
+        "tags": [
+          "dashboard",
+          "langsmith"
+        ]
+      }
+    },
     "/dashboard/api/langsmith/login": {
       "get": {
         "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
@@ -9765,6 +9921,40 @@
                 }
               ],
               "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_handoff",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Handoff"
+            }
+          },
+          {
+            "in": "query",
+            "name": "desktop_port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1024,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Desktop Port"
             }
           }
         ],
@@ -12033,6 +12223,70 @@
       }
     },
     "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review": {
+      "get": {
+        "operationId": "api_human_review_availability_dashboard_api_repos__owner___repo__pulls__number__human_review_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "title": "Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanReviewAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Human Review Availability",
+        "tags": [
+          "dashboard",
+          "human-review"
+        ]
+      },
       "post": {
         "operationId": "api_request_human_review_dashboard_api_repos__owner___repo__pulls__number__human_review_post",
         "parameters": [
@@ -13038,9 +13292,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Get Review Chat Dashboard Api Reviews  Owner   Repo   Pr Number  Chat Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewChat"
                 }
               }
             },
@@ -13926,7 +14178,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/agent__review__assessment_feedback__FeedbackSubmission"
+                "$ref": "#/components/schemas/openswe__review__assessment_feedback__FeedbackSubmission"
               }
             }
           },
@@ -16723,6 +16975,16 @@
               "title": "Sort By",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "hierarchy",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Hierarchy",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -17456,7 +17718,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/agent__threads__feedback__FeedbackSubmission"
+                "$ref": "#/components/schemas/openswe__threads__feedback__FeedbackSubmission"
               }
             }
           },

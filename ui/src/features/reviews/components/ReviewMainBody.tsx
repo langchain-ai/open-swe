@@ -1403,6 +1403,8 @@ function ReviewBodyInner({
                   headRef={detail.pr.head_ref}
                   baseRef={detail.pr.base_ref}
                   author={detail.pr.author?.login}
+                  createdAt={detail.pr.created_at}
+                  mergedAt={detail.pr.merged_at}
                   stats={{
                     changedFiles: detail.pr.changed_files,
                     additions: detail.pr.additions,
@@ -1440,6 +1442,7 @@ function ReviewBodyInner({
                     <Markdown
                       content={detail.pr.body}
                       transformImageUrl={transformPrImage}
+                      enlargeImages
                     />
                   ) : (
                     <p className="text-xs text-muted-foreground">

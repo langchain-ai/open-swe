@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.threads import (
+from openswe.threads import (
     access,
     blobs,
     handlers,
@@ -14,7 +14,7 @@ from agent.threads import (
     summary,
     workflow_approval_api,
 )
-from agent.tools import threads as tools
+from openswe.tools import threads as tools
 
 _ADMINS = {"admin", "admin@example.com"}
 

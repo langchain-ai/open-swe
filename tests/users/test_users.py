@@ -5,12 +5,12 @@ import asyncio
 import pytest
 from sqlalchemy import func, select, update
 
-from agent.database import postgres
-from agent.slack.client import get_slack_user_info
-from agent.slack.users import SlackUser
-from agent.threads.participants import participant_summaries
-from agent.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
-from agent.users.avatars import avatar_for_login
+from openswe.database import postgres
+from openswe.slack.client import get_slack_user_info
+from openswe.slack.users import SlackUser
+from openswe.threads.participants import participant_summaries
+from openswe.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
+from openswe.users.avatars import avatar_for_login
 from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -126,7 +126,7 @@ async def test_participants_deduplicate_linked_identities_and_keep_cached_slack_
 async def test_identity_lookup_uses_current_email_and_fails_closed(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent.slack import client
+    from openswe.slack import client
 
     async with postgres.session() as session:
         session.add(SlackUser(id="U0123", payload={"profile": {"email": "old@example.com"}}))

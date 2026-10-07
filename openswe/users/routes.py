@@ -1,0 +1,47 @@
+"""Dashboard routes for people: the admin listing of who Open SWE knows."""
+
+from typing import Any
+
+from fastapi import APIRouter, Query
+
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.users.avatars import avatar_for_login
+from openswe.users.models import User
+
+router = APIRouter(tags=["users"])
+
+
+@router.get("/users/{login}/avatar")
+async def user_avatar(
+    login: str,
+    _session: dict[str, str] = SESSION_DEP,
+) -> dict[str, str]:
+    return {"avatar_url": await avatar_for_login(login)}
+
+
+@router.get("/admin/users")
+async def admin_list_users(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    search: str = Query(default=""),
+    _admin: dict[str, Any] = ADMIN_DEP,
+) -> dict[str, Any]:
+    """One page of users with the identities each one signed in or linked with."""
+    users, total = await User.page(offset=(page - 1) * page_size, limit=page_size, search=search)
+    return {
+        "items": [
+            {
+                "user_id": str(user.id),
+                "github_login": user.github_login,
+                "email": user.email,
+                "slack_user_id": user.slack_user_id or None,
+                "display_name": user.display_name,
+                "avatar_url": user.avatar_url,
+                "is_admin": user.is_admin,
+            }
+            for user in users
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }

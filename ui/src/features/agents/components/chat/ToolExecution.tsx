@@ -6,10 +6,10 @@ import {
   useRef,
   useState,
 } from "react"
-import { MultiFileDiff } from "@pierre/diffs/react"
 import { DiffView } from "./DiffView"
 import { SqlResultTable, parseSqlResult } from "./SqlResultTable"
 import { formatToolDisplay } from "./toolExecutionDisplay"
+import { ScopedFileDiff } from "@/features/agents/components/ScopedFileDiff"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
@@ -133,7 +133,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
           className="max-h-[250px] overflow-auto border-t border-border"
           style={{ boxShadow: edgeShadows || "none" }}
         >
-          <MultiFileDiff
+          <ScopedFileDiff
             oldFile={oldFile}
             newFile={newFile}
             options={inlineDiffOptions}

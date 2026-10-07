@@ -104,6 +104,7 @@ const NAV: Array<NavGroup> = [
       },
       { to: "/admin/incidents", label: "Incidents", icon: IoWarningOutline },
       { to: "/admin/operations", label: "Operations", icon: IoPulseOutline },
+      { to: "/admin/audit-logs", label: "Audit logs", icon: IoReaderOutline },
       { to: "/admin/users", label: "Users", icon: IoPeopleOutline },
       { to: "/admin/evals", label: "Evals", icon: IoBarChartOutline },
     ],
