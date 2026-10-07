@@ -6,9 +6,9 @@ import httpx2
 import pytest
 from langchain_core.messages import HumanMessage
 
-from agent.dashboard.options import available_requested_models
-from agent.model_request import ModelRequestIntent, infer_requested_model
-from agent.utils.jev import JevDecision, select_jev_choice
+from openswe.dashboard.options import available_requested_models
+from openswe.model_request import ModelRequestIntent, infer_requested_model
+from openswe.utils.jev import JevDecision, select_jev_choice
 
 type ResponseHandler = (
     Callable[[httpx2.Request], httpx2.Response]
@@ -117,7 +117,7 @@ async def test_missing_credentials_skips_classification(
 async def test_classifier_deadline_cancels_stalled_request(
     monkeypatch: pytest.MonkeyPatch, transport: InstallTransport
 ) -> None:
-    monkeypatch.setattr("agent.utils.jev.JEV_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr("openswe.utils.jev.JEV_TIMEOUT_SECONDS", 0.01)
     cancelled = asyncio.Event()
 
     async def handle(request: httpx2.Request) -> httpx2.Response:

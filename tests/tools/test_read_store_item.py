@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.tools.read_store_item import read_store_item
+from openswe.tools.read_store_item import read_store_item
 
 
 @pytest.mark.asyncio
@@ -22,7 +22,7 @@ async def test_store_read_requires_current_admin_and_private_surface(
             )
         )
     )
-    monkeypatch.setattr("agent.tools.access.langgraph_sdk.get_client", lambda: client)
+    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: client)
     config = {
         "configurable": {
             "thread_id": "t-1",
@@ -33,8 +33,8 @@ async def test_store_read_requires_current_admin_and_private_surface(
     }
     read = AsyncMock(return_value={"setting": "stored"})
     with (
-        patch("agent.run_config.get_config", return_value=config),
-        patch("agent.tools.read_store_item.get_value", read),
+        patch("openswe.run_config.get_config", return_value=config),
+        patch("openswe.tools.read_store_item.get_value", read),
     ):
         result = await read_store_item(["arbitrary", "nested"], "item")
     assert result["ok"] is allowed

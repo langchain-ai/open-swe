@@ -162,6 +162,7 @@ function TimelineEntry({
             <Markdown
               content={item.body}
               transformImageUrl={transformImageUrl}
+              enlargeImages
             />
           </div>
         ) : null}

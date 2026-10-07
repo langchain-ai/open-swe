@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.expedited_review.readiness import (
+from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
     Readiness,
     _latest_reviews_by_user,
@@ -10,8 +10,8 @@ from agent.expedited_review.readiness import (
     assess_readiness,
     readiness_blockers,
 )
-from agent.github.ci import RequiredCheck
-from agent.github.pull_request_status import Mergeability
+from openswe.github.ci import RequiredCheck
+from openswe.github.pull_request_status import Mergeability, PullRequestClient
 
 
 def _snapshot(**overrides: object) -> PullRequestSnapshot:
@@ -100,7 +100,7 @@ async def test_assess_readiness_separates_required_checks_from_optional_checks(
     )
     with (
         patch(
-            "agent.expedited_review.readiness.fetch_pr",
+            "openswe.expedited_review.readiness.fetch_pr",
             AsyncMock(
                 return_value={
                     "state": "open",
@@ -113,7 +113,7 @@ async def test_assess_readiness_separates_required_checks_from_optional_checks(
             ),
         ),
         patch(
-            "agent.expedited_review.readiness.list_check_runs",
+            "openswe.expedited_review.readiness.list_check_runs",
             AsyncMock(
                 return_value=[
                     {"name": "Open SWE Review", "status": "completed", "conclusion": "neutral"},
@@ -127,20 +127,17 @@ async def test_assess_readiness_separates_required_checks_from_optional_checks(
                 ]
             ),
         ),
-        patch("agent.expedited_review.readiness.list_commit_statuses", AsyncMock(return_value=[])),
         patch(
-            "agent.expedited_review.readiness.fetch_required_checks",
+            "openswe.expedited_review.readiness.list_commit_statuses", AsyncMock(return_value=[])
+        ),
+        patch(
+            "openswe.expedited_review.readiness.fetch_required_checks",
             AsyncMock(return_value={RequiredCheck("required")}),
         ),
-        patch("agent.expedited_review.readiness.github_client"),
-        patch(
-            "agent.expedited_review.readiness.fetch_unresolved_review_threads",
-            AsyncMock(return_value=[]),
-        ),
-        patch(
-            "agent.expedited_review.readiness._fetch_reviews", AsyncMock(return_value=live_reviews)
-        ),
-        patch("agent.expedited_review.readiness.fetch_mergeability", AsyncMock(return_value=None)),
+        patch("openswe.github.http.github_client"),
+        patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
+        patch.object(PullRequestClient, "reviews", AsyncMock(return_value=live_reviews)),
+        patch.object(PullRequestClient, "mergeability", AsyncMock(return_value=None)),
     ):
         result = await assess_readiness(owner="lc", repo="repo", pr_number=7, token="t")
 
