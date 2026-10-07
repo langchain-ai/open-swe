@@ -1,67 +1,96 @@
-"""Emit one inactivity event per quiet period for unresolved public threads."""
+"""Turn due thread inactivity deadlines into ``thread_inactive`` event log rows."""
 
 import asyncio
+import json
 import logging
+from datetime import datetime
 
+from pydantic import BaseModel, JsonValue
 from sqlalchemy import text
 
 from agent.database import transaction
+from agent.transcript.inactivity import INACTIVE_AFTER
 from agent.webhooks.event_log import EventLog, LoggedEvent
 from agent.webhooks.event_subscriptions import EventSubscription
+from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 logger = logging.getLogger(__name__)
+_BATCH = 100
+_POLL_SECONDS = 60
 _STOP = asyncio.Event()
 _WORKER: asyncio.Task[None] | None = None
 
-_EMIT = text(
+_CLAIM_DUE = text(
     """
-    WITH quiet AS (
-        SELECT t.thread_id, w.id AS workspace_id, activity.last_activity_at
-        FROM thread t
-        JOIN workspace w ON w.slug = COALESCE(
-            t.metadata->>'workspace', t.metadata->>'environment', 'default')
-        CROSS JOIN LATERAL (
-            SELECT max(GREATEST(requested_at, started_at, completed_at)) AS last_activity_at
-            FROM thread_turn WHERE thread_id = t.thread_id
-        ) activity
-        WHERE t.status <> 'running'
-          AND COALESCE(t.metadata->>'visibility', 'public') = 'public'
-          AND COALESCE(t.metadata->>'resolved', 'false') <> 'true'
-          AND activity.last_activity_at <= clock_timestamp() - interval '1 hour'
-          AND COALESCE(t.metadata->>'inactivity_emitted_for', '')
-              <> activity.last_activity_at::text
-          AND NOT EXISTS (
-              SELECT 1 FROM thread_turn
-              WHERE thread_id = t.thread_id AND state IN ('requested', 'running')
-          )
-        ORDER BY activity.last_activity_at
-        LIMIT 100
-        FOR UPDATE OF t SKIP LOCKED
-    ), claimed AS (
-        UPDATE thread t
-        SET metadata = jsonb_set(t.metadata, '{inactivity_emitted_for}',
-                                to_jsonb(quiet.last_activity_at::text))
-        FROM quiet WHERE t.thread_id = quiet.thread_id
-        RETURNING t.thread_id, quiet.workspace_id, quiet.last_activity_at
+    DELETE FROM thread_inactivity AS due USING thread
+    WHERE due.thread_id IN (
+        SELECT thread_id FROM thread_inactivity
+        WHERE due_at <= clock_timestamp()
+        ORDER BY due_at
+        LIMIT :limit
+        FOR UPDATE SKIP LOCKED
     )
+      AND thread.thread_id = due.thread_id
+    RETURNING due.thread_id, due.last_activity_at, thread.metadata
+    """
+)
+
+_INSERT = text(
+    """
     INSERT INTO event_log (source, endpoint, event_type, delivery_id, payload, workspace_id)
-    SELECT 'thread', 'thread-inactivity', 'thread_inactive',
-           thread_id || ':' || last_activity_at::text,
-           jsonb_build_object('thread_id', thread_id,
-                              'last_activity_at', last_activity_at,
-                              'inactive_for_seconds', 3600), workspace_id
-    FROM claimed
+    SELECT 'thread', 'thread-inactivity', 'thread_inactive', :delivery_id,
+           CAST(:payload AS jsonb), id
+    FROM workspace WHERE slug = :workspace
     RETURNING source, event_type, delivery_id, received_at, payload,
               user_id, workspace_id, repository_id, pull_request_id
     """
 )
 
 
+class _DueThread(BaseModel):
+    thread_id: str
+    last_activity_at: datetime
+    metadata: dict[str, JsonValue]
+
+    @property
+    def watchable(self) -> bool:
+        return (
+            self.metadata.get("visibility", "public") == "public"
+            and self.metadata.get("resolved") is not True
+        )
+
+    @property
+    def workspace(self) -> str:
+        for key in ("workspace", "environment"):
+            value = self.metadata.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return DEFAULT_WORKSPACE_SLUG
+
+
 async def emit_inactivity_events() -> int:
+    """Emit an event for every due deadline, each exactly once; returns how many."""
     await EventLog.ensure_partitions()
+    events: list[LoggedEvent] = []
     async with transaction() as conn:
-        result = await conn.execute(_EMIT)
-        events = [LoggedEvent.model_validate(dict(row)) for row in result.mappings()]
+        claimed = await conn.execute(_CLAIM_DUE, {"limit": _BATCH})
+        for due in (_DueThread.model_validate(dict(row)) for row in claimed.mappings()):
+            if not due.watchable:
+                continue
+            payload = {
+                "thread_id": due.thread_id,
+                "last_activity_at": due.last_activity_at.isoformat(),
+                "inactive_for_seconds": int(INACTIVE_AFTER.total_seconds()),
+            }
+            inserted = await conn.execute(
+                _INSERT,
+                {
+                    "delivery_id": f"{due.thread_id}:{payload['last_activity_at']}",
+                    "payload": json.dumps(payload),
+                    "workspace": due.workspace,
+                },
+            )
+            events.extend(LoggedEvent.model_validate(dict(row)) for row in inserted.mappings())
     for event in events:
         await EventSubscription.deliver(event)
     return len(events)
@@ -74,7 +103,7 @@ async def _run() -> None:
         except Exception:  # noqa: BLE001
             logger.warning("Thread inactivity sweep failed", exc_info=True)
         try:
-            await asyncio.wait_for(_STOP.wait(), timeout=60)
+            await asyncio.wait_for(_STOP.wait(), timeout=_POLL_SECONDS)
         except TimeoutError:
             pass
 
