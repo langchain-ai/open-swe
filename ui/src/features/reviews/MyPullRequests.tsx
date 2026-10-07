@@ -21,6 +21,7 @@ import { pullRequestKey, statusLabels } from "./lib/status"
 import { control } from "./lib/styles"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
+import { usePullRequestSearch } from "./lib/usePullRequestSearch"
 import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
 
 const chunkSize = 10
@@ -62,6 +63,20 @@ export function MyPullRequests({
   const queryClient = useQueryClient()
   const query = useOpenPullRequests(login, repo, sort, direction)
   const knownRepos = useRepos()
+  const descriptionSearch = usePullRequestSearch(search)
+  const descriptionMatches = new Set(
+    descriptionSearch.data?.pages.flatMap((page) =>
+      page.pull_requests.map((pr) => pullRequestKey(pr).toLowerCase())
+    ) ?? []
+  )
+  const {
+    hasNextPage: hasMoreMatches,
+    isFetching: fetchingMatches,
+    fetchNextPage: fetchMoreMatches,
+  } = descriptionSearch
+  useEffect(() => {
+    if (hasMoreMatches && !fetchingMatches) void fetchMoreMatches()
+  }, [hasMoreMatches, fetchingMatches, fetchMoreMatches])
   // Rows whose details have been asked for. Tied to the filter set that grew
   // it, so changing a filter starts the list over without an extra render.
   const [growth, setGrowth] = useState({ key: "", rows: chunkSize })
@@ -100,10 +115,12 @@ export function MyPullRequests({
           pr.number,
         ]) !== null
     )
-    .filter((pr) =>
-      `${pr.repo} #${pr.number} ${pr.title}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
+    .filter(
+      (pr) =>
+        `${pr.repo} #${pr.number} ${pr.title}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()) ||
+        descriptionMatches.has(pullRequestKey(pr).toLowerCase())
     )
   // A status filter can only be applied to rows whose details have arrived, so
   // it costs a detail read for every row rather than only the ones on screen.
@@ -233,7 +250,7 @@ export function MyPullRequests({
             <input
               className={cn(control, "min-w-40 flex-1")}
               aria-label="Search pull requests"
-              placeholder="Search title or PR number…"
+              placeholder="Search title, description, or PR number…"
               value={search}
               onChange={(event) =>
                 onFiltersChange({ q: event.target.value || undefined }, true)
@@ -296,6 +313,9 @@ export function MyPullRequests({
                 })
                 void query.refetch()
                 void queryClient.invalidateQueries({
+                  queryKey: ["pull-request-search", login],
+                })
+                void queryClient.invalidateQueries({
                   queryKey: ["my-pr-details", login],
                 })
                 void queryClient.invalidateQueries({
@@ -323,6 +343,12 @@ export function MyPullRequests({
               {query.error.message}
             </p>
           )}
+          {search.trim() && descriptionSearch.isError && (
+            <p role="alert" className="text-sm text-destructive">
+              Title and description search is unavailable; showing repository,
+              title, and PR number matches only.
+            </p>
+          )}
           {query.isLoading ? (
             <Skeleton className="h-56 w-full" />
           ) : incomplete ? (
@@ -339,7 +365,9 @@ export function MyPullRequests({
               <>
                 {visible.length === 0 ? (
                   <p className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
-                    {detailsLoading || query.isFetchingNextPage
+                    {detailsLoading ||
+                    query.isFetchingNextPage ||
+                    descriptionSearch.isSearching
                       ? "Loading matching PRs…"
                       : all.length
                         ? "No PRs match these filters."

@@ -1227,51 +1227,6 @@ const costRow: UsageLeaderboardRow = {
   avg_invocation_seconds: 90,
 }
 
-it("explains the feedback trophy on focus", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
-  vi.mocked(api.usageLeaderboard).mockResolvedValue({
-    ...emptyUsage,
-    total_members: 1,
-    rows: [
-      { ...costRow, feedback_given: 3, is_top_feedback_contributor: true },
-    ],
-  })
-  const client = mountReport()
-  const trigger = await screen.findByRole("button", {
-    name: "Top feedback contributor",
-  })
-  act(() => trigger.focus())
-  expect(
-    await screen.findByText("Most feedback given in the selected date range.")
-  ).toBeTruthy()
-  client.clear()
-})
-
-it.each([true, false, undefined])(
-  "shows the feedback trophy only for a global leader (%s)",
-  async (isTopContributor) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
-    vi.mocked(api.usageLeaderboard).mockResolvedValue({
-      ...emptyUsage,
-      total_members: 20,
-      rows: [
-        {
-          ...costRow,
-          feedback_given: 3,
-          is_top_feedback_contributor: isTopContributor,
-        },
-      ],
-    })
-    const client = mountReport()
-    await screen.findByText("Cost Reader")
-    const trophy = screen.queryByRole("button", {
-      name: "Top feedback contributor",
-    })
-    expect(Boolean(trophy)).toBe(Boolean(isTopContributor))
-    client.clear()
-  }
-)
-
 it.each([
   [5, 2, "2.5"],
   [0, 0, "—"],
@@ -1746,19 +1701,19 @@ it("copies diagnostics from the keyboard and reports a denied clipboard", async 
   client.clear()
 })
 
-it("renders feedback counts and resets pagination when sorting feedback in either direction", async () => {
+it("renders agent LOC and resets pagination when sorting LOC in either direction", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockImplementation(
     async (_period, _limit, cursor) => ({
       ...emptyUsage,
       total_members: 11,
       next_cursor: cursor ? null : "next-page",
-      rows: [{ ...costRow, feedback_given: 1234 }],
+      rows: [{ ...costRow, agent_loc: 1234 }],
     })
   )
   const client = mountReport()
   const header = await screen.findByRole("columnheader", {
-    name: "# Feedback Given",
+    name: "Agent LOC",
   })
   const table = header.closest("table")!
   expect(within(table).getByText("1,234")).toBeTruthy()
@@ -1770,7 +1725,7 @@ it("renders feedback counts and resets pagination when sorting feedback in eithe
       "30d",
       10,
       undefined,
-      "feedback_given",
+      "agent_loc",
       "desc"
     )
   )
@@ -1782,7 +1737,7 @@ it("renders feedback counts and resets pagination when sorting feedback in eithe
       "30d",
       10,
       undefined,
-      "feedback_given",
+      "agent_loc",
       "asc"
     )
   )

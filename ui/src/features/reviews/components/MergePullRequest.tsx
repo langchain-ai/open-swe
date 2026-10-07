@@ -68,6 +68,7 @@ export function MergePullRequest({
       onClick={() => merge.mutate()}
     >
       <select
+        hidden={options.length === 1}
         className={control}
         aria-label={`Merge method for PR #${pr.number}`}
         value={method}

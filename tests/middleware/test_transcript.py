@@ -14,9 +14,19 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langchain_core.outputs import ChatGenerationChunk
 from langgraph.prebuilt.tool_node import ToolCallRequest
 
-from agent.middleware import transcript as mw
-from agent.transcript.engine import Command
-from agent.transcript.events import MessageUsage, TurnFailed
+from openswe.input_messages import build_input_messages
+from openswe.middleware import transcript as mw
+from openswe.transcript.engine import Command, append
+from openswe.transcript.events import (
+    MessageSender,
+    MessageUsage,
+    ThreadCreated,
+    TurnCompleted,
+    TurnFailed,
+    TurnRequested,
+)
+from openswe.transcript.rebuild import rebuild_thread_projections
+from openswe.transcript.snapshot import load_events, load_snapshot
 
 THREAD_ID = "thread-under-test"
 RUN_ID = "run-under-test"
@@ -183,6 +193,116 @@ async def test_only_mid_run_human_messages_are_recorded_once(
     ]
     assert [command.command_id for command in human_events] == ["human:human-queued"]
     assert human_events[0].event.role == "human"
+
+
+@pytest.mark.parametrize("supplied_turn", [False, True])
+async def test_event_inputs_survive_initial_delivery_injection_and_replay(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, supplied_turn: bool
+) -> None:
+    thread_id, previous_turn = str(uuid7()), uuid7()
+    old_human = HumanMessage(content="Original request", id="original-request")
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id="created",
+                event=ThreadCreated(title="Task", source="dashboard", owner_login="owner"),
+                actor_kind="system",
+            ),
+            Command(
+                command_id="original-request",
+                event=TurnRequested(
+                    turn_id=previous_turn,
+                    message_id=old_human.id,
+                    text=old_human.content,
+                    sender=MessageSender(login="owner", kind="dashboard"),
+                ),
+                actor_kind="user",
+            ),
+            Command(
+                command_id="original-completed",
+                event=TurnCompleted(turn_id=previous_turn),
+                actor_kind="agent",
+            ),
+        ],
+    )
+
+    def event_message(text: str) -> tuple[str, HumanMessage]:
+        event_id = str(uuid7())
+        (message,) = build_input_messages(
+            text,
+            {
+                "sender_id": "system:event-subscription",
+                "surface": "automation",
+                "kind": "system",
+                "data": {"event_match": event_id},
+            },
+        )
+        content = message["content"]
+        assert isinstance(content, str)
+        return event_id, HumanMessage(content=content, id=f"event-match:{event_id}")
+
+    old_event_id, old_event = event_message("An old, untranscribed event")
+    first_id, first = event_message("Worker B asks a question")
+    second_id, second = event_message("Worker A reports a blocker")
+    _, injected = event_message("Worker B completed")
+    history = [old_human, AIMessage(content="Working", id="old-response"), old_event]
+    initial = [*history, first, second]
+    all_messages = [*initial, injected]
+    configurable: dict[str, object] = {"thread_id": thread_id, "run_id": "event-run"}
+    if supplied_turn:
+        configurable["transcript_turn_id"] = str(uuid7())
+    config = {
+        "configurable": configurable,
+        "metadata": {"kind": "event_match", "event_match_ids": [first_id, second_id]},
+    }
+    monkeypatch.setattr(mw, "get_config", lambda: config)
+    middleware = mw.TranscriptMiddleware()
+    await middleware.abefore_agent({"messages": initial}, None)
+
+    async def respond(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="Both received", id="coordinator-answer")])
+
+    for _ in range(2):
+        await middleware.awrap_model_call(_model_request(all_messages), respond)
+    await middleware.aafter_agent({"messages": all_messages}, None)
+    snapshot = await load_snapshot(thread_id)
+    assert snapshot is not None
+    event_messages = [message for message in snapshot.messages if message.role == "human"]
+    assert [message.message_id for message in event_messages] == [
+        old_human.id,
+        first.id,
+        second.id,
+        injected.id,
+    ]
+    assert [message.text for message in event_messages[1:]] == [
+        first.content,
+        second.content,
+        injected.content,
+    ]
+    assert event_messages[0].turn_id == previous_turn
+    event_turn = event_messages[1].turn_id
+    assert event_turn != previous_turn
+    if supplied_turn:
+        assert str(event_turn) == configurable["transcript_turn_id"]
+    assert all(message.turn_id == event_turn for message in event_messages[1:])
+    assert old_event_id not in " ".join(message.text for message in snapshot.messages)
+
+    configurable.update(run_id="event-redispatch", transcript_turn_id=str(uuid7()))
+    await middleware.abefore_agent({"messages": all_messages}, None)
+    await middleware.awrap_model_call(_model_request(all_messages), respond)
+    await middleware.aafter_agent({"messages": all_messages}, None)
+    replay = await load_events(thread_id, after=snapshot.version, limit=100)
+    assert all(event.event_type != "message.completed" for event in replay)
+    retried = await load_snapshot(thread_id)
+    assert retried is not None and retried.messages == snapshot.messages
+    assert retried.thread.status == "idle"
+    assert all(turn.state == "completed" for turn in retried.turns)
+    await rebuild_thread_projections(thread_id)
+    reloaded = await load_snapshot(thread_id)
+    assert reloaded is not None and reloaded.messages == snapshot.messages
+    assert reloaded.turns == retried.turns
+    assert reloaded.thread.status == "idle"
 
 
 async def test_a_human_message_keeps_the_envelope_it_is_attributed_by(
