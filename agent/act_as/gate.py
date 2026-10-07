@@ -134,6 +134,8 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
         await post_slack_top_level_message_with_ts(
             dm_channel_id,
             message,
+            unfurl_links=False,
+            unfurl_media=False,
             blocks=block_payload(
                 [*card_blocks(message, request, thread_id), *await origin_footer(thread_id)]
             ),
