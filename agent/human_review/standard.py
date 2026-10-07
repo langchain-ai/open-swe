@@ -87,6 +87,7 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
+_AUTO_ASSIGN_ASKED = "auto_assign_asked"
 
 
 async def in_review_channel(owner: str, repo: str, channel_id: str, token: str) -> bool:
@@ -846,6 +847,10 @@ async def start_auto_assign(
 
     ``asked`` is someone requesting it now rather than the deadline passing.
     """
+    if asked:
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            if row is not None:
+                row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
     result = (
         AutoAssignResult("disabled")
         if not asked and skip_on_preview("start_auto_assign")
@@ -1118,18 +1123,22 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     return "rotated"
 
 
-async def _still_watched(request: HumanReviewRequest) -> bool:
-    """Whether a posted request is in a review channel; retires it, releasing its picks, if not."""
+async def _may_auto_assign(request: HumanReviewRequest) -> bool:
+    """Whether Open SWE picks reviewers unasked; releases its picks if not.
+
+    A pull request merely linked outside a review channel only gets reactions.
+    """
+    if request.kind != "posted" or _AUTO_ASSIGN_ASKED in request.run_config:
+        return True
     pr = request.pull_request
     token = await repo_token(pr.owner, pr.repo)
     if token is None or await in_review_channel(pr.owner, pr.repo, request.slack_channel_id, token):
         return True
     logger.info(
-        "Retiring a posted review request outside the repository's review channels",
+        "Not auto-assigning a pull request posted outside its review channels",
         extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
     )
-    request = await release_picks(request, "it was not posted in a review channel")
-    await retire(request, "cancelled", "not posted in a review channel")
+    await release_picks(request, "nobody asked Open SWE to find a reviewer for it")
     return False
 
 
@@ -1141,8 +1150,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
-    if request.kind == "posted" and not await _still_watched(request):
-        return {"status": "cancelled"}
+    if step != "auto_merge" and not await _may_auto_assign(request):
+        return {"status": "not_asked"}
     if step.startswith("remind:"):
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
 
