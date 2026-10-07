@@ -447,6 +447,7 @@ export interface AdminUser {
   email: string
   slack_user_id: string | null
   display_name: string
+  avatar_url: string
   is_admin: boolean
 }
 
