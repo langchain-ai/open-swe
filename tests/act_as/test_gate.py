@@ -81,6 +81,8 @@ async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monke
     assert refusal is not None and refusal["act_as"] == "pending"
     dm.assert_awaited_once()
     assert dm.await_args.args[0] == "D-ALICE"
+    assert dm.await_args.kwargs["unfurl_links"] is False
+    assert dm.await_args.kwargs["unfurl_media"] is False
     expected_url = slack_url or "https://example.com/agents/thread-1"
     assert f"<{expected_url}|this thread>" in dm.await_args.args[1]
     value = json.loads(dm.await_args.kwargs["blocks"][1]["elements"][0]["value"])
