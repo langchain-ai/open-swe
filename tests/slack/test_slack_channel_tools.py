@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent import tools
-from agent.run_config import RunConfig
-from agent.users import User
+from openswe import tools
+from openswe.run_config import RunConfig
+from openswe.users import User
 from tests.support.slack_api import SlackAPI
 
 
@@ -132,7 +132,7 @@ async def test_post_channel_message_requires_active_channel_membership(
 async def test_post_channel_message_finds_membership_after_empty_page(
     slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, source_channel: str
 ) -> None:
-    from agent.slack.tools import channels
+    from openswe.slack.tools import channels
 
     monkeypatch.setattr(
         RunConfig, "from_runtime", lambda: RunConfig.parse({"thread_id": "agent-thread"})

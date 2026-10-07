@@ -11,8 +11,8 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
 )
 
-from agent.middleware.tool_error_handler import ToolErrorMiddleware
-from agent.sandboxes.state import (
+from openswe.middleware.tool_error_handler import ToolErrorMiddleware
+from openswe.sandboxes.state import (
     SANDBOX_BACKENDS,
     set_sandbox_backend,
 )
@@ -59,11 +59,11 @@ async def test_unreachable_sandbox_notifies_then_ends_the_run() -> None:
     try:
         with (
             patch(
-                "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
+                "openswe.middleware.tool_error_handler.post_sandbox_unreachable_notification",
                 new_callable=AsyncMock,
             ) as mock_notify,
             patch(
-                "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
+                "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
             ) as mock_create,
             pytest.raises(SandboxConnectionError),
         ):
@@ -94,7 +94,7 @@ async def test_transient_sandbox_error_keeps_the_sandbox_and_asks_for_a_retry() 
 
     try:
         with patch(
-            "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
+            "openswe.middleware.tool_error_handler.post_sandbox_unreachable_notification",
             new_callable=AsyncMock,
         ) as mock_notify:
             result = await middleware.awrap_tool_call(request, handler)
@@ -128,7 +128,7 @@ async def test_command_level_sandbox_error_does_not_end_the_run() -> None:
         raise SandboxOperationError("CommandNotFound: no such file or directory: fzf")
 
     with patch(
-        "agent.middleware.tool_error_handler.post_sandbox_unreachable_notification",
+        "openswe.middleware.tool_error_handler.post_sandbox_unreachable_notification",
         new_callable=AsyncMock,
     ) as mock_notify:
         result = await middleware.awrap_tool_call(request, handler)

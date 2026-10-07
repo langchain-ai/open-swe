@@ -231,14 +231,14 @@ jobs:
             exit 0
           fi
 
-          agent_unit_test_paths=(agent tests pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
+          agent_unit_test_paths=(openswe testspyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
           if git diff --quiet "$BASE_SHA" HEAD -- "${agent_unit_test_paths[@]}"; then
             echo "agent_unit_tests=false" >> "$GITHUB_OUTPUT"
           else
             echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-          paths=(agent ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
+          paths=(openswe ui tests/e2epackage.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
           if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
             echo "browser=false" >> "$GITHUB_OUTPUT"
           else
