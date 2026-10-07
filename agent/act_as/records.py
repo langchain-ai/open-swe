@@ -79,11 +79,15 @@ class ThreadActAs:
         metadata = thread["metadata"] or {}
         requests = _parse(thread_id, metadata, _REQUEST_PREFIX, ActAsRequest)
         decisions = _parse(thread_id, metadata, _DECISION_PREFIX, ActAsDecision)
-        # Senders with no GitHub link are tracked by email only, and can steer the run too.
-        participant_count = len(participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY))) + len(
-            participant_logins(metadata.get(PARTICIPANT_EMAILS_KEY))
-        )
-        return cls(thread_id, requests, decisions, participant_count)
+        logins = set(participant_logins(metadata.get(PARTICIPANT_LOGINS_KEY)))
+        unlinked_count = 0
+        for email in participant_logins(metadata.get(PARTICIPANT_EMAILS_KEY)):
+            login = await User.login_for_email(email)
+            if login:
+                logins.add(login.strip().lower())
+            else:
+                unlinked_count += 1
+        return cls(thread_id, requests, decisions, len(logins) + unlinked_count)
 
     @property
     def is_shared(self) -> bool:
