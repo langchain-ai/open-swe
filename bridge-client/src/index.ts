@@ -14,6 +14,7 @@ export {
   Bridge,
   BridgeGoneError,
   CredentialRejectedError,
+  type BridgeHandler,
   type BridgeOptions,
 } from "./bridge"
 export {

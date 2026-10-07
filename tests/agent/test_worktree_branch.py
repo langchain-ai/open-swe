@@ -5,7 +5,7 @@ from typing import Any, cast
 from deepagents.backends import LocalShellBackend
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.bridge.worktree_branch import rename_temporary_worktree_branch
+from openswe.bridge.worktree_branch import rename_temporary_worktree_branch
 
 
 class _FakeModel:

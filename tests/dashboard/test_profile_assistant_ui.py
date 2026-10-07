@@ -1,6 +1,6 @@
 import pytest
 
-from agent.dashboard.profiles import ProfileUpdate, get_profile, upsert_profile
+from openswe.dashboard.profiles import ProfileUpdate, get_profile, upsert_profile
 
 
 @pytest.mark.parametrize("flag", ["experimental_assistant_ui", "experimental_mcp_ptc"])

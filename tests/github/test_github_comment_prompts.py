@@ -6,10 +6,10 @@ from langchain_core.language_models.base import LangSmithParams
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from agent.github import comments as github_comments
-from agent.github import webhook as github_webhooks
-from agent.prompt import construct_system_prompt
-from agent.utils.authorship import (
+from openswe.github import comments as github_comments
+from openswe.github import webhook as github_webhooks
+from openswe.prompt import construct_system_prompt
+from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
     CollaboratorIdentity,

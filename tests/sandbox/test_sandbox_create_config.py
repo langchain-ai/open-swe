@@ -2,8 +2,8 @@
 
 import pytest
 
-from agent.sandboxes.lifecycle import SandboxCreateConfig
-from agent.workspaces.store import Workspace
+from openswe.sandboxes.lifecycle import SandboxCreateConfig
+from openswe.workspaces.store import Workspace
 
 
 @pytest.mark.asyncio
@@ -23,7 +23,7 @@ async def test_inherited_sandbox_tracks_default_without_changing_workspace_ident
     async def load(slug: str | None) -> Workspace:
         return child if slug == "child" else default
 
-    monkeypatch.setattr("agent.sandboxes.lifecycle.load_workspace", load)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.load_workspace", load)
     config = await SandboxCreateConfig.resolve("child")
     assert config.snapshot_id == "snap-1"
     assert config.resources == {"mem_bytes": 1234}

@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo } from "react"
+import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
 import { ArrowUp, ChevronDown, Clock, X } from "lucide-react"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -227,6 +228,7 @@ export const Messages = memo(function MessagesComponent({
                 />
               )
             })}
+            <ReviewChatActions messages={visibleMessages} />
             {threadId && showPlanArtifact && (
               <InlinePlanArtifact threadId={threadId} />
             )}
