@@ -6,11 +6,11 @@ import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
 from agent.github.ci import read_required_checks, unreported_required_checks
@@ -28,6 +28,7 @@ _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _SEARCH_PAGE_SIZE = 100
 # GitHub search returns at most 1000 results per query.
 _SEARCH_MAX_PAGES = 10
+_REST_PAGE_SIZE = 100
 _MERGEABILITY_ATTEMPTS = 3
 _MERGEABILITY_DELAY_SECONDS = 0.7
 _SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
@@ -90,23 +91,24 @@ ReviewDecision = Literal["approved", "changes_requested", "none"]
 ReviewerState = Literal["approved", "changes_requested", "dismissed", "commented"]
 PullRequestState = Literal["open", "closed", "merged"]
 
-_REVIEWER_STATES: dict[str, ReviewerState] = {
-    "APPROVED": "approved",
-    "CHANGES_REQUESTED": "changes_requested",
-    "DISMISSED": "dismissed",
-    "COMMENTED": "commented",
-}
+_ANY_STATE: frozenset[PullRequestState] = frozenset({"open", "closed", "merged"})
 
 
 class _GithubReviewUser(BaseModel):
+    id: int
     login: str
     avatar_url: str | None = None
 
 
 class _GithubReview(BaseModel):
     id: int
-    state: str
+    state: ReviewerState | Literal["pending"]
     user: _GithubReviewUser | None = None
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def _lowercase(cls, value: object) -> object:
+        return value.lower() if isinstance(value, str) else value
 
 
 class PullRequestReviewer(BaseModel):
@@ -117,27 +119,27 @@ class PullRequestReviewer(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+    user_id: int
     login: str
     avatar_url: str | None = None
     state: ReviewerState
 
     @classmethod
     def latest(cls, reviews: Sequence[_GithubReview]) -> list[PullRequestReviewer]:
-        latest: dict[str, tuple[_GithubReview, ReviewerState]] = {}
+        latest: dict[int, PullRequestReviewer] = {}
         for review in sorted(reviews, key=lambda review: review.id):
-            state = _REVIEWER_STATES.get(review.state)
-            if review.user is None or state is None:
+            if review.user is None or review.state == "pending":
                 continue
-            key = review.user.login.lower()
-            previous = latest.get(key)
-            if state == "commented" and previous is not None and previous[1] != "commented":
+            previous = latest.get(review.user.id)
+            if review.state == "commented" and previous and previous.state != "commented":
                 continue
-            latest[key] = (review, state)
-        return [
-            cls(login=review.user.login, avatar_url=review.user.avatar_url, state=state)
-            for review, state in latest.values()
-            if review.user is not None
-        ]
+            latest[review.user.id] = cls(
+                user_id=review.user.id,
+                login=review.user.login,
+                avatar_url=review.user.avatar_url,
+                state=review.state,
+            )
+        return list(latest.values())
 
     @staticmethod
     def decision(reviewers: Sequence[PullRequestReviewer]) -> ReviewDecision:
@@ -265,100 +267,6 @@ def _live_state(pull: Mapping[str, Any]) -> PullRequestState | None:
             return None
 
 
-async def _fetch_pull_request(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> dict[str, Any] | None:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}"
-    try:
-        response = await github_request(client, "GET", url)
-        response.raise_for_status()
-        payload = response.json()
-    except httpx2.HTTPError, ValueError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-async def _fetch_mergeable_pull_request(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> dict[str, Any] | None:
-    """Read a pull request, waiting for GitHub to decide whether it merges.
-
-    GitHub computes mergeability in the background and answers `null` until it
-    finishes; the first read only asks it to start.
-    """
-    for attempt in range(_MERGEABILITY_ATTEMPTS):
-        pull = await _fetch_pull_request(client, owner, repo, number)
-        if pull is None or pull.get("mergeable") is not None:
-            return pull
-        if _live_state(pull) != "open" or attempt + 1 == _MERGEABILITY_ATTEMPTS:
-            return pull
-        await asyncio.sleep(_MERGEABILITY_DELAY_SECONDS * (attempt + 1))
-    return None
-
-
-async def _fetch_check_runs(
-    client: httpx2.AsyncClient, owner: str, repo: str, sha: str
-) -> list[dict[str, Any]] | None:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}/check-runs"
-    runs: list[dict[str, Any]] = []
-    page = 1
-    try:
-        while True:
-            response = await github_request(
-                client,
-                "GET",
-                url,
-                params={"filter": "latest", "per_page": "100", "page": str(page)},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            raw_runs = payload.get("check_runs") if isinstance(payload, dict) else None
-            if not isinstance(raw_runs, list):
-                return None
-            runs.extend(run for run in raw_runs if isinstance(run, dict))
-            if len(raw_runs) < 100:
-                return runs
-            page += 1
-    except httpx2.HTTPError, ValueError:
-        return None
-
-
-async def _fetch_commit_statuses(
-    client: httpx2.AsyncClient, owner: str, repo: str, sha: str
-) -> list[dict[str, Any]] | None:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{sha}/status"
-    statuses: list[dict[str, Any]] = []
-    page = 1
-    try:
-        while True:
-            response = await github_request(
-                client,
-                "GET",
-                url,
-                params={"per_page": "100", "page": str(page)},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            raw_statuses = payload.get("statuses") if isinstance(payload, dict) else None
-            if not isinstance(raw_statuses, list):
-                return None
-            statuses.extend(status for status in raw_statuses if isinstance(status, dict))
-            if len(raw_statuses) < 100:
-                break
-            page += 1
-    except httpx2.HTTPError, ValueError:
-        return None
-    latest: list[dict[str, Any]] = []
-    contexts: set[str] = set()
-    for status in statuses:
-        context = status.get("context")
-        if not isinstance(context, str) or context in contexts:
-            continue
-        contexts.add(context)
-        latest.append(status)
-    return latest
-
-
 def _normalize_checks(
     runs: list[dict[str, Any]], statuses: list[dict[str, Any]]
 ) -> tuple[list[dict[str, str | None]], int, int]:
@@ -405,71 +313,6 @@ def _normalize_checks(
     return failing, pending, inconclusive
 
 
-@dataclass(frozen=True, slots=True)
-class Mergeability:
-    """GitHub's verdict on whether a pull request can merge."""
-
-    mergeable: bool | None
-    merge_state: str
-
-
-async def fetch_mergeability(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> Mergeability | None:
-    """Mergeability over GraphQL, or ``None`` when GitHub could not answer.
-
-    REST answers ``mergeable: null`` whenever its cached verdict has expired,
-    and only starts recomputing it; GraphQL waits for that computation, so a
-    single read usually gets the real answer.
-    """
-    try:
-        response = await github_request(
-            client,
-            "POST",
-            GITHUB_GRAPHQL,
-            json={
-                "query": _MERGEABILITY_QUERY,
-                "variables": {"owner": owner, "repo": repo, "number": number},
-            },
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except httpx2.HTTPError, ValueError:
-        logger.warning(
-            "Mergeability query failed; falling back to what REST reported",
-            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
-            exc_info=True,
-        )
-        return None
-    if not isinstance(payload, Mapping) or payload.get("errors"):
-        logger.warning(
-            "Mergeability query answered with errors; falling back to what REST reported",
-            extra={
-                "pr_repo_full_name": f"{owner}/{repo}",
-                "pr_number": number,
-                "graphql_errors": payload.get("errors") if isinstance(payload, Mapping) else None,
-            },
-        )
-        return None
-    data = payload.get("data")
-    repository = data.get("repository") if isinstance(data, Mapping) else None
-    pull = repository.get("pullRequest") if isinstance(repository, Mapping) else None
-    if not isinstance(pull, Mapping):
-        logger.warning(
-            "Mergeability query answered without a pull request",
-            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
-        )
-        return None
-    mergeable = pull.get("mergeable")
-    merge_state = pull.get("mergeStateStatus")
-    return Mergeability(
-        mergeable={"MERGEABLE": True, "CONFLICTING": False}.get(
-            mergeable if isinstance(mergeable, str) else ""
-        ),
-        merge_state=merge_state.lower() if isinstance(merge_state, str) else "",
-    )
-
-
 def _thread_reply(comment: dict[str, Any]) -> dict[str, Any]:
     author = comment.get("author")
     return {
@@ -481,84 +324,12 @@ def _thread_reply(comment: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def fetch_unresolved_review_threads(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> list[dict[str, Any]] | None:
-    """Unresolved review threads on a PR, or ``None`` when GitHub could not answer."""
-    unresolved: list[dict[str, Any]] = []
-    cursor: str | None = None
-    seen_cursors: set[str] = set()
-    try:
-        while True:
-            response = await github_request(
-                client,
-                "POST",
-                GITHUB_GRAPHQL,
-                json={
-                    "query": _REVIEW_THREADS_QUERY,
-                    "variables": {
-                        "owner": owner,
-                        "repo": repo,
-                        "number": number,
-                        "cursor": cursor,
-                    },
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict) or payload.get("errors"):
-                return None
-            data = payload.get("data")
-            repository = data.get("repository") if isinstance(data, dict) else None
-            pull = repository.get("pullRequest") if isinstance(repository, dict) else None
-            threads = pull.get("reviewThreads") if isinstance(pull, dict) else None
-            if not isinstance(threads, dict) or not isinstance(threads.get("nodes"), list):
-                return None
-            for thread in threads["nodes"]:
-                if not isinstance(thread, dict) or thread.get("isResolved") is True:
-                    continue
-                comments = thread.get("comments")
-                nodes = comments.get("nodes") if isinstance(comments, dict) else None
-                comment = (
-                    nodes[0]
-                    if isinstance(nodes, list) and nodes and isinstance(nodes[0], dict)
-                    else {}
-                )
-                author = comment.get("author")
-                line = thread.get("line")
-                if not isinstance(line, int) or isinstance(line, bool):
-                    line = thread.get("originalLine")
-                unresolved.append(
-                    {
-                        "thread_id": thread.get("id")
-                        if isinstance(thread.get("id"), str)
-                        else None,
-                        "author": author.get("login")
-                        if isinstance(author, dict) and isinstance(author.get("login"), str)
-                        else None,
-                        "body": comment.get("body") if isinstance(comment.get("body"), str) else "",
-                        "path": thread.get("path") if isinstance(thread.get("path"), str) else "",
-                        "line": line
-                        if isinstance(line, int) and not isinstance(line, bool)
-                        else None,
-                        "url": comment.get("url") if isinstance(comment.get("url"), str) else None,
-                        "replies": [
-                            _thread_reply(reply)
-                            for reply in (nodes[1:] if isinstance(nodes, list) else [])
-                            if isinstance(reply, dict)
-                        ],
-                    }
-                )
-            page_info = threads.get("pageInfo")
-            if not isinstance(page_info, dict) or page_info.get("hasNextPage") is not True:
-                return unresolved
-            next_cursor = page_info.get("endCursor")
-            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
-                return None
-            seen_cursors.add(next_cursor)
-            cursor = next_cursor
-    except httpx2.HTTPError, ValueError:
-        return None
+@dataclass(frozen=True, slots=True)
+class Mergeability:
+    """GitHub's verdict on whether a pull request can merge."""
+
+    mergeable: bool | None
+    merge_state: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -575,149 +346,451 @@ class ReviewState:
     review_required: bool = False
 
 
-async def _fetch_review_state(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> ReviewState:
-    """Read a pull request's review requirement and its unresolved review threads."""
-    unresolved = 0
-    review_required = False
-    cursor: str | None = None
-    seen_cursors: set[str] = set()
-    try:
-        while True:
-            response = await github_request(
-                client,
-                "POST",
-                GITHUB_GRAPHQL,
-                json={
-                    "query": _THREAD_COUNT_QUERY,
-                    "variables": {
-                        "owner": owner,
-                        "repo": repo,
-                        "number": number,
-                        "cursor": cursor,
-                    },
-                },
+@dataclass(frozen=True, slots=True)
+class PullRequestClient:
+    """One pull request, read from GitHub over one HTTP client.
+
+    Every read answers ``None`` (or an unknown ``ReviewState``) when GitHub
+    could not answer, so one failed read degrades its part of a status rather
+    than the whole of it.
+    """
+
+    http: httpx2.AsyncClient
+    owner: str
+    repo: str
+    number: int
+
+    @classmethod
+    def of(cls, http: httpx2.AsyncClient, record: object) -> Self | None:
+        """The client for a ``repo_full_name`` and ``number``, or for a search hit's ``repository_url``."""
+        if not isinstance(record, Mapping):
+            return None
+        full_name = record.get("repo_full_name")
+        repository_url = record.get("repository_url")
+        prefix = f"{GITHUB_API_BASE}/repos/"
+        if not isinstance(full_name, str):
+            full_name = (
+                repository_url.removeprefix(prefix)
+                if isinstance(repository_url, str) and repository_url.startswith(prefix)
+                else ""
             )
+        identity = pull_request_identity(
+            {"repo_full_name": full_name, "number": record.get("number")}
+        )
+        return None if identity is None else cls(http, *identity)
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.owner}/{self.repo}"
+
+    @property
+    def _log_extra(self) -> dict[str, object]:
+        return {"pr_repo_full_name": self.full_name, "pr_number": self.number}
+
+    async def pull(self) -> dict[str, Any] | None:
+        url = f"{GITHUB_API_BASE}/repos/{self.full_name}/pulls/{self.number}"
+        try:
+            response = await github_request(self.http, "GET", url)
             response.raise_for_status()
             payload = response.json()
-            if not isinstance(payload, dict) or payload.get("errors"):
-                return ReviewState(None, review_required)
-            data = payload.get("data")
-            repository = data.get("repository") if isinstance(data, dict) else None
-            pull = repository.get("pullRequest") if isinstance(repository, dict) else None
-            if isinstance(pull, Mapping):
-                review_required = pull.get("reviewDecision") == "REVIEW_REQUIRED"
-            threads = pull.get("reviewThreads") if isinstance(pull, Mapping) else None
-            if not isinstance(threads, Mapping):
-                return ReviewState(None, review_required)
-            nodes = threads.get("nodes")
-            if not isinstance(nodes, list):
-                return ReviewState(None, review_required)
-            unresolved += sum(
-                1
-                for thread in nodes
-                if isinstance(thread, Mapping) and thread.get("isResolved") is False
+        except httpx2.HTTPError, ValueError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    async def mergeable_pull(self) -> dict[str, Any] | None:
+        """Read the pull request, waiting for GitHub to decide whether it merges.
+
+        GitHub computes mergeability in the background and answers `null` until it
+        finishes; the first read only asks it to start.
+        """
+        for attempt in range(_MERGEABILITY_ATTEMPTS):
+            pull = await self.pull()
+            if pull is None or pull.get("mergeable") is not None:
+                return pull
+            if _live_state(pull) != "open" or attempt + 1 == _MERGEABILITY_ATTEMPTS:
+                return pull
+            await asyncio.sleep(_MERGEABILITY_DELAY_SECONDS * (attempt + 1))
+        return None
+
+    async def check_runs(self, sha: str) -> list[dict[str, Any]] | None:
+        return await self._pages(
+            f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
+        )
+
+    async def commit_statuses(self, sha: str) -> list[dict[str, Any]] | None:
+        """The latest status per context."""
+        statuses = await self._pages(f"commits/{sha}/status", key="statuses")
+        if statuses is None:
+            return None
+        latest: dict[str, dict[str, Any]] = {}
+        for status in statuses:
+            context = status.get("context")
+            if isinstance(context, str):
+                latest.setdefault(context, status)
+        return list(latest.values())
+
+    async def reviewers(self) -> list[PullRequestReviewer] | None:
+        """Each reviewer's standing review."""
+        reviews = await self._pages(f"pulls/{self.number}/reviews", key=None)
+        if reviews is None:
+            return None
+        try:
+            return PullRequestReviewer.latest(_GITHUB_REVIEWS.validate_python(reviews))
+        except ValueError:
+            logger.warning("Unreadable pull request reviews", extra=self._log_extra, exc_info=True)
+            return None
+
+    async def mergeability(self) -> Mergeability | None:
+        """Mergeability over GraphQL.
+
+        REST answers ``mergeable: null`` whenever its cached verdict has expired,
+        and only starts recomputing it; GraphQL waits for that computation, so a
+        single read usually gets the real answer.
+        """
+        try:
+            payload = await self._graphql(_MERGEABILITY_QUERY)
+        except httpx2.HTTPError, ValueError:
+            logger.warning(
+                "Mergeability query failed; falling back to what REST reported",
+                extra=self._log_extra,
+                exc_info=True,
             )
-            page_info = threads.get("pageInfo")
-            if not isinstance(page_info, dict) or page_info.get("hasNextPage") is not True:
-                return ReviewState(unresolved, review_required)
-            next_cursor = page_info.get("endCursor")
-            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
-                return ReviewState(None, review_required)
-            seen_cursors.add(next_cursor)
-            cursor = next_cursor
-    except httpx2.HTTPError, ValueError:
-        return ReviewState(None, review_required)
+            return None
+        if not isinstance(payload, Mapping) or payload.get("errors"):
+            logger.warning(
+                "Mergeability query answered with errors; falling back to what REST reported",
+                extra={
+                    **self._log_extra,
+                    "graphql_errors": payload.get("errors")
+                    if isinstance(payload, Mapping)
+                    else None,
+                },
+            )
+            return None
+        pull = _graphql_pull(payload)
+        if pull is None:
+            logger.warning(
+                "Mergeability query answered without a pull request", extra=self._log_extra
+            )
+            return None
+        mergeable = pull.get("mergeable")
+        merge_state = pull.get("mergeStateStatus")
+        return Mergeability(
+            mergeable={"MERGEABLE": True, "CONFLICTING": False}.get(
+                mergeable if isinstance(mergeable, str) else ""
+            ),
+            merge_state=merge_state.lower() if isinstance(merge_state, str) else "",
+        )
 
+    async def unresolved_threads(self) -> list[dict[str, Any]] | None:
+        unresolved: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        try:
+            while True:
+                payload = await self._graphql(_REVIEW_THREADS_QUERY, {"cursor": cursor})
+                if not isinstance(payload, dict) or payload.get("errors"):
+                    return None
+                pull = _graphql_pull(payload)
+                threads = pull.get("reviewThreads") if pull is not None else None
+                if not isinstance(threads, dict) or not isinstance(threads.get("nodes"), list):
+                    return None
+                for thread in threads["nodes"]:
+                    if not isinstance(thread, dict) or thread.get("isResolved") is True:
+                        continue
+                    comments = thread.get("comments")
+                    nodes = comments.get("nodes") if isinstance(comments, dict) else None
+                    comment = (
+                        nodes[0]
+                        if isinstance(nodes, list) and nodes and isinstance(nodes[0], dict)
+                        else {}
+                    )
+                    author = comment.get("author")
+                    line = thread.get("line")
+                    if not isinstance(line, int) or isinstance(line, bool):
+                        line = thread.get("originalLine")
+                    unresolved.append(
+                        {
+                            "thread_id": thread.get("id")
+                            if isinstance(thread.get("id"), str)
+                            else None,
+                            "author": author.get("login")
+                            if isinstance(author, dict) and isinstance(author.get("login"), str)
+                            else None,
+                            "body": comment.get("body")
+                            if isinstance(comment.get("body"), str)
+                            else "",
+                            "path": thread.get("path")
+                            if isinstance(thread.get("path"), str)
+                            else "",
+                            "line": line
+                            if isinstance(line, int) and not isinstance(line, bool)
+                            else None,
+                            "url": comment.get("url")
+                            if isinstance(comment.get("url"), str)
+                            else None,
+                            "replies": [
+                                _thread_reply(reply)
+                                for reply in (nodes[1:] if isinstance(nodes, list) else [])
+                                if isinstance(reply, dict)
+                            ],
+                        }
+                    )
+                cursor = _next_cursor(threads, seen_cursors)
+                if cursor is None:
+                    return unresolved
+        except _CursorLoop, httpx2.HTTPError, ValueError:
+            return None
 
-async def _pull_request_status(client: httpx2.AsyncClient, record: object) -> dict[str, Any]:
-    identity = pull_request_identity(record)
-    if identity is None:
-        return _unavailable_pull_request(record)
-    owner, repo, number = identity
-    result = _unavailable_pull_request(record)
-    result.update(
-        {
-            "repoFullName": f"{owner}/{repo}",
-            "number": number,
-            "url": f"https://github.com/{owner}/{repo}/pull/{number}",
-        }
-    )
-    pull, review_threads = await asyncio.gather(
-        _fetch_pull_request(client, owner, repo, number),
-        fetch_unresolved_review_threads(client, owner, repo, number),
-    )
-    if review_threads is not None:
+    async def review_state(self) -> ReviewState:
+        """The review requirement and the number of unresolved review threads."""
+        unresolved = 0
+        review_required = False
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        try:
+            while True:
+                payload = await self._graphql(_THREAD_COUNT_QUERY, {"cursor": cursor})
+                if not isinstance(payload, dict) or payload.get("errors"):
+                    return ReviewState(None, review_required)
+                pull = _graphql_pull(payload)
+                if pull is not None:
+                    review_required = pull.get("reviewDecision") == "REVIEW_REQUIRED"
+                threads = pull.get("reviewThreads") if pull is not None else None
+                if not isinstance(threads, Mapping) or not isinstance(threads.get("nodes"), list):
+                    return ReviewState(None, review_required)
+                unresolved += sum(
+                    1
+                    for thread in threads["nodes"]
+                    if isinstance(thread, Mapping) and thread.get("isResolved") is False
+                )
+                cursor = _next_cursor(threads, seen_cursors)
+                if cursor is None:
+                    return ReviewState(unresolved, review_required)
+        except _CursorLoop, httpx2.HTTPError, ValueError:
+            return ReviewState(None, review_required)
+
+    async def thread_status(self) -> dict[str, Any]:
+        """The PR health a dashboard thread shows: state, checks and unresolved threads."""
+        result = _unavailable_pull_request(
+            {"repo_full_name": self.full_name, "number": self.number}
+        )
+        result["url"] = f"https://github.com/{self.full_name}/pull/{self.number}"
+        pull, review_threads = await asyncio.gather(self.pull(), self.unresolved_threads())
+        if review_threads is not None:
+            result.update(
+                {
+                    "commentsAvailable": True,
+                    "unresolvedReviewThreadCount": len(review_threads),
+                    "unresolvedReviewThreads": review_threads,
+                }
+            )
+        if pull is None:
+            return result
+        state = _live_state(pull)
+        draft = pull.get("draft")
+        head = pull.get("head")
+        sha = head.get("sha") if isinstance(head, dict) else None
         result.update(
             {
-                "commentsAvailable": True,
-                "unresolvedReviewThreadCount": len(review_threads),
-                "unresolvedReviewThreads": review_threads,
+                "statusAvailable": state is not None and isinstance(draft, bool),
+                "state": state,
+                "isDraft": draft if isinstance(draft, bool) else None,
+                "mergeConflictState": _merge_conflict_state(pull),
             }
         )
-    if pull is None:
+        if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
+            return result
+        runs, statuses = await asyncio.gather(self.check_runs(sha), self.commit_statuses(sha))
+        if runs is not None and statuses is not None:
+            failing, pending, inconclusive = _normalize_checks(runs, statuses)
+            result.update(
+                {
+                    "checksAvailable": True,
+                    "failingChecks": failing,
+                    "pendingCheckCount": pending,
+                    "inconclusiveCheckCount": inconclusive,
+                }
+            )
         return result
-    state = _live_state(pull)
-    draft = pull.get("draft")
-    head = pull.get("head")
-    sha = head.get("sha") if isinstance(head, dict) else None
-    result.update(
-        {
-            "statusAvailable": state is not None and isinstance(draft, bool),
-            "state": state,
-            "isDraft": draft if isinstance(draft, bool) else None,
-            "mergeConflictState": _merge_conflict_state(pull),
-        }
-    )
-    if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
-        return result
-    runs, statuses = await asyncio.gather(
-        _fetch_check_runs(client, owner, repo, sha),
-        _fetch_commit_statuses(client, owner, repo, sha),
-    )
-    if runs is not None and statuses is not None:
-        failing, pending, inconclusive = _normalize_checks(runs, statuses)
-        result.update(
-            {
-                "checksAvailable": True,
-                "failingChecks": failing,
-                "pendingCheckCount": pending,
-                "inconclusiveCheckCount": inconclusive,
-            }
+
+    async def load(
+        self,
+        *,
+        details: bool = True,
+        listed: Mapping[str, Any] | None = None,
+        wanted: Collection[PullRequestState] = _ANY_STATE,
+    ) -> OpenPullRequest | None:
+        """The PR's live status, or ``None`` when its state is not ``wanted``.
+
+        Without ``details`` only ``listed`` (a search hit) is used, and nothing is read.
+        """
+        pull = await self.mergeable_pull() if details else None
+        state = _live_state(pull) if pull is not None else "open"
+        if state is None or state not in wanted:
+            return None
+        source: Mapping[str, Any] = pull if pull is not None else listed or {}
+        result = OpenPullRequest(
+            repo=self.full_name,
+            number=self.number,
+            title=_as_str(source.get("title"), ""),
+            state=state,
+            created_at=_as_optional_str(source.get("created_at")),
+            updated_at=_as_optional_str(source.get("updated_at")),
+            draft=_as_optional_bool(source.get("draft")),
+            details_loading=not details,
+            additions=_as_optional_int(source.get("additions")),
+            deletions=_as_optional_int(source.get("deletions")),
+            mergeable=_as_optional_bool(source.get("mergeable")),
+            merge_state=_as_str(source.get("mergeable_state"), "unknown"),
+            status_available=pull is not None,
         )
-    return result
+        if pull is None:
+            return result
+        head = pull.get("head")
+        if not isinstance(head, Mapping):
+            return result
+        result.head_ref = _as_optional_str(head.get("ref"))
+        sha = _as_optional_str(head.get("sha"))
+        if sha is None or not _SHA_PATTERN.fullmatch(sha):
+            return result
+        result.head_sha = sha
+        runs, statuses, reviewers, review_state = await asyncio.gather(
+            self.check_runs(sha), self.commit_statuses(sha), self.reviewers(), self.review_state()
+        )
+        result.reviewers = reviewers
+        result.review_decision = (
+            None if reviewers is None else PullRequestReviewer.decision(reviewers)
+        )
+        result.review_required = review_state.review_required
+        result.unresolved_threads = review_state.unresolved_threads
+        if runs is None or statuses is None:
+            return result
+        failed, _, _ = _normalize_checks(runs, statuses)
+        failures = [_as_str(check["name"], "Unnamed check") for check in failed]
+        failures.extend(
+            _as_str(run.get("name"), "Unnamed check")
+            for run in runs
+            if run.get("status") == "completed" and run.get("conclusion") in {"cancelled", "stale"}
+        )
+        pending = [
+            _as_str(run.get("name"), "Unnamed check")
+            for run in runs
+            if run.get("status") != "completed"
+        ] + [
+            _as_str(status.get("context"), "Unnamed status")
+            for status in statuses
+            if status.get("state") == "pending"
+        ]
+        result.failing_checks = failures
+        result.pending_checks = pending
+        result.ci = (
+            "failing"
+            if failures
+            else "pending"
+            if pending
+            else "passing"
+            if runs or statuses
+            else "none"
+        )
+        base = pull.get("base")
+        base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
+        # A check gated on `needs:` has no run until its upstream jobs finish.
+        if base_ref is not None and result.merge_state == "blocked" and not pending:
+            required = await read_required_checks(
+                self.http, owner=self.owner, repo=self.repo, branch=base_ref
+            )
+            if required is not None:
+                result.missing_checks = unreported_required_checks(required, runs, statuses)
+        return result
+
+    async def _pages(
+        self, path: str, *, key: str | None, params: Mapping[str, str] | None = None
+    ) -> list[dict[str, Any]] | None:
+        """Every item of a paginated REST list under the repository, or ``None`` on failure.
+
+        ``key`` names the list inside each page's object; ``None`` means the page is the list.
+        """
+        url = f"{GITHUB_API_BASE}/repos/{self.full_name}/{path}"
+        items: list[dict[str, Any]] = []
+        page = 1
+        try:
+            while True:
+                response = await github_request(
+                    self.http,
+                    "GET",
+                    url,
+                    params={**(params or {}), "per_page": str(_REST_PAGE_SIZE), "page": str(page)},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if key is None:
+                    batch = payload
+                else:
+                    batch = payload.get(key) if isinstance(payload, dict) else None
+                if not isinstance(batch, list):
+                    return None
+                items.extend(item for item in batch if isinstance(item, dict))
+                if len(batch) < _REST_PAGE_SIZE:
+                    return items
+                page += 1
+        except httpx2.HTTPError, ValueError:
+            return None
+
+    async def _graphql(self, query: str, variables: Mapping[str, object] | None = None) -> object:
+        response = await github_request(
+            self.http,
+            "POST",
+            GITHUB_GRAPHQL,
+            json={
+                "query": query,
+                "variables": {
+                    "owner": self.owner,
+                    "repo": self.repo,
+                    "number": self.number,
+                    **(variables or {}),
+                },
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+class _CursorLoop(Exception):
+    """GitHub handed back a page cursor it had already given."""
+
+
+def _graphql_pull(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    data = payload.get("data")
+    repository = data.get("repository") if isinstance(data, Mapping) else None
+    pull = repository.get("pullRequest") if isinstance(repository, Mapping) else None
+    return pull if isinstance(pull, Mapping) else None
+
+
+def _next_cursor(connection: Mapping[str, Any], seen: set[str]) -> str | None:
+    """The cursor of the next page, ``None`` on the last page."""
+    page_info = connection.get("pageInfo")
+    if not isinstance(page_info, Mapping) or page_info.get("hasNextPage") is not True:
+        return None
+    cursor = page_info.get("endCursor")
+    if not isinstance(cursor, str) or not cursor or cursor in seen:
+        raise _CursorLoop
+    seen.add(cursor)
+    return cursor
 
 
 async def get_pull_request_statuses(records: Sequence[object], token: str) -> list[dict[str, Any]]:
     """Return live status for every tracked pull request record."""
-    async with github_client(token=token) as client:
-        return [await _pull_request_status(client, record) for record in records]
-
-
-async def _fetch_reviewers(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> list[PullRequestReviewer] | None:
-    """Each reviewer's standing review, or ``None`` when the reviews could not be read."""
-    reviews: list[_GithubReview] = []
-    page = 1
-    try:
-        while True:
-            response = await github_request(
-                client,
-                "GET",
-                f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/reviews",
-                params={"per_page": "100", "page": str(page)},
+    async with github_client(token=token) as http:
+        statuses: list[dict[str, Any]] = []
+        for record in records:
+            client = PullRequestClient.of(http, record)
+            statuses.append(
+                await client.thread_status()
+                if client is not None
+                else _unavailable_pull_request(record)
             )
-            response.raise_for_status()
-            batch = _GITHUB_REVIEWS.validate_python(response.json())
-            reviews.extend(batch)
-            if len(batch) < 100:
-                break
-            page += 1
-    except httpx2.HTTPError, ValueError:
-        return None
-    return PullRequestReviewer.latest(reviews)
+        return statuses
 
 
 async def list_open_pull_requests(
@@ -746,10 +819,10 @@ async def list_open_pull_requests(
     query = f"is:pr is:open author:{login}"
     for name in repositories:
         query += f" repo:{name}"
-    async with github_client(token=token) as client:
+    async with github_client(token=token) as http:
         try:
             response = await github_request(
-                client,
+                http,
                 "GET",
                 f"{GITHUB_API_BASE}/search/issues",
                 params={
@@ -778,8 +851,11 @@ async def list_open_pull_requests(
         semaphore = asyncio.Semaphore(4)
 
         async def load(item: object) -> OpenPullRequest | None:
+            client = PullRequestClient.of(http, item)
+            if client is None or not isinstance(item, Mapping):
+                return None
             async with semaphore:
-                return await load_open_pull_request(client, item, details=not lightweight)
+                return await client.load(details=not lightweight, listed=item, wanted={"open"})
 
         items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
     total = payload.get("total_count")
@@ -792,118 +868,3 @@ async def list_open_pull_requests(
         incomplete=payload.get("incomplete_results") is True,
         updated_at=datetime.now(UTC).isoformat(),
     )
-
-
-async def load_open_pull_request(
-    client: httpx2.AsyncClient, item: object, details: bool = True
-) -> OpenPullRequest | None:
-    """An open pull request's live status; ``None`` once it is closed or merged."""
-    return await _load_pull_request(client, item, details, wanted={"open"})
-
-
-async def load_pull_request(
-    client: httpx2.AsyncClient, item: object, details: bool = True
-) -> OpenPullRequest | None:
-    """A pull request's live status in any state; ``None`` for an unreadable identity."""
-    return await _load_pull_request(client, item, details, wanted={"open", "closed", "merged"})
-
-
-async def _load_pull_request(
-    client: httpx2.AsyncClient,
-    item: object,
-    details: bool,
-    *,
-    wanted: Collection[PullRequestState],
-) -> OpenPullRequest | None:
-    if not isinstance(item, dict):
-        return None
-    repository_url = item.get("repository_url")
-    prefix = f"{GITHUB_API_BASE}/repos/"
-    full_name = item.get("repo_full_name")
-    if not isinstance(full_name, str):
-        full_name = (
-            repository_url.removeprefix(prefix)
-            if isinstance(repository_url, str) and repository_url.startswith(prefix)
-            else ""
-        )
-    identity = pull_request_identity({"repo_full_name": full_name, "number": item.get("number")})
-    if identity is None:
-        return None
-    owner, name, number = identity
-    pull = await _fetch_mergeable_pull_request(client, owner, name, number) if details else None
-    state = _live_state(pull) if pull is not None else "open"
-    if state is None or state not in wanted:
-        return None
-    source: Mapping[str, Any] = pull if pull is not None else item
-    result = OpenPullRequest(
-        repo=full_name,
-        number=number,
-        title=_as_str(source.get("title"), ""),
-        state=state,
-        created_at=_as_optional_str(source.get("created_at")),
-        updated_at=_as_optional_str(source.get("updated_at")),
-        draft=_as_optional_bool(source.get("draft")),
-        details_loading=not details,
-        additions=_as_optional_int(source.get("additions")),
-        deletions=_as_optional_int(source.get("deletions")),
-        mergeable=_as_optional_bool(source.get("mergeable")),
-        merge_state=_as_str(source.get("mergeable_state"), "unknown"),
-        status_available=pull is not None,
-    )
-    if pull is None:
-        return result
-    head = pull.get("head")
-    if not isinstance(head, Mapping):
-        return result
-    result.head_ref = _as_optional_str(head.get("ref"))
-    sha = _as_optional_str(head.get("sha"))
-    if sha is None or not _SHA_PATTERN.fullmatch(sha):
-        return result
-    result.head_sha = sha
-    runs, statuses, reviewers, review_state = await asyncio.gather(
-        _fetch_check_runs(client, owner, name, sha),
-        _fetch_commit_statuses(client, owner, name, sha),
-        _fetch_reviewers(client, owner, name, number),
-        _fetch_review_state(client, owner, name, number),
-    )
-    result.reviewers = reviewers
-    result.review_decision = None if reviewers is None else PullRequestReviewer.decision(reviewers)
-    result.review_required = review_state.review_required
-    result.unresolved_threads = review_state.unresolved_threads
-    if runs is None or statuses is None:
-        return result
-    failed, _, _ = _normalize_checks(runs, statuses)
-    failures = [_as_str(check["name"], "Unnamed check") for check in failed]
-    failures.extend(
-        _as_str(run.get("name"), "Unnamed check")
-        for run in runs
-        if run.get("status") == "completed" and run.get("conclusion") in {"cancelled", "stale"}
-    )
-    pending = [
-        _as_str(run.get("name"), "Unnamed check")
-        for run in runs
-        if run.get("status") != "completed"
-    ] + [
-        _as_str(status.get("context"), "Unnamed status")
-        for status in statuses
-        if status.get("state") == "pending"
-    ]
-    result.failing_checks = failures
-    result.pending_checks = pending
-    result.ci = (
-        "failing"
-        if failures
-        else "pending"
-        if pending
-        else "passing"
-        if runs or statuses
-        else "none"
-    )
-    base = pull.get("base")
-    base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-    # A check gated on `needs:` has no run until its upstream jobs finish.
-    if base_ref is not None and result.merge_state == "blocked" and not pending:
-        required = await read_required_checks(client, owner=owner, repo=name, branch=base_ref)
-        if required is not None:
-            result.missing_checks = unreported_required_checks(required, runs, statuses)
-    return result

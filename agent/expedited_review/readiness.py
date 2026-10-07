@@ -24,11 +24,7 @@ from agent.github.ci import (
     unreported_required_checks,
 )
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.github.pull_request_status import (
-    Mergeability,
-    fetch_mergeability,
-    fetch_unresolved_review_threads,
-)
+from agent.github.pull_request_status import Mergeability, PullRequestClient
 from agent.github.pull_requests import PullRequestPayload
 
 
@@ -247,9 +243,10 @@ async def assess_readiness(
     if required is None:
         return None
     async with github_client(token=token) as client:
-        threads = await fetch_unresolved_review_threads(client, owner, repo, pr_number)
+        pull_request = PullRequestClient(client, owner, repo, pr_number)
+        threads = await pull_request.unresolved_threads()
         reviews = await _fetch_reviews(client, owner, repo, pr_number)
-        mergeability = await fetch_mergeability(client, owner, repo, pr_number)
+        mergeability = await pull_request.mergeability()
     if threads is None or reviews is None:
         return None
     mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)

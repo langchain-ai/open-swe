@@ -3,10 +3,12 @@
 import logging
 from typing import Any
 
+from agent.github.pull_request_key import PullRequestKey
 from agent.review_scout.git import OTHER_TITLE, ScoutGitError, commit_staged, committed_kinds
 from agent.review_scout.paths import scout_repo_dir
 from agent.run_config import RunConfig
 from agent.runtime import get_cached_sandbox_backend
+from agent.ui_invalidations import Topic
 
 logger = logging.getLogger(__name__)
 
@@ -49,4 +51,8 @@ async def commit_walkthrough_step(
         return {"success": False, "error": str(exc)}
     if sha is None:
         return {"success": False, "error": "nothing is staged; stage this step's changes first"}
+    if cfg.repo is not None and cfg.pr_number is not None:
+        await Topic.PULL_REQUESTS.invalidate(
+            key=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
+        )
     return {"success": True, "commit": sha}

@@ -21,8 +21,8 @@ from agent.github.pull_request_actions import (
 from agent.github.pull_request_status import (
     OpenPullRequest,
     OpenPullRequests,
+    PullRequestClient,
     list_open_pull_requests,
-    load_pull_request,
     pull_request_identity,
 )
 from agent.github.pull_requests import PullRequest
@@ -112,10 +112,8 @@ async def api_pull_request_details(
     token = await get_valid_access_token(session["sub"])
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
-    async with github_client(token=token) as client:
-        return await load_pull_request(
-            client, {"repo_full_name": f"{owner}/{repo}", "number": number}
-        )
+    async with github_client(token=token) as http:
+        return await PullRequestClient(http, owner, repo, number).load()
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/action")

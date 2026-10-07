@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from agent.dashboard.admin import is_admin
-from agent.github.pull_request_key import PullRequestKey, parse_pull_request_key
+from agent.github.pull_request_key import PullRequestKey
 from agent.ui_invalidations import outbox
 
 if TYPE_CHECKING:
@@ -165,8 +165,9 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     return {
         key
         for key in keys
-        if (identity := parse_pull_request_key(key)) is not None
-        and f"{identity[0]}/{identity[1]}" in accessible
+        if (parsed := PullRequestKey.parse(key)) is not None
+        and parsed == key
+        and parsed.repo_full_name in accessible
     }
 
 

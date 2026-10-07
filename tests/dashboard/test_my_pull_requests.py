@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
@@ -127,20 +127,22 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
         "head": {"sha": "a" * 40},
         "base": {"ref": "main"},
     }
-    monkeypatch.setattr(prs, "_fetch_pull_request", AsyncMock(return_value=pull))
-    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=runs))
-    monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    monkeypatch.setattr(prs.PullRequestClient, "check_runs", AsyncMock(return_value=runs))
+    monkeypatch.setattr(prs.PullRequestClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        prs,
-        "_fetch_reviewers",
-        AsyncMock(return_value=[prs.PullRequestReviewer(login="reviewer", state="approved")]),
+        prs.PullRequestClient,
+        "reviewers",
+        AsyncMock(
+            return_value=[prs.PullRequestReviewer(user_id=10, login="reviewer", state="approved")]
+        ),
     )
     monkeypatch.setattr(
-        prs, "_fetch_review_state", AsyncMock(return_value=prs.ReviewState(0, False))
+        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
     rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
     monkeypatch.setattr(prs, "read_required_checks", rules)
-    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
+    result = await _client(1).load(wanted={"open"})
     assert result is not None
     assert result.missing_checks == missing
     assert rules.await_count == int(reads_rules)
@@ -151,9 +153,9 @@ async def test_mergeability_is_not_awaited_forever(monkeypatch):
     fetches = AsyncMock(
         return_value={"state": "open", "mergeable": None, "mergeable_state": "unknown"}
     )
-    monkeypatch.setattr(prs, "_fetch_pull_request", fetches)
-    monkeypatch.setattr(prs, "_fetch_reviewers", AsyncMock(return_value=[]))
-    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 1})
+    monkeypatch.setattr(prs.PullRequestClient, "pull", fetches)
+    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
+    result = await _client(1).load(wanted={"open"})
     assert fetches.await_count == prs._MERGEABILITY_ATTEMPTS
     assert result is not None
     assert result.status_available is True and result.mergeable is None
@@ -185,8 +187,12 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     assert listing.await_count == 1
 
 
+def _client(number: int) -> prs.PullRequestClient:
+    return prs.PullRequestClient(MagicMock(), "acme", "app", number)
+
+
 async def _decision() -> prs.ReviewDecision:
-    reviewers = await prs._fetch_reviewers(object(), "acme", "app", 1)
+    reviewers = await _client(1).reviewers()
     assert reviewers is not None
     return prs.PullRequestReviewer.decision(reviewers)
 
@@ -198,17 +204,20 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
         AsyncMock(
             return_value=response(
                 [
-                    {"id": 1, "user": {"login": "reviewer"}, "state": "CHANGES_REQUESTED"},
-                    {"id": 2, "user": {"login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 3, "user": {"login": "reviewer"}, "state": "COMMENTED"},
-                    {"id": 4, "user": {"login": "other"}, "state": "DISMISSED"},
+                    {
+                        "id": 1,
+                        "user": {"id": 10, "login": "reviewer"},
+                        "state": "CHANGES_REQUESTED",
+                    },
+                    {"id": 2, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
+                    {"id": 3, "user": {"id": 10, "login": "reviewer"}, "state": "COMMENTED"},
+                    {"id": 4, "user": {"id": 20, "login": "other"}, "state": "DISMISSED"},
                 ]
             )
         ),
     )
     assert [
-        (reviewer.login, reviewer.state)
-        for reviewer in await prs._fetch_reviewers(object(), "acme", "app", 1) or []
+        (reviewer.login, reviewer.state) for reviewer in await _client(1).reviewers() or []
     ] == [("reviewer", "approved"), ("other", "dismissed")]
     assert await _decision() == "approved"
     monkeypatch.setattr(
@@ -217,8 +226,8 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
         AsyncMock(
             return_value=response(
                 [
-                    {"id": 1, "user": {"login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 2, "user": {"login": "reviewer"}, "state": "DISMISSED"},
+                    {"id": 1, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
+                    {"id": 2, "user": {"id": 10, "login": "reviewer"}, "state": "DISMISSED"},
                 ]
             )
         ),
@@ -230,8 +239,8 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
         AsyncMock(
             return_value=response(
                 [
-                    {"id": 1, "user": {"login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 2, "user": {"login": "other"}, "state": "CHANGES_REQUESTED"},
+                    {"id": 1, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
+                    {"id": 2, "user": {"id": 20, "login": "other"}, "state": "CHANGES_REQUESTED"},
                 ]
             )
         ),
@@ -264,8 +273,8 @@ async def test_review_indicators_require_repo_access_before_reading(monkeypatch)
 
 def _patch_detail_fetchers(monkeypatch):
     monkeypatch.setattr(
-        prs,
-        "_fetch_pull_request",
+        prs.PullRequestClient,
+        "pull",
         AsyncMock(
             return_value={
                 "state": "open",
@@ -276,12 +285,14 @@ def _patch_detail_fetchers(monkeypatch):
             }
         ),
     )
-    monkeypatch.setattr(prs, "_fetch_check_runs", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs, "_fetch_commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.PullRequestClient, "check_runs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.PullRequestClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        prs,
-        "_fetch_reviewers",
-        AsyncMock(return_value=[prs.PullRequestReviewer(login="reviewer", state="approved")]),
+        prs.PullRequestClient,
+        "reviewers",
+        AsyncMock(
+            return_value=[prs.PullRequestReviewer(user_id=10, login="reviewer", state="approved")]
+        ),
     )
     monkeypatch.setattr(prs, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
 
@@ -310,7 +321,7 @@ async def test_a_graphql_failure_leaves_the_unresolved_count_unknown(monkeypatch
         "github_request",
         AsyncMock(return_value=response({"errors": [{"message": "Bad credentials"}]})),
     )
-    result = await prs.load_open_pull_request(object(), {"repo_full_name": "acme/app", "number": 7})
+    result = await _client(7).load(wanted={"open"})
     assert result is not None
     assert result.unresolved_threads is None
     assert result.review_decision == "approved"

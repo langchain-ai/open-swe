@@ -14,7 +14,7 @@ from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
 from agent.database import configured, transaction
-from agent.github.pull_request_key import PullRequestKey, pull_request_key
+from agent.github.pull_request_key import PullRequestKey
 from agent.slack.payloads import SlackEventEnvelope
 from agent.slack.pr_links import event_pull_requests
 
@@ -130,7 +130,7 @@ class EventRefs(BaseModel):
         owner, _, repo = self.github_repository.partition("/")
         if not owner or not repo or self.pull_request_number is None:
             return None
-        return pull_request_key(owner, repo, self.pull_request_number)
+        return PullRequestKey.of(owner, repo, self.pull_request_number)
 
     @classmethod
     def github(cls, body: bytes) -> Self:

@@ -6,7 +6,6 @@ from pydantic import BaseModel, ValidationError
 
 from agent.database import postgres
 from agent.dispatch import create_durable_run, dispatch_client
-from agent.github.pull_request_key import PullRequestKey, pull_request_key
 from agent.input_messages import build_run_input
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
@@ -119,10 +118,6 @@ class ReviewScoutTarget(BaseModel):
         return review_scout_thread_id(self.owner, self.repo, self.pr_number)
 
     @property
-    def pull_request(self) -> PullRequestKey:
-        return pull_request_key(self.owner, self.repo, self.pr_number)
-
-    @property
     def log_extra(self) -> dict[str, object]:
         return {
             "pr_repo_full_name": f"{self.owner}/{self.repo}",
@@ -217,7 +212,6 @@ class ReviewScoutTarget(BaseModel):
             thread_title=f"Walkthrough: {self.pr_title} #{self.pr_number}",
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             metadata={_HEAD_METADATA_KEY: self.head_sha},
-            pull_request=self.pull_request,
         )
         logger.info("Started review scout", extra=self.log_extra)
         return _ScoutRun.model_validate(run).run_id

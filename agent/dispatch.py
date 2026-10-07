@@ -27,7 +27,7 @@ busy-check and the custom store-queue) with one function that uses:
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Self
 from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
@@ -59,12 +59,23 @@ ContentBlocks = str | list[dict[str, Any]]
 LangGraphRunConfig = dict[str, Any]
 
 
+_PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
+
+
 class RunMetadata(BaseModel):
     """What ``create_durable_run`` records on a run and the run-complete webhook reads back."""
 
     model_config = ConfigDict(extra="ignore")
 
     pull_request: PullRequestKey | None = None
+    """The pull request whose review page shows this run; its start and end refresh it."""
+
+    @classmethod
+    def of_run(cls, assistant_id: str, config: LangGraphRunConfig | None) -> Self:
+        cfg = RunConfig.from_config(config)
+        if assistant_id not in _PULL_REQUEST_GRAPHS or cfg.repo is None or cfg.pr_number is None:
+            return cls()
+        return cls(pull_request=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number))
 
 
 # The server's legacy-named compatibility marker selects the v3 stream path.
@@ -315,20 +326,17 @@ async def create_durable_run(
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
-    pull_request: PullRequestKey | None = None,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread. ``pull_request`` is the
-    pull request whose review page shows this run; its start and end refresh it.
+    means the caller already created and titled the thread.
     """
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
-    run_metadata = dict(metadata or {}) | RunMetadata(pull_request=pull_request).model_dump(
-        exclude_none=True
-    )
+    recorded = RunMetadata.of_run(assistant_id, config)
+    run_metadata = dict(metadata or {}) | recorded.model_dump(exclude_none=True)
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
@@ -358,8 +366,8 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
-    if pull_request is not None:
-        await Topic.PULL_REQUESTS.invalidate(key=pull_request)
+    if recorded.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=recorded.pull_request)
     cfg = RunConfig.from_config(run_config)
     if assistant_id == "agent" and cfg.slack_ask is not True:
         from agent.slack.thinking import sync_slack_background_status
@@ -393,7 +401,6 @@ async def dispatch_agent_run(
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
     source_context: SourceContext | None = None,
-    pull_request: PullRequestKey | None = None,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
@@ -434,5 +441,4 @@ async def dispatch_agent_run(
         client=client,
         multitask_strategy=multitask_strategy,
         source_context=source_context,
-        pull_request=pull_request,
     )

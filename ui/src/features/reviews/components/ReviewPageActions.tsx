@@ -30,7 +30,7 @@ export function ReviewPageActions({
     })
     void pr.refetch()
   }
-  if (!session.data || !pr.data) return null
+  if (!session.data || !pr.data || pr.data.state !== "open") return null
   return (
     <div className="mt-3 space-y-2">
       <div className="flex flex-wrap gap-1">

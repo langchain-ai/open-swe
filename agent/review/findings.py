@@ -36,7 +36,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from agent.database import postgres
 from agent.database.orm import NOW, Base
-from agent.github.pull_request_key import pull_request_key
+from agent.github.pull_request_key import PullRequestKey
 from agent.run_config import RunConfig
 from agent.ui_invalidations import Topic
 from agent.users.models import UserIdentity
@@ -982,7 +982,7 @@ async def _invalidate_review_page(session: AsyncSession, pull_request_id: UUID) 
     pull = await session.get(PullRequest, pull_request_id)
     if pull is not None:
         await Topic.PULL_REQUESTS.invalidate(
-            session, key=pull_request_key(pull.owner, pull.repo, pull.number)
+            session, key=PullRequestKey.of(pull.owner, pull.repo, pull.number)
         )
 
 

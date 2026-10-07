@@ -4090,9 +4090,14 @@
             ],
             "title": "State",
             "type": "string"
+          },
+          "userId": {
+            "title": "Userid",
+            "type": "integer"
           }
         },
         "required": [
+          "userId",
           "login",
           "state"
         ],

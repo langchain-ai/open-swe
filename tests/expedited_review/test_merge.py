@@ -65,7 +65,7 @@ class _GitHub:
         self.comment_status = True
         monkeypatch.setattr(merge, "post_github_comment", self._comment)
         self.threads: list[dict[str, Any]] = []
-        monkeypatch.setattr(merge, "fetch_unresolved_review_threads", self._threads)
+        monkeypatch.setattr(merge.PullRequestClient, "unresolved_threads", self._threads)
 
     async def _threads(self, *_: object) -> list[dict[str, Any]]:
         return self.threads
