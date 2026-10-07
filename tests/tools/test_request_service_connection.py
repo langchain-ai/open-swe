@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-connection = importlib.import_module("agent.tools.request_service_connection")
+connection = importlib.import_module("openswe.tools.request_service_connection")
 
 
 @pytest.mark.asyncio

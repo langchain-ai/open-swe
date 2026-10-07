@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 import httpx2
 import pytest
 
-from agent.github.codeowners import CodeOwners
-from agent.human_review.picking import WorkHours
+from openswe.github.codeowners import CodeOwners
+from openswe.human_review.picking import WorkHours
 
 _CODEOWNERS = CodeOwners.parse(
     """
@@ -41,7 +41,7 @@ def test_the_last_matching_codeowners_rule_owns_a_path(path: str, owners: tuple[
 async def test_the_largest_code_owner_area_comes_first_and_an_approval_leaves_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.human_review import picking
+    from openswe.human_review import picking
 
     monkeypatch.setattr(picking, "team_members", AsyncMock(return_value=["Grace", "Ada"]))
     coverage = await picking.Coverage.build(
@@ -67,7 +67,7 @@ async def test_strict_codeowners_fetch_distinguishes_missing_from_unreadable(
     status: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.github import repo_files
+    from openswe.github import repo_files
 
     @asynccontextmanager
     async def client(**kwargs: object):

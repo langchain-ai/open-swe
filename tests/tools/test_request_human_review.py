@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.run_config import RunConfig
-from agent.users import User
+from openswe.run_config import RunConfig
+from openswe.users import User
 
-# ``agent.tools`` exports the tool function under the module's name.
-request_human_review = importlib.import_module("agent.tools.request_human_review")
+# ``openswe.tools`` exports the tool function under the module's name.
+request_human_review = importlib.import_module("openswe.tools.request_human_review")
 
 
 def _config(source: str = "slack") -> RunConfig:

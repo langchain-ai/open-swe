@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 from langsmith.sandbox import SandboxRetryableConnectionError
 
-from agent import scheduler
+from openswe import scheduler
 
 
 @pytest.mark.parametrize(
