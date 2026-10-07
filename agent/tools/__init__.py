@@ -28,6 +28,7 @@ _TOOL_MODULES = {
     "link_pull_request": ".open_pull_request",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "switch_to_performance_model": ".switch_to_performance_model",
     "manage_code_channel": "agent.slack.tools.manage_code_channel",
     "manage_incident": "agent.incidents.tools",
     "manage_thread": ".threads",
@@ -106,6 +107,7 @@ __all__ = [
     "link_pull_request",
     "list_threads",
     "manage_baby_sit",
+    "switch_to_performance_model",
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
@@ -224,6 +226,7 @@ if TYPE_CHECKING:
     from agent.tools.search_pull_requests import search_pull_requests
     from agent.tools.submit_thread_feedback import submit_thread_feedback
     from agent.tools.suggest_task import suggest_task
+    from agent.tools.switch_to_performance_model import switch_to_performance_model
     from agent.tools.threads import get_thread, list_threads, manage_thread, start_thread
     from agent.tools.update_finding import update_finding
     from agent.tools.user_skills import delete_user_skill, save_user_skill
