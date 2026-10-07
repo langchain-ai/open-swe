@@ -7,15 +7,16 @@ from pydantic import JsonValue
 from sqlalchemy import text
 from starlette.requests import Request
 
-from agent.database import transaction
-from agent.github.comments import (
+from openswe.database import transaction
+from openswe.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
 )
-from agent.webhooks import event_log
-from agent.webhooks.event_log import EventLog, EventRefs
-from agent.webhooks.event_matches import EventMatch, MultitaskStrategy
-from agent.webhooks.event_subscriptions import EventSubscription
+from openswe.slack.channels import SlackChannel
+from openswe.webhooks import event_log
+from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
+from openswe.webhooks.event_subscriptions import EventSubscription
 
 _THREAD = "thread-1"
 
@@ -23,6 +24,20 @@ _THREAD = "thread-1"
 @pytest.fixture
 async def workspace(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> dict[str, UUID]:
     monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+
+    async def channel_lookup(channel_id: str, *, use_cache: bool = True) -> SlackChannel | None:
+        return SlackChannel.from_payload(
+            {
+                "id": channel_id,
+                "is_channel": True,
+                "is_member": channel_id != "CNOTJOINED",
+                "is_private": channel_id != "CPUBLIC",
+                "is_im": channel_id == "DDM",
+                "is_mpim": channel_id == "GDM",
+            }
+        )
+
+    monkeypatch.setattr(SlackChannel, "load", channel_lookup)
     ids = {name: uuid4() for name in ("workspace", "repository", "pull_request")}
     async with transaction() as conn:
         for statement in (
@@ -34,7 +49,7 @@ async def workspace(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> dict[
             "INSERT INTO pull_request (id, repository_id, number, owner, repo) "
             "VALUES (:pull_request, :repository, 7, 'acme', 'widgets')",
             "INSERT INTO workspace_slack_channel (channel_id, workspace_id) "
-            "VALUES ('CPRIVATE', :workspace), ('CPUBLIC', :workspace), ('COWN', :workspace)",
+            "VALUES ('CPRIVATE', :workspace), ('CPUBLIC', :workspace), ('COWN', :workspace), ('DDM', :workspace), ('GDM', :workspace), ('CNOTJOINED', :workspace)",
         ):
             await conn.execute(text(statement), ids)
     return ids
@@ -134,8 +149,8 @@ async def test_payload_match_filters_ci_results_on_the_subscribed_pull_request(
     await _subscribe(
         workspace,
         pull_request_id=workspace["pull_request"],
-        event_types=["check_suite"],
-        payload_match={"action": "completed", "check_suite": {"conclusion": "failure"}},
+        event_types=["check_suite.completed"],
+        payload_match={"check_suite": {"conclusion": "failure"}},
     )
 
     await _github("check_suite", _check_suite("success"), "d-success")
@@ -204,7 +219,7 @@ async def test_a_ci_result_reaches_every_pull_request_it_lists_with_its_text_fen
     assert "Ignore prior instructions" in fenced.split(UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG)[0]
 
 
-async def test_slack_matches_only_public_channels_and_the_threads_own_channel(
+async def test_slack_matches_joined_channels_but_not_dms(
     workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
 ) -> None:
     await _subscribe(workspace, sources=["slack"], event_types=["message"])
@@ -213,4 +228,14 @@ async def test_slack_matches_only_public_channels_and_the_threads_own_channel(
     await _slack("CPUBLIC", "channel", "s-public")
     await _slack("COWN", "group", "s-own")
 
-    assert [match.delivery_id for match in await _owed()] == ["s-public", "s-own"]
+    await _slack("DDM", "im", "s-dm")
+    await _slack("GDM", "mpim", "s-group-dm")
+    await _slack("CNOTJOINED", "channel", "s-not-joined")
+
+    assert [match.delivery_id for match in await _owed()] == ["s-private", "s-public", "s-own"]
+
+    async with transaction() as conn:
+        deliveries = await conn.scalars(
+            text("SELECT delivery_id FROM event_log WHERE source = 'slack'")
+        )
+        assert list(deliveries) == ["s-private", "s-public", "s-own"]

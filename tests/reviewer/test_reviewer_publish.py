@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.review.assessment_feedback import ASSESSMENTS
-from agent.review.findings import Finding, new_finding
-from agent.review.publish import (
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.review.assessment_feedback import ASSESSMENTS
+from openswe.review.findings import Finding, new_finding
+from openswe.review.publish import (
     ReviewAssessment,
     post_pull_request_review,
     render_inline_comment_body,
@@ -27,15 +27,15 @@ def _assessment(head_sha: str = "a" * 40) -> ReviewAssessment:
 
 
 async def test_stale_assessment_does_not_publish_or_advance_reviewed_commit() -> None:
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(
-            "agent.tools.publish_review.resolve_review_head_sha", AsyncMock(return_value="b" * 40)
+            "openswe.tools.publish_review.resolve_review_head_sha", AsyncMock(return_value="b" * 40)
         ),
-        patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()) as post,
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+        patch("openswe.tools.publish_review.post_pull_request_review", AsyncMock()) as post,
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
     ):
         result = await _publish_review_async(
             owner="o",
@@ -99,16 +99,16 @@ def _f(**overrides: Any) -> Finding:
 def _isolate_publish_review_pr_state(fake_store: FakeStore) -> Iterator[None]:
     with (
         patch(
-            "agent.tools.publish_review.get_workspace_settings",
+            "openswe.tools.publish_review.get_workspace_settings",
             AsyncMock(return_value=WorkspaceSettings({})),
         ),
-        patch("agent.tools.publish_review.PullRequest.link_review", AsyncMock()),
-        patch("agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),
-        patch("agent.tools.publish_review.replace_findings", AsyncMock()),
-        patch("agent.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
-        patch("agent.tools.publish_review.clear_review_started_comment", AsyncMock()),
+        patch("openswe.tools.publish_review.PullRequest.link_review", AsyncMock()),
+        patch("openswe.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),
+        patch("openswe.tools.publish_review.replace_findings", AsyncMock()),
+        patch("openswe.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
+        patch("openswe.tools.publish_review.clear_review_started_comment", AsyncMock()),
         patch(
-            "agent.tools.publish_review.resolve_review_head_sha",
+            "openswe.tools.publish_review.resolve_review_head_sha",
             AsyncMock(
                 side_effect=lambda thread_id, configurable: configurable.get("head_sha") or ""
             ),
@@ -142,18 +142,18 @@ def _eval_config(**configurable: object) -> dict[str, object]:
 async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
     ranking: list[str], missing: list[str], unknown: list[str], duplicates: list[str]
 ) -> None:
-    from agent.tools.publish_review import publish_review
+    from openswe.tools.publish_review import publish_review
 
     findings = [
         _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1),
         _f(id="f_two", severity="low", file="b.py", start_line=2, end_line=2),
     ]
     with (
-        patch("agent.tools.publish_review.get_config", return_value=_eval_config()),
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.tools.publish_review.mutate_findings", AsyncMock()) as mutate,
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+        patch("openswe.tools.publish_review.get_config", return_value=_eval_config()),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("openswe.tools.publish_review.mutate_findings", AsyncMock()) as mutate,
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
     ):
         result = await publish_review(ranking=ranking)
 
@@ -171,7 +171,7 @@ async def test_publish_review_rejects_a_ranking_that_is_not_a_total_order(
 async def test_publish_review_refuses_when_called_alongside_other_tools() -> None:
     from langchain_core.messages import AIMessage
 
-    from agent.tools.publish_review import publish_review
+    from openswe.tools.publish_review import publish_review
 
     turn = AIMessage(
         "",
@@ -180,7 +180,7 @@ async def test_publish_review_refuses_when_called_alongside_other_tools() -> Non
             {"name": "publish_review", "args": {"ranking": []}, "id": "call_publish"},
         ],
     )
-    with patch("agent.tools.publish_review._record_ranking", AsyncMock()) as record_ranking:
+    with patch("openswe.tools.publish_review._record_ranking", AsyncMock()) as record_ranking:
         result = await publish_review(ranking=[], state={"messages": [turn]})
 
     assert result["success"] is False
@@ -188,21 +188,21 @@ async def test_publish_review_refuses_when_called_alongside_other_tools() -> Non
 
 
 async def test_eval_run_publishes_the_findings_it_recorded_without_postgres() -> None:
-    from agent.review.findings import (
+    from openswe.review.findings import (
         REVIEWER_EVAL_PUBLICATION_KEY,
         append_finding,
         start_run_scoped_findings,
     )
-    from agent.tools.publish_review import publish_review
+    from openswe.tools.publish_review import publish_review
 
     start_run_scoped_findings("tid")
     await append_finding(
         "tid", _f(id="f_one", severity="high", file="a.py", start_line=1, end_line=1)
     )
     with (
-        patch("agent.tools.publish_review.get_config", return_value=_eval_config()),
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
+        patch("openswe.tools.publish_review.get_config", return_value=_eval_config()),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as set_meta,
     ):
         result = await publish_review(ranking=["f_one"])
 
@@ -226,7 +226,7 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
     client_cm.__aenter__.return_value = client_cm
     client_cm.post = AsyncMock(return_value=response)
 
-    with patch("agent.github.http.httpx2.AsyncClient", return_value=client_cm):
+    with patch("openswe.github.http.httpx2.AsyncClient", return_value=client_cm):
         result = await post_pull_request_review(
             owner="o",
             repo="r",
@@ -250,7 +250,7 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
 @pytest.mark.asyncio
 async def test_publish_review_skips_findings_already_published() -> None:
     """Re-runs must not re-post findings that already carry a review comment id."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_old", severity="high", file="a.py", github_review_comment_ids=[42]),
@@ -263,18 +263,18 @@ async def test_publish_review_skips_findings_already_published() -> None:
     set_metadata = AsyncMock()
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.list_findings_async", list_async),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
-        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", list_async),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.fetch_review_comments", fetch_comments),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
         patch(
-            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            "openswe.tools.publish_review._maybe_post_slack_completion_reply",
             new_callable=AsyncMock,
         ),
     ):
@@ -301,37 +301,40 @@ async def test_publish_review_skips_findings_already_published() -> None:
 async def test_published_review_registry_failure_does_not_complete_or_invite_duplicate(
     assessment_mode: str | None,
 ) -> None:
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     with (
         patch(
-            "agent.tools.publish_review.approval_mode_for", AsyncMock(return_value=assessment_mode)
+            "openswe.tools.publish_review.approval_mode_for",
+            AsyncMock(return_value=assessment_mode),
         ),
-        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(
-            "agent.tools.publish_review.open_swe_review_exists",
+            "openswe.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)
+        ),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch(
+            "openswe.tools.publish_review.open_swe_review_exists",
             AsyncMock(side_effect=[False, True]),
         ),
         patch(
-            "agent.tools.publish_review.post_pull_request_review",
+            "openswe.tools.publish_review.post_pull_request_review",
             AsyncMock(return_value={"id": 999}),
         ) as post,
         patch(
-            "agent.tools.publish_review.PullRequest.link_review",
+            "openswe.tools.publish_review.PullRequest.link_review",
             AsyncMock(side_effect=[RuntimeError("Storage unavailable"), None]),
         ) as completion,
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             AsyncMock(return_value=0),
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
-        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle,
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+        patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()) as settle,
         patch(
-            "agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()
+            "openswe.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()
         ) as notify,
-        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("openswe.tools.publish_review._record_reviewer_usage", AsyncMock()),
     ):
 
         async def publish() -> dict[str, object]:
@@ -387,7 +390,7 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings(
     storage_fails: bool,
 ) -> None:
     """Re-review with nothing new to surface must not spam another comment."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     # All findings already carry a review comment id from the prior publish
     # (so none are "unpublished"), plus one previously-resolved finding whose
@@ -419,18 +422,18 @@ async def test_publish_review_skips_post_on_re_review_with_no_new_findings(
     settle_check = AsyncMock()
 
     with (
-        patch("agent.tools.publish_review.PullRequest.link_review", completion),
-        patch("agent.tools.publish_review.settle_review_check_run", settle_check),
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.list_findings_async", list_async),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.PullRequest.link_review", completion),
+        patch("openswe.tools.publish_review.settle_review_check_run", settle_check),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", list_async),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             resolve_threads,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
         patch(
-            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            "openswe.tools.publish_review._maybe_post_slack_completion_reply",
             new_callable=AsyncMock,
         ),
     ):
@@ -476,7 +479,7 @@ async def test_publish_review_does_not_surface_out_of_diff_finding() -> None:
     """Out-of-diff findings are disabled: a finding anchored outside the diff is
     never surfaced on the PR. On a re-review with nothing else to post, it is
     treated as an empty re-review."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     findings = [
         _f(
@@ -489,22 +492,24 @@ async def test_publish_review_does_not_surface_out_of_diff_finding() -> None:
     post_review = AsyncMock(return_value={"id": 555})
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
         patch(
-            "agent.tools.publish_review._open_swe_already_reviewed",
+            "openswe.tools.publish_review._open_swe_already_reviewed",
             AsyncMock(return_value=True),
         ),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             AsyncMock(return_value=0),
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
-        patch("agent.tools.publish_review.clear_review_started_comment", AsyncMock()),
-        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
-        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
-        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("openswe.tools.publish_review.clear_review_started_comment", AsyncMock()),
+        patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()),
+        patch("openswe.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+        patch(
+            "openswe.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)
+        ),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -529,26 +534,26 @@ async def test_publish_review_dedup_keys_off_durable_last_reviewed_sha() -> None
     """A non-empty ``last_reviewed_sha`` on thread metadata means this thread
     already published once. The empty-summary guard must trust that durable
     signal and suppress without ever hitting the reviews API."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     review_exists = AsyncMock(return_value=False)
     post_review = AsyncMock()
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(
-            "agent.tools.publish_review.get_thread_metadata",
+            "openswe.tools.publish_review.get_thread_metadata",
             AsyncMock(return_value={"last_reviewed_sha": "oldsha"}),
         ),
-        patch("agent.tools.publish_review.open_swe_review_exists", review_exists),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.open_swe_review_exists", review_exists),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -567,7 +572,7 @@ async def test_publish_review_dedup_keys_off_durable_last_reviewed_sha() -> None
 
 @pytest.mark.asyncio
 async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> None:
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     finding = _f(
         id="f_old",
@@ -608,21 +613,21 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
     reply_comment = AsyncMock(return_value={"id": 555})
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(
-            "agent.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=threads)
+            "openswe.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=threads)
         ),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", AsyncMock()),
-        patch("agent.tools.publish_review.post_pull_request_review", AsyncMock()),
-        patch("agent.tools.publish_review.resolve_review_thread", resolve_thread),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", AsyncMock()),
+        patch("openswe.tools.publish_review.post_pull_request_review", AsyncMock()),
+        patch("openswe.tools.publish_review.resolve_review_thread", resolve_thread),
         patch(
-            "agent.tools.publish_review.fetch_review_thread_id_for_comment",
+            "openswe.tools.publish_review.fetch_review_thread_id_for_comment",
             AsyncMock(return_value=None),
         ),
-        patch("agent.tools.publish_review.reply_to_review_comment", reply_comment),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review.reply_to_review_comment", reply_comment),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -652,7 +657,7 @@ async def test_re_review_backfills_and_resolves_duplicate_existing_threads() -> 
 
 @pytest.mark.asyncio
 async def test_publish_review_backfills_from_threads_when_review_comments_are_empty() -> None:
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     finding = _f(id="f_new", first_seen_sha="sha")
     findings = [finding]
@@ -672,24 +677,24 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
     fetch_threads = AsyncMock(side_effect=[[], [thread]])
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.fetch_pr_review_threads", fetch_threads),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", AsyncMock()),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.fetch_pr_review_threads", fetch_threads),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", AsyncMock()),
         patch(
-            "agent.tools.publish_review.post_pull_request_review",
+            "openswe.tools.publish_review.post_pull_request_review",
             AsyncMock(return_value={"id": 999}),
         ),
-        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch("openswe.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
         patch(
-            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            "openswe.tools.publish_review._maybe_post_slack_completion_reply",
             new_callable=AsyncMock,
         ),
     ):
@@ -713,7 +718,7 @@ async def test_publish_review_backfills_from_threads_when_review_comments_are_em
 
 @pytest.mark.asyncio
 async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     old = _f(id="f_old", first_seen_sha="oldsha", file="old.py")
     new = _f(id="f_new", first_seen_sha="newsha", file="new.py")
@@ -731,16 +736,16 @@ async def test_re_review_only_posts_current_head_unpublished_findings() -> None:
     )
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
-        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.fetch_review_comments", fetch_comments),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -768,7 +773,7 @@ async def test_publish_review_matches_comment_ids_by_marker_not_path_line_body()
     each get their OWN comment id, matched via the embedded marker. The old
     ``(path, line, body)`` fallback collided here and cached one comment id on
     both findings, breaking resolve-on-fix."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     f1 = _f(id="f_one", file="dup.py", start_line=5, end_line=5, description="same text")
     f2 = _f(id="f_two", file="dup.py", start_line=5, end_line=5, description="same text")
@@ -784,18 +789,18 @@ async def test_publish_review_matches_comment_ids_by_marker_not_path_line_body()
     )
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
-        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.fetch_review_comments", fetch_comments),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
-        patch("agent.tools.publish_review._store_thread_ids_on_findings", new_callable=AsyncMock),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
-        patch("agent.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
+        patch("openswe.tools.publish_review._store_thread_ids_on_findings", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review._maybe_post_slack_completion_reply", AsyncMock()),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -821,7 +826,7 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once(
     tool must filter the bad findings against the PR diff_line_set, re-POST
     with only the valid ones, return ``success=True``, and report the dropped
     finding ids via ``unresolvable_findings`` plus a corrective hint."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
@@ -844,7 +849,7 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once(
 
     with (
         patch(
-            "agent.run_config.get_config",
+            "openswe.run_config.get_config",
             return_value={
                 "configurable": {
                     "thread_id": "tid",
@@ -852,25 +857,25 @@ async def test_publish_review_drops_unresolvable_findings_and_retries_once(
                 },
             },
         ),
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(
-            "agent.tools.publish_review.list_findings_async",
+            "openswe.tools.publish_review.list_findings_async",
             AsyncMock(return_value=findings),
         ),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
-        patch("agent.tools.publish_review.fetch_review_comments", fetch_comments),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.fetch_review_comments", fetch_comments),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
         patch(
-            "agent.tools.publish_review._store_thread_ids_on_findings",
+            "openswe.tools.publish_review._store_thread_ids_on_findings",
             new_callable=AsyncMock,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", set_metadata),
         patch(
-            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            "openswe.tools.publish_review._maybe_post_slack_completion_reply",
             new_callable=AsyncMock,
         ),
     ):
@@ -905,7 +910,7 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
     """If even the filtered retry fails, the tool surfaces
     ``success=False`` plus the offending finding ids and a hint — it must
     NOT collapse into the opaque retry-with-same-args loop."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
@@ -924,7 +929,7 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
 
     with (
         patch(
-            "agent.run_config.get_config",
+            "openswe.run_config.get_config",
             return_value={
                 "configurable": {
                     "thread_id": "tid",
@@ -932,18 +937,18 @@ async def test_publish_review_reports_unresolvable_when_retry_still_fails() -> N
                 },
             },
         ),
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(
-            "agent.tools.publish_review.list_findings_async",
+            "openswe.tools.publish_review.list_findings_async",
             AsyncMock(return_value=findings),
         ),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -965,7 +970,7 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
     """When the unresolved_anchor 422 fires but the diff_line_set rules out
     no findings (e.g., diff data unavailable), the tool must NOT retry — it
     must surface the structured error so the agent stops looping."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_only", severity="high", file="in_diff.py", start_line=10, end_line=10),
@@ -982,26 +987,26 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
 
     with (
         patch(
-            "agent.run_config.get_config",
+            "openswe.run_config.get_config",
             return_value={"configurable": {"thread_id": "tid"}},
         ),
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(
-            "agent.tools.publish_review.list_findings_async",
+            "openswe.tools.publish_review.list_findings_async",
             AsyncMock(return_value=findings),
         ),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
         patch(
-            "agent.tools.publish_review._resolve_diff_line_set",
+            "openswe.tools.publish_review._resolve_diff_line_set",
             new_callable=AsyncMock,
             return_value=None,
         ),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -1023,15 +1028,15 @@ async def test_publish_review_does_not_retry_when_no_findings_can_be_dropped() -
 async def test_publish_review_tool_returns_structured_error_when_thread_missing() -> None:
     """A missing reviewer thread surfaces as a do-not-retry tool result instead
     of an exception the middleware swallows into an empty tool message."""
-    from agent.review.findings import ReviewerThreadMissingError
-    from agent.tools.publish_review import publish_review
+    from openswe.review.findings import ReviewerThreadMissingError
+    from openswe.tools.publish_review import publish_review
 
     publish_async = AsyncMock(
         side_effect=ReviewerThreadMissingError("tid", RuntimeError("thread tid not found"))
     )
     with (
         patch(
-            "agent.tools.publish_review.get_config",
+            "openswe.tools.publish_review.get_config",
             return_value={
                 "configurable": {
                     "thread_id": "tid",
@@ -1042,9 +1047,9 @@ async def test_publish_review_tool_returns_structured_error_when_thread_missing(
                 "metadata": {},
             },
         ),
-        patch("agent.tools.publish_review.resolve_thread_github_token", return_value="token"),
-        patch("agent.tools.publish_review._publish_review_async", publish_async),
-        patch("agent.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
+        patch("openswe.tools.publish_review.resolve_thread_github_token", return_value="token"),
+        patch("openswe.tools.publish_review._publish_review_async", publish_async),
+        patch("openswe.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
     ):
         result = await publish_review(ranking=[])
 
@@ -1072,28 +1077,30 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     expected_event: str,
     has_assessment: bool,
 ) -> None:
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.approval_mode_for", AsyncMock(return_value=mode)),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.approval_mode_for", AsyncMock(return_value=mode)),
         patch(
-            "agent.tools.publish_review.approval_allowed_for_head",
+            "openswe.tools.publish_review.approval_allowed_for_head",
             AsyncMock(return_value=current_head),
         ),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
         patch(
-            "agent.tools.publish_review.post_pull_request_review",
+            "openswe.tools.publish_review.post_pull_request_review",
             AsyncMock(return_value={"id": 77}),
         ) as post,
-        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)
+        ),
+        patch(
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             AsyncMock(return_value=0),
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
-        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
-        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
+        patch("openswe.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()),
     ):
         result = await _publish_review_async(
             owner="o",
@@ -1129,11 +1136,11 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     ],
 )
 async def test_approval_rechecks_github_head_and_pr_state(pr: dict[str, object]) -> None:
-    from agent.review.publish import approval_allowed_for_head
+    from openswe.review.publish import approval_allowed_for_head
 
     response = MagicMock()
     response.json.return_value = pr
-    with patch("agent.review.publish.github_request", AsyncMock(return_value=response)):
+    with patch("openswe.review.publish.github_request", AsyncMock(return_value=response)):
         assert not await approval_allowed_for_head(
             owner="o", repo="r", pr_number=7, head_sha="a" * 40, token="t"
         )
@@ -1143,7 +1150,9 @@ async def test_approved_review_posts_approve_event_for_reviewed_commit() -> None
     response = MagicMock()
     response.status_code = 200
     response.json.return_value = {"id": 77, "state": "APPROVED"}
-    with patch("agent.review.publish.github_request", AsyncMock(return_value=response)) as request:
+    with patch(
+        "openswe.review.publish.github_request", AsyncMock(return_value=response)
+    ) as request:
         await post_pull_request_review(
             owner="o",
             repo="r",
@@ -1176,7 +1185,7 @@ async def test_approval_publication_handles_github_rejections(
 ) -> None:
     import httpx2
 
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     request = httpx2.Request("POST", "https://api.github.com/repos/o/r/pulls/7/reviews")
     responses = [httpx2.Response(status, json=error_body, request=request)]
@@ -1189,19 +1198,23 @@ async def test_approval_publication_handles_github_rejections(
             )
         )
     with (
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
-        patch("agent.tools.publish_review.approval_mode_for", AsyncMock(return_value="approve")),
-        patch("agent.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)),
-        patch("agent.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
-        patch("agent.review.publish.github_request", AsyncMock(side_effect=responses)) as post,
-        patch("agent.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.approval_mode_for", AsyncMock(return_value="approve")),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review.approval_allowed_for_head", AsyncMock(return_value=True)
+        ),
+        patch("openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=[])),
+        patch("openswe.review.publish.github_request", AsyncMock(side_effect=responses)) as post,
+        patch(
+            "openswe.tools.publish_review._resolve_review_trace_url", AsyncMock(return_value=None)
+        ),
+        patch(
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             AsyncMock(return_value=0),
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
-        patch("agent.tools.publish_review._record_reviewer_usage", AsyncMock()),
-        patch("agent.tools.publish_review.settle_review_check_run", AsyncMock()) as settle_check,
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()) as metadata,
+        patch("openswe.tools.publish_review._record_reviewer_usage", AsyncMock()),
+        patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()) as settle_check,
     ):
         result = await _publish_review_async(
             owner="o",
@@ -1245,7 +1258,7 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
     PR's unified diff on demand and recomputing the line set — otherwise no
     finding is ever droppable and the retry surfaces empty
     ``unresolvable_findings`` for the reachable production case."""
-    from agent.tools.publish_review import _publish_review_async
+    from openswe.tools.publish_review import _publish_review_async
 
     findings = [
         _f(id="f_good", severity="high", file="in_diff.py", start_line=10, end_line=10),
@@ -1270,32 +1283,32 @@ async def test_publish_review_fetches_pr_diff_when_diff_line_set_missing() -> No
 
     with (
         patch(
-            "agent.run_config.get_config",
+            "openswe.run_config.get_config",
             return_value={"configurable": {"thread_id": "tid"}},
         ),
-        patch("agent.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+        patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch(
-            "agent.tools.publish_review.list_findings_async",
+            "openswe.tools.publish_review.list_findings_async",
             AsyncMock(return_value=findings),
         ),
-        patch("agent.tools.publish_review.post_pull_request_review", post_review),
+        patch("openswe.tools.publish_review.post_pull_request_review", post_review),
         patch(
-            "agent.tools.publish_review.fetch_pr_diff",
+            "openswe.tools.publish_review.fetch_pr_diff",
             AsyncMock(return_value=pr_diff),
         ),
-        patch("agent.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
+        patch("openswe.tools.publish_review.fetch_review_comments", AsyncMock(return_value=[])),
         patch(
-            "agent.tools.publish_review._resolve_threads_for_resolved_findings",
+            "openswe.tools.publish_review._resolve_threads_for_resolved_findings",
             new_callable=AsyncMock,
             return_value=0,
         ),
         patch(
-            "agent.tools.publish_review._store_thread_ids_on_findings",
+            "openswe.tools.publish_review._store_thread_ids_on_findings",
             new_callable=AsyncMock,
         ),
-        patch("agent.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
+        patch("openswe.tools.publish_review.set_reviewer_thread_metadata", new_callable=AsyncMock),
         patch(
-            "agent.tools.publish_review._maybe_post_slack_completion_reply",
+            "openswe.tools.publish_review._maybe_post_slack_completion_reply",
             new_callable=AsyncMock,
         ),
     ):

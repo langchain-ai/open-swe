@@ -6,8 +6,8 @@ import pytest
 from fastapi import FastAPI, HTTPException, Response, WebSocket
 from fastapi.testclient import TestClient
 
-from agent.dashboard import oauth
-from agent.threads import terminal
+from openswe.dashboard import oauth
+from openswe.threads import terminal
 
 
 def test_terminal_ticket_is_short_lived_and_thread_bound(monkeypatch) -> None:

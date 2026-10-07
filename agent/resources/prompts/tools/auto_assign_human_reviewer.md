@@ -1,3 +1,0 @@
-Start Open SWE's automatic reviewer assignment for a pull request's open review request — the same process that runs once a request has waited too long without a reviewer. Use it when someone asks you to auto-assign or pick a reviewer for a pull request that has a review card or is being watched from a review channel post. Pass the pull request URL.
-
-It does not pick anyone itself: a separate run chooses the reviewer from CODEOWNERS and recent history, tags them in the review's Slack thread, requests their review on GitHub, and messages them directly. Do not call `assign_human_reviewer` yourself afterwards.

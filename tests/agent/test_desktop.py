@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 from blockbuster import BlockBuster
 
-from agent.desktop import (
+from openswe.desktop import (
     create_desktop_backend,
     desktop_artifact_routes,
     resolve_desktop_project,
 )
-from agent.run_config import RunConfig
+from openswe.run_config import RunConfig
 
 
 @contextmanager

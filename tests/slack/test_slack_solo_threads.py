@@ -12,11 +12,11 @@ from fastapi import BackgroundTasks
 from langgraph_sdk.client import LangGraphClient
 from starlette.requests import Request
 
-from agent.slack import routes, solo_threads
-from agent.slack.payloads import SlackChannelContext
-from agent.slack.request import SlackRequest
-from agent.utils.json_types import JsonObject
-from agent.webhooks import common
+from openswe.slack import routes, solo_threads
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.request import SlackRequest
+from openswe.utils.json_types import JsonObject
+from openswe.webhooks import common
 
 
 class _Store:
@@ -127,7 +127,9 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
             return_value=SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)
         ),
     )
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
     return state
 
 

@@ -5,13 +5,13 @@ from typing import cast
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
-from agent.threads.recent_context import (
+from openswe.threads.recent_context import (
     RecentContextAudience,
     RecentContextSelector,
     RecentThreadContext,
     render_recent_thread_context,
 )
-from agent.utils.json_types import JsonObject, ThreadLike
+from openswe.utils.json_types import JsonObject, ThreadLike
 
 
 class FakeThreads:

@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import { MultiFileDiff } from "@pierre/diffs/react"
+import { ScopedFileDiff } from "@/features/agents/components/ScopedFileDiff"
 import type { DiffData } from "@/features/agents/lib/types"
 import { useDiffOptions } from "@/features/agents/utils/diffUtils"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
@@ -46,7 +46,7 @@ export function DiffView({ diffData, snippet = false }: DiffViewProps) {
         <span className="text-red-400">-{stats.deletions}</span>
       </div>
       <div className="max-h-60 overflow-auto rounded-lg border border-border/60 bg-card">
-        <MultiFileDiff
+        <ScopedFileDiff
           oldFile={{ name: displayPath, contents: originalContent ?? "" }}
           newFile={{ name: displayPath, contents: newContent }}
           options={options}

@@ -1,13 +1,13 @@
 import pytest
 
-from agent.config import ENV
-from agent.dashboard.user_preferences import (
+from openswe.config import ENV
+from openswe.dashboard.user_preferences import (
     UserPreferencesUpdate,
     get_user_preferences,
     set_user_preferences,
 )
-from agent.workspaces import routing
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
+from openswe.workspaces import routing
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
 from tests.conftest import FakeStore
 
 # Workspaces are rows; user preferences are still Store records, so the tests

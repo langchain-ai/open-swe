@@ -5,9 +5,9 @@ import os
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 
-from agent.dashboard.oauth import require_session
-from agent.mcp.cli_tools import router
-from agent.tools.manage_feature_flags import manage_feature_flags
+from openswe.dashboard.oauth import require_session
+from openswe.mcp.cli_tools import router
+from openswe.tools.manage_feature_flags import manage_feature_flags
 
 app = FastAPI()
 app.include_router(router, prefix="/dashboard/api")

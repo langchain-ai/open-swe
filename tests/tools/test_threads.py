@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-threads_tool = importlib.import_module("agent.tools.threads")
+threads_tool = importlib.import_module("openswe.tools.threads")
 
 
 def _actor(*, login: str = "octocat", admin: bool = False) -> object:
@@ -422,9 +422,9 @@ async def test_delegation_survives_message_serialization_and_inspection(
     monkeypatch: pytest.MonkeyPatch,
     delegated: bool,
 ) -> None:
-    from agent.message_authorship import concierge_author
-    from agent.threads.runs import _attributed_run_messages
-    from agent.users import User
+    from openswe.message_authorship import concierge_author
+    from openswe.threads.runs import _attributed_run_messages
+    from openswe.users import User
 
     monkeypatch.setattr(
         User, "for_person", AsyncMock(return_value=SimpleNamespace(display_name="Ramon Nogueira"))
