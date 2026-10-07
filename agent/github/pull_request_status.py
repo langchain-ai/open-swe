@@ -832,7 +832,7 @@ async def _load_pull_request(
     owner, name, number = identity
     pull = await _fetch_mergeable_pull_request(client, owner, name, number) if details else None
     state = _live_state(pull) if pull is not None else "open"
-    if state not in wanted:
+    if state is None or state not in wanted:
         return None
     source: Mapping[str, Any] = pull if pull is not None else item
     result = OpenPullRequest(
