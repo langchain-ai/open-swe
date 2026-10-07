@@ -401,6 +401,8 @@ def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
         "head_ref": (payload.get("head") or {}).get("ref") or "",
         "base_ref": (payload.get("base") or {}).get("ref") or "",
         "author": _user_ref(payload.get("user")),
+        "created_at": payload.get("created_at"),
+        "merged_at": payload.get("merged_at"),
         "assignees": [
             user
             for user in (_user_ref(value) for value in payload.get("assignees") or [])
