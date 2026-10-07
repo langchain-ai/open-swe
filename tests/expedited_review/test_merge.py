@@ -9,6 +9,7 @@ import pytest
 from agent.expedited_review import merge, reviews
 from agent.expedited_review.eligibility import ChangedFile, diff_fingerprint
 from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
+from agent.github.pull_request_status import PullRequestClient
 from agent.human_review import lifecycle, merging
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.users import User
@@ -65,7 +66,7 @@ class _GitHub:
         self.comment_status = True
         monkeypatch.setattr(merge, "post_github_comment", self._comment)
         self.threads: list[dict[str, Any]] = []
-        monkeypatch.setattr(merge.PullRequestClient, "unresolved_threads", self._threads)
+        monkeypatch.setattr(PullRequestClient, "unresolved_threads", self._threads)
 
     async def _threads(self, *_: object) -> list[dict[str, Any]]:
         return self.threads

@@ -20,9 +20,12 @@ import random
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import httpx2
+
+if TYPE_CHECKING:
+    from agent.github.pull_request_status import PullRequestClient
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +279,12 @@ class RepoClient:
     @property
     def full_name(self) -> str:
         return f"{self.owner}/{self.name}"
+
+    def pull_request(self, number: int) -> PullRequestClient:
+        # pull_request_status imports this module.
+        from agent.github.pull_request_status import PullRequestClient
+
+        return PullRequestClient(self, number)
 
     async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
         return await self.github.get(f"repos/{self.full_name}/{path}", params)

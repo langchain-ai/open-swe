@@ -14,7 +14,7 @@ from agent.github.http import (
     github_client,
     github_request,
 )
-from agent.github.pull_request_status import PullRequestClient, pull_request_identity
+from agent.github.pull_request_status import pull_request_identity
 from agent.github.repo_merge_methods import MergeMethod
 from agent.github.squash_message import GitHubUser, SquashSource
 
@@ -354,9 +354,9 @@ async def resolve_review_threads(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     async with github_client(token=token) as client:
-        threads = await PullRequestClient(
-            GitHubClient(client).repo(owner, repo), number
-        ).unresolved_threads()
+        threads = (
+            await GitHubClient(client).repo(owner, repo).pull_request(number).unresolved_threads()
+        )
         if threads is None:
             logger.warning(
                 "Review threads unavailable for resolve",

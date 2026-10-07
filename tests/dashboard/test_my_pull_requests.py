@@ -19,7 +19,7 @@ async def client(**kwargs):
 
 
 def _client(number: int) -> prs.PullRequestClient:
-    return prs.PullRequestClient(github_http.GitHubClient(MagicMock()).repo("acme", "app"), number)
+    return github_http.GitHubClient(MagicMock()).repo("acme", "app").pull_request(number)
 
 
 def response(payload, status=200):
