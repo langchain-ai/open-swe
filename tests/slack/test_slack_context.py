@@ -5,20 +5,22 @@ from xml.etree import ElementTree
 
 import pytest
 
-from agent.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
-from agent.run_config import Repo
-from agent.slack import client as slack_utils
-from agent.slack import webhook as slack_webhooks
-from agent.slack.channels import SlackChannel
-from agent.slack.client import (
+from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.run_config import Repo
+from openswe.slack import client as slack_utils
+from openswe.slack import webhook as slack_webhooks
+from openswe.slack.channels import SlackChannel
+from openswe.slack.client import (
     format_slack_messages_for_prompt,
 )
-from agent.slack.payloads import SlackChannelContext, SlackChannelPayload
-from agent.slack.request import SlackRequest
-from agent.source_context import SourceContext
-from agent.utils.run_usage import RunUsageSummary
-from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.slack.payloads import SlackChannelContext, SlackChannelPayload
+from openswe.slack.request import SlackRequest
+from openswe.source_context import SourceContext
+from openswe.users import User
+from openswe.utils.run_usage import RunUsageSummary
+from openswe.utils.thread_participants import participant_ids
+from openswe.webhooks import common as webhook_common
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
@@ -122,6 +124,56 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == "private"
     assert metadata["owner_login"] == "Alice"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("linked_slack", [True, False])
+async def test_upsert_counts_linked_and_unregistered_slack_participants(
+    monkeypatch: pytest.MonkeyPatch,
+    linked_slack: bool,
+) -> None:
+    threads = _FakeThreadsClient(thread={"metadata": {}})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    alice = User()
+
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=alice))
+    monkeypatch.setattr(User, "for_email", AsyncMock(return_value=alice))
+    monkeypatch.setattr(User, "login_for_email", AsyncMock(return_value="alice"))
+    monkeypatch.setattr(
+        User,
+        "for_identity",
+        AsyncMock(
+            side_effect=lambda provider, uid: alice if linked_slack and uid == "U1" else None
+        ),
+    )
+    monkeypatch.setattr(
+        User,
+        "login_for_slack",
+        AsyncMock(side_effect=lambda uid: "alice" if linked_slack and uid == "U1" else None),
+    )
+    for slack_ids, expected in [
+        (["U1"], {f"user:{alice.id}"}),
+        (["U1", "U2"], {f"user:{alice.id}", "slack:U2"}),
+    ]:
+        assert await webhook_common.upsert_agent_thread_metadata(
+            "thread-id",
+            source="slack",
+            github_login="alice" if linked_slack else "",
+            user_email="alice@example.com",
+            source_context=SourceContext.parse(
+                {
+                    "slack_thread": {
+                        "channel_id": "C1",
+                        "thread_ts": "1.0",
+                        "triggering_user_id": "U1",
+                        "permalink": "https://slack.example/thread",
+                    }
+                }
+            ),
+            slack_participant_user_ids=slack_ids,
+            title="Thread",
+        )
+        assert participant_ids(cast(dict, threads.thread)["metadata"]) == expected
 
 
 def test_upsert_records_a_token_scope_only_on_creation(
@@ -340,7 +392,7 @@ async def test_web_question_keeps_context_without_slack_delivery(monkeypatch, fa
 
 @pytest.fixture
 async def slack_file_mention(monkeypatch, fake_store, registry_db):
-    from agent.sandboxes import lifecycle, state
+    from openswe.sandboxes import lifecycle, state
 
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -503,9 +555,9 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
 
     import langgraph_sdk
 
-    from agent.dashboard import profiles
+    from openswe.dashboard import profiles
 
-    opr = importlib.import_module("agent.tools.open_pull_request")
+    opr = importlib.import_module("openswe.tools.open_pull_request")
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     client = slack_webhooks.get_langgraph_client()
@@ -549,7 +601,7 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
     ) == explicitly_tagged
     run_config = kwargs["config"]
     run_config["configurable"]["thread_id"] = run_create["thread_id"]
-    monkeypatch.setattr("agent.run_config.get_config", lambda: run_config)
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
 
     assert asyncio.run(opr._resolve_pr_author_token()) == ("bob-token", "user")
     assert saved_metadata["owner_login"] == "alice"

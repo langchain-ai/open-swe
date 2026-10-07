@@ -10,8 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from agent.database import postgres
-from agent.database.migrations.transcript_legacy import schema_definition
+from openswe.database import postgres
+from openswe.database.migrations.transcript_legacy import schema_definition
 
 LEGACY_SQL = Path(__file__).with_name("fixtures") / "legacy_transcript.sql"
 

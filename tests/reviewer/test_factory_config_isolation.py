@@ -9,7 +9,7 @@ from langgraph.graph.state import RunnableConfig
 
 @pytest.mark.parametrize(
     ("module_name", "factory_name"),
-    [("agent.reviewer", "get_reviewer_agent"), ("agent.chat", "get_chat_agent")],
+    [("openswe.reviewer", "get_reviewer_agent"), ("openswe.chat", "get_chat_agent")],
 )
 @pytest.mark.asyncio
 async def test_factory_copies_config_dicts_but_preserves_runtime_objects(

@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.utils import langsmith
-from agent.utils.langsmith import parse_langsmith_locator
+from openswe.utils import langsmith
+from openswe.utils.langsmith import parse_langsmith_locator
 
 
 @pytest.mark.parametrize(
