@@ -40,6 +40,15 @@ logger = logging.getLogger(__name__)
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
 
 
+class WorkerLaunchError(Exception):
+    """A reserved worker failed to launch; ``retryable`` is False when retrying cannot help."""
+
+    def __init__(self, worker_thread_id: str, error: str, *, retryable: bool) -> None:
+        super().__init__(error)
+        self.worker_thread_id = worker_thread_id
+        self.retryable = retryable
+
+
 @dataclass(frozen=True)
 class Actor:
     thread_id: str
@@ -307,12 +316,12 @@ async def dispatch_reserved_worker(
             "Worker launch is incomplete", extra={"worker_thread_id": delegation.worker_thread_id}
         )
         await store.set_launch_error(delegation.worker_thread_id, str(exc)[:2000])
-        return {
-            "success": False,
-            "worker_thread_id": delegation.worker_thread_id,
-            "error": str(exc),
-            "recovery": "Use control_worker with action=retry and this worker_thread_id",
-        }
+        # A conflicting identity or a cancelled worker fails the same way on every retry.
+        raise WorkerLaunchError(
+            delegation.worker_thread_id,
+            str(exc),
+            retryable=not isinstance(exc, (PermissionError, ValueError)),
+        ) from exc
     await store.set_launch_error(delegation.worker_thread_id, None)
     return {
         "success": True,

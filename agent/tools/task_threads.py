@@ -17,6 +17,17 @@ async def actor_from_state(state: dict[str, object]) -> service.Actor:
     return service.Actor(thread_id=thread_id, login=actor.login, email=actor.email)
 
 
+def _launch_failure(exc: service.WorkerLaunchError) -> dict[str, object]:
+    result: dict[str, object] = {
+        "success": False,
+        "worker_thread_id": exc.worker_thread_id,
+        "error": str(exc),
+    }
+    if exc.retryable:
+        result["recovery"] = "Use control_worker with action=retry and this worker_thread_id"
+    return result
+
+
 async def spawn_worker(
     instructions: str,
     state: Annotated[dict[str, object], InjectedState],
@@ -24,13 +35,16 @@ async def spawn_worker(
     model: str | None = None,
     effort: str | None = None,
 ) -> dict[str, object]:
-    return await service.spawn_worker(
-        await actor_from_state(state),
-        instructions=instructions,
-        model=model,
-        effort=effort,
-        request_id=tool_call_id,
-    )
+    try:
+        return await service.spawn_worker(
+            await actor_from_state(state),
+            instructions=instructions,
+            model=model,
+            effort=effort,
+            request_id=tool_call_id,
+        )
+    except service.WorkerLaunchError as exc:
+        return _launch_failure(exc)
 
 
 async def task_status(state: Annotated[dict[str, object], InjectedState]) -> dict[str, object]:
@@ -56,11 +70,14 @@ async def control_worker(
     action: Literal["status", "cancel", "retry"],
     state: Annotated[dict[str, object], InjectedState],
 ) -> dict[str, object]:
-    return await service.control_worker(
-        await actor_from_state(state),
-        worker_thread_id=worker_thread_id,
-        action=action,
-    )
+    try:
+        return await service.control_worker(
+            await actor_from_state(state),
+            worker_thread_id=worker_thread_id,
+            action=action,
+        )
+    except service.WorkerLaunchError as exc:
+        return _launch_failure(exc)
 
 
 for _tool in (spawn_worker, task_status, message_task_thread, control_worker):

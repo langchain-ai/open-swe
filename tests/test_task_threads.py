@@ -358,18 +358,19 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert await store.load_context(COORDINATOR) is None
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     client.fail_after_accept = True
-    result = await asyncio.wait_for(
-        service.spawn_worker(
-            actor,
-            instructions="Implement login fix",
-            model=MODEL,
-            effort="low",
-            request_id="stable-call",
-        ),
-        timeout=5,
-    )
-    assert result["success"] is False
-    worker_id = str(result["worker_thread_id"])
+    with pytest.raises(service.WorkerLaunchError) as failed:
+        await asyncio.wait_for(
+            service.spawn_worker(
+                actor,
+                instructions="Implement login fix",
+                model=MODEL,
+                effort="low",
+                request_id="stable-call",
+            ),
+            timeout=5,
+        )
+    assert failed.value.retryable
+    worker_id = failed.value.worker_thread_id
     context = await store.load_context(COORDINATOR)
     assert context is not None
     assert context.membership.role == "coordinator"
