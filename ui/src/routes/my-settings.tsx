@@ -1,48 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { AboutSection } from "@/features/settings/components/AboutSection"
 
-import { AccountSection } from "@/features/settings/components/AccountSection"
-import { AppShell } from "@/components/AppShell"
-import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
-import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
-import { PersonalInstructionsSection } from "@/features/settings/components/PersonalInstructionsSection"
-import { PreferencesSection } from "@/features/settings/components/PreferencesSection"
-import { PullRequestsSection } from "@/features/settings/components/PullRequestsSection"
-import { RequireLogin } from "@/lib/auth-redirect"
+import { SettingsPage } from "@/components/AppShell"
+import { GeneralSettings } from "@/features/settings/components/GeneralSettings"
 import { pageTitle } from "@/lib/pageTitle"
-import { Skeleton } from "@/components/ui/skeleton"
-import { useSession } from "@/lib/session"
 
 export const Route = createFileRoute("/my-settings")({
-  component: MySettingsPage,
-  head: () => ({ meta: [{ title: pageTitle("Profile") }] }),
-})
-
-function MySettingsPage() {
-  const session = useSession()
-
-  if (session.isLoading) {
-    return (
-      <main className="p-6">
-        <Skeleton className="h-40 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-
-  return (
-    <AppShell
-      user={session.data}
-      title="Settings"
-      description="Personal preferences, connected accounts, and instructions that apply to every run you trigger."
+  component: () => (
+    <SettingsPage
+      title="General"
+      description="How the dashboard looks and behaves for you."
     >
-      <AccountSection user={session.data} />
-      <PreferencesSection />
-      <PullRequestsSection />
-      <ConnectionsSection user={session.data} />
-      <MCPConnectionsSection scope="user" />
-      <PersonalInstructionsSection />
-      <AboutSection user={session.data} />
-    </AppShell>
-  )
-}
+      <GeneralSettings />
+    </SettingsPage>
+  ),
+  head: () => ({ meta: [{ title: pageTitle("General") }] }),
+})

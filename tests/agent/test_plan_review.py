@@ -8,7 +8,7 @@ from tests.conftest import FakeStore
 
 
 async def test_save_plan_rejects_html_outside_plans_dir() -> None:
-    from agent.tools.save_plan import save_plan
+    from openswe.tools.save_plan import save_plan
 
     result = await save_plan("/workspace/plan.html")
     assert result["success"] is False
@@ -20,7 +20,7 @@ async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
 ) -> None:
     import importlib
 
-    save_plan_tool = importlib.import_module("agent.tools.save_plan")
+    save_plan_tool = importlib.import_module("openswe.tools.save_plan")
 
     saved: dict[str, Any] = {}
 
@@ -40,7 +40,7 @@ async def test_save_plan_wraps_a_fragment_with_a_title_from_the_filename(
         saved.update(kwargs)
 
     monkeypatch.setattr(
-        "agent.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
+        "openswe.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-1"}}
     )
     monkeypatch.setattr(save_plan_tool, "get_sandbox_backend", fake_backend)
     monkeypatch.setattr(save_plan_tool, "save_plan_content", fake_save_content)
@@ -58,7 +58,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
 ) -> None:
     from fastapi import HTTPException
 
-    from agent.threads import workflow_approval_api
+    from openswe.threads import workflow_approval_api
 
     async def fake_metadata(thread_id: str) -> dict[str, Any]:
         assert thread_id == "thread-1"
@@ -80,7 +80,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
 async def test_republished_artifact_drops_legacy_approval(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    from agent.threads import plan_api, plan_store
+    from openswe.threads import plan_api, plan_store
 
     metadata: dict[str, object] = {
         "source": "slack",
@@ -106,7 +106,7 @@ async def test_republished_artifact_drops_legacy_approval(
 async def test_dismissal_clears_when_artifact_is_republished(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    from agent.threads import plan_api, plan_store
+    from openswe.threads import plan_api, plan_store
 
     session = {"sub": "owner", "email": None}
     monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
@@ -127,7 +127,7 @@ async def test_dismissal_clears_when_artifact_is_republished(
 async def test_artifact_comments_remain_authorized_without_approval_gates(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, status: str
 ) -> None:
-    from agent.threads import plan_api, plan_store
+    from openswe.threads import plan_api, plan_store
 
     fake_store.seed(
         plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>", "status": status}
@@ -148,7 +148,7 @@ async def test_artifact_comments_remain_authorized_without_approval_gates(
 async def test_submit_artifact_comments_dispatches_only_for_comment_author(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    from agent.threads import plan_api, plan_store
+    from openswe.threads import plan_api, plan_store
 
     fake_store.seed(plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>"})
     monkeypatch.setattr(
@@ -175,7 +175,7 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
 async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
     monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
 ) -> None:
-    from agent.threads import plan_api, plan_store
+    from openswe.threads import plan_api, plan_store
 
     path = "/workspace/plans/legacy.md"
     fake_store.seed(

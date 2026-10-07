@@ -12,9 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 from langgraph.runtime import Runtime
 
-import agent.server as server
-from agent.middleware.prepare_run import PrepareRunState
-from agent.utils import ttl_cache
+import openswe.server as server
+from openswe.middleware.prepare_run import PrepareRunState
+from openswe.utils import ttl_cache
 
 _INSTALLATION_TOKEN = "installation-token"
 
@@ -59,7 +59,7 @@ def _clear_public_profile_cache() -> None:
 @pytest.fixture
 def github_client(monkeypatch: pytest.MonkeyPatch) -> _FakeGitHubClient:
     client = _FakeGitHubClient([])
-    import agent.utils.authorship as authorship
+    import openswe.utils.authorship as authorship
 
     monkeypatch.setattr(authorship.httpx2, "AsyncClient", lambda *a, **kw: client)
     return client
@@ -187,7 +187,7 @@ async def test_public_scope_resolves_profile_via_installation_token(
     async def fake_token(**kwargs: Any) -> str:
         return _INSTALLATION_TOKEN
 
-    monkeypatch.setattr("agent.github.app.get_github_app_installation_token", fake_token)
+    monkeypatch.setattr("openswe.github.app.get_github_app_installation_token", fake_token)
     github_client._responses.extend(
         [
             _FakeResponse(401, {"message": "Bad credentials"}),

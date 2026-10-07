@@ -515,7 +515,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           <AgentComposerDock>
             <ThreadPullRequests
               pullRequests={composerPr ? [composerPr] : []}
-              compact
               healthUnavailable
             />
             {terminalContexts.length > 0 && (

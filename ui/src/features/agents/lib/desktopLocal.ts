@@ -58,6 +58,15 @@ export function runsOnAMac(thread: Pick<AgentThread, "sandboxBridgeClient">) {
  * changes the list, so it is refreshed where it does rather than polled.
  */
 export function useLocalThreads() {
+  const queryClient = useQueryClient()
+  useEffect(
+    () =>
+      window.openSweDesktop?.onLocalThreadsChanged(
+        () =>
+          void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
+      ),
+    [queryClient]
+  )
   return useQuery({
     queryKey: localThreadKeys.all,
     queryFn: async () =>
@@ -72,6 +81,14 @@ export function useLocalThread(threadId: string): DesktopLocalThread | null {
   return (
     useLocalThreads().data?.find((thread) => thread.id === threadId) ?? null
   )
+}
+
+/** This Mac's checkout for the thread, while the thread runs on a Mac. */
+export function useMacCheckout(
+  thread: Pick<AgentThread, "id" | "sandboxBridgeClient">
+): DesktopLocalThread | null {
+  const local = useLocalThread(thread.id)
+  return runsOnAMac(thread) ? local : null
 }
 
 export function useRefreshLocalThreads() {

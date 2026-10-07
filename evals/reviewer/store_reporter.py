@@ -1,9 +1,9 @@
 """Publish reviewer-eval progress to the LangGraph store for the dashboard.
 
-When the eval runs in a LangSmith sandbox (``agent.review.eval_jobs``) it writes the same
+When the eval runs in a LangSmith sandbox (``openswe.review.eval_jobs``) it writes the same
 store record the dashboard reads (namespace ``["evals"]``, key ``"reviewer"``),
 so ``/admin/evals`` shows the run live. The dashboard reconciles a run whose
-heartbeat goes stale to ``failed`` (see ``agent.review.eval_jobs``), so the
+heartbeat goes stale to ``failed`` (see ``openswe.review.eval_jobs``), so the
 reporter must keep heartbeating while the eval runs.
 """
 
@@ -16,7 +16,7 @@ from typing import Any
 
 from langgraph_sdk import get_client
 
-from agent.review.eval_store import (
+from openswe.review.eval_store import (
     EVALS_NAMESPACE,
     HEARTBEAT_INTERVAL_SECONDS,
     REVIEWER_EVAL_KEY,

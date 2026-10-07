@@ -12,8 +12,8 @@ import tempfile
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
-from agent.utils.gateway import gateway_env_default, gateway_overrides
 from evals.reviewer.judge import ReviewComment
+from openswe.utils.gateway import gateway_env_default, gateway_overrides
 
 logger = logging.getLogger(__name__)
 
