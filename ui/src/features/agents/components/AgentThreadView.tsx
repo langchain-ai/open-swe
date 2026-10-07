@@ -149,10 +149,14 @@ export function AgentThreadView({
   const localThread = runsOnAMac(thread) ? localRecord : null
   const runsElsewhere =
     runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
+  // A move takes effect with the next message, whose run carries the checkout over.
+  const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
+  // An offline Mac's thread can still move to the cloud, from its pushed work.
+  const macOffline = runsElsewhere && handoff !== "cloud"
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
   const canPost =
-    !runsElsewhere &&
+    !macOffline &&
     !botThread &&
     ((thread.threadCategory !== "automation" && !thread.adminThread) ||
       session.data?.is_admin === true)
@@ -212,12 +216,9 @@ export function AgentThreadView({
         ? localBridge.error.message
         : "This Mac could not be reached"
       : null
-  // A move takes effect with the next message, whose run carries the checkout over.
-  const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
   const runsHere: ThreadTarget = runsOnAMac(thread) ? "local" : "cloud"
   const canMove =
-    Boolean(window.openSweDesktop) &&
-    !runsElsewhere &&
+    (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
     Boolean(thread.repoFullName) &&
     thread.visibility === "private" &&
@@ -724,7 +725,7 @@ export function AgentThreadView({
           panelCollapsed={panelCollapsed}
           thread={thread}
         />
-        {(runsElsewhere || bridgeError) && (
+        {(macOffline || bridgeError) && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert
               variant={bridgeError ? "error" : "info"}
@@ -735,7 +736,7 @@ export function AgentThreadView({
                 <span>
                   {bridgeError
                     ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                    : `This thread runs in a checkout on another Mac, which is offline. Open it in the Open SWE app there to continue it.`}
+                    : `This thread runs in a checkout on another Mac, which is offline. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
                 </span>
               </AlertDescription>
             </Alert>
@@ -946,7 +947,7 @@ export function AgentThreadView({
               )}
               <AgentPromptBar
                 placeholder={
-                  runsElsewhere
+                  macOffline
                     ? "This thread's Mac is offline"
                     : botThread
                       ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`

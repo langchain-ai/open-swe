@@ -671,6 +671,13 @@ async def _sandbox_handoff(
     if (await langgraph_client().threads.get(thread_id)).get("status") == "busy":
         raise HTTPException(409, "stop the run before moving this thread")
     source = metadata.get(HANDOFF_FROM_KEY) or current
+    if (
+        bridge is None
+        and Bridge.bridge_id_of(source)
+        and not await BridgeStore.is_connected(source)
+    ):
+        # An offline Mac's checkout stays behind; the cloud starts from what was pushed.
+        source = None
     update[HANDOFF_FROM_KEY] = None if source == update["sandbox_id"] else source
     return update
 
@@ -770,7 +777,13 @@ async def _attributed_run_messages(
         notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
     if sandbox_handoff is not None:
         to_cloud = sandbox_handoff.get("sandbox_id") is None
-        notices.append((_SANDBOX_HANDOFF_SYSTEM, prompt("runs/sandbox-handoff", to_cloud=to_cloud)))
+        carried = sandbox_handoff.get(HANDOFF_FROM_KEY) is not None
+        notices.append(
+            (
+                _SANDBOX_HANDOFF_SYSTEM,
+                prompt("runs/sandbox-handoff", to_cloud=to_cloud, carried=carried),
+            )
+        )
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
     if pr_url and history_read and not persisted_message_ids:
         notices.append(
