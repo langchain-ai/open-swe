@@ -380,6 +380,7 @@ export function streamMessagesToUi(
         const chunk: ToolExecutionChunk = {
           kind: "tool-execution",
           toolCallId,
+          toolName: name,
           timestamp: messageArrivalTimestamp(toolCallId),
           title: toolTitle(name, args),
           toolKind: toolKind(name),

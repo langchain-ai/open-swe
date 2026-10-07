@@ -803,8 +803,13 @@ export function useAgentThread(threadId: string) {
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 3000 : false,
+    refetchInterval: (query) => {
+      const thread = query.state.data
+      if (thread?.status === "running") return 3000
+      return thread && !thread.resolved
+        ? sidebarRefreshInterval([thread])
+        : false
+    },
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.

@@ -842,6 +842,7 @@ function toolChunk(
   const chunk: ToolExecutionChunk = {
     kind: "tool-execution",
     toolCallId: call.toolCallId,
+    toolName: call.name,
     timestamp: call.startedAt,
     title: toolTitle(call.name, call.input),
     toolKind: kind,

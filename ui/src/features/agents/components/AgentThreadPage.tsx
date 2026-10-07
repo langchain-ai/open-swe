@@ -111,6 +111,7 @@ function AgentThreadContent({
         ) : (
           <AgentThreadView
             thread={threadQuery.data}
+            workerStatusUnavailable={threadQuery.isError}
             composerDraft={composerDraft}
           />
         )}

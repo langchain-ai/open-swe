@@ -37,6 +37,7 @@ import { AgentComposerDock } from "@/features/agents/components/composer/AgentCo
 import { PullRequestPreviewProvider } from "@/features/agents/components/PullRequestPreview"
 import { ThreadPullRequests } from "@/features/agents/components/ThreadPullRequests"
 import { ThreadFeedbackCard } from "@/features/agents/components/ThreadFeedbackCard"
+import { TaskWorkersStatus } from "@/features/agents/components/TaskWorkersStatus"
 import {
   readStoredPanelCollapsed,
   writeStoredPanelCollapsed,
@@ -89,6 +90,7 @@ import {
 interface AgentThreadViewProps {
   thread: AgentThread
   composerDraft?: { key: number; text: string }
+  workerStatusUnavailable?: boolean
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -123,6 +125,7 @@ function CodeChannelLink({ url }: { url?: string | null }) {
 export function AgentThreadView({
   thread,
   composerDraft,
+  workerStatusUnavailable,
 }: AgentThreadViewProps) {
   const reviewChat = useContext(ReviewChatActionsContext)
   const renameThread = useRenameAgentThread()
@@ -666,6 +669,11 @@ export function AgentThreadView({
           }
           panelCollapsed={panelCollapsed}
           thread={thread}
+        />
+        <TaskWorkersStatus
+          thread={thread}
+          messages={baseMessages}
+          unavailable={workerStatusUnavailable}
         />
         {(runsElsewhere || bridgeError) && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
