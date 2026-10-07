@@ -2,7 +2,7 @@ import pytest
 from jinja2 import UndefinedError
 from langchain_core.tools import StructuredTool
 
-from agent.prompts import apply_tool_descriptions, load_prompt, prompt
+from openswe.prompts import apply_tool_descriptions, load_prompt, prompt
 
 
 def sample_tool(value: str) -> str:
@@ -22,7 +22,7 @@ def test_load_prompt_rejects_paths_outside_resources() -> None:
 
 def test_apply_tool_descriptions_copies_base_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     source = StructuredTool.from_function(sample_tool)
-    monkeypatch.setattr("agent.prompts.load_prompt", lambda _: "Resource description.")
+    monkeypatch.setattr("openswe.prompts.load_prompt", lambda _: "Resource description.")
 
     [described] = apply_tool_descriptions([source])
 

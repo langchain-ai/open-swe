@@ -11,12 +11,12 @@ from langchain_core.exceptions import ModelAuthenticationError
 from langchain_core.messages import AIMessage, HumanMessage
 from sqlalchemy import text
 
-from agent import agent_cost
-from agent.analytics import directory, emitter, ingestion, outbox, queries, usage
-from agent.analytics.events import EventEnvelope
-from agent.middleware.record_run_usage import record_run_usage
-from agent.utils.langsmith import LangSmithThreadCost
-from agent.utils.run_usage import RunUsageSummary
+from openswe import agent_cost
+from openswe.analytics import directory, emitter, ingestion, outbox, queries, usage
+from openswe.analytics.events import EventEnvelope
+from openswe.middleware.record_run_usage import record_run_usage
+from openswe.utils.langsmith import LangSmithThreadCost
+from openswe.utils.run_usage import RunUsageSummary
 from tests.analytics.helpers import DAY
 
 
@@ -264,7 +264,7 @@ async def test_auth_failure_is_terminal_and_cost_coverage_uses_trace_evidence(
     await _start()
     usage_storage[0] = DAY + timedelta(seconds=12)
     monkeypatch.setattr(
-        "agent.run_config.get_config",
+        "openswe.run_config.get_config",
         lambda: {"configurable": {"thread_id": "thread", "invocation_id": "run"}},
     )
     scheduled = AsyncMock(return_value=True)

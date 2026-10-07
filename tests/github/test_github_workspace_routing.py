@@ -5,10 +5,10 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.github import routes as github_routes
-from agent.github import webhook as github_webhooks
-from agent.webhooks import common as webhook_common
-from agent.workspaces.routing import WorkspaceLookupError
+from openswe.github import routes as github_routes
+from openswe.github import webhook as github_webhooks
+from openswe.webhooks import common as webhook_common
+from openswe.workspaces.routing import WorkspaceLookupError
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-workspace-routing"

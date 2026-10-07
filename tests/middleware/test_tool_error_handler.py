@@ -11,7 +11,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.errors import NodeCancelledError
 from langgraph.graph import StateGraph, add_messages
 
-from agent.middleware.tool_error_handler import ToolErrorMiddleware
+from openswe.middleware.tool_error_handler import ToolErrorMiddleware
 
 
 class _State(TypedDict):

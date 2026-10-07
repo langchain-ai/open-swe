@@ -7,8 +7,8 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import identity, ingestion
-from agent.analytics.events import (
+from openswe.analytics import identity, ingestion
+from openswe.analytics.events import (
     EventName,
     FeedbackSubmittedPayload,
     FeedbackWithdrawnPayload,
@@ -21,7 +21,7 @@ from agent.analytics.events import (
     RunCostRecordedPayload,
     RunStartedPayload,
 )
-from agent.database import postgres
+from openswe.database import postgres
 from tests.analytics.helpers import DAY, event
 
 
@@ -32,7 +32,7 @@ async def projection_storage(analytics_db, monkeypatch):
 
 
 async def test_directory_preserves_immutable_identity_after_login_change(analytics_db, monkeypatch):
-    from agent.analytics import directory
+    from openswe.analytics import directory
 
     workspace, transaction = analytics_db
     monkeypatch.setattr(directory, "transaction", transaction)

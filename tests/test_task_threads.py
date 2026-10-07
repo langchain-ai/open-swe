@@ -9,20 +9,20 @@ from fastapi import HTTPException
 from pydantic import JsonValue
 from sqlalchemy import func, select
 
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.database import postgres
-from agent.tasks import flags, presentation, service, store
-from agent.tasks import messages as task_messages
-from agent.tasks.messages import TaskMessage
-from agent.tasks.presentation import TaskEventMetadata
-from agent.tasks.schemas import ThreadMetadata
-from agent.threads import access, creation, handlers
-from agent.users import User
-from agent.users.models import UserIdentity
-from agent.webhooks import event_matches
-from agent.webhooks.event_matches import EventMatch
-from agent.webhooks.event_subscriptions import EventSubscription
-from agent.workspaces.rows import WorkspaceRow
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.database import postgres
+from openswe.tasks import flags, presentation, service, store
+from openswe.tasks import messages as task_messages
+from openswe.tasks.messages import TaskMessage
+from openswe.tasks.presentation import TaskEventMetadata
+from openswe.tasks.schemas import ThreadMetadata
+from openswe.threads import access, creation, handlers
+from openswe.users import User
+from openswe.users.models import UserIdentity
+from openswe.webhooks import event_matches
+from openswe.webhooks.event_matches import EventMatch
+from openswe.webhooks.event_subscriptions import EventSubscription
+from openswe.workspaces.rows import WorkspaceRow
 
 MODEL = "openai:gpt-6-astra"
 COORDINATOR = str(uuid4())
@@ -204,8 +204,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(service, "resolve_run_email", AsyncMock(return_value=None))
     monkeypatch.setattr(service, "COMPLETION_WEBHOOK_URL", "https://example.test/completion")
     monkeypatch.setattr(creation, "_owner_prefers_tools_in_sandbox", AsyncMock(return_value=False))
-    from agent import dispatch
-    from agent.slack import thinking
+    from openswe import dispatch
+    from openswe.slack import thinking
 
     monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value=None))
     monkeypatch.setattr(thinking, "sync_slack_background_status", AsyncMock())

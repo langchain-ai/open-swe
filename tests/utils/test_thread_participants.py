@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.utils import thread_participants as participants
+from openswe.utils import thread_participants as participants
 
 
 class _Threads:
