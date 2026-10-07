@@ -1,5 +1,6 @@
 """PostgreSQL regressions for clicks on an expedited review card."""
 
+import importlib
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -7,11 +8,15 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
+from agent.dashboard.workspace_settings import WorkspaceSettings
 from agent.expedited_review import voting
+from agent.expedited_review.eligibility import ChangedFile
+from agent.github.repo_files import RepoSettings
 from agent.human_review import lifecycle, people
 from agent.human_review.people import Outcome
 from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from agent.slack import cards
+from agent.slack.channels import SlackChannel
 from agent.slack.http import SlackRequestError
 from agent.users import User
 from tests.expedited_review.conftest import OpenApproval
@@ -215,8 +220,6 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
-    from agent.expedited_review.eligibility import ChangedFile
-
     monkeypatch.setattr(
         lifecycle,
         "fetch_changed_files",
@@ -246,10 +249,69 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert len(private_messages) == 1
 
 
+async def test_draft_nomination_does_not_announce_in_another_channel(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tool = importlib.import_module("agent.tools.expedite_pr_approval")
+    author = await User.sign_in("github", "1", login="ada")
+    await author.link("slack", "U_ADA", team_id="T1")
+    monkeypatch.setattr(tool, "get_config", lambda: {"configurable": {"thread_id": "thread-1"}})
+    monkeypatch.setattr(
+        tool,
+        "get_workspace_settings",
+        AsyncMock(return_value=WorkspaceSettings({"expedited_review_enabled": True})),
+    )
+    monkeypatch.setattr(tool, "run_slack_location", AsyncMock(return_value=("C1", "1.0")))
+    monkeypatch.setattr(tool, "resolve_github_token", AsyncMock(return_value=("token", None)))
+    monkeypatch.setattr(
+        tool,
+        "fetch_pr",
+        AsyncMock(
+            return_value={
+                "state": "open",
+                "draft": True,
+                "title": "Fix",
+                "head": {"sha": "abc123"},
+                "user": {"login": "ada", "id": 1},
+            }
+        ),
+    )
+    files = [ChangedFile(filename="agent/example.py", additions=1, deletions=0, patch="+fixed")]
+    monkeypatch.setattr(tool, "fetch_changed_files", AsyncMock(return_value=files))
+    monkeypatch.setattr(lifecycle, "fetch_changed_files", AsyncMock(return_value=files))
+    monkeypatch.setattr(RepoSettings, "cached", AsyncMock(return_value=RepoSettings()))
+    monkeypatch.setattr(
+        SlackChannel, "resolve", AsyncMock(return_value=SlackChannel(id="C_OTHER", name="eng"))
+    )
+    root = AsyncMock(return_value="5.0")
+    posted = AsyncMock(return_value="3.0")
+    dm = AsyncMock(return_value=("D_ADA", "4.0"))
+    monkeypatch.setattr(SlackChannel, "post", root)
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
+    monkeypatch.setattr(lifecycle, "send_dm_with_location", dm)
+    monkeypatch.setattr(lifecycle, "origin_footer", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+
+    result = await tool.expedite_pr_approval("https://github.com/lc/repo/pull/7", channel="C_OTHER")
+
+    assert result["success"]
+    pending = await HumanReviewRequest.active_for("lc", "repo", 7)
+    assert pending is not None and pending.awaiting_ready
+    assert pending.slack_channel_id == "C_OTHER"
+    assert not pending.slack_thread_ts and not pending.slack_message_ts
+    root.assert_not_awaited()
+    posted.assert_not_awaited()
+    assert dm.call_args.args[0] == "U_ADA"
+    assert "open_swe_option_select_ready" in str(dm.call_args)
+
+
+@pytest.mark.parametrize("thread_ts", ["1.0", ""])
 async def test_draft_card_is_not_posted_until_ready(
-    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, thread_ts: str
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
+    approval.slack_thread_ts = thread_ts
     approval.slack_message_ts = ""
     approval.slack_dm_channel_id = "D_ADA"
     approval.slack_dm_message_ts = "4.0"
@@ -259,8 +321,13 @@ async def test_draft_card_is_not_posted_until_ready(
     monkeypatch.setattr(lifecycle, "note_for_concierge", AsyncMock())
     posted = AsyncMock(return_value="3.0")
     monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
+    root = AsyncMock(return_value="5.0")
+    monkeypatch.setattr(SlackChannel, "post", root)
+    monkeypatch.setattr(
+        SlackChannel, "load", AsyncMock(return_value=SlackChannel(id="C1", name="eng"))
+    )
+    monkeypatch.setattr(RepoSettings, "cached", AsyncMock(return_value=RepoSettings()))
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
-    monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
 
@@ -268,6 +335,7 @@ async def test_draft_card_is_not_posted_until_ready(
         await lifecycle.post_card(approval, title="Fix", files=[])
     await lifecycle.refresh_card(approval)
     posted.assert_not_called()
+    root.assert_not_awaited()
     deleted.assert_not_awaited()
     approval.awaiting_ready = False
     await approval.save()
@@ -275,9 +343,42 @@ async def test_draft_card_is_not_posted_until_ready(
 
     stored = await _stored(approval)
     assert stored.slack_message_ts == "3.0"
+    assert stored.slack_thread_ts == (thread_ts or "5.0")
+    assert root.await_count == (0 if thread_ts else 1)
+    assert posted.call_args.args[:2] == ("C1", stored.slack_thread_ts)
     assert not stored.slack_dm_channel_id and not stored.slack_dm_message_ts
     deleted.assert_awaited_once_with("D_ADA", "4.0")
     assert "open_swe_option_select_approve" in str(posted.call_args)
+    assert "Broadcast in #eng" in str(posted.call_args)
+
+
+async def test_ready_card_retry_reuses_its_announcement(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval()
+    approval.slack_thread_ts = approval.slack_message_ts = ""
+    await approval.save()
+    root = AsyncMock(return_value="5.0")
+    monkeypatch.setattr(SlackChannel, "post", root)
+    monkeypatch.setattr(
+        SlackChannel, "load", AsyncMock(return_value=SlackChannel(id="C1", name="eng"))
+    )
+    monkeypatch.setattr(RepoSettings, "cached", AsyncMock(return_value=RepoSettings()))
+    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
+    posted = AsyncMock(side_effect=[SlackRequestError("ratelimited"), "3.0"])
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
+
+    await lifecycle.refresh_card(approval)
+    pending = await _stored(approval)
+    assert pending.slack_thread_ts == "5.0"
+    assert not pending.slack_message_ts
+    await lifecycle.refresh_card(pending)
+
+    assert (await _stored(approval)).slack_message_ts == "3.0"
+    root.assert_awaited_once()
+    assert posted.call_args.args[:2] == ("C1", "5.0")
 
 
 async def test_author_only_prompt_delivery_failure_is_reported(
