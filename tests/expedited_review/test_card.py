@@ -2,13 +2,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.expedited_review.card import _test_diffstat
-from agent.expedited_review.eligibility import ChangedFile
-from agent.github.pull_requests import PullRequest
-from agent.github.repo_files import RepoSettings
-from agent.human_review import lifecycle
-from agent.human_review.requests import HumanReviewRequest
-from agent.slack.blocks import SECTION_TEXT_MAX_CHARS
+from openswe.expedited_review.card import _test_diffstat
+from openswe.expedited_review.eligibility import ChangedFile
+from openswe.github.pull_requests import PullRequest
+from openswe.github.repo_files import RepoSettings
+from openswe.human_review import lifecycle
+from openswe.human_review.requests import HumanReviewRequest
+from openswe.slack.blocks import SECTION_TEXT_MAX_CHARS
 
 
 def test_long_test_paths_stay_under_the_slack_limit_and_count_the_rest() -> None:
@@ -37,7 +37,7 @@ async def test_configured_channel_hides_send_controls(monkeypatch: pytest.Monkey
     approval.pull_request = pr
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     settings = RepoSettings(review_channel="C2")
-    monkeypatch.setattr(RepoSettings, "fetch", AsyncMock(return_value=settings))
+    monkeypatch.setattr(RepoSettings, "cached", AsyncMock(return_value=settings))
 
     assert await lifecycle._channel_choices(approval) == []
     settings.review_channel = ""

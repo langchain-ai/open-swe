@@ -28,6 +28,7 @@ import type { ReviewsSearch } from "./search"
 vi.mock("@/lib/api", () => ({
   api: {
     myPullRequests: vi.fn(),
+    searchPullRequests: vi.fn(),
     myPullRequestDetails: vi.fn(),
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
@@ -181,6 +182,10 @@ beforeEach(() => {
   vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: false })
   vi.mocked(api.reviewSummaries).mockResolvedValue({})
   vi.mocked(api.myPullRequests).mockResolvedValue(payload)
+  vi.mocked(api.searchPullRequests).mockResolvedValue({
+    pull_requests: [],
+    has_more: false,
+  })
   vi.mocked(api.repos).mockResolvedValue({
     installations: [],
     repositories: [],
@@ -700,10 +705,8 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 2")
-    const only = await mergeSelect(1)
-    expect(mergeOptions(only)).toEqual(["Merge method", "Squash merge"])
-    // Nothing left to choose, so the merge is ready without a selection.
-    expect(only.value).toBe("squash")
+    const card = screen.getByText("Change 1").closest("li")!
+    await waitFor(() => expect(within(card).queryByRole("combobox")).toBeNull())
     const pair = await mergeSelect(2)
     expect(mergeOptions(pair)).toEqual([
       "Merge method",

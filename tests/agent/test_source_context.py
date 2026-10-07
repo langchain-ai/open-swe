@@ -1,4 +1,4 @@
-from agent.source_context import SourceContext
+from openswe.source_context import SourceContext
 
 
 def test_round_trip_preserves_unknown_keys_exactly() -> None:

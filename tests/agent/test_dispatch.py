@@ -7,11 +7,11 @@ from xml.etree import ElementTree
 
 import pytest
 
-from agent import thread_feedback
-from agent.slack import thinking as slack_thinking
-from agent.users import User
+from openswe import thread_feedback
+from openswe.slack import thinking as slack_thinking
+from openswe.users import User
 
-dispatch = importlib.import_module("agent.dispatch")
+dispatch = importlib.import_module("openswe.dispatch")
 
 _ABSOLUTE = "https://open-swe-v3-abc.us.langgraph.app/webhooks/run-complete"
 

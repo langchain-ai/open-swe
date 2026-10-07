@@ -1,8 +1,8 @@
 from typing import Any
 
-from agent.webhooks import common
-from agent.workspaces import routing
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.webhooks import common
+from openswe.workspaces import routing
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _Client:

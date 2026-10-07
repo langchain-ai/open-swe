@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
-from agent.threads import proxy as thread_proxy
+from openswe.threads import proxy as thread_proxy
 from tests.conftest import patch_thread_module
 
 DASHBOARD_METADATA = {
