@@ -13,8 +13,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from agent.utils import model
-from agent.utils.model import OpenAIReasoning
+from openswe.utils import model
+from openswe.utils.model import OpenAIReasoning
 
 _GATEWAY_ENV_VARS = (
     "LANGSMITH_API_KEY",
@@ -151,7 +151,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
     """
     from langchain_fireworks.chat_models import ChatFireworks
 
-    from agent.middleware.sanitize_fireworks_messages import _sanitize_messages
+    from openswe.middleware.sanitize_fireworks_messages import _sanitize_messages
 
     captured_bodies: list[dict] = []
 

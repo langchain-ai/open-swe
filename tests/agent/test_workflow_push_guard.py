@@ -6,8 +6,8 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
-from agent.middleware import workflow_push_guard as guard
-from agent.sandboxes.state import SandboxBackendProxy
+from openswe.middleware import workflow_push_guard as guard
+from openswe.sandboxes.state import SandboxBackendProxy
 
 
 class _Response:
@@ -170,7 +170,7 @@ async def test_workflow_change_does_not_misattribute_preexisting_workflows() -> 
 
 
 def test_workflow_approval_response_serializes_review_fields() -> None:
-    from agent.threads.workflow_approval import workflow_push_approval_response
+    from openswe.threads.workflow_approval import workflow_push_approval_response
 
     response = workflow_push_approval_response(
         {
@@ -246,13 +246,11 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         pending_kwargs.update(kwargs)
         return {"fingerprint": kwargs["fingerprint"], "status": "pending", "notified": False}, True
 
-    async def fake_post(
-        channel_id: str, thread_ts: str, message: str, **kwargs: Any
-    ) -> tuple[str, None]:
+    async def fake_post(channel_id: str, thread_ts: str, message: str, **kwargs: Any) -> str:
         posted.update(
             channel_id=channel_id, thread_ts=thread_ts, message=message, blocks=kwargs["blocks"]
         )
-        return "1700000000.000200", None
+        return "1700000000.000200"
 
     async def fake_notified(thread_id: str, fingerprint: str) -> None:
         posted["notified"] = fingerprint

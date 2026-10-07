@@ -143,6 +143,9 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             <>
               <select
                 aria-label="Repository"
+                title={
+                  typeof config?.repo === "string" ? config.repo : undefined
+                }
                 value={typeof config?.repo === "string" ? config.repo : ""}
                 onChange={(event) =>
                   update({

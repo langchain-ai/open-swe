@@ -1,7 +1,5 @@
 import {
-  arrayAt,
   isRecord,
-  numberAt,
   parseJson,
   recordAt,
   stringAt,
@@ -23,6 +21,7 @@ import {
 } from "./review.ts"
 import { uploadedThreadSchema } from "./upload.ts"
 import { cliToolSchema, type CliTool } from "./mcp-catalog.ts"
+import { BridgeHttpApi } from "open-swe-bridge-client"
 import * as z from "zod"
 import { createdSessionSchema, type CreateSessionArgs } from "./session.ts"
 
@@ -43,29 +42,10 @@ export class ProtocolError extends Error {
   }
 }
 
-export interface BridgeSession {
-  bridgeId: string
-  heartbeatIntervalSeconds: number
-  aliveThresholdSeconds: number
-}
-
 /** A pre-encoded request body and the headers that describe it. */
 interface RawBody {
   data: Uint8Array
   headers: Record<string, string>
-}
-
-export interface BridgeRequest {
-  requestId: string
-  method: string
-  params: Record<string, unknown>
-}
-
-export interface CreateBridgeInput {
-  rootPath: string
-  hostname: string
-  label: string | null
-  bridgeId: string | null
 }
 
 export interface EventStreamInput {
@@ -74,8 +54,6 @@ export interface EventStreamInput {
   depth: number
   since: number
 }
-
-export type BridgeReply = { result: JsonObject } | { error: string }
 
 const MAX_DETAIL_CHARS = 600
 
@@ -269,86 +247,11 @@ export class ApiClient {
     return parsed.data
   }
 
-  async createBridge(input: CreateBridgeInput): Promise<BridgeSession> {
-    const payload = await this.json("POST", "/bridges", {
-      body: {
-        root_path: input.rootPath,
-        hostname: input.hostname,
-        label: input.label,
-        bridge_id: input.bridgeId,
-      },
-    })
-    if (!isRecord(payload))
-      throw new ProtocolError("bridge response is not an object")
-    const bridgeId = stringAt(payload, "bridge_id")
-    if (!bridgeId)
-      throw new ProtocolError("bridge response is missing bridge_id")
-    return {
-      bridgeId,
-      heartbeatIntervalSeconds:
-        numberAt(payload, "heartbeat_interval_seconds") ?? 15,
-      aliveThresholdSeconds: numberAt(payload, "alive_threshold_seconds") ?? 60,
-    }
-  }
-
-  async heartbeat(bridgeId: string): Promise<void> {
-    await this.send(
-      "POST",
-      `/bridges/${encodeURIComponent(bridgeId)}/heartbeat`
+  /** The bridge routes, for `Bridge` to serve this machine through. */
+  bridges(): BridgeHttpApi {
+    return new BridgeHttpApi((method, path, options) =>
+      this.json(method, path, options)
     )
-  }
-
-  /** Long-poll for requests, naming the ones already running so a lost response is re-offered. */
-  async pollRequests(
-    bridgeId: string,
-    options: {
-      wait: number
-      limit: number
-      held: readonly string[]
-      signal?: AbortSignal
-    }
-  ): Promise<BridgeRequest[]> {
-    const payload = await this.json(
-      "POST",
-      `/bridges/${encodeURIComponent(bridgeId)}/requests/claim`,
-      {
-        body: { wait: options.wait, limit: options.limit, held: options.held },
-        signal: options.signal,
-      }
-    )
-    const entries = arrayAt(isRecord(payload) ? payload : null, "requests")
-    if (entries === null) {
-      throw new ProtocolError("poll response is missing a requests array")
-    }
-    const requests: BridgeRequest[] = []
-    for (const entry of entries) {
-      if (!isRecord(entry)) continue
-      const requestId = stringAt(entry, "request_id")
-      const method = stringAt(entry, "method")
-      if (!requestId || !method) continue
-      requests.push({
-        requestId,
-        method,
-        params: recordAt(entry, "params") ?? {},
-      })
-    }
-    return requests
-  }
-
-  async respond(
-    bridgeId: string,
-    requestId: string,
-    reply: BridgeReply
-  ): Promise<void> {
-    await this.send(
-      "POST",
-      `/bridges/${encodeURIComponent(bridgeId)}/requests/${encodeURIComponent(requestId)}`,
-      { body: reply }
-    )
-  }
-
-  async deleteBridge(bridgeId: string): Promise<void> {
-    await this.send("DELETE", `/bridges/${encodeURIComponent(bridgeId)}`)
   }
 
   /** Start a run on `threadId`; returns the run id when the server reports one. */

@@ -13,8 +13,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import StateSnapshot
 
-from agent.input_messages import message_sender_id
-from agent.middleware.require_user_reply import (
+from openswe.input_messages import message_sender_id
+from openswe.middleware.require_user_reply import (
     REPLY_GUARD,
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
@@ -162,7 +162,7 @@ class TestRequireUserReplyMiddleware:
     async def test_posts_the_final_message_once_the_budget_is_spent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import agent.slack.tools.reply as reply_tool
+        import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
         monkeypatch.setattr(reply_tool, "slack_reply", posted)
@@ -181,7 +181,7 @@ class TestRequireUserReplyMiddleware:
     async def test_blank_replies_to_the_nudges_still_post_the_earlier_answer(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import agent.slack.tools.reply as reply_tool
+        import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
         monkeypatch.setattr(reply_tool, "slack_reply", posted)
@@ -201,7 +201,7 @@ class TestRequireUserReplyMiddleware:
     async def test_a_spent_budget_with_nothing_to_say_posts_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import agent.slack.tools.reply as reply_tool
+        import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
         monkeypatch.setattr(reply_tool, "slack_reply", posted)
@@ -225,7 +225,7 @@ class TestRequireUserReplyMiddleware:
     async def test_retries_preserve_prefix_and_checkpoint_nudges(
         self, monkeypatch: pytest.MonkeyPatch, system: SystemMessage | None
     ) -> None:
-        import agent.slack.tools.reply as reply_tool
+        import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
         monkeypatch.setattr(reply_tool, "slack_reply", posted)

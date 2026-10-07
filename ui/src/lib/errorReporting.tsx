@@ -12,7 +12,7 @@ export interface ErrorReport {
   showToast?: boolean
 }
 
-/** Field caps enforced by `ClientErrorReport` in agent/dashboard/client_errors.py. */
+/** Field caps enforced by `ClientErrorReport` in openswe/dashboard/client_errors.py. */
 const REPORT_LIMITS = {
   title: 200,
   error_message: 2000,
@@ -40,7 +40,25 @@ export function ErrorToastBody({
 }) {
   return (
     <span className="flex flex-col gap-1">
-      <span>{message}</span>
+      <span>
+        {message
+          .split(/(https:\/\/[\w-]+\.slack\.com\/archives\/[\w/]+)/)
+          .map((part, index) =>
+            /^https:\/\/[\w-]+\.slack\.com\/archives\/[\w/]+$/.test(part) ? (
+              <a
+                key={index}
+                href={part}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                Open review card in Slack
+              </a>
+            ) : (
+              part
+            )
+          )}
+      </span>
       <span className="font-mono text-[11px] opacity-70">ID {id}</span>
     </span>
   )

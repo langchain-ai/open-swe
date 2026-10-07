@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import httpx
 from langgraph_sdk.errors import ConflictError
 
-from agent.utils.background_task_state import update_background_task_state
+from openswe.utils.background_task_state import update_background_task_state
 
 
 async def test_concurrent_task_updates_read_after_acquiring_lock() -> None:

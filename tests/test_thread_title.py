@@ -8,7 +8,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
-from agent.thread_title import (
+from openswe.thread_title import (
     _ThreadTitle,
     generate_and_store_thread_title,
     schedule_thread_title_generation,
@@ -109,7 +109,7 @@ async def test_title_persistence_failure_is_bounded_and_logged(
             cancelled.set()
 
     monkeypatch.setattr(threads, "update", fail_update)
-    monkeypatch.setattr("agent.thread_title.TITLE_GENERATION_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr("openswe.thread_title.TITLE_GENERATION_TIMEOUT_SECONDS", 0.01)
     await asyncio.wait_for(
         generate_and_store_thread_title(
             thread_id="thread-123",
@@ -157,9 +157,9 @@ async def test_title_generation_renames_channel_promoted_during_update(
         }
     )
     client = type("Client", (), {"threads": threads})()
-    rename = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr("agent.thread_title.rename_session", rename)
-    monkeypatch.setattr("agent.thread_title.is_code_channel", AsyncMock(return_value=True))
+    rename = AsyncMock(return_value=None)
+    monkeypatch.setattr("openswe.thread_title.rename_session", rename)
+    monkeypatch.setattr("openswe.thread_title.is_code_channel", AsyncMock(return_value=True))
 
     await generate_and_store_thread_title(
         thread_id="thread-123",
@@ -189,8 +189,8 @@ async def test_generated_title_updates_only_manual_breakout_roots(
             },
         }
     )
-    update = AsyncMock(return_value=(True, None))
-    monkeypatch.setattr("agent.thread_title.update_slack_message", update)
+    update = AsyncMock(return_value=None)
+    monkeypatch.setattr("openswe.thread_title.update_slack_message", update)
 
     await generate_and_store_thread_title(
         thread_id="thread-123",

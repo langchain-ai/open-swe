@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agent.utils import thread_ops
+from openswe.utils import thread_ops
 
 
 @pytest.mark.asyncio
