@@ -114,6 +114,10 @@ it("copies only environment diagnostics from session data", async () => {
     build_info: { ...user.build_info!, secret: "private-build-field" },
   }
   render(<AboutSection user={session} />)
+  const details = screen.getByText("Show diagnostics").closest("details")!
+  expect(details.open).toBe(false)
+  fireEvent.click(screen.getByText("Show diagnostics"))
+  expect(details.open).toBe(true)
   fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
   expect(
     await screen.findByText("Diagnostics copied to clipboard.")
