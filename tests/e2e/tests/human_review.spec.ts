@@ -111,6 +111,34 @@ async function latestRequest(
   return found!;
 }
 
+/** The newest request once its card is in Slack, which is posted after the request is saved. */
+async function postedRequest(
+  request: APIRequestContext,
+): Promise<ReviewRequest> {
+  let found: ReviewRequest | undefined;
+  await expect
+    .poll(
+      async () => {
+        found = (await reviewRequests(request)).at(-1);
+        return found?.slack_message_ts ?? "";
+      },
+      { message: "the review card should be posted", timeout: 90_000 },
+    )
+    .not.toBe("");
+  return found!;
+}
+
+/** The texts waiting for an agent thread's next run. */
+async function queuedTexts(
+  request: APIRequestContext,
+  threadId: string,
+): Promise<Array<string>> {
+  const res = await request.get(
+    `/control/queued?thread_id=${encodeURIComponent(threadId)}`,
+  );
+  return ((await res.json()) as { texts: Array<string> }).texts;
+}
+
 async function pull(
   request: APIRequestContext,
   number: number,
@@ -480,12 +508,8 @@ test.describe("Human review in Slack", () => {
       text: `<@U0BOT> can someone review ${pr.url} E2E_HUMAN_REVIEW_HERE`,
       mention_bot: true,
     })) as { thread_ts?: string };
-    await expect
-      .poll(async () => (await reviewRequests(request)).length, {
-        timeout: 90_000,
-      })
-      .toBe(1);
-    const posted = await latestRequest(request);
+    const posted = await postedRequest(request);
+    expect(await reviewRequests(request)).toHaveLength(1);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
     expect(posted.slack_thread_ts).not.toBe("");
     if (sent.thread_ts) expect(posted.slack_thread_ts).toBe(sent.thread_ts);
@@ -659,13 +683,12 @@ test.describe("Human review in Slack", () => {
           m.text.includes("Open SWE picked you"),
       ),
     ).toBe(true);
-    // ...and messaged in his DM, which is his concierge conversation.
+    // ...and messaged in his DM, which his idle concierge conversation reads on its next run.
     const picked = await pickedDm(request, "D_BOB");
     expect(picked.thread_ts).toBe(picked.ts);
-    const state = await request.get(`/threads/${dm.thread_id}/state`);
-    expect(JSON.stringify(await state.json())).toContain(
-      "picked you to review",
-    );
+    await expect
+      .poll(async () => (await queuedTexts(request, dm.thread_id)).join("\n"))
+      .toContain("picked you to review");
     await shootCard(page, "picked");
 
     // 3. Bob accepts from his DM and becomes the reviewer.
@@ -830,14 +853,7 @@ test.describe("Human review in Slack", () => {
       text: `<@U0BOT> get ${pr.url} reviewed by a human E2E_HUMAN_REVIEW`,
       mention_bot: true,
     })) as { thread_ts: string };
-    await expect
-      .poll(
-        async () =>
-          (await reviewRequests(request)).at(-1)?.slack_message_ts ?? "",
-        { timeout: 90_000 },
-      )
-      .not.toBe("");
-    const posted = await latestRequest(request);
+    const posted = await postedRequest(request);
 
     await control(request, "/mock/slack/send", {
       thread_ts: asked.thread_ts,
