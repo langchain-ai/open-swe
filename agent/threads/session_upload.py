@@ -17,12 +17,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from agent.claude_code.transcript import ClaudeTranscript, TranscriptError
 from agent.dashboard.profiles import get_profile
 from agent.dashboard.repo_access import require_repo_access_for_user
-from agent.github.http import GITHUB_API_BASE, github_client
+from agent.github.http import GitHubClient
 from agent.github.pull_requests import PullRequest
 from agent.input_messages import SystemIdentity, build_input_messages
 from agent.prompts import prompt
 from agent.slack.client import parse_github_pr_url
-from agent.threads.access import _github_token_for_login
 from agent.threads.creation import create_thread
 from agent.threads.diffs import _safe_git_ref
 from agent.threads.runs import (
@@ -176,17 +175,17 @@ class _Target(BaseModel):
 
 async def _github_get(login: str, path: str) -> httpx2.Response | None:
     """The GitHub response, or ``None`` when GitHub reports the resource missing."""
-    async with github_client(token=await _github_token_for_login(login)) as client:
-        response = await client.get(f"{GITHUB_API_BASE}{path}")
-    if response.status_code == 404:
-        return None
-    if response.is_error:
+    try:
+        async with GitHubClient.as_user(login) as github:
+            return await github.request("GET", path.removeprefix("/"))
+    except httpx2.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return None
         logger.warning(
             "GitHub read for a session upload failed",
-            extra={"github_path": path, "github_status": response.status_code},
+            extra={"github_path": path, "github_status": exc.response.status_code},
         )
-        raise HTTPException(502, "could not read from GitHub")
-    return response
+        raise HTTPException(502, "could not read from GitHub") from exc
 
 
 async def _pull_request_target(pr_url: str, login: str) -> _Target:

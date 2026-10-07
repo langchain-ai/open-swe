@@ -639,23 +639,24 @@ class PullRequestClient:
         return result
 
 
-async def get_pull_request_statuses(records: Sequence[object], token: str) -> list[dict[str, Any]]:
+async def get_pull_request_statuses(
+    github: GitHubClient, records: Sequence[object]
+) -> list[dict[str, Any]]:
     """Return live status for every tracked pull request record."""
-    async with GitHubClient.connect(token=token) as github:
-        statuses: list[dict[str, Any]] = []
-        for record in records:
-            client = PullRequestClient.of(github, record)
-            statuses.append(
-                await client.thread_status()
-                if client is not None
-                else _unavailable_pull_request(record)
-            )
-        return statuses
+    statuses: list[dict[str, Any]] = []
+    for record in records:
+        client = PullRequestClient.of(github, record)
+        statuses.append(
+            await client.thread_status()
+            if client is not None
+            else _unavailable_pull_request(record)
+        )
+    return statuses
 
 
 async def list_open_pull_requests(
+    github: GitHubClient,
     login: str,
-    token: str,
     repo: str = "",
     *,
     lightweight: bool = False,
@@ -663,7 +664,7 @@ async def list_open_pull_requests(
     direction: str = "desc",
     page: int = 1,
 ) -> OpenPullRequests:
-    """Read the caller's open PRs and current-head checks using their own token."""
+    """Read ``login``'s open PRs and current-head checks."""
     if not _OWNER_PATTERN.fullmatch(login):
         raise HTTPException(422, "invalid GitHub login")
     if not 1 <= page <= _SEARCH_MAX_PAGES:
@@ -679,41 +680,40 @@ async def list_open_pull_requests(
     query = f"is:pr is:open author:{login}"
     for name in repositories:
         query += f" repo:{name}"
-    async with GitHubClient.connect(token=token) as github:
-        try:
-            payload = await github.get(
-                "search/issues",
-                {
-                    "q": query,
-                    "per_page": str(_SEARCH_PAGE_SIZE),
-                    "page": str(page),
-                    "sort": sort,
-                    "order": direction,
-                },
-            )
-        except (httpx2.HTTPError, ValueError) as exc:
-            raise HTTPException(502, "Could not load open PRs from GitHub") from exc
-        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-            raise HTTPException(502, "Invalid GitHub PR search response")
-        # A timed-out search answers with an arbitrary subset of the matches, so
-        # any list built from it would silently hide most of a user's PRs.
-        if payload.get("incomplete_results") is True:
-            return OpenPullRequests(
-                pull_requests=[],
-                next_page=None,
-                incomplete=True,
-                updated_at=datetime.now(UTC).isoformat(),
-            )
-        semaphore = asyncio.Semaphore(4)
+    try:
+        payload = await github.get(
+            "search/issues",
+            {
+                "q": query,
+                "per_page": str(_SEARCH_PAGE_SIZE),
+                "page": str(page),
+                "sort": sort,
+                "order": direction,
+            },
+        )
+    except (httpx2.HTTPError, ValueError) as exc:
+        raise HTTPException(502, "Could not load open PRs from GitHub") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise HTTPException(502, "Invalid GitHub PR search response")
+    # A timed-out search answers with an arbitrary subset of the matches, so
+    # any list built from it would silently hide most of a user's PRs.
+    if payload.get("incomplete_results") is True:
+        return OpenPullRequests(
+            pull_requests=[],
+            next_page=None,
+            incomplete=True,
+            updated_at=datetime.now(UTC).isoformat(),
+        )
+    semaphore = asyncio.Semaphore(4)
 
-        async def load(item: object) -> OpenPullRequest | None:
-            client = PullRequestClient.of(github, item)
-            if client is None or not isinstance(item, Mapping):
-                return None
-            async with semaphore:
-                return await client.load_open(details=not lightweight, listed=item)
+    async def load(item: object) -> OpenPullRequest | None:
+        client = PullRequestClient.of(github, item)
+        if client is None or not isinstance(item, Mapping):
+            return None
+        async with semaphore:
+            return await client.load_open(details=not lightweight, listed=item)
 
-        items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
+    items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
     total = payload.get("total_count")
     has_more = (
         isinstance(total, int) and page * _SEARCH_PAGE_SIZE < total and page < _SEARCH_MAX_PAGES

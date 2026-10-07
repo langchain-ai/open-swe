@@ -17,7 +17,7 @@ use the typed async SDK in ``agent.github.sdk``. This helper centralises:
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
@@ -197,21 +197,94 @@ async def github_request(
     raise last_exc or httpx2.HTTPError("Max retries exceeded")
 
 
+class GitHubSignInRequired(Exception):
+    """The person has no usable GitHub authorization and must sign in again."""
+
+    def __init__(self, login: str) -> None:
+        super().__init__(f"GitHub sign-in required for {login}")
+        self.login = login
+
+
+class GitHubAppUnavailable(Exception):
+    """No GitHub App installation token can be minted for the request."""
+
+
 class GitHubClient:
     """GitHub's REST and GraphQL APIs over one HTTP client, with ``github_request``'s retries.
 
+    Open one as the person or the App it acts for: ``as_user`` or ``as_app``.
     Every call raises ``httpx2.HTTPError`` when GitHub fails or refuses it, and
     ``ValueError`` when it answers with something other than the expected shape.
     """
 
-    def __init__(self, http: httpx2.AsyncClient) -> None:
+    def __init__(
+        self,
+        http: httpx2.AsyncClient,
+        *,
+        reauthorize: Callable[[], Awaitable[str]] | None = None,
+    ) -> None:
         self.http = http
+        self._reauthorize = reauthorize
 
     @classmethod
     @asynccontextmanager
     async def connect(
         cls, *, token: str | None = None, timeout: httpx2.Timeout | float | None = None
     ) -> AsyncIterator[Self]:
+        async with github_client(token=token, timeout=timeout) as http:
+            yield cls(http)
+
+    @classmethod
+    @asynccontextmanager
+    async def as_user(
+        cls, login: str, *, timeout: httpx2.Timeout | float | None = None
+    ) -> AsyncIterator[Self]:
+        """Acts with ``login``'s own GitHub permissions; a rejected token is refreshed once.
+
+        Raises ``GitHubSignInRequired`` when ``login`` has no usable authorization.
+        """
+        # profiles imports this module.
+        from agent.dashboard.profiles import get_valid_access_token
+
+        token = await get_valid_access_token(login)
+        if not token:
+            raise GitHubSignInRequired(login)
+
+        async def reauthorize() -> str:
+            if token := await get_valid_access_token(login, force_refresh=True):
+                return token
+            raise GitHubSignInRequired(login)
+
+        async with github_client(token=token, timeout=timeout) as http:
+            yield cls(http, reauthorize=reauthorize)
+
+    @classmethod
+    @asynccontextmanager
+    async def as_app(
+        cls,
+        owner: str | None = None,
+        repo: str | None = None,
+        *,
+        timeout: httpx2.Timeout | float | None = None,
+    ) -> AsyncIterator[Self]:
+        """Acts as the Open SWE GitHub App: its installation on ``owner/repo``, else the default one.
+
+        Raises ``GitHubAppUnavailable`` when no installation token can be minted.
+        """
+        # app imports this module.
+        from agent.github.app import (
+            get_github_app_installation_id_for_repo,
+            get_github_app_installation_token,
+        )
+
+        installation_id = None
+        if owner is not None and repo is not None:
+            installation_id = await get_github_app_installation_id_for_repo(owner, repo)
+            if installation_id is None:
+                raise GitHubAppUnavailable(f"no GitHub App installation on {owner}/{repo}")
+        token = await get_github_app_installation_token(installation_id=installation_id)
+        if not token:
+            raise GitHubAppUnavailable("GitHub App token unavailable")
         async with github_client(token=token, timeout=timeout) as http:
             yield cls(http)
 
@@ -222,6 +295,9 @@ class GitHubClient:
         """``path`` is relative to the REST API root, or an absolute URL."""
         url = path if "://" in path else f"{GITHUB_API_BASE}/{path}"
         response = await github_request(self.http, method, url, **kwargs)
+        if response.status_code == 401 and self._reauthorize is not None:
+            self.http.headers.update(github_headers(await self._reauthorize()))
+            response = await github_request(self.http, method, url, **kwargs)
         response.raise_for_status()
         return response
 

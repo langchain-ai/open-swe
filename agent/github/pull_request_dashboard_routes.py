@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from agent.dashboard.deps import SESSION_DEP
-from agent.dashboard.profiles import get_valid_access_token
 from agent.dashboard.repo_access import require_repo_access_for_user
 from agent.github.comments import PrState
 from agent.github.http import GitHubClient
@@ -88,18 +87,16 @@ async def api_list_pull_requests(
     scope: Literal["mine"] = "mine",
     session: dict[str, Any] = SESSION_DEP,
 ) -> OpenPullRequests:
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await list_open_pull_requests(
-        session["sub"],
-        token,
-        repo,
-        lightweight=lightweight,
-        sort=sort,
-        direction=direction,
-        page=page,
-    )
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await list_open_pull_requests(
+            github,
+            session["sub"],
+            repo,
+            lightweight=lightweight,
+            sort=sort,
+            direction=direction,
+            page=page,
+        )
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}")
@@ -108,10 +105,7 @@ async def api_pull_request_details(
 ) -> OpenPullRequest | None:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    async with GitHubClient.connect(token=token) as github:
+    async with GitHubClient.as_user(session["sub"]) as github:
         return await github.repo(owner, repo).pull_request(number).load_open()
 
 
@@ -123,10 +117,8 @@ async def api_act_on_pull_request(
     body: PullRequestAction,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PullRequestActionResult:
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await act_on_pull_request(owner, repo, number, body, token)
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await act_on_pull_request(github.repo(owner, repo).pull_request(number), body)
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/thread")
@@ -160,7 +152,5 @@ async def api_resolve_review_threads(
     session: dict[str, Any] = SESSION_DEP,
 ) -> ResolveReviewThreadsResult:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await resolve_review_threads(owner, repo, number, body, token)
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await resolve_review_threads(github.repo(owner, repo).pull_request(number), body)

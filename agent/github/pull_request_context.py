@@ -11,7 +11,7 @@ from agent.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
     sanitize_github_comment_body,
 )
-from agent.github.http import GITHUB_GRAPHQL, github_client, github_request
+from agent.github.http import GITHUB_GRAPHQL, GitHubClient, github_request
 from agent.github.pull_request_status import pull_request_identity
 from agent.prompts import prompt
 from agent.users import User
@@ -577,16 +577,15 @@ def _review_lines(context: Mapping[str, Any]) -> list[str]:
 
 
 async def get_pull_request_context(
-    record: object, token: str, scope: PullRequestFixScope
+    github: GitHubClient, record: object, scope: PullRequestFixScope
 ) -> dict[str, Any] | None:
     """Fetch fresh actionable context for one validated pull-request record."""
     identity = pull_request_identity(record)
     if identity is None:
         return None
     owner, repo, number = identity
-    async with github_client(token=token) as client:
-        reviews = await _fetch_reviews(client, owner, repo, number)
-        checks = await _fetch_checks(client, owner, repo, number)
+    reviews = await _fetch_reviews(github.http, owner, repo, number)
+    checks = await _fetch_checks(github.http, owner, repo, number)
     context: dict[str, Any] = {
         "repoFullName": f"{owner}/{repo}",
         "number": number,

@@ -11,17 +11,14 @@ from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 
 from agent.dashboard.options import normalize_model_choice
+from agent.github.http import GitHubClient
 from agent.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from agent.github.pull_request_context import PullRequestFixScope, get_pull_request_context
 from agent.github.pull_request_status import get_pull_request_statuses
 from agent.github.thread_token import invalidate_cached_github_token
 from agent.review.session import ReviewSession, ReviewSessionMetadata
 from agent.slack.client import parse_github_pr_url
-from agent.threads.access import (
-    _authorized_thread,
-    _github_token_for_login,
-    _readable_thread_metadata,
-)
+from agent.threads.access import _authorized_thread, _readable_thread_metadata
 from agent.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from agent.threads.creation import TITLE_LOCKED_KEY, create_thread
 from agent.threads.listing import list_unresolved_dashboard_threads, settle_review_walkthrough
@@ -713,8 +710,8 @@ async def get_dashboard_thread_pull_request_status(
     tracked = _tracked_pull_requests(metadata)
     if not tracked:
         return {"pullRequests": []}
-    token = await _github_token_for_login(login)
-    return {"pullRequests": await get_pull_request_statuses(tracked, token)}
+    async with GitHubClient.as_user(login) as github:
+        return {"pullRequests": await get_pull_request_statuses(github, tracked)}
 
 
 async def get_dashboard_pull_request_checks(
@@ -723,8 +720,8 @@ async def get_dashboard_pull_request_checks(
     """Return batched live state for the pull requests the sidebar is showing."""
     if not records:
         return {}
-    token = await _github_token_for_login(login)
-    return dict(await get_pull_request_check_states(records, login, token))
+    async with GitHubClient.as_user(login) as github:
+        return dict(await get_pull_request_check_states(github, records, login))
 
 
 async def get_dashboard_thread_pull_request_context(
@@ -750,8 +747,8 @@ async def get_dashboard_thread_pull_request_context(
     )
     if record is None:
         raise HTTPException(404, "pull request is not tracked by this thread")
-    token = await _github_token_for_login(login)
-    result = await get_pull_request_context(record, token, scope)
+    async with GitHubClient.as_user(login) as github:
+        result = await get_pull_request_context(github, record, scope)
     if result is None:
         raise HTTPException(502, "could not scan pull request")
     return result
