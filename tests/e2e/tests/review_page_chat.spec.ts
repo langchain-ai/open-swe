@@ -475,6 +475,10 @@ test.describe("review page", () => {
 
     await reviewButton.click();
     await page.getByRole("button", { name: "Discard review" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Discard review" })
+      .click();
     await expect(reviewButton).not.toContainText("1");
     await expect(
       diffColumn(page).getByTestId("pending-review-comment"),

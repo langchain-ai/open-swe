@@ -2,7 +2,13 @@ import {
   SettingRow,
   SettingSection,
 } from "@langchain/gtm-platform-design-system/patterns/setting-section"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@langchain/gtm-platform-design-system/ui/select"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
 import { ModelPairControl } from "./WorkspaceSettingsSections"
 

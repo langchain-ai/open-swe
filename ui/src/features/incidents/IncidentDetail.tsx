@@ -8,10 +8,20 @@ import { FormField } from "@langchain/gtm-platform-design-system/patterns/form-f
 import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
 import { RecordHeader } from "@langchain/gtm-platform-design-system/patterns/record-header"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
-import { Button, buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
 import {
   Collapsible,
   CollapsibleContent,
@@ -254,11 +264,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             }
             meta={
               <Stack gap="md">
-                <Inline
-                  gap="md"
-                  wrap
-                  className="text-label text-ink-subtle"
-                >
+                <Inline gap="md" wrap className="text-label text-ink-subtle">
                   <Inline render={<span />} gap="xs">
                     <Icon icon={Hash} size="sm" />
                     {incident.channel_name}
@@ -387,7 +393,10 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                               </li>
                             ))}
                           </Stack>
-                          <Box render={<p />} className="text-meta text-ink-subtle">
+                          <Box
+                            render={<p />}
+                            className="text-meta text-ink-subtle"
+                          >
                             Recommendations for the responder
                           </Box>
                         </Alert>
@@ -502,7 +511,9 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                             <Box render={<h3 />} className={SUBHEAD_CLASS}>
                               {hypothesis.title}
                             </Box>
-                            <Badge tone={ASSESSMENT_TONE[hypothesis.assessment]}>
+                            <Badge
+                              tone={ASSESSMENT_TONE[hypothesis.assessment]}
+                            >
                               {humanize(hypothesis.assessment)}
                             </Badge>
                           </Inline>

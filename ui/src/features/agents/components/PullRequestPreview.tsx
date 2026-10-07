@@ -121,7 +121,12 @@ export function PreviewablePullRequestLink({
           </a>
         }
       />
-      <HoverCardContent side="top" align="start" sideOffset={8} className="w-auto">
+      <HoverCardContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        className="w-auto"
+      >
         <PullRequestHoverCard
           pullRequest={pullRequest}
           health={previews.health.get(

@@ -2,7 +2,11 @@ import { memo } from "react"
 
 import { ToolResultBody } from "./ToolResultBody"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
 
 export const ShellEntryBody = memo(function ShellEntryBody({

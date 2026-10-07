@@ -50,7 +50,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         }
         className={cn(
           PREVIEW_HEIGHT_CLASS,
-          "block w-full cursor-pointer overflow-hidden rounded-panel border border-line bg-canvas text-left shadow-control outline-none transition-[border-color,box-shadow] duration-fast ease-out-quint hover:border-line-strong hover:shadow-raised-hover focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
+          "block w-full cursor-pointer overflow-hidden rounded-panel border border-line bg-canvas text-left shadow-control transition-[border-color,box-shadow] duration-fast ease-out-quint outline-none hover:border-line-strong hover:shadow-raised-hover focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
         )}
       >
         {html ? (
@@ -75,7 +75,10 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
           className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end rounded-b-panel bg-linear-to-b from-transparent via-canvas/75 to-canvas p-3"
         >
           <span
-            className={buttonVariants({ variant: "secondary", size: "compact" })}
+            className={buttonVariants({
+              variant: "secondary",
+              size: "compact",
+            })}
           >
             Open artifact
             <Icon icon={ArrowUpRight} size="sm" />

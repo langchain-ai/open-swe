@@ -27,7 +27,11 @@ import {
   AgentTurn as AgentTurnShell,
   TurnCopyButton,
 } from "@langchain/gtm-platform-design-system/patterns/agent-thread"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { formatElapsed } from "@/lib/utils"
 
 /**

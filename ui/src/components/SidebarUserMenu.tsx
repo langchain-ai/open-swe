@@ -2,7 +2,11 @@ import { useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useState, useSyncExternalStore } from "react"
 import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
 import {
@@ -22,7 +26,15 @@ import {
 import type { SessionUser } from "@/lib/api"
 import type { Theme } from "@/lib/theme"
 import type { Glyph } from "@/components/glyphs"
-import { Copy, LogOut, Monitor, Moon, Palette, Settings2, Sun } from "@/components/glyphs"
+import {
+  Copy,
+  LogOut,
+  Monitor,
+  Moon,
+  Palette,
+  Settings2,
+  Sun,
+} from "@/components/glyphs"
 import { api } from "@/lib/api"
 import {
   getDatadogSessionLink,

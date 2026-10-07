@@ -193,7 +193,9 @@ it("shows delivery lag separately from suppression, then refreshes to a populate
   expect(await screen.findByText("example-model")).toBeTruthy()
   expect(screen.getByText("Analytics are up to date")).toBeTruthy()
   expect(
-    screen.getByRole("button", { name: "Details" }).getAttribute("aria-expanded")
+    screen
+      .getByRole("button", { name: "Details" })
+      .getAttribute("aria-expanded")
   ).toBe("true")
   expect(screen.getAllByText(/Last event processed/).length).toBe(1)
   client.clear()
@@ -859,7 +861,9 @@ it("refreshes the usage leaderboard and merge rate report from the coverage foot
     await screen.findByRole("button", { name: "Refresh now" })
   ).toBeTruthy()
   expect(
-    screen.getByRole("button", { name: "Details" }).getAttribute("aria-expanded")
+    screen
+      .getByRole("button", { name: "Details" })
+      .getAttribute("aria-expanded")
   ).toBe("false")
   client.clear()
 })

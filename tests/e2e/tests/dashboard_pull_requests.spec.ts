@@ -76,14 +76,8 @@ test.describe("thread pull requests", () => {
 
     const summary = page.getByTestId("pr-summary-fakeorg/demo-1");
     const fixButton = page.getByRole("button", { name: "Fix checks on PR #1" });
-    await expect(summary).toHaveAttribute(
-      "data-pr-tone",
-      "text-ink-subtle",
-    );
-    await expect(summary).not.toHaveAttribute(
-      "data-pr-tone",
-      "text-positive",
-    );
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-ink-subtle");
+    await expect(summary).not.toHaveAttribute("data-pr-tone", "text-positive");
     await expect(summary).toContainText("draft");
     await expect(fixButton).toHaveCount(0);
 
@@ -98,10 +92,7 @@ test.describe("thread pull requests", () => {
       review_threads: [],
     });
     await page.reload();
-    await expect(summary).toHaveAttribute(
-      "data-pr-tone",
-      "text-positive",
-    );
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-positive");
     await expect(summary).toContainText("open");
     await expect(fixButton).toHaveCount(0);
     await page.waitForTimeout(1_000);
@@ -118,11 +109,9 @@ test.describe("thread pull requests", () => {
       window.dispatchEvent(new Event("visibilitychange")),
     );
     await failedRefresh;
-    await expect(summary).toHaveAttribute(
-      "data-pr-tone",
-      "text-ink-subtle",
-      { timeout: 5_000 },
-    );
+    await expect(summary).toHaveAttribute("data-pr-tone", "text-ink-subtle", {
+      timeout: 5_000,
+    });
     await summary.focus();
     await expect(
       page.getByTestId("pr-hover-card-fakeorg/demo-1"),

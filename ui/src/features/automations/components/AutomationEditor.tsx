@@ -13,15 +13,28 @@ import {
   RecordHeader,
   RecordInlineEdit,
 } from "@langchain/gtm-platform-design-system/patterns/record-header"
-import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
-import { Button, buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
 import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { IconWell } from "@langchain/gtm-platform-design-system/ui/icon-well"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
-import { HELP_CLASS, LABEL_CLASS } from "@langchain/gtm-platform-design-system/ui/label"
+import {
+  HELP_CLASS,
+  LABEL_CLASS,
+} from "@langchain/gtm-platform-design-system/ui/label"
 import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
 import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"
 import {
@@ -592,7 +605,10 @@ function TriggerEditor({
         ) : (
           <Inline gap="sm" wrap className="text-body text-ink">
             {describeCron(draft.cron)}
-            <Box render={<span />} className="font-mono text-meta text-ink-subtle">
+            <Box
+              render={<span />}
+              className="font-mono text-meta text-ink-subtle"
+            >
               {draft.cron}
             </Box>
           </Inline>

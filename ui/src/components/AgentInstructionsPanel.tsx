@@ -7,13 +7,34 @@ import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty
 import { FormField } from "@langchain/gtm-platform-design-system/patterns/form-field"
 import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
-import { Button, buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
-import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxTrigger } from "@langchain/gtm-platform-design-system/ui/combobox"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from "@langchain/gtm-platform-design-system/ui/combobox"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"
-import { AlertTriangle, ChevronRight, FileText, GitHub, Lock } from "@/components/glyphs"
+import {
+  AlertTriangle,
+  ChevronRight,
+  FileText,
+  GitHub,
+  Lock,
+} from "@/components/glyphs"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
 import {
   api,
@@ -156,7 +177,10 @@ export function AgentInstructionsPanel() {
           action={
             <a
               href={loginUrl()}
-              className={buttonVariants({ size: "compact", variant: "outline" })}
+              className={buttonVariants({
+                size: "compact",
+                variant: "outline",
+              })}
             >
               Sign in with GitHub again
             </a>
@@ -205,7 +229,11 @@ export function AgentInstructionsPanel() {
                   <ComboboxEmpty>No matches</ComboboxEmpty>
                   {suggestedRepos.map((r) => (
                     <ComboboxItem key={r.full_name} value={r.full_name}>
-                      <Box render={<span />} className="truncate" title={r.full_name}>
+                      <Box
+                        render={<span />}
+                        className="truncate"
+                        title={r.full_name}
+                      >
                         {r.full_name}
                       </Box>
                       {r.private && (

@@ -8,7 +8,11 @@ import { UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import type { MessagesProps } from "./types"
 import { AgentThread } from "@langchain/gtm-platform-design-system/patterns/agent-thread"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { TooltipProvider } from "@langchain/gtm-platform-design-system/ui/tooltip"

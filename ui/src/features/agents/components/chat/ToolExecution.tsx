@@ -4,7 +4,11 @@ import { DiffView } from "./DiffView"
 import { SqlResultTable, parseSqlResult } from "./SqlResultTable"
 import { formatToolDisplay } from "./toolExecutionDisplay"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import {
   Collapsible,
   CollapsibleChevron,

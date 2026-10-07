@@ -1,5 +1,9 @@
 import { useState } from "react"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Checkbox } from "@langchain/gtm-platform-design-system/ui/checkbox"
 import {

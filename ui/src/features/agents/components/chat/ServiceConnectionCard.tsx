@@ -4,7 +4,11 @@ import { toast } from "sonner"
 
 import { ProviderMark } from "@langchain/gtm-platform-design-system/patterns/provider-mark"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import {
   Frame,
@@ -59,7 +63,10 @@ export function ServiceConnectionCard() {
         <ProviderMark provider="notion" />
         <Stack gap="xs" className="min-w-0 flex-1">
           <Inline gap="sm" align="center" wrap>
-            <Box render={<span />} className="text-label font-semibold text-ink">
+            <Box
+              render={<span />}
+              className="text-label font-semibold text-ink"
+            >
               Notion
             </Box>
             {connected && !credentials.isError && (
@@ -78,10 +85,10 @@ export function ServiceConnectionCard() {
       </Inline>
       <FramePanel>
         <FrameDescription>
-          For your account only, in private threads you own. Connecting does
-          not give other participants or shared channels access. Consent opens
-          in a new browser tab; return here afterward. It does not resume the
-          task automatically.
+          For your account only, in private threads you own. Connecting does not
+          give other participants or shared channels access. Consent opens in a
+          new browser tab; return here afterward. It does not resume the task
+          automatically.
         </FrameDescription>
         {cancelled && (
           <Box render={<p role="status" />} className="text-meta text-ink">
@@ -89,7 +96,12 @@ export function ServiceConnectionCard() {
           </Box>
         )}
       </FramePanel>
-      <Inline gap="sm" align="center" justify="end" className="px-1.5 pt-1 pb-1.5">
+      <Inline
+        gap="sm"
+        align="center"
+        justify="end"
+        className="px-1.5 pt-1 pb-1.5"
+      >
         {credentials.isError ? (
           <>
             <Box render={<p role="alert" />} className="text-label text-risk">

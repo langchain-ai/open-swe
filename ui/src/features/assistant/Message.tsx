@@ -260,7 +260,9 @@ export function AssistantMessage() {
               )
             case "file":
               return (
-                <span className="text-body">{part.filename ?? "Attachment"}</span>
+                <span className="text-body">
+                  {part.filename ?? "Attachment"}
+                </span>
               )
             case "indicator":
               return (

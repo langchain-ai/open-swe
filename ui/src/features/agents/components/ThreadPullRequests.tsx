@@ -1,7 +1,11 @@
 import { useState } from "react"
 import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
 import {
@@ -49,7 +53,11 @@ const PR_STATE_BADGE: Record<
   closed: { tone: "risk" },
 }
 
-function PullRequestStateBadge({ state }: { state: AgentPullRequest["state"] }) {
+function PullRequestStateBadge({
+  state,
+}: {
+  state: AgentPullRequest["state"]
+}) {
   const badge = PR_STATE_BADGE[state]
   return (
     <Badge
@@ -267,7 +275,10 @@ function HealthDetails({
                     {location}
                   </Box>
                 </Inline>
-                <Box render={<p />} className="line-clamp-2 text-label text-ink">
+                <Box
+                  render={<p />}
+                  className="line-clamp-2 text-label text-ink"
+                >
                   {thread.body || "No comment text"}
                 </Box>
               </Stack>
@@ -446,7 +457,12 @@ function PullRequestLink({
             <PullRequestStateBadge state={state} />
           </Inline>
         </HoverCardTrigger>
-        <HoverCardContent side="top" align="start" sideOffset={8} className="w-96">
+        <HoverCardContent
+          side="top"
+          align="start"
+          sideOffset={8}
+          className="w-96"
+        >
           <PullRequestHoverCard
             pullRequest={pullRequest}
             health={health}

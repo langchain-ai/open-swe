@@ -7,11 +7,18 @@ import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
-import { HELP_CLASS, LABEL_CLASS } from "@langchain/gtm-platform-design-system/ui/label"
+import {
+  HELP_CLASS,
+  LABEL_CLASS,
+} from "@langchain/gtm-platform-design-system/ui/label"
 import {
   Popover,
   PopoverContent,
@@ -39,7 +46,13 @@ const BOT_ROW_CLASS =
 
 function ErrorLine({ children }: { children: string }) {
   return (
-    <Inline role="alert" gap="sm" align="start" ink="risk" className="text-label">
+    <Inline
+      role="alert"
+      gap="sm"
+      align="start"
+      ink="risk"
+      className="text-label"
+    >
       <Icon icon={AlertTriangle} size="sm" className="mt-0.5" />
       <Box render={<span />}>{children}</Box>
     </Inline>
@@ -356,7 +369,9 @@ export function AllowedSlackBotsSection({
                     >
                       {bot.name}
                     </Box>
-                    <Box className="text-meta text-ink-subtle">{bot.bot_id}</Box>
+                    <Box className="text-meta text-ink-subtle">
+                      {bot.bot_id}
+                    </Box>
                   </Stack>
                   <Badge tone="positive" dot>
                     Enabled

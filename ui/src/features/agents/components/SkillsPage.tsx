@@ -13,7 +13,11 @@ import {
 } from "@langchain/gtm-platform-design-system/patterns/split-view"
 import { SidebarTreeRow } from "@langchain/gtm-platform-design-system/patterns/sidebar-tree"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { FadeText } from "@langchain/gtm-platform-design-system/ui/fade-text"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"

@@ -256,7 +256,10 @@ export function AgentThreadHeader({
             })
             .then(() => refreshLocalThreads(localThread.id))
             .catch((error: unknown) =>
-              reportError({ title: "Couldn't archive or restore thread", error })
+              reportError({
+                title: "Couldn't archive or restore thread",
+                error,
+              })
             )
         } else if (thread && !resolveThread.isPending) {
           resolveThread.mutate({ threadId: thread.id, resolved: !archived })

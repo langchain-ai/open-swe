@@ -5,7 +5,13 @@ import {
   SettingSection,
 } from "@langchain/gtm-platform-design-system/patterns/setting-section"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@langchain/gtm-platform-design-system/ui/select"
 import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"

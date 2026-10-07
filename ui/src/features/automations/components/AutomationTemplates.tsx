@@ -1,10 +1,17 @@
 import { Link } from "@tanstack/react-router"
 
 import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { IconWell } from "@langchain/gtm-platform-design-system/ui/icon-well"
-import { HELP_CLASS, LABEL_CLASS } from "@langchain/gtm-platform-design-system/ui/label"
+import {
+  HELP_CLASS,
+  LABEL_CLASS,
+} from "@langchain/gtm-platform-design-system/ui/label"
 
 import { Clock } from "@/components/glyphs"
 import { AUTOMATION_TEMPLATES } from "@/features/automations/lib/automation-templates"

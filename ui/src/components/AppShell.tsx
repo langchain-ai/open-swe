@@ -73,11 +73,7 @@ export function AppShell({
 
   const page =
     contentWidth === "reading" ? (
-      <PageFrame
-        title={title}
-        description={description}
-        actions={action}
-      >
+      <PageFrame title={title} description={description} actions={action}>
         {children}
       </PageFrame>
     ) : (
@@ -96,7 +92,10 @@ export function AppShell({
           band={
             <PageBand
               variant="lineage"
-              lineage={[{ label: backTo.label, href: backTo.to }, { label: title }]}
+              lineage={[
+                { label: backTo.label, href: backTo.to },
+                { label: title },
+              ]}
               backLabel={backTo.label}
               onBack={() => void navigate({ to: backTo.to })}
             />

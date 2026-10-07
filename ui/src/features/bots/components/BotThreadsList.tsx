@@ -7,8 +7,15 @@ import { RecordHop } from "@langchain/gtm-platform-design-system/patterns/record
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
-import { Button, buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
 import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"

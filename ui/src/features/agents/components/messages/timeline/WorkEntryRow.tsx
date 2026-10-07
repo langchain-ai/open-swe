@@ -69,12 +69,7 @@ function EntryMark({ entry }: { entry: WorkEntryView }) {
   }
   if (entry.status === "pending") {
     return (
-      <Icon
-        icon={Clock}
-        size="sm"
-        label="Waiting"
-        className="text-attention"
-      />
+      <Icon icon={Clock} size="sm" label="Waiting" className="text-attention" />
     )
   }
   return (
@@ -289,25 +284,25 @@ export function WorkEntryRow({
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          {typeof body === "function" ? (
-            body({ loadedText, loadError })
-          ) : (body ??
-            (detailText != null ? (
-              <ToolResultBody value={detailText} />
-            ) : loadError ? (
-              <Box render={<p />} className="text-meta text-risk">
-                {loadError}
-              </Box>
-            ) : (
-              <Inline
-                gap="xs"
-                align="center"
-                className="text-meta text-ink-subtle"
-              >
-                <Spinner size="sm" />
-                Loading output…
-              </Inline>
-            )))}
+          {typeof body === "function"
+            ? body({ loadedText, loadError })
+            : (body ??
+              (detailText != null ? (
+                <ToolResultBody value={detailText} />
+              ) : loadError ? (
+                <Box render={<p />} className="text-meta text-risk">
+                  {loadError}
+                </Box>
+              ) : (
+                <Inline
+                  gap="xs"
+                  align="center"
+                  className="text-meta text-ink-subtle"
+                >
+                  <Spinner size="sm" />
+                  Loading output…
+                </Inline>
+              )))}
         </div>
       )}
     </div>

@@ -2,7 +2,11 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
 import type { ReactNode } from "react"
 
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
@@ -95,9 +99,8 @@ function Login() {
           Sign in to Open SWE
         </Box>
         <Box render={<p />} className="text-body text-ink-subtle">
-          Use your GitHub account. We'll configure your default model,
-          reasoning effort, and default repo for Slack/Linear/GitHub triggered
-          runs.
+          Use your GitHub account. We'll configure your default model, reasoning
+          effort, and default repo for Slack/Linear/GitHub triggered runs.
         </Box>
       </Stack>
       <a

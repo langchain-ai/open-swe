@@ -13,7 +13,11 @@ import {
   AlertTitle,
 } from "@langchain/gtm-platform-design-system/ui/alert"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import {
   Collapsible,
@@ -204,10 +208,7 @@ export function WorkflowApprovalCard({
                       </pre>
                     )}
                     {approval.diffPreviewTruncated && (
-                      <Box
-                        render={<p />}
-                        className="text-meta text-ink-subtle"
-                      >
+                      <Box render={<p />} className="text-meta text-ink-subtle">
                         Diff preview is truncated.
                       </Box>
                     )}

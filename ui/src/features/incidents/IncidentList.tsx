@@ -5,7 +5,11 @@ import { useDeferredValue, useState } from "react"
 import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
 import { PageMasthead } from "@langchain/gtm-platform-design-system/patterns/page-masthead"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { ScrollArea } from "@langchain/gtm-platform-design-system/ui/scroll-area"

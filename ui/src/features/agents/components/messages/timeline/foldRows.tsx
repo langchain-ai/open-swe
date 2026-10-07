@@ -57,7 +57,7 @@ export function WorkGroupToggleRow({
       type="button"
       aria-expanded={expanded}
       onClick={onToggle}
-      className="-mx-1.5 flex w-fit cursor-pointer items-center gap-2 rounded-compact px-1.5 py-0.5 text-left text-label text-ink-subtle outline-none transition-colors duration-fast ease-out-quint hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset motion-reduce:transition-none"
+      className="-mx-1.5 flex w-fit cursor-pointer items-center gap-2 rounded-compact px-1.5 py-0.5 text-left text-label text-ink-subtle transition-colors duration-fast ease-out-quint outline-none hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset motion-reduce:transition-none"
     >
       <span className="flex size-5 shrink-0 items-center justify-center">
         <Icon

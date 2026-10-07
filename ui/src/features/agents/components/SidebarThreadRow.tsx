@@ -3,7 +3,11 @@ import type { MouseEvent, ReactElement, SyntheticEvent } from "react"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { SidebarTreeRow } from "@langchain/gtm-platform-design-system/patterns/sidebar-tree"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
 import {
@@ -197,7 +201,11 @@ function PullRequestMark({
   // truth wins so a merged PR stops rendering as open.
   const meta = PR_STATE_META[live?.state ?? state]
   return (
-    <Box render={<span />} title={meta.label} className="relative flex shrink-0">
+    <Box
+      render={<span />}
+      title={meta.label}
+      className="relative flex shrink-0"
+    >
       <Icon
         icon={meta.icon}
         size="sm"
@@ -291,8 +299,7 @@ export function SidebarThreadRow({
     prefs.collapseSubagentsByDefault !==
     prefs.collapsedSubagentKeys.includes(item.key)
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
-  const source =
-    item.source && item.source !== "dashboard" ? item.source : null
+  const source = item.source && item.source !== "dashboard" ? item.source : null
   // Strictly an unread marker, not a "finished" one: any thread the user has
   // not opened since its latest run shows the dot. The focused thread is being
   // read right now, so it never does — derived rather than left to the
@@ -370,7 +377,10 @@ export function SidebarThreadRow({
           <SidebarTreeRow
             selected={rowIsActive}
             multiline={false}
-            className={cn("group/thread-row", compact && "min-h-control-sm py-1")}
+            className={cn(
+              "group/thread-row",
+              compact && "min-h-control-sm py-1"
+            )}
           >
             <Inline gap="sm" align="center" className="min-w-0 pr-7">
               {hasSubagents && (
@@ -380,7 +390,9 @@ export function SidebarThreadRow({
                   aria-label={
                     subagentsCollapsed ? "Show subagents" : "Hide subagents"
                   }
-                  title={subagentsCollapsed ? "Show subagents" : "Hide subagents"}
+                  title={
+                    subagentsCollapsed ? "Show subagents" : "Hide subagents"
+                  }
                   onClick={onToggleSubagents}
                   className={cn(
                     ABOVE_ROW_LINK_CLASS,
@@ -494,7 +506,9 @@ export function SidebarThreadRow({
             </Box>
           </SidebarTreeRow>
         </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-48">{menuItems}</ContextMenuContent>
+        <ContextMenuContent className="min-w-48">
+          {menuItems}
+        </ContextMenuContent>
       </ContextMenu>
       {hasSubagents && !subagentsCollapsed && (
         <Stack
@@ -609,7 +623,10 @@ export function SidebarThreadDot({
             nativeButton={false}
             aria-label={item.title}
             aria-current={isActive ? "page" : undefined}
-            className={cn("w-full", isActive && "bg-selected hover:bg-selected")}
+            className={cn(
+              "w-full",
+              isActive && "bg-selected hover:bg-selected"
+            )}
           />
         }
       >

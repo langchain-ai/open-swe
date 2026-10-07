@@ -14,7 +14,13 @@ import {
   type SettingValue,
 } from "@langchain/gtm-platform-design-system/patterns/setting-section"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@langchain/gtm-platform-design-system/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@langchain/gtm-platform-design-system/ui/select"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
 import { Switch } from "@langchain/gtm-platform-design-system/ui/switch"
 import { ArchiveBox } from "@/components/glyphs"

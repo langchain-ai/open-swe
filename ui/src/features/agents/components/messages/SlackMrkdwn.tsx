@@ -168,7 +168,10 @@ function renderRange(
       if (closing !== -1) {
         flushLiteral(cursor)
         nodes.push(
-          <code key={key} className="rounded-tick bg-hover px-1 font-mono text-meta">
+          <code
+            key={key}
+            className="rounded-tick bg-hover px-1 font-mono text-meta"
+          >
             {decodeSlackText(text.slice(cursor + 1, closing))}
           </code>
         )

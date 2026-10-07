@@ -5,7 +5,11 @@ import type { ReactNode } from "react"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { ProviderMark } from "@langchain/gtm-platform-design-system/patterns/provider-mark"
 import { Receipt } from "@langchain/gtm-platform-design-system/patterns/receipt"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
 import { Separator } from "@langchain/gtm-platform-design-system/ui/separator"
 
@@ -67,7 +71,10 @@ function blocksFromOptions(
 }
 
 /** Slack buttons are drawn as the outline controls they become, but stay inert here. */
-const SLACK_BUTTON_CLASS = buttonVariants({ variant: "outline", size: "compact" })
+const SLACK_BUTTON_CLASS = buttonVariants({
+  variant: "outline",
+  size: "compact",
+})
 
 const SLACK_TEXT_CLASS = "wrap-anywhere whitespace-pre-wrap"
 

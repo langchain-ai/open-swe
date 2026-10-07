@@ -14,7 +14,11 @@ import {
   Alert,
   AlertDescription,
 } from "@langchain/gtm-platform-design-system/ui/alert"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Shortcut } from "@langchain/gtm-platform-design-system/ui/shortcut"
 import { Textarea } from "@langchain/gtm-platform-design-system/ui/textarea"
@@ -271,7 +275,10 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                         className="resize-none text-body"
                       />
                       <Inline gap="sm" align="center" justify="end">
-                        <Box render={<span aria-hidden="true" />} className="mr-auto">
+                        <Box
+                          render={<span aria-hidden="true" />}
+                          className="mr-auto"
+                        >
                           <Shortcut keys={["mod", "enter"]} />
                         </Box>
                         <Button
@@ -299,10 +306,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   )}
                   <Box className="min-h-0 flex-1 overflow-y-auto p-3">
                     {comments.length === 0 ? (
-                      <Box
-                        render={<p />}
-                        className="text-meta text-ink-subtle"
-                      >
+                      <Box render={<p />} className="text-meta text-ink-subtle">
                         No comments yet.
                       </Box>
                     ) : (

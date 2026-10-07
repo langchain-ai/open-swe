@@ -78,9 +78,7 @@ export const Route = createRootRouteWithContext<{
   notFoundComponent: () => (
     <main className="mx-auto max-w-reading px-4 pt-16 lg:px-6">
       <h1 className="text-page font-semibold tracking-tightish">404</h1>
-      <p className="text-ink-subtle">
-        The requested page could not be found.
-      </p>
+      <p className="text-ink-subtle">The requested page could not be found.</p>
     </main>
   ),
   shellComponent: RootDocument,
@@ -109,28 +107,28 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           )}
         <ThemeSync />
         <DesignSystemHost>
-        <Toaster position="bottom-right" closeButton />
-        <QueryClientProvider client={queryClient}>
-          <PageTracking />
-          <InvalidationStream />
-          <VersionMismatchBanner />
-          <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
-          <PerfHudMount />
-          {import.meta.env.VITE_DEVTOOLS !== "false" && (
-            <>
-              <TanStackDevtools
-                config={{ position: "bottom-right" }}
-                plugins={[
-                  {
-                    name: "Tanstack Router",
-                    render: <TanStackRouterDevtoolsPanel />,
-                  },
-                ]}
-              />
-              <ReactQueryDevtools initialIsOpen={false} />
-            </>
-          )}
-        </QueryClientProvider>
+          <Toaster position="bottom-right" closeButton />
+          <QueryClientProvider client={queryClient}>
+            <PageTracking />
+            <InvalidationStream />
+            <VersionMismatchBanner />
+            <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>
+            <PerfHudMount />
+            {import.meta.env.VITE_DEVTOOLS !== "false" && (
+              <>
+                <TanStackDevtools
+                  config={{ position: "bottom-right" }}
+                  plugins={[
+                    {
+                      name: "Tanstack Router",
+                      render: <TanStackRouterDevtoolsPanel />,
+                    },
+                  ]}
+                />
+                <ReactQueryDevtools initialIsOpen={false} />
+              </>
+            )}
+          </QueryClientProvider>
         </DesignSystemHost>
         <Scripts />
       </body>

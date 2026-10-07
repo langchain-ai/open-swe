@@ -53,7 +53,11 @@ const NAV: ReadonlyArray<NavGroup> = [
       { to: "/my-settings", label: "General", icon: Settings2 },
       { to: "/my-settings/agent", label: "Agent", icon: Sparkles },
       { to: "/my-settings/git", label: "Git", icon: GitBranch },
-      { to: "/my-settings/instructions", label: "Instructions", icon: BookOpen },
+      {
+        to: "/my-settings/instructions",
+        label: "Instructions",
+        icon: BookOpen,
+      },
       { to: "/my-settings/connections", label: "Connections", icon: Link },
       { to: "/my-settings/experiments", label: "Experiments", icon: Beaker },
     ],
@@ -135,30 +139,28 @@ export function SettingsNav({
           compact={collapsed}
         />
       </SidebarNavCluster>
-      {NAV.filter((group) => !group.adminOnly || user.is_admin).map(
-        (group) => (
-          <SidebarNavCluster
-            key={group.heading}
-            label={collapsed ? null : group.heading}
-            divider={collapsed}
-          >
-            {group.items.map((item) => (
-              <SidebarNavItem
-                key={item.to}
-                icon={item.icon}
-                label={item.label}
-                href={item.to}
-                selected={isSelected(item, pathname)}
-                compact={collapsed}
-              >
-                {item.to === "/workspaces" && user.is_admin && !collapsed ? (
-                  <WorkspaceChildren pathname={pathname} />
-                ) : undefined}
-              </SidebarNavItem>
-            ))}
-          </SidebarNavCluster>
-        )
-      )}
+      {NAV.filter((group) => !group.adminOnly || user.is_admin).map((group) => (
+        <SidebarNavCluster
+          key={group.heading}
+          label={collapsed ? null : group.heading}
+          divider={collapsed}
+        >
+          {group.items.map((item) => (
+            <SidebarNavItem
+              key={item.to}
+              icon={item.icon}
+              label={item.label}
+              href={item.to}
+              selected={isSelected(item, pathname)}
+              compact={collapsed}
+            >
+              {item.to === "/workspaces" && user.is_admin && !collapsed ? (
+                <WorkspaceChildren pathname={pathname} />
+              ) : undefined}
+            </SidebarNavItem>
+          ))}
+        </SidebarNavCluster>
+      ))}
     </SidebarNav>
   )
 }

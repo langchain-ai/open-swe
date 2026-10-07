@@ -12,7 +12,11 @@ import { StatReadout } from "@langchain/gtm-platform-design-system/patterns/stat
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import { Avatar } from "@langchain/gtm-platform-design-system/ui/avatar"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
 import {
@@ -767,7 +771,12 @@ function PRMergeRateSection({
               </p>
               <Stack render={<ul />} gap="xs">
                 {data.unavailable_thread_ids.map((threadId) => (
-                  <Inline render={<li />} key={threadId} gap="sm" align="center">
+                  <Inline
+                    render={<li />}
+                    key={threadId}
+                    gap="sm"
+                    align="center"
+                  >
                     <Box render={<code />} className="font-mono select-all">
                       {threadId}
                     </Box>
@@ -790,14 +799,15 @@ function PRMergeRateSection({
           {data ? (
             <TableFootnote label="How these numbers work">
               <p>
-                <strong className="font-medium text-ink">Open</strong>{" "}
-                includes PRs that haven’t been merged or closed. Each count’s
-                tooltip shows the age breakdown: open for less than{" "}
-                {data.maturity_days} days, or open for {data.maturity_days}{" "}
-                days or longer.
+                <strong className="font-medium text-ink">Open</strong> includes
+                PRs that haven’t been merged or closed. Each count’s tooltip
+                shows the age breakdown: open for less than {data.maturity_days}{" "}
+                days, or open for {data.maturity_days} days or longer.
               </p>
               <p>
-                <strong className="font-medium text-ink">Median distance</strong>{" "}
+                <strong className="font-medium text-ink">
+                  Median distance
+                </strong>{" "}
                 is the median normalized line edit distance between each merged
                 PR’s opening diff and final diff. It is calculated only for
                 merged PRs with complete text patches; higher means more
@@ -831,8 +841,8 @@ function PRMergeRateSection({
               </p>
               <Stack render={<ul />} gap="xs" className="list-disc pl-4">
                 <li>
-                  Merge rate = merged ÷ (merged + closed without merge + open
-                  at least {data.maturity_days} days).
+                  Merge rate = merged ÷ (merged + closed without merge + open at
+                  least {data.maturity_days} days).
                 </li>
               </Stack>
               <p>
@@ -1503,9 +1513,7 @@ function UsageTable({
                 )}
               </TableCell>
               <TableCell className={NUMBER_CELL_CLASS}>
-                {row.threads
-                  ? (row.invocations / row.threads).toFixed(1)
-                  : "—"}
+                {row.threads ? (row.invocations / row.threads).toFixed(1) : "—"}
               </TableCell>
               <TableCell className={NUMBER_CELL_CLASS}>
                 {formatNumber(row.total_tokens)}
@@ -1613,8 +1621,16 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
         ))}
       </MetricCardGrid>
       <Box className="grid gap-6 sm:grid-cols-2">
-        <CounterList title="Top categories" icon={BarChart} rows={stats.top_categories} />
-        <CounterList title="Severity mix" icon={AlertCircle} rows={severityRows(stats)} />
+        <CounterList
+          title="Top categories"
+          icon={BarChart}
+          rows={stats.top_categories}
+        />
+        <CounterList
+          title="Severity mix"
+          icon={AlertCircle}
+          rows={severityRows(stats)}
+        />
       </Box>
     </Stack>
   )
@@ -1771,7 +1787,10 @@ function UsageCost({ row }: { row: UsageLeaderboardRow }) {
       <Tooltip>
         <TooltipTrigger
           aria-label={`Cost ${label.toLowerCase()}`}
-          className={cn(HINT_TRIGGER_CLASS, "font-sans text-meta text-ink-subtle")}
+          className={cn(
+            HINT_TRIGGER_CLASS,
+            "font-sans text-meta text-ink-subtle"
+          )}
         >
           {label}
         </TooltipTrigger>

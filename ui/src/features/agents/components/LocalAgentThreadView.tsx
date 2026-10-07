@@ -12,7 +12,11 @@ import { Link } from "@tanstack/react-router"
 import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"
@@ -448,7 +452,12 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     return (
       <Stack grow justify="center" align="center" className="min-w-0 p-6">
         {threadQuery.isPending ? (
-          <Inline gap="sm" align="center" ink="ink-subtle" className="text-meta">
+          <Inline
+            gap="sm"
+            align="center"
+            ink="ink-subtle"
+            className="text-meta"
+          >
             <Spinner size="sm" />
             Loading local Open SWE session…
           </Inline>

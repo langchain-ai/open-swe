@@ -189,7 +189,11 @@ import { DRAWN_GLYPHS } from "./drawn"
 export * from "@langchain/gtm-platform-design-system/ui/glyphs"
 export type { Glyph } from "@langchain/gtm-platform-design-system/ui/glyphs"
 
-function glyph(micro: Glyph["micro"], mini: Glyph["mini"], full: Glyph["full"]): Glyph {
+function glyph(
+  micro: Glyph["micro"],
+  mini: Glyph["mini"],
+  full: Glyph["full"]
+): Glyph {
   return { micro, mini, full }
 }
 
@@ -201,54 +205,126 @@ export const Hash: Glyph = glyph(HashMicro, HashMini, HashFull)
 export const Sparkles: Glyph = glyph(SparklesMicro, SparklesMini, SparklesFull)
 export const Bug: Glyph = glyph(BugMicro, BugMini, BugFull)
 export const Code: Glyph = glyph(CodeMicro, CodeMini, CodeFull)
-export const CodeSquare: Glyph = glyph(CodeSquareMicro, CodeSquareMini, CodeSquareFull)
+export const CodeSquare: Glyph = glyph(
+  CodeSquareMicro,
+  CodeSquareMini,
+  CodeSquareFull
+)
 export const Flag: Glyph = glyph(FlagMicro, FlagMini, FlagFull)
 export const Beaker: Glyph = glyph(BeakerMicro, BeakerMini, BeakerFull)
 export const Puzzle: Glyph = glyph(PuzzleMicro, PuzzleMini, PuzzleFull)
 export const Cube: Glyph = glyph(CubeMicro, CubeMini, CubeFull)
 export const BarChart: Glyph = glyph(BarChartMicro, BarChartMini, BarChartFull)
 export const Activity: Glyph = glyph(ActivityMicro, ActivityMini, ActivityFull)
-export const ShieldCheck: Glyph = glyph(ShieldCheckMicro, ShieldCheckMini, ShieldCheckFull)
+export const ShieldCheck: Glyph = glyph(
+  ShieldCheckMicro,
+  ShieldCheckMini,
+  ShieldCheckFull
+)
 export const Sliders: Glyph = glyph(SlidersMicro, SlidersMini, SlidersFull)
 export const LogOut: Glyph = glyph(LogOutMicro, LogOutMini, LogOutFull)
 export const Monitor: Glyph = glyph(MonitorMicro, MonitorMini, MonitorFull)
 export const Brush: Glyph = glyph(BrushMicro, BrushMini, BrushFull)
 export const BookOpen: Glyph = glyph(BookOpenMicro, BookOpenMini, BookOpenFull)
-export const FileSearch: Glyph = glyph(FileSearchMicro, FileSearchMini, FileSearchFull)
+export const FileSearch: Glyph = glyph(
+  FileSearchMicro,
+  FileSearchMini,
+  FileSearchFull
+)
 export const ThumbsUp: Glyph = glyph(ThumbsUpMicro, ThumbsUpMini, ThumbsUpFull)
-export const ThumbsDown: Glyph = glyph(ThumbsDownMicro, ThumbsDownMini, ThumbsDownFull)
-export const Lightbulb: Glyph = glyph(LightbulbMicro, LightbulbMini, LightbulbFull)
+export const ThumbsDown: Glyph = glyph(
+  ThumbsDownMicro,
+  ThumbsDownMini,
+  ThumbsDownFull
+)
+export const Lightbulb: Glyph = glyph(
+  LightbulbMicro,
+  LightbulbMini,
+  LightbulbFull
+)
 export const Hammer: Glyph = glyph(HammerMicro, HammerMini, HammerFull)
-export const ArrowUpDown: Glyph = glyph(ArrowUpDownMicro, ArrowUpDownMini, ArrowUpDownFull)
+export const ArrowUpDown: Glyph = glyph(
+  ArrowUpDownMicro,
+  ArrowUpDownMini,
+  ArrowUpDownFull
+)
 export const SortDesc: Glyph = glyph(SortDescMicro, SortDescMini, SortDescFull)
 export const SortAsc: Glyph = glyph(SortAscMicro, SortAscMini, SortAscFull)
 export const Minimize: Glyph = glyph(MinimizeMicro, MinimizeMini, MinimizeFull)
 export const WrapText: Glyph = glyph(WrapTextMicro, WrapTextMini, WrapTextFull)
-export const ListOrdered: Glyph = glyph(ListOrderedMicro, ListOrderedMini, ListOrderedFull)
+export const ListOrdered: Glyph = glyph(
+  ListOrderedMicro,
+  ListOrderedMini,
+  ListOrderedFull
+)
 export const Bold: Glyph = glyph(BoldMicro, BoldMini, BoldFull)
 export const Italic: Glyph = glyph(ItalicMicro, ItalicMini, ItalicFull)
 export const Heading: Glyph = glyph(HeadingMicro, HeadingMini, HeadingFull)
 export const Ban: Glyph = glyph(BanMicro, BanMini, BanFull)
-export const MessageCircle: Glyph = glyph(MessageCircleMicro, MessageCircleMini, MessageCircleFull)
+export const MessageCircle: Glyph = glyph(
+  MessageCircleMicro,
+  MessageCircleMini,
+  MessageCircleFull
+)
 export const Messages: Glyph = glyph(MessagesMicro, MessagesMini, MessagesFull)
-export const AlertCircle: Glyph = glyph(AlertCircleMicro, AlertCircleMini, AlertCircleFull)
-export const FolderPlus: Glyph = glyph(FolderPlusMicro, FolderPlusMini, FolderPlusFull)
+export const AlertCircle: Glyph = glyph(
+  AlertCircleMicro,
+  AlertCircleMini,
+  AlertCircleFull
+)
+export const FolderPlus: Glyph = glyph(
+  FolderPlusMicro,
+  FolderPlusMini,
+  FolderPlusFull
+)
 export const Rows: Glyph = glyph(RowsMicro, RowsMini, RowsFull)
-export const CheckBadge: Glyph = glyph(CheckBadgeMicro, CheckBadgeMini, CheckBadgeFull)
+export const CheckBadge: Glyph = glyph(
+  CheckBadgeMicro,
+  CheckBadgeMini,
+  CheckBadgeFull
+)
 export const Key: Glyph = glyph(KeyMicro, KeyMini, KeyFull)
-export const Duplicate: Glyph = glyph(DuplicateMicro, DuplicateMini, DuplicateFull)
-export const MoreVertical: Glyph = glyph(MoreVerticalMicro, MoreVerticalMini, MoreVerticalFull)
+export const Duplicate: Glyph = glyph(
+  DuplicateMicro,
+  DuplicateMini,
+  DuplicateFull
+)
+export const MoreVertical: Glyph = glyph(
+  MoreVerticalMicro,
+  MoreVerticalMini,
+  MoreVerticalFull
+)
 export const Rocket: Glyph = glyph(RocketMicro, RocketMini, RocketFull)
 export const Repeat: Glyph = glyph(RepeatMicro, RepeatMini, RepeatFull)
 export const AtSign: Glyph = glyph(AtSignMicro, AtSignMini, AtSignFull)
 export const Unlock: Glyph = glyph(UnlockMicro, UnlockMini, UnlockFull)
 export const Redo: Glyph = glyph(RedoMicro, RedoMini, RedoFull)
-export const ClipboardList: Glyph = glyph(ClipboardListMicro, ClipboardListMini, ClipboardListFull)
+export const ClipboardList: Glyph = glyph(
+  ClipboardListMicro,
+  ClipboardListMini,
+  ClipboardListFull
+)
 export const Stack: Glyph = glyph(StackMicro, StackMini, StackFull)
-export const SwitchHorizontal: Glyph = glyph(SwitchHorizontalMicro, SwitchHorizontalMini, SwitchHorizontalFull)
-export const UserCircle: Glyph = glyph(UserCircleMicro, UserCircleMini, UserCircleFull)
-export const Fingerprint: Glyph = glyph(FingerprintMicro, FingerprintMini, FingerprintFull)
-export const MinusCircle: Glyph = glyph(MinusCircleMicro, MinusCircleMini, MinusCircleFull)
+export const SwitchHorizontal: Glyph = glyph(
+  SwitchHorizontalMicro,
+  SwitchHorizontalMini,
+  SwitchHorizontalFull
+)
+export const UserCircle: Glyph = glyph(
+  UserCircleMicro,
+  UserCircleMini,
+  UserCircleFull
+)
+export const Fingerprint: Glyph = glyph(
+  FingerprintMicro,
+  FingerprintMini,
+  FingerprintFull
+)
+export const MinusCircle: Glyph = glyph(
+  MinusCircleMicro,
+  MinusCircleMini,
+  MinusCircleFull
+)
 
 export const GitBranch: Glyph = DRAWN_GLYPHS.GitBranch
 export const GitMerge: Glyph = DRAWN_GLYPHS.GitMerge

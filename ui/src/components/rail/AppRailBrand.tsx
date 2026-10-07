@@ -34,11 +34,16 @@ function isDesktopApp(): boolean {
  */
 export function DesktopRailInset() {
   if (!isDesktopApp()) return null
-  return <Box aria-hidden data-desktop-drag-region="" className="h-8 shrink-0" />
+  return (
+    <Box aria-hidden data-desktop-drag-region="" className="h-8 shrink-0" />
+  )
 }
 
 /** Mark tile + product name + collapse. Collapsed, the mark is the expand control. */
-export function AppRailBrand({ collapsed, onToggleCollapsed }: AppRailBrandProps) {
+export function AppRailBrand({
+  collapsed,
+  onToggleCollapsed,
+}: AppRailBrandProps) {
   const toggleLabel = collapsed ? "Expand sidebar" : "Collapse sidebar"
   return (
     <>

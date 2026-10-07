@@ -3,7 +3,11 @@ import { Link } from "@tanstack/react-router"
 
 import { SubagentActivity } from "./SubagentActivity"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Spinner } from "@langchain/gtm-platform-design-system/ui/spinner"

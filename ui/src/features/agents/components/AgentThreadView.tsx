@@ -9,7 +9,11 @@ import {
 } from "react"
 import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
@@ -750,9 +754,9 @@ export function AgentThreadView({ thread }: AgentThreadViewProps) {
           <ThreadNotice>
             <Alert tone="info" icon={GitMerge}>
               <AlertDescription>
-                Every pull request from this thread is merged or closed.
-                Resolve the thread if the work is done, or send a follow-up to
-                keep going.
+                Every pull request from this thread is merged or closed. Resolve
+                the thread if the work is done, or send a follow-up to keep
+                going.
               </AlertDescription>
             </Alert>
           </ThreadNotice>

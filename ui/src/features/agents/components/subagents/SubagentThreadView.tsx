@@ -3,7 +3,11 @@ import type { ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { PageBand } from "@langchain/gtm-platform-design-system/patterns/page-band"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"

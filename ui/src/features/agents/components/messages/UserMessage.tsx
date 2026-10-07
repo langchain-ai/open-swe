@@ -12,7 +12,11 @@ import {
   UserTurn,
   UserTurnCopy,
 } from "@langchain/gtm-platform-design-system/patterns/agent-thread"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import {
   Collapsible,
   CollapsibleChevron,
@@ -66,7 +70,11 @@ function MessageBody({
       )}
       {text && (
         <UserTurnCopy text={text}>
-          {isSlack ? <SlackMrkdwn text={text} /> : <SkillPromptText text={text} />}
+          {isSlack ? (
+            <SlackMrkdwn text={text} />
+          ) : (
+            <SkillPromptText text={text} />
+          )}
         </UserTurnCopy>
       )}
     </Stack>

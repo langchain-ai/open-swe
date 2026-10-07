@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 
@@ -57,7 +61,9 @@ export function LoadError({
                 <Button
                   size="compact"
                   variant="ghost"
-                  onClick={() => window.location.assign(import.meta.env.BASE_URL)}
+                  onClick={() =>
+                    window.location.assign(import.meta.env.BASE_URL)
+                  }
                 >
                   Back to home
                 </Button>

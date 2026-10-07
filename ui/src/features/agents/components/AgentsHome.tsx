@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 
 import { AlertTriangle } from "@/components/glyphs"
 import { OpenSweMarkTile } from "@/components/rail/OpenSweMark"

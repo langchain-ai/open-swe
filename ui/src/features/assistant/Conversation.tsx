@@ -2,7 +2,11 @@ import { useEffect, useState } from "react"
 import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
 import { PageBand } from "@langchain/gtm-platform-design-system/patterns/page-band"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
@@ -147,11 +151,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
             <Icon icon={ArrowDown} />
           </ThreadPrimitive.ScrollToBottom>
           {error && (
-            <Box
-              render={<p />}
-              role="alert"
-              className="text-label text-risk"
-            >
+            <Box render={<p />} role="alert" className="text-label text-risk">
               {error}
             </Box>
           )}

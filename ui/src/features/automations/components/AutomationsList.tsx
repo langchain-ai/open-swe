@@ -4,10 +4,20 @@ import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty
 import { PageMasthead } from "@langchain/gtm-platform-design-system/patterns/page-masthead"
 import type { PageMastheadCount } from "@langchain/gtm-platform-design-system/patterns/page-masthead"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
-import { Button, buttonVariants } from "@langchain/gtm-platform-design-system/ui/button"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Button,
+  buttonVariants,
+} from "@langchain/gtm-platform-design-system/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -121,9 +131,9 @@ export function AutomationsList({
         {canManage && (
           <Alert tone="neutral" icon={Info}>
             <AlertDescription>
-              Automations can also be listed and managed through Open SWE.
-              Start a new thread, turn on Admin next to the model picker, then
-              ask the agent to make the change.
+              Automations can also be listed and managed through Open SWE. Start
+              a new thread, turn on Admin next to the model picker, then ask the
+              agent to make the change.
             </AlertDescription>
           </Alert>
         )}

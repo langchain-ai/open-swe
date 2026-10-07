@@ -7,8 +7,15 @@ import {
   SettingSection,
 } from "@langchain/gtm-platform-design-system/patterns/setting-section"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Alert, AlertDescription } from "@langchain/gtm-platform-design-system/ui/alert"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Alert,
+  AlertDescription,
+} from "@langchain/gtm-platform-design-system/ui/alert"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { Icon } from "@langchain/gtm-platform-design-system/ui/icon"
 import { Input } from "@langchain/gtm-platform-design-system/ui/input"
@@ -128,9 +135,7 @@ function PolicyForm({
           )}
         />
       </SettingSection>
-      <SettingSection
-        title="Model and analysis limits"
-      >
+      <SettingSection title="Model and analysis limits">
         <SettingRow
           label="Model calls per turn"
           control={({ id }) => (
@@ -242,8 +247,7 @@ function SlackConnectionStatus({
   const facts = [
     {
       label: "Workspace",
-      value:
-        connection.workspace_id || policy.workspace_id || "Not configured",
+      value: connection.workspace_id || policy.workspace_id || "Not configured",
       mono: true,
     },
     {
@@ -260,9 +264,7 @@ function SlackConnectionStatus({
   return (
     <PageSection
       title="Slack connection"
-      description={
-        connectionError ? undefined : "Slack connection configured."
-      }
+      description={connectionError ? undefined : "Slack connection configured."}
     >
       <Stack gap="lg">
         {connectionError && (

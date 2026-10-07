@@ -85,7 +85,7 @@ export function MessageTimestamp({
             )
           }
         }}
-        className="cursor-pointer rounded-tick text-meta text-ink-subtle tabular-nums opacity-0 transition-opacity duration-fast ease-out-quint outline-none select-none group-hover/turn:opacity-100 group-focus-within/turn:opacity-100 hover:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
+        className="cursor-pointer rounded-tick text-meta text-ink-subtle tabular-nums opacity-0 transition-opacity duration-fast ease-out-quint outline-none select-none group-focus-within/turn:opacity-100 group-hover/turn:opacity-100 hover:text-ink focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none"
       >
         <time dateTime={date.toISOString()}>{shortTimestamp(date)}</time>
       </button>

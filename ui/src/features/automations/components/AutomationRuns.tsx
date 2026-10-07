@@ -4,7 +4,11 @@ import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty
 import { PageSection } from "@langchain/gtm-platform-design-system/patterns/page-frame"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
 import { Badge } from "@langchain/gtm-platform-design-system/ui/badge"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { ProviderLogo } from "@langchain/gtm-platform-design-system/ui/provider-logos"
 import { Skeleton } from "@langchain/gtm-platform-design-system/ui/skeleton"

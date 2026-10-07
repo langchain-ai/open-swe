@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { EmptyState } from "@langchain/gtm-platform-design-system/patterns/empty-state"
 import {
@@ -14,7 +14,11 @@ import {
   type StatTone,
 } from "@langchain/gtm-platform-design-system/patterns/stat-readout"
 import { StateNotice } from "@langchain/gtm-platform-design-system/patterns/state-notice"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import {
   Button,
   buttonVariants,
@@ -341,13 +345,21 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
           value={data.status}
           tone={STATUS_TONE[data.status]}
         />
-        <StatReadout shape="field" label="Progress" value={progressLabel(data)} />
+        <StatReadout
+          shape="field"
+          label="Progress"
+          value={progressLabel(data)}
+        />
         <StatReadout
           shape="field"
           label="Run name"
           value={data.run_name ?? config?.experiment_prefix}
         />
-        <StatReadout shape="field" label="Dataset" value={config?.dataset_name} />
+        <StatReadout
+          shape="field"
+          label="Dataset"
+          value={config?.dataset_name}
+        />
         <StatReadout
           shape="field"
           label="Limit"
@@ -359,7 +371,11 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
           label="Effort"
           value={config?.reasoning_effort}
         />
-        <StatReadout shape="field" label="Score mode" value={config?.score_mode} />
+        <StatReadout
+          shape="field"
+          label="Score mode"
+          value={config?.score_mode}
+        />
         <StatReadout
           shape="field"
           label="Threshold"
@@ -370,7 +386,11 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
           label="LangSmith project"
           value={data.langsmith_project}
         />
-        <StatReadout shape="field" label="Triggered by" value={data.created_by} />
+        <StatReadout
+          shape="field"
+          label="Triggered by"
+          value={data.created_by}
+        />
         <StatReadout shape="field" label="Sandbox" value={data.worker_id} />
         {data.started_at && (
           <StatReadout
@@ -399,13 +419,21 @@ function ReviewerEvalLogs() {
   const logTail = status.data?.log_tail ?? null
   const running = isActive(status.data)
 
+  // State re-runs the listener effect when the viewport mounts; the ref is
+  // what gets scrolled, since React state values must not be mutated.
+  const viewportRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null)
+  const attachViewport = useCallback((node: HTMLDivElement | null) => {
+    viewportRef.current = node
+    setViewport(node)
+  }, [])
   const [follow, setFollow] = useState(true)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (follow && viewport) {
-      viewport.scrollTop = viewport.scrollHeight
+    const node = viewportRef.current
+    if (follow && node) {
+      node.scrollTop = node.scrollHeight
     }
   }, [logTail, follow, viewport])
 
@@ -462,7 +490,7 @@ function ReviewerEvalLogs() {
       {logTail ? (
         <ScrollArea
           overflow="vertical"
-          viewportRef={setViewport}
+          viewportRef={attachViewport}
           viewportClassName="max-h-112"
         >
           <Box

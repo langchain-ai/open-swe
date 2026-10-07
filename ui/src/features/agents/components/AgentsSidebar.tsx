@@ -8,7 +8,11 @@ import {
   SidebarNavItem,
 } from "@langchain/gtm-platform-design-system/patterns/sidebar-nav"
 import { SidebarTreeGroup } from "@langchain/gtm-platform-design-system/patterns/sidebar-tree"
-import { Box, Inline, Stack } from "@langchain/gtm-platform-design-system/ui/box"
+import {
+  Box,
+  Inline,
+  Stack,
+} from "@langchain/gtm-platform-design-system/ui/box"
 import { Button } from "@langchain/gtm-platform-design-system/ui/button"
 import { cn } from "@langchain/gtm-platform-design-system/ui/cn"
 import {
@@ -225,9 +229,7 @@ function AgentFeatures({
           icon={MessageCircle}
           label="Concierge"
           href={
-            conciergeThreadId
-              ? `${chat.home}/${conciergeThreadId}`
-              : undefined
+            conciergeThreadId ? `${chat.home}/${conciergeThreadId}` : undefined
           }
           onSelect={
             !conciergeThreadId && conciergeChannelId
@@ -707,7 +709,9 @@ function AgentsSidebar({
           <DropdownMenuRadioItem value="repo">
             By repository
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="list">In one list</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="list">
+            In one list
+          </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
       </DropdownMenuGroup>
       <DropdownMenuGroup>
@@ -1274,7 +1278,10 @@ function ThreadSourceError({
   return (
     <Inline gap="sm" align="center" className="pl-2 text-meta">
       <Icon icon={AlertTriangle} size="sm" className="text-attention" />
-      <Box render={<span />} className="min-w-0 flex-1 truncate text-ink-subtle">
+      <Box
+        render={<span />}
+        className="min-w-0 flex-1 truncate text-ink-subtle"
+      >
         {label}
       </Box>
       <Button
