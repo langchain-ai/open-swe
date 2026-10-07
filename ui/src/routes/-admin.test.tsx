@@ -17,7 +17,10 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 
-import { SlackIntegrationSection, UsersSection } from "./admin"
+import {
+  SlackIntegrationSection,
+  UsersSection,
+} from "@/features/settings/components/AdminSections"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 
 afterEach(cleanup)
@@ -85,6 +88,7 @@ describe("UsersSection", () => {
       user_id: String(index),
       github_login: `user-${index}`,
       display_name: "",
+      avatar_url: "",
       email: `user-${index}@example.com`,
       slack_user_id: null,
       is_admin: false,
