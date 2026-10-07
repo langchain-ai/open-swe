@@ -17,9 +17,9 @@ use the typed async SDK in ``agent.github.sdk``. This helper centralises:
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Self
 
 import httpx2
 
@@ -31,6 +31,7 @@ GITHUB_HEADERS_VERSION = "2022-11-28"
 
 DEFAULT_TIMEOUT = httpx2.Timeout(30.0, connect=10.0, pool=5.0)
 DEFAULT_MAX_RETRIES = 3
+_PAGE_SIZE = 100
 
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
 _IDEMPOTENT_RETRYABLE_STATUS = frozenset({502, 504})
@@ -190,3 +191,76 @@ async def github_request(
         return response
 
     raise last_exc or httpx2.HTTPError("Max retries exceeded")
+
+
+class GitHubClient:
+    """GitHub's REST and GraphQL APIs over one HTTP client, with ``github_request``'s retries.
+
+    Every call raises ``httpx2.HTTPError`` when GitHub fails or refuses it, and
+    ``ValueError`` when it answers with something other than the expected shape.
+    """
+
+    def __init__(self, http: httpx2.AsyncClient) -> None:
+        self.http = http
+
+    @classmethod
+    @asynccontextmanager
+    async def connect(
+        cls, *, token: str | None = None, timeout: httpx2.Timeout | float | None = None
+    ) -> AsyncIterator[Self]:
+        async with github_client(token=token, timeout=timeout) as http:
+            yield cls(http)
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> httpx2.Response:
+        """``path`` is relative to the REST API root, or an absolute GitHub API URL."""
+        url = path if path.startswith(GITHUB_API_BASE) else f"{GITHUB_API_BASE}/{path}"
+        response = await github_request(self.http, method, url, **kwargs)
+        response.raise_for_status()
+        return response
+
+    async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
+        return (await self.request("GET", path, params=params)).json()
+
+    async def pages(
+        self, path: str, *, key: str | None = None, params: Mapping[str, str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Every item of a paginated list; ``key`` names the list inside each page's object."""
+        items: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            payload = await self.get(
+                path, {**(params or {}), "per_page": str(_PAGE_SIZE), "page": str(page)}
+            )
+            batch = (
+                payload if key is None else payload.get(key) if isinstance(payload, dict) else None
+            )
+            if not isinstance(batch, list):
+                raise ValueError(f"GitHub answered {path} without a list")
+            items.extend(item for item in batch if isinstance(item, dict))
+            if len(batch) < _PAGE_SIZE:
+                return items
+            page += 1
+
+    async def graphql(self, query: str, variables: Mapping[str, object]) -> Mapping[str, Any]:
+        """The response's ``data``; GraphQL errors raise ``GraphQLError``."""
+        payload = (
+            await self.request(
+                "POST", GITHUB_GRAPHQL, json={"query": query, "variables": dict(variables)}
+            )
+        ).json()
+        if not isinstance(payload, Mapping):
+            raise ValueError("GitHub answered GraphQL without an object")
+        if payload.get("errors"):
+            raise GraphQLError(payload["errors"])
+        data = payload.get("data")
+        if not isinstance(data, Mapping):
+            raise ValueError("GitHub answered GraphQL without data")
+        return data
+
+
+class GraphQLError(ValueError):
+    """GitHub answered a GraphQL query with errors."""
+
+    def __init__(self, errors: object) -> None:
+        super().__init__(f"GitHub GraphQL errors: {errors}")
+        self.errors = errors

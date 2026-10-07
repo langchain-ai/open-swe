@@ -23,12 +23,8 @@ from agent.github.ci import (
     list_commit_statuses,
     unreported_required_checks,
 )
-from agent.github.http import GITHUB_API_BASE, github_client, github_request
-from agent.github.pull_request_status import (
-    Mergeability,
-    fetch_mergeability,
-    fetch_unresolved_review_threads,
-)
+from agent.github.http import GitHubClient
+from agent.github.pull_request_status import Mergeability, PullRequestClient
 from agent.github.pull_requests import PullRequestPayload
 
 
@@ -145,34 +141,11 @@ def _latest_reviews_by_user(reviews: list[dict[str, Any]], author: str) -> dict[
     return latest
 
 
-async def _fetch_reviews(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> list[dict[str, Any]] | None:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}/reviews"
-    collected: list[dict[str, Any]] = []
-    page = 1
-    try:
-        while True:
-            response = await github_request(
-                client, "GET", url, params={"per_page": "100", "page": str(page)}
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, list):
-                return None
-            collected.extend(item for item in data if isinstance(item, dict))
-            if len(data) < 100:
-                return collected
-            page += 1
-    except httpx2.HTTPError, ValueError:
-        return None
-
-
 async def review_authors(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> set[str] | None:
     """Lowercased logins of everyone who submitted a review, comment-only ones included."""
-    reviews = await _fetch_reviews(client, owner, repo, number)
+    reviews = await PullRequestClient(GitHubClient(client), owner, repo, number).reviews()
     if reviews is None:
         return None
     authors: set[str] = set()
@@ -188,7 +161,7 @@ async def latest_review_states(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int, author: str
 ) -> dict[str, str] | None:
     """Each non-author reviewer's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state."""
-    reviews = await _fetch_reviews(client, owner, repo, number)
+    reviews = await PullRequestClient(GitHubClient(client), owner, repo, number).reviews()
     if reviews is None:
         return None
     return _latest_reviews_by_user(reviews, author)
@@ -246,10 +219,11 @@ async def assess_readiness(
     )
     if required is None:
         return None
-    async with github_client(token=token) as client:
-        threads = await fetch_unresolved_review_threads(client, owner, repo, pr_number)
-        reviews = await _fetch_reviews(client, owner, repo, pr_number)
-        mergeability = await fetch_mergeability(client, owner, repo, pr_number)
+    async with GitHubClient.connect(token=token) as github:
+        pull_request = PullRequestClient(github, owner, repo, pr_number)
+        threads = await pull_request.unresolved_threads()
+        reviews = await pull_request.reviews()
+        mergeability = await pull_request.mergeability()
     if threads is None or reviews is None:
         return None
     mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
