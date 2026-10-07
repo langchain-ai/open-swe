@@ -153,6 +153,21 @@ async function pickedDm(
   return found!;
 }
 
+/** Picks reach the picked person's DM and the card, never the team channel's thread. */
+async function expectNoPickReplies(
+  request: APIRequestContext,
+  req: ReviewRequest,
+) {
+  const replies = await channelMessages(
+    request,
+    req.slack_channel_id,
+    req.slack_thread_ts || req.slack_message_ts,
+  );
+  expect(
+    replies.filter((m) => m.is_bot && m.text.includes("picked you")),
+  ).toEqual([]);
+}
+
 function cardText(message: SlackMessage): string {
   return (message.blocks ?? [])
     .flatMap((block) => [
@@ -560,7 +575,7 @@ test.describe("Human review in Slack", () => {
     ).toHaveCount(0);
   });
 
-  test("requested from the dashboard; nobody signs up, so the agent picks a reviewer, tags and DMs them, and it merges on their approval", async ({
+  test("requested from the dashboard; nobody signs up, so the agent picks a reviewer, DMs them without posting in the channel, and it merges on their approval", async ({
     page,
     request,
   }) => {
@@ -625,8 +640,8 @@ test.describe("Human review in Slack", () => {
       "Requested by",
     );
 
-    // 2. The auto-assignment timeout passes with nobody signed up: Alice's thread
-    //    for the PR is woken and the agent picks Bob, who has yet to accept.
+    // 2. The auto-assignment timeout passes with nobody signed up: the agent owning
+    //    the card's thread is woken and picks Bob, who has yet to accept.
     await control(request, "/control/human-review-deadline", {
       request_id: posted.id,
       step: "unclaimed",
@@ -638,7 +653,6 @@ test.describe("Human review in Slack", () => {
       })
       .toEqual(["bob"]);
     expect((await latestRequest(request)).reviewers).toEqual([]);
-    expect((await latestRequest(request)).thread_id).not.toBe("");
     await expect
       .poll(
         async () => (await pull(request, seeded.number)).requested_reviewers,
@@ -648,22 +662,9 @@ test.describe("Human review in Slack", () => {
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toContain("waiting for them to accept");
 
-    // Tagged in the card's thread...
-    const replies = await channelMessages(
-      request,
-      REVIEW_CHANNEL,
-      posted.slack_message_ts,
-    );
-    expect(
-      replies.some(
-        (m) =>
-          m.is_bot &&
-          m.text.includes(`<@${BOB.slack}>`) &&
-          m.text.includes("Open SWE picked you"),
-      ),
-    ).toBe(true);
-    // ...and messaged in his DM, which is his concierge conversation.
+    // Messaged in his DM, which is his concierge conversation, and not in the team channel.
     const picked = await pickedDm(request, "D_BOB");
+    await expectNoPickReplies(request, posted);
     expect(picked.thread_ts).toBe(picked.ts);
     await expect
       .poll(async () => {
@@ -718,7 +719,7 @@ test.describe("Human review in Slack", () => {
     expect((await latestRequest(request)).state).toBe("merged");
   });
 
-  test("nobody signs up, so Open SWE picks the code owner without an agent; they accept from their DM and their approval merges it", async ({
+  test("nobody signs up, so the thread's agent picks the code owner Open SWE suggests; they accept from their DM and their approval merges it", async ({
     page,
     request,
   }) => {
@@ -751,7 +752,8 @@ test.describe("Human review in Slack", () => {
     });
     const posted = await latestRequest(request);
 
-    // 2. Nobody signs up: Open SWE picks Bob from CODEOWNERS itself, with no agent run.
+    // 2. Nobody signs up: Open SWE suggests Bob from CODEOWNERS, and the agent owning
+    //    the card's thread picks him with Open SWE's reason.
     await control(request, "/control/human-review-deadline", {
       request_id: posted.id,
       step: "unclaimed",
@@ -759,10 +761,9 @@ test.describe("Human review in Slack", () => {
     });
     await expect
       .poll(async () => (await latestRequest(request)).picks, {
-        timeout: 30_000,
+        timeout: 90_000,
       })
       .toEqual(["bob"]);
-    expect((await latestRequest(request)).thread_id).toBe("");
     expect((await latestRequest(request)).reviewers).toEqual([]);
     await expect
       .poll(
@@ -772,23 +773,34 @@ test.describe("Human review in Slack", () => {
     await expect
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toContain("waiting for them to accept");
-    const replies = await channelMessages(
-      request,
-      REVIEW_CHANNEL,
-      posted.slack_message_ts,
-    );
-    expect(
-      replies.some(
-        (m) =>
-          m.is_bot &&
-          m.text.includes(`<@${BOB.slack}>`) &&
-          m.text.includes("You own 1 of the 1 changed file"),
-      ),
-      "the pick should say why Bob was chosen",
-    ).toBe(true);
-
-    // 3. Bob accepts from his DM.
+    // 3. Bob accepts from his DM, which says why he was chosen.
     const picked = await pickedDm(request, "D_BOB");
+    expect(picked.text, "the pick should say why Bob was chosen").toContain(
+      "You own 1 of the 1 changed file",
+    );
+    await expectNoPickReplies(request, posted);
+    // The DM links back to the review's thread, and a thread Bob starts under it
+    // knows which review it came from.
+    expect(cardText(picked)).toContain("Slack thread");
+    const reply = (await control(request, "/mock/slack/send", {
+      channel: "D_BOB",
+      channel_type: "im",
+      user: BOB.slack,
+      mention_bot: false,
+      thread_ts: picked.ts,
+      text: "Why me? E2E_HELLO",
+    })) as { thread_id: string };
+    await expect
+      .poll(
+        async () =>
+          JSON.stringify(
+            await (
+              await request.get(`/threads/${reply.thread_id}/state`)
+            ).json(),
+          ),
+        { timeout: 60_000 },
+      )
+      .toContain("on behalf of the Slack thread");
     const accept = (picked.blocks ?? [])
       .filter((block) => block.type === "actions")
       .flatMap((block) => block.elements ?? [])

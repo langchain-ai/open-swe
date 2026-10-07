@@ -1448,6 +1448,21 @@ async def gh_request_reviewers(
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 
 
+@app.delete("/fake-gh/repos/{owner}/{repo}/pulls/{number}/requested_reviewers")
+async def gh_remove_requested_reviewers(
+    owner: str, repo: str, number: int, request: Request
+) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    body = await request.json()
+    removed = set(body.get("reviewers") or [])
+    pr["requested_reviewers"] = [
+        login for login in pr["requested_reviewers"] if login not in removed
+    ]
+    return JSONResponse(_gh_pr_json(pr))
+
+
 @app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
 async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
     body = await request.json()

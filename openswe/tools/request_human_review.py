@@ -111,9 +111,9 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if request is None or request.kind == "expedited":
         return _failure("This pull request has no open review request to assign a reviewer to.")
-    thread_id = RunConfig.from_config(get_config()).thread_id
+    thread_id = RunConfig.from_config(get_config()).thread_id or ""
     # Only the thread woken to pick a reviewer may pick one.
-    if not thread_id or request.thread_id != thread_id:
+    if not await request.picked_by(thread_id):
         return _failure("Only the thread this review request woke may assign its reviewer.")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
@@ -122,7 +122,10 @@ async def assign_human_reviewer(pr_url: str, github_login: str, reason: str = ""
         return _failure(result.error)
     return {
         "success": True,
-        "next": "They are tagged on the card and messaged directly. Nothing else to post.",
+        "next": (
+            "They are shown on the review card, requested on GitHub, and messaged directly. "
+            "Nothing else to post."
+        ),
     }
 
 

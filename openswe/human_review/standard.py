@@ -69,6 +69,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
+from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
@@ -537,26 +538,6 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
-async def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> str:
-    """Use deadline wording only when the reviewer's wait has passed."""
-    now = datetime.now(UTC)
-    minutes = await _assignment_minutes(request)
-    wait = timedelta(minutes=minutes) - _SCHEDULER_EARLINESS
-    if not request.has_card and request.ready_since and now - request.ready_since >= wait:
-        return (
-            f"{who}, {label} has been green for {minutes} minutes without an "
-            "approval, so Open SWE picked you."
-        )
-    if (
-        request.has_card
-        and not request.reviewers
-        and request.created_at
-        and now - request.created_at >= wait
-    ):
-        return f"{who}, nobody signed up to review {label}, so Open SWE picked you."
-    return f"{who}, Open SWE picked you to review {label}."
-
-
 async def _github_approvers(request: HumanReviewRequest) -> list[str]:
     """Who has approved the pull request on GitHub; empty when GitHub cannot be read."""
     pr = request.pull_request
@@ -575,7 +556,7 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
 
 
 async def assign(request: HumanReviewRequest, github_login: str, reason: str) -> RequestResult:
-    """The agent's pick for a request nobody signed up for: tag them on the card and DM them."""
+    """The agent's pick for a request nobody signed up for: show them on the card and DM them."""
     if approvers := await _github_approvers(request):
         names = ", ".join(f"@{login}" for login in approvers)
         return _failure(
@@ -592,8 +573,6 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         return _failure(reviewer.message)
     pr = request.pull_request
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
-    who = mention(user)
-    notice = await _pick_notice(request, who, label)
     added = await _add_reviewer(request, reviewer, picked=True)
     if isinstance(added, Outcome):
         return RequestResult(
@@ -609,17 +588,6 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
     accept = actions(accept_button(added))
-    thread_ts = added.slack_thread_ts or added.slack_message_ts
-    thread_text = f"{notice}{why}{deadline}"
-    await post_slack_thread_reply_with_ts(
-        added.slack_channel_id,
-        thread_ts,
-        thread_text,
-        blocks=block_payload([section(thread_text), accept]),
-        unfurl_links=False,
-        agent_thread_id=added.thread_id or None,
-        reply_broadcast=False,
-    )
     permalink = await _permalink(added)
     if user.slack_user_id:
         where = "review card" if added.has_card else "Slack post"
@@ -627,10 +595,18 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         dm_text = (
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
+        origin = added.dm_origin
         await send_dm(
             user.slack_user_id,
             dm_text,
-            blocks=block_payload([section(dm_text), accept, *await origin_footer(added.thread_id)]),
+            blocks=block_payload(
+                [
+                    section(dm_text),
+                    accept,
+                    *await origin_footer(added.thread_id, origin.location if origin else None),
+                ]
+            ),
+            origin=origin,
         )
     await _schedule(added, f"remind:{user.id}", timedelta(0))
     return RequestResult(
@@ -853,12 +829,22 @@ class AutoAssignResult:
     at: datetime | None = None
 
 
-async def start_auto_assign(
-    request: HumanReviewRequest, *, asked: bool = False
-) -> AutoAssignResult:
-    """Pick a reviewer as the unclaimed deadline does, waking an agent when nobody qualifies.
+@dataclass(frozen=True, slots=True)
+class PickTrigger:
+    """Background work that needs a reviewer picked; the Slack thread's agent decides."""
 
-    ``asked`` is someone requesting it now rather than the deadline passing.
+    kind: Literal["unclaimed", "expired"]
+    logins: tuple[str, ...] = ()
+
+
+async def start_auto_assign(
+    request: HumanReviewRequest, *, asked: bool = False, trigger: PickTrigger | None = None
+) -> AutoAssignResult:
+    """Pick a reviewer, waking an agent when nobody qualifies.
+
+    ``asked`` is someone requesting it now rather than the deadline passing. A
+    ``trigger`` hands the pick to the agent owning the request's Slack thread,
+    with Open SWE's choice as a suggestion.
     """
     if asked:
         async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -867,7 +853,7 @@ async def start_auto_assign(
     result = (
         AutoAssignResult("disabled")
         if not asked and skip_on_preview("start_auto_assign")
-        else await _auto_assign(request, asked=asked)
+        else await _auto_assign(request, asked=asked, trigger=trigger)
     )
     logger.info(
         "Auto-assign finished",
@@ -882,7 +868,9 @@ async def start_auto_assign(
     return result
 
 
-async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssignResult:
+async def _auto_assign(
+    request: HumanReviewRequest, *, asked: bool, trigger: PickTrigger | None
+) -> AutoAssignResult:
     request = await HumanReviewRequest.get(request.id) or request
     if request.reviewers or request.picks:
         return AutoAssignResult("claimed")
@@ -894,6 +882,9 @@ async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssig
         if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):
             return AutoAssignResult("waiting", choice.login, choice.until)
         return AutoAssignResult("failed")
+    if trigger is not None:
+        woken = await _wake_picker(request, asked=asked, trigger=trigger, suggestion=choice)
+        return AutoAssignResult("woken" if woken else "failed")
     if isinstance(choice, Pick):
         result = await assign(request, choice.login, choice.reason)
         if result.success:
@@ -908,10 +899,17 @@ async def _auto_assign(request: HumanReviewRequest, *, asked: bool) -> AutoAssig
                 "error": result.error,
             },
         )
-    return AutoAssignResult("woken" if await _wake_picker(request, asked=asked) else "failed")
+    woken = await _wake_picker(request, asked=asked, trigger=None, suggestion=None)
+    return AutoAssignResult("woken" if woken else "failed")
 
 
-async def _wake_picker(request: HumanReviewRequest, *, asked: bool) -> bool:
+async def _wake_picker(
+    request: HumanReviewRequest,
+    *,
+    asked: bool,
+    trigger: PickTrigger | None,
+    suggestion: Pick | None,
+) -> bool:
     pr = request.pull_request
     text = prompt(
         "runs/human-review-unclaimed",
@@ -920,10 +918,27 @@ async def _wake_picker(request: HumanReviewRequest, *, asked: bool) -> bool:
         author=pr.author,
         posted=not request.has_card,
         asked=asked,
+        trigger=trigger,
+        suggestion=suggestion,
     )
+    requester = request.requested_by
+    thread_ts = request.slack_thread_ts or request.slack_message_ts
+    if requester is not None and requester.slack_user_id and request.slack_channel_id and thread_ts:
+        try:
+            await wake_thread_owner(
+                request.slack_channel_id, thread_ts, requester.slack_user_id, text
+            )
+        except Exception:
+            logger.warning(
+                "Could not wake the Slack thread's agent to pick a reviewer; retrying",
+                extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
+                exc_info=True,
+            )
+            await _schedule(request, "unclaimed", _DEADLINE_RETRY)
+            return False
+        return True
     if request.thread_id:
         return await notify_agent(request, text)
-    requester = request.requested_by
     login = requester.login_for("github") if requester is not None else ""
     if not login:
         logger.info(
@@ -1040,6 +1055,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
+            origin=request.dm_origin,
         )
         if sent:
             row.run_config = {**row.run_config, marker: True}
@@ -1115,7 +1131,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         request,
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
-        f"{minutes} minutes, so Open SWE asked someone else.",
+        f"{minutes} minutes, so Open SWE released you from it.",
         expired=True,
     )
     current = await HumanReviewRequest.get(request.id)
@@ -1124,16 +1140,10 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     if isinstance(choice, Wait):
         await _schedule(current, "unclaimed", choice.until - datetime.now(UTC))
         return "rotating"
-    result = await assign(current, choice.login, choice.reason)
-    if result.claimed:
-        return "claimed"
-    if not result.success:
-        logger.warning(
-            "Open SWE's next reviewer pick was refused",
-            extra={"request_id": str(request.id), "github_login": choice.login},
-        )
-        return "rotation_refused"
-    return "rotated"
+    trigger = PickTrigger("expired", tuple(p.github_login for p in idle))
+    if not await _wake_picker(current, asked=False, trigger=trigger, suggestion=choice):
+        return "rotation_failed"
+    return "rotating"
 
 
 async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | None:
@@ -1211,7 +1221,9 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
                 request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
             )
             return {"status": "approved"}
-        return {"status": (await start_auto_assign(request)).status}
+        return {
+            "status": (await start_auto_assign(request, trigger=PickTrigger("unclaimed"))).status
+        }
     if step == "auto_merge":
         await settle(request)
         return {"status": "settled"}

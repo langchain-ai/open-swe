@@ -14,6 +14,7 @@ from openswe.prompts import prompt
 from openswe.slack.dm import note_for_concierge
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.slack.responses import WebhookResponse, accepted, ignored
+from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -26,18 +27,20 @@ async def _process(
 ) -> None:
     async def handle(request: HumanReviewRequest) -> Outcome:
         if action == "dismiss":
-            return await dismiss_request(request, slack_user_id)
-        outcome = await claim(request, await User.for_person({"id": f"slack:{slack_user_id}"}))
+            outcome = await dismiss_request(request, slack_user_id)
+        else:
+            user = await User.for_person({"id": f"slack:{slack_user_id}"})
+            outcome = await claim(request, user)
+        note = prompt(
+            "slack/review-request-clicked",
+            action=action,
+            pr_url=request.pull_request.url,
+            outcome=outcome.message,
+        )
+        origin = request.dm_origin
+        await note_for_thread_owner(*(origin.location if origin else (channel_id, thread_ts)), note)
         if channel_id.startswith("D"):
-            await note_for_concierge(
-                slack_user_id,
-                channel_id,
-                prompt(
-                    "slack/concierge-review-pick-clicked",
-                    pr_url=request.pull_request.url,
-                    outcome=outcome.message,
-                ),
-            )
+            await note_for_concierge(slack_user_id, channel_id, note)
         return outcome
 
     await answer_click(
