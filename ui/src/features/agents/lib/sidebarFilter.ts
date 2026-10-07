@@ -13,6 +13,7 @@ export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
 }
 
 interface FilterableThread {
+  id?: string
   source?: AgentSource
   threadCategory?: string
 }
@@ -31,9 +32,11 @@ function isAutomationThread(thread: FilterableThread): boolean {
 /** Apply the active filter dimensions to a list of threads. */
 export function filterThreads<T extends FilterableThread>(
   threads: Array<T>,
-  filters: SidebarFilters
+  filters: SidebarFilters,
+  activeThreadId?: string
 ): Array<T> {
   return threads.filter((thread) => {
+    if (activeThreadId && thread.id === activeThreadId) return true
     if (
       !filters.includeAutomations &&
       isAutomationThread(thread) &&

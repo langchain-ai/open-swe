@@ -1,4 +1,5 @@
 import {
+  skipToken,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -625,28 +626,28 @@ export function useSidebarRepos({
 export function useSidebarActiveThread({
   activeThreadId,
   loadedThreads,
-  includeResolved = false,
   enabled = true,
 }: {
   activeThreadId?: string
   loadedThreads: Array<AgentThread>
-  includeResolved?: boolean
   enabled?: boolean
 }): AgentThread | undefined {
-  const loaded = loadedThreads.some((thread) => thread.id === activeThreadId)
+  const detail = useQuery<AgentThread>({
+    queryKey: agentThreadKeys.detail(activeThreadId ?? ""),
+    queryFn: skipToken,
+  }).data
+  const loaded = loadedThreads.find((thread) => thread.id === activeThreadId)
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
-    enabled: enabled && Boolean(activeThreadId) && !loaded,
+    enabled: enabled && Boolean(activeThreadId) && !detail && !loaded,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
       current.state.data?.status === "running" ? 2000 : false,
     retry: false,
   })
-  return !loaded && (!query.data?.resolved || includeResolved)
-    ? query.data
-    : undefined
+  return detail ?? loaded ?? query.data
 }
 
 function useSidebarThreadPages(
