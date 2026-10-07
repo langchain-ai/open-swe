@@ -347,7 +347,7 @@ async def create_durable_run(
         from openswe.slack.thinking import sync_slack_background_status
 
         await sync_slack_background_status(
-            client, thread_id, resume=True, source_context=source_context
+            client, thread_id, resume=True, run_id=run["run_id"], source_context=source_context
         )
     logger.info(
         "Dispatched %s run on thread %s (source=%s, run=%s)",
