@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.bridge.constants import HANDOFF_FROM_KEY
 from agent.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from agent.dashboard.admin import is_admin
 from agent.dashboard.agent_overrides import normalize_profile_overrides
@@ -49,7 +50,6 @@ from agent.input_messages import (
 )
 from agent.invocation import new_invocation_id, with_invocation_id
 from agent.prompts import prompt
-from agent.sandboxes.handoff import HANDOFF_FROM_KEY
 from agent.slack.client import (
     lookup_slack_thread_run_mapping,
     update_slack_trace_reply_for_web_handoff,

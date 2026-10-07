@@ -14,13 +14,11 @@ from collections.abc import Mapping
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langgraph_sdk import get_client
 
+from agent.bridge.constants import HANDOFF_FROM_KEY
 from agent.sandboxes.connect import connect_sandbox
 from agent.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
 
 logger = logging.getLogger(__name__)
-
-HANDOFF_FROM_KEY = "sandbox_handoff_from"
-"""Thread metadata naming the sandbox whose checkout the next run carries over."""
 
 _TRANSFER_TIMEOUT_SECONDS = 600
 _BRANCH_PREFIX = "branch="

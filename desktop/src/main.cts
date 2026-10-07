@@ -873,17 +873,27 @@ function configureDesktopIpc() {
     }
   });
   /**
-   * Move a cloud thread onto This Mac: a fresh worktree of the project whose
-   * origin is the thread's repository, and the bridge its next run hands the
-   * cloud checkout over through.
+   * Move a cloud thread onto This Mac: the worktree it had here, or a fresh one
+   * of the project whose origin is the thread's repository, and the bridge its
+   * next run hands the cloud checkout over through.
    */
   ipcMain.handle("desktop:take-over-thread", async (event, input) => {
     requireTrustedDesktopIpc(event);
+    const existing = localThreadStore.get(input?.threadId);
+    if (existing) {
+      // Its worktree and bridge may be the source of a handoff still pending.
+      // A thread that ran in the user's own checkout moves to a worktree, so
+      // the handoff never overwrites that checkout.
+      const thread = existing.worktreePath
+        ? await ensureThreadWorktree(existing)
+        : await recordLocalCheckpoint(
+            await createThreadWorktree(existing, null),
+          );
+      return localBridges.ensure(thread.id);
+    }
     const cwd = await projectForRepo(input?.repo);
     if (!cwd)
       throw new Error(`Add a checkout of ${input?.repo} to Open SWE first`);
-    const stale = localThreadStore.get(input?.threadId);
-    if (stale) await discardLocalThread(stale);
     let thread = localThreadStore.create({ id: input?.threadId, cwd });
     try {
       thread = await createThreadWorktree(thread, null);
