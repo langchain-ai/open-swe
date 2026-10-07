@@ -73,6 +73,7 @@ def user_mcp_source(login: str) -> MCPSource:
             raise RuntimeError("Personal MCP tools require the private thread owner")
 
     return MCPSource(
+        scope="user",
         namespace=(*USER_MCPS_NAMESPACE, login),
         list_connections=partial(list_user_mcp_records, login),
         get_connection=partial(get_user_mcp, login),

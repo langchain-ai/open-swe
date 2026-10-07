@@ -118,6 +118,19 @@ class MCPConnectionUpdate(BaseModel):
         return list(dict.fromkeys(name.strip() for name in value))
 
 
+type MCPScope = Literal["instance", "workspace", "user"]
+
+
+class MCPToolProvenance(BaseModel):
+    """Credential-free provenance from the caller's authorized connection sources."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    connection_name: str
+    scope: MCPScope
+    overridden_scopes: list[MCPScope]
+
+
 class MCPToolDescription(BaseModel):
     name: str
     description: str = ""
