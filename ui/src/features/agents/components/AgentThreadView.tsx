@@ -136,10 +136,11 @@ export function AgentThreadView({
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
-  // A "This Mac" thread can only run where its checkout is: the Mac whose app
-  // started it. Everywhere else it is read-only.
+  // A "This Mac" thread runs in its checkout on the Mac whose app started it,
+  // so elsewhere it is read-only while that Mac is not serving it.
   const localThread = useLocalThread(thread.id)
-  const runsElsewhere = runsOnAMac(thread) && !localThread
+  const runsElsewhere =
+    runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
   const canPost =
@@ -678,7 +679,7 @@ export function AgentThreadView({
                 <span>
                   {bridgeError
                     ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                    : "This thread runs in a checkout on another Mac. Open it in the Open SWE app there to continue it."}
+                    : "This thread runs in a checkout on another Mac, which is offline. Open it in the Open SWE app there to continue it."}
                 </span>
               </AlertDescription>
             </Alert>
@@ -890,7 +891,7 @@ export function AgentThreadView({
               <AgentPromptBar
                 placeholder={
                   runsElsewhere
-                    ? "This thread runs on another Mac"
+                    ? "This thread's Mac is offline"
                     : botThread
                       ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
                       : canPost

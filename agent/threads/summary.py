@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
+from agent.bridge.store import BridgeStore
 from agent.dashboard.admin import is_admin
 from agent.github.pull_requests import PullRequest
 from agent.review.findings import (
@@ -400,6 +401,17 @@ async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
         pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
 
 
+async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bool:
+    """Whether a "This Mac" thread's Mac is serving its checkout, so it can run from anywhere."""
+    if metadata.get("sandbox_bridge_client") != "desktop":
+        return False
+    try:
+        return await BridgeStore.is_connected(sandbox_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read the thread's sandbox bridge", exc_info=True)
+        return False
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -507,6 +519,7 @@ async def _thread_summary(
             if metadata.get("sandbox_kind") == "bridge"
             else None
         ),
+        "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id),
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []
