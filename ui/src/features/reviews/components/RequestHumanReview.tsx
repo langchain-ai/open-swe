@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
@@ -23,12 +23,23 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     staleTime: 60_000,
   })
   const blocked = refusal(pr)
+  const queryClient = useQueryClient()
+  const queryKey = ["humanReviewStatus", pr.repo, pr.number]
+  const status = useQuery({
+    queryKey,
+    queryFn: () => api.humanReviewStatus(pr.repo, pr.number),
+    enabled: pr.reviewDecision !== "approved",
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+  })
   const requestReview = useMutation({
     mutationFn: () => api.requestHumanReview(pr),
     meta: {
       errorTitle: `Could not request a review of ${pullRequestKey(pr)}`,
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
+      await queryClient.cancelQueries({ queryKey })
+      queryClient.setQueryData(queryKey, { active: true })
       toast.success(
         result.reused
           ? `${pullRequestKey(pr)} already has a review request in Slack`
@@ -52,8 +63,17 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   })
   if (pr.reviewDecision === "approved" || !availability.data?.available)
     return null
+  if (status.isPending) return null
+  if (!status.data)
+    return (
+      <PullRequestActionButton
+        label="Retry review status"
+        disabled={status.isFetching}
+        onClick={() => void status.refetch()}
+      />
+    )
   const label =
-    requestReview.isPending || requestReview.isSuccess
+    requestReview.isPending || status.data.active
       ? "Review requested"
       : requestReview.isError
         ? "Retry review request"
@@ -63,7 +83,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       <PullRequestActionButton
         label={label}
         disabled={
-          blocked !== null || requestReview.isPending || requestReview.isSuccess
+          blocked !== null || requestReview.isPending || status.data.active
         }
         onClick={() => requestReview.mutate()}
       />

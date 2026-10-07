@@ -35,6 +35,10 @@ class HumanReviewDismissResult(BaseModel):
     request_id: str
 
 
+class HumanReviewStatus(BaseModel):
+    active: bool
+
+
 def _pr_ref(owner: str, repo: str, number: int) -> GitHubPrRef:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
@@ -44,6 +48,19 @@ def _pr_ref(owner: str, repo: str, number: int) -> GitHubPrRef:
         number=number,
         url=f"https://github.com/{owner}/{repo}/pull/{number}",
     )
+
+
+@router.get("/repos/{owner}/{repo}/pulls/{number}/human-review/status")
+async def api_human_review_status(
+    owner: str,
+    repo: str,
+    number: int,
+    session: dict[str, object] = SESSION_DEP,
+) -> HumanReviewStatus:
+    pr_ref = _pr_ref(owner, repo, number)
+    await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
+    request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    return HumanReviewStatus(active=request is not None)
 
 
 class HumanReviewAvailability(BaseModel):
