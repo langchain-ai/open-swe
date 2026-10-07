@@ -16,9 +16,11 @@ Enrichments allowlist actor and execution metadata, HTTP method, route **templat
 
 Request/response bodies, tool arguments/results, query strings, headers, credentials, and exception text are never stored. No IP address is inferred from untrusted forwarded headers. Production and preview installations retain their own audit history; a workspace override additionally identifies its workspace.
 
-Unauthenticated failures, failures before an actor is bound (including CSRF), GET/read access, login/logout, webhook-driven actions, arbitrary shell commands, and tools not listed above are not covered. There is no historical backfill or dashboard viewer in this first pass.
+Unauthenticated failures, failures before an actor is bound (including CSRF), GET/read access, login/logout, webhook-driven actions, arbitrary shell commands, and tools not listed above are not covered. There is no historical backfill.
 
 ## Querying
+
+Installation administrators can browse **Administration → Audit logs** (`/admin/audit-logs`) in the dashboard. The viewer defaults to the last 24 hours, with local-time date inputs and exact-match operation, user ID, API key ID, and workspace ID filters. Apply filters to start a new query; load more to page through the same fixed range. Event details include actor and execution metadata and recorded settings changes, preserving redacted and unset values.
 
 Installation administrators can call `GET /dashboard/api/audit-logs` using their dashboard session:
 
