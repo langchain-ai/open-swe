@@ -1,9 +1,12 @@
-import { Link } from "@tanstack/react-router"
+import { Link, Navigate } from "@tanstack/react-router"
 import { ArrowLeftIcon, CaretRightIcon } from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import { AppSidebar } from "@/components/AppSidebar"
+import { Skeleton } from "@/components/ui/skeleton"
+import { RequireLogin } from "@/lib/auth-redirect"
+import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 interface AppShellProps {
@@ -61,6 +64,34 @@ export function AppShell({
         </div>
       </main>
     </div>
+  )
+}
+
+interface SettingsPageProps extends Omit<AppShellProps, "user" | "children"> {
+  adminOnly?: boolean
+  children: ReactNode | ((user: SessionUser) => ReactNode)
+}
+
+/** An AppShell page that waits for the session and requires sign-in (and admin, when asked). */
+export function SettingsPage({
+  adminOnly,
+  children,
+  ...props
+}: SettingsPageProps) {
+  const session = useSession()
+  if (session.isLoading) {
+    return (
+      <main className="p-6">
+        <Skeleton className="h-40 w-full" />
+      </main>
+    )
+  }
+  if (!session.data) return <RequireLogin />
+  if (adminOnly && !session.data.is_admin) return <Navigate to="/my-settings" />
+  return (
+    <AppShell user={session.data} {...props}>
+      {typeof children === "function" ? children(session.data) : children}
+    </AppShell>
   )
 }
 

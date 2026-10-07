@@ -1,10 +1,15 @@
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
 from agent import completion
+from agent.message_queue import QueuedMessage
 from agent.slack import thinking as slack_thinking
+from agent.tasks import events, store
+from agent.threads import runs
+from tests.conftest import FakeStore
 
 
 class _FakeThreads:
@@ -99,30 +104,75 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("status", "metadata", "picks_up"),
+    ("status", "metadata", "worker", "cancelled", "picks_up"),
     [
-        ("success", {}, True),
-        # A run that failed before its first model call left the store as it
-        # was; restarting it would only fail again, forever.
-        ("error", {}, False),
-        ("success", {"kind": "follow_up_pickup"}, False),
+        ("success", {}, False, False, True),
+        ("error", {}, False, False, False),
+        ("success", {"kind": "follow_up_pickup"}, False, False, False),
+        ("success", {}, True, False, True),
+        ("success", {}, True, True, False),
     ],
 )
 async def test_leftover_follow_ups_get_one_pickup_run(
-    monkeypatch: pytest.MonkeyPatch, status: str, metadata: dict[str, Any], picks_up: bool
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store: FakeStore,
+    registry_db: None,
+    status: str,
+    metadata: dict[str, object],
+    worker: bool,
+    cancelled: bool,
+    picks_up: bool,
 ) -> None:
-    monkeypatch.setattr(
-        completion, "langgraph_client", lambda: _FakeClient({"source": "dashboard"})
+    pending = {"text": "Check logout too", "source": "dashboard"}
+    await QueuedMessage.put("t1", pending)
+    client = SimpleNamespace(
+        threads=_FakeThreads({"source": "dashboard", "owner_login": "owner"}),
+        runs=SimpleNamespace(list=AsyncMock(return_value=[])),
+        store=fake_store,
     )
+    dispatched: list[dict[str, object]] = []
+
+    async def dispatch(
+        thread_id: str, content: object, configurable: dict[str, object], **kwargs: object
+    ) -> dict[str, str]:
+        dispatched.append(
+            {
+                "thread_id": thread_id,
+                "input": kwargs["input"],
+                "metadata": kwargs["metadata"],
+                "strategy": kwargs["multitask_strategy"],
+            }
+        )
+        return {"run_id": "pickup-run"}
+
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     monkeypatch.setattr(completion, "schedule_answer_feedback", AsyncMock())
-    pickup = AsyncMock()
-    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", pickup)
+    monkeypatch.setattr(events, "worker_finished", AsyncMock(return_value=worker))
+    monkeypatch.setattr(
+        store.TaskDelegation, "get", AsyncMock(return_value=SimpleNamespace(cancelled=cancelled))
+    )
+    monkeypatch.setattr(
+        runs, "_build_dashboard_configurable", AsyncMock(return_value={"github_login": "owner"})
+    )
+    monkeypatch.setattr(runs, "dispatch_agent_run", dispatch)
 
     await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": status, "metadata": metadata}
     )
 
-    assert pickup.await_count == (1 if picks_up else 0)
+    assert dispatched == (
+        [
+            {
+                "thread_id": "t1",
+                "input": {"messages": []},
+                "metadata": {"kind": completion.FOLLOW_UP_PICKUP_KIND},
+                "strategy": "reject",
+            }
+        ]
+        if picks_up
+        else []
+    )
+    assert [message.content for message in await QueuedMessage.for_thread("t1")] == [pending]
 
 
 @pytest.mark.asyncio

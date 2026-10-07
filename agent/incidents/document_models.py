@@ -2,9 +2,11 @@
 
 from pydantic import BaseModel
 
+from agent.incidents.models import IncidentId
+
 
 class IncidentHistory(BaseModel):
-    id: str
+    id: IncidentId
     workspace_id: str
     channel_id: str
     channel_name: str = ""

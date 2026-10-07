@@ -57,22 +57,33 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   openLocalTrace: (threadId) =>
     ipcRenderer.invoke("desktop:open-local-trace", threadId),
   signInLocalOpenAI: () => ipcRenderer.invoke("desktop:local-openai-sign-in"),
-  startLocalThread: (input) =>
-    ipcRenderer.invoke("desktop:start-local-thread", input),
-  getLocalPrompt: (threadId) =>
-    ipcRenderer.invoke("desktop:get-local-prompt", threadId),
-  clearLocalPrompt: (threadId) =>
-    ipcRenderer.invoke("desktop:clear-local-prompt", threadId),
+  getLegacyLocalPrompt: (threadId) =>
+    ipcRenderer.invoke("desktop:get-legacy-local-prompt", threadId),
+  clearLegacyLocalPrompt: (threadId) =>
+    ipcRenderer.invoke("desktop:clear-legacy-local-prompt", threadId),
+  getLegacyLocalThread: (threadId) =>
+    ipcRenderer.invoke("desktop:get-legacy-local-thread", threadId),
+  listLegacyLocalThreads: () =>
+    ipcRenderer.invoke("desktop:list-legacy-local-threads"),
+  legacyLocalActivity: () =>
+    ipcRenderer.invoke("desktop:legacy-local-activity"),
+  updateLegacyLocalThread: (input) =>
+    ipcRenderer.invoke("desktop:update-legacy-local-thread", input),
+  deleteLegacyLocalThread: (threadId) =>
+    ipcRenderer.invoke("desktop:delete-legacy-local-thread", threadId),
+  prepareLocalThread: (input) =>
+    ipcRenderer.invoke("desktop:prepare-local-thread", { ...input }),
+  takeOverThread: (input) =>
+    ipcRenderer.invoke("desktop:take-over-thread", { ...input }),
+  ensureLocalBridge: (threadId) =>
+    ipcRenderer.invoke("desktop:ensure-local-bridge", threadId),
   getLocalThread: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-thread", threadId),
   setAppearance: (appearance) =>
     ipcRenderer.invoke("desktop:set-appearance", appearance),
   listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
-  localActivity: () => ipcRenderer.invoke("desktop:local-activity"),
-  updateLocalThread: (input) =>
-    ipcRenderer.invoke("desktop:update-local-thread", input),
-  deleteLocalThread: (threadId) =>
-    ipcRenderer.invoke("desktop:delete-local-thread", threadId),
+  discardLocalThread: (threadId) =>
+    ipcRenderer.invoke("desktop:discard-local-thread", threadId),
   getLocalDiff: (threadId) =>
     ipcRenderer.invoke("desktop:get-local-diff", threadId),
   getLocalPrDiff: (threadId) =>

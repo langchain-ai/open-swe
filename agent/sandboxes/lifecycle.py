@@ -6,7 +6,7 @@ recreate rebind. The registry itself lives in ``state``.
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -19,6 +19,7 @@ from agent.bridge.store import Bridge
 from agent.config import ENV
 from agent.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
 from agent.github.sandbox_access import SandboxGitHubAccess, workspace_token
+from agent.sandboxes.handoff import complete_handoff
 from agent.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
 from agent.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from agent.sandboxes.state import (
@@ -34,6 +35,8 @@ from agent.sandboxes.state import (
     unwrap_sandbox_backend,
 )
 from agent.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
+from agent.tasks.schemas import ThreadMetadata
+from agent.tasks.store import TaskMembership
 from agent.users import User
 from agent.utils.authorship import OPEN_SWE_BOT_EMAIL, OPEN_SWE_BOT_NAME
 from agent.utils.startup_trace import aphase
@@ -42,8 +45,6 @@ from agent.workspaces.store import (
     SandboxResources,
     Workspace,
     load_workspace,
-    sandbox_update_timeout,
-    script_command,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,8 @@ class SandboxCreateConfig:
         workspace, preserve_memory = await asyncio.gather(
             workspace_for_source(), cls._owner_preserves_memory(owner_login)
         )
+        if workspace is not None and workspace.inherit_default_sandbox:
+            workspace = await load_workspace(None)
         create_params = workspace.sandbox_create_params() if workspace is not None else {}
         if preserve_memory:
             create_params = {**create_params, "preserve_memory_on_stop": True}
@@ -116,52 +119,6 @@ class SandboxCreateConfig:
     def proxy_config(self) -> dict[str, Any] | None:
         return get_sandbox_proxy_config(self.create_params)
 
-    async def run_update_script(
-        self, sandbox_backend: SandboxBackendProtocol, thread_id: str | None
-    ) -> None:
-        """Freshen this box's checkouts when the snapshot it booted from has aged out.
-
-        Awaited before the first model call, on purpose: refreshing only the
-        snapshot in the background never helps the run that triggered it, and
-        with sparse traffic every run is a triggering run — so the first run
-        after a quiet spell would otherwise work against a checkout as old as
-        the last nightly rebuild. Bounded by a short timeout, and never fatal:
-        the image is already usable, so a failed pull costs freshness, not the
-        run.
-        """
-        workspace = self.workspace
-        if workspace is None or not is_snapshot_stale(workspace):
-            return
-        try:
-            async with aphase(thread_id, "sandbox.update_script"):
-                result = await sandbox_backend.aexecute(
-                    script_command(workspace.update_script, "update", workspace.repos),
-                    timeout=sandbox_update_timeout(),
-                )
-        except Exception:
-            # "Never fatal" has to cover the execute itself: it can raise past
-            # its own retries when a freshly booted box is briefly unreachable,
-            # and losing the whole sandbox over a skipped `git pull` is worse
-            # than starting from the snapshot as captured.
-            logger.warning(
-                "Workspace update script could not run in sandbox %s",
-                sandbox_backend.id,
-                exc_info=True,
-                extra={"workspace": workspace.slug},
-            )
-            return
-        if result.exit_code != 0:
-            logger.warning(
-                "Workspace update script exited %s in sandbox %s",
-                result.exit_code,
-                sandbox_backend.id,
-                extra={
-                    "workspace": workspace.slug,
-                    "exit_code": result.exit_code,
-                    "log_tail": (result.output or "")[-2000:],
-                },
-            )
-
     async def boot(self) -> SandboxBackendProtocol:
         if self.create_params:
             return await create_sandbox(
@@ -179,6 +136,7 @@ async def _create_sandbox_with_proxy(
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
     owner_login: str | None = None,
+    record_stale_boot: bool = False,
 ) -> SandboxBackendProtocol:
     """Create a new sandbox with GitHub proxy auth configured."""
     async with aphase(thread_id, "sandbox.resolve_snapshot"):
@@ -210,11 +168,23 @@ async def _create_sandbox_with_proxy(
                 base_proxy_config=proxy_config,
             )
 
-    # This run gets fresh checkouts now; the background capture makes the *next*
-    # creation skip the step entirely.
-    await config.run_update_script(sandbox_backend, thread_id)
+    if (
+        record_stale_boot
+        and thread_id
+        and config.workspace is not None
+        and is_snapshot_stale(config.workspace)
+    ):
+        _STALE_BOOTS[thread_id] = config.workspace
     _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
     return sandbox_backend
+
+
+_STALE_BOOTS: dict[str, Workspace] = {}
+
+
+def take_stale_boot(thread_id: str) -> Workspace | None:
+    """The workspace whose stale snapshot this thread's new sandbox booted from, once."""
+    return _STALE_BOOTS.pop(thread_id, None)
 
 
 def _fire_and_forget(coro: Coroutine[Any, Any, Any], what: str) -> None:
@@ -379,12 +349,90 @@ async def _connect_existing_sandbox(
     return refreshed
 
 
+async def _attach_task_worker_sandbox(
+    thread_id: str,
+    metadata: Mapping[str, object],
+    *,
+    github_proxy_repositories: Sequence[str] | None,
+    workspace_slug: str | None,
+) -> SandboxBackendProtocol:
+    worker = ThreadMetadata.model_validate(metadata)
+    context = await TaskMembership.context_for_thread(thread_id)
+    host_id = worker.sandbox_host_thread_id
+    if (
+        context is None
+        or not host_id
+        or context.membership.role != "worker"
+        or context.task.id != worker.task_id
+        or host_id != context.task.coordinator_thread_id
+        or host_id == thread_id
+    ):
+        raise PermissionError("The shared sandbox host does not match this worker's task")
+    host_context = await TaskMembership.context_for_thread(host_id)
+    if (
+        host_context is None
+        or host_context.task.id != context.task.id
+        or host_context.membership.role != "coordinator"
+    ):
+        raise PermissionError("The shared sandbox host is not this task's coordinator")
+    host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
+    owner = await worker.owner()
+    host_owner = await host.owner()
+    if (
+        host.sandbox_host_thread_id
+        or host.task_id
+        or owner.id != host_owner.id
+        or worker.workspace != context.task.workspace.slug
+        or (host.workspace or host.environment or "default") != context.task.workspace.slug
+        or (workspace_slug is not None and workspace_slug != context.task.workspace.slug)
+        or worker.admin_thread != host.admin_thread
+        or worker.visibility != host.visibility
+    ):
+        raise PermissionError("The shared sandbox host has different ownership or permissions")
+    host_repositories = host.github_token_repositories
+    worker_repositories = narrowed_repositories(
+        github_proxy_repositories, worker.github_token_repositories
+    )
+    if worker_repositories is not None and (
+        host_repositories is None
+        or not {repo.lower() for repo in host_repositories}.issubset(
+            repo.lower() for repo in worker_repositories
+        )
+    ):
+        raise PermissionError("The shared sandbox grants repositories outside this worker's scope")
+    for target_id, binding, person in ((thread_id, worker, owner), (host_id, host, host_owner)):
+        if binding.owner_user_id is None:
+            await client.threads.update(target_id, metadata={"owner_user_id": str(person.id)})
+    backend = await ensure_sandbox_for_thread(
+        host_id, workspace_slug=context.task.workspace.slug, require_existing=True
+    )
+    current_host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
+    if current_host.sandbox_id != backend.id:
+        raise RuntimeError("The coordinator's sandbox changed while the worker was attaching")
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={
+            "sandbox_id": backend.id,
+            SANDBOX_PROXY_CONFIG_METADATA_KEY: current_host.sandbox_base_proxy_config,
+        },
+    )
+    published = set_sandbox_backend(thread_id, unwrap_sandbox_backend(backend))
+    if worker.running_background_tasks:
+        from agent.background_tasks import reconcile_background_tasks
+
+        # Ensuring the host's sandbox reconciles only its own commands; reconcile this worker's.
+        _fire_and_forget(reconcile_background_tasks(thread_id), "background task reconcile")
+    return published
+
+
 async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
     github_proxy_repositories: Sequence[str] | None = None,
     workspace_slug: str | None = None,
     allow_replacement: bool = False,
+    record_stale_boot: bool = False,
+    require_existing: bool = False,
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
@@ -395,6 +443,8 @@ async def ensure_sandbox_for_thread(
     1. Metadata has an id -> reuse this process's connection to that sandbox if
        it has one, else reconnect; then refresh proxy.
     2. No sandbox at all -> create one and persist the id.
+    3. A task worker (metadata has ``task_id``) -> attach to its coordinator's
+       existing sandbox; it never creates or replaces one.
 
     A sandbox that exists but can't be reached raises ``SandboxUnreachableError``
     instead of being replaced, because a replacement is empty and swapping one in
@@ -407,6 +457,11 @@ async def ensure_sandbox_for_thread(
     for callers whose sandbox holds nothing but a re-derivable checkout — the
     read-only reviewer, which re-preps the repo every run.
 
+    ``record_stale_boot`` is for callers that collect ``take_stale_boot``.
+
+    ``require_existing`` raises ``SandboxUnreachableError`` instead of creating or
+    replacing a sandbox.
+
     For LangSmith sandboxes, also refreshes the GitHub App proxy auth. Newly
     created sandboxes boot from the workspace's snapshot when one is ready,
     otherwise LangSmith's own base snapshot.
@@ -416,17 +471,29 @@ async def ensure_sandbox_for_thread(
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
+    if sandbox_metadata.get("task_id") is not None:
+        return await _attach_task_worker_sandbox(
+            thread_id,
+            sandbox_metadata,
+            github_proxy_repositories=github_proxy_repositories,
+            workspace_slug=workspace_slug,
+        )
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
     sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
+    if require_existing and sandbox_id is None:
+        raise SandboxUnreachableError(
+            thread_id, None, "The coordinator must attach its sandbox first"
+        )
     bridge_id = Bridge.bridge_id_of(sandbox_id)
     if bridge_id is not None:
         # The sandbox is the user's own machine: there is nothing to boot, no
         # managed proxy to reconfigure, and no global git config of theirs to
         # rewrite. An unreachable bridge fails the run, as any bound sandbox does.
         async with aphase(thread_id, "sandbox.bridge_connect", sandbox_id=sandbox_id):
-            return set_sandbox_backend(
-                thread_id, await BridgeSandboxBackend.connect(thread_id, bridge_id)
-            )
+            bridged = await BridgeSandboxBackend.connect(thread_id, bridge_id)
+        async with aphase(thread_id, "sandbox.handoff"):
+            await complete_handoff(thread_id, sandbox_metadata, bridged)
+        return set_sandbox_backend(thread_id, bridged)
     metadata_proxy_config = sandbox_metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
         metadata_proxy_config
@@ -448,6 +515,7 @@ async def ensure_sandbox_for_thread(
             github_proxy_repositories=github_proxy_repositories,
             workspace_slug=workspace_slug,
             owner_login=owner_login,
+            record_stale_boot=record_stale_boot,
         )
         created = True
         created_proxy_config = get_recorded_proxy_base_config(thread_id)
@@ -463,6 +531,12 @@ async def ensure_sandbox_for_thread(
                 workspace_slug=workspace_slug,
             )
         except (SandboxGoneError, SandboxUnreachableError) as exc:
+            if require_existing:
+                raise SandboxUnreachableError(
+                    thread_id,
+                    sandbox_id,
+                    "The coordinator must recover its sandbox before workers attach",
+                ) from exc
             gone = isinstance(exc, SandboxGoneError)
             if not (gone or allow_replacement):
                 raise
@@ -478,6 +552,7 @@ async def ensure_sandbox_for_thread(
                     github_proxy_repositories=github_proxy_repositories,
                     workspace_slug=workspace_slug,
                     owner_login=owner_login,
+                    record_stale_boot=record_stale_boot,
                 )
                 created = True
                 created_proxy_config = get_recorded_proxy_base_config(thread_id)
@@ -512,6 +587,8 @@ async def ensure_sandbox_for_thread(
     from agent.sandboxes.tool_access import provision_tool_url
     from agent.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 
+    async with aphase(thread_id, "sandbox.handoff"):
+        await complete_handoff(thread_id, sandbox_metadata, sandbox_backend)
     await provision_tool_url(thread_id, sandbox_backend)
     published = set_sandbox_backend(thread_id, sandbox_backend)
     if sandbox_metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
@@ -522,15 +599,26 @@ async def ensure_sandbox_for_thread(
     return published
 
 
+class SandboxRecreationStopError(RuntimeError):
+    def __init__(self, old_sandbox_id: str, new_sandbox_id: str, reason: str) -> None:
+        super().__init__(reason)
+        self.old_sandbox_id = old_sandbox_id
+        self.new_sandbox_id = new_sandbox_id
+
+
 async def recreate_sandbox_for_thread(
     thread_id: str,
     *,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
-) -> tuple[str, str, str | None]:
-    """Best-effort stop the old sandbox and bind the thread to a fresh one."""
+) -> tuple[str, str]:
+    """Bind a fresh sandbox, then raise with its IDs if stopping the old one failed."""
     cached = SANDBOX_BACKENDS.get(thread_id)
     metadata = await get_sandbox_metadata(thread_id)
+    if metadata.get("task_id") is not None:
+        raise PermissionError(
+            "Task workers cannot recreate the shared sandbox; the coordinator must recover it"
+        )
     raw_sandbox_id = metadata.get("sandbox_id")
     metadata_sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
     old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
@@ -599,7 +687,9 @@ async def recreate_sandbox_for_thread(
         old_sandbox_id,
         new_sandbox.id,
     )
-    return old_sandbox_id, new_sandbox.id, stop_error
+    if stop_error is not None:
+        raise SandboxRecreationStopError(old_sandbox_id, new_sandbox.id, stop_error)
+    return old_sandbox_id, new_sandbox.id
 
 
 def get_cached_sandbox_backend(

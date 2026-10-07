@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 
 from agent.incidents import documents
 from agent.incidents import routes as incidents_routes
+from agent.incidents.models import IncidentId
 
 router = APIRouter(tags=["incidents"])
 Responder = Annotated[dict[str, Any], Depends(incidents_routes.responder)]
@@ -22,5 +23,5 @@ async def search_history(
 
 
 @router.get("/{incident_id}")
-async def get_document(incident_id: str, session: Responder) -> dict[str, Any]:
+async def get_document(incident_id: IncidentId, session: Responder) -> dict[str, Any]:
     return await documents.document_context(incident_id)

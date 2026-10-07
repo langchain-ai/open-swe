@@ -45,6 +45,7 @@ from agent.threads.handlers import (
     share_thread_with_workspace,
 )
 from agent.threads.listing import (
+    DashboardThreadScope,
     list_dashboard_pinned_threads,
     list_dashboard_thread_repos,
     list_dashboard_threads,
@@ -169,11 +170,13 @@ async def api_list_threads_page(
     source: str | None = None,
     status: str | None = None,
     q: str | None = None,
-    scope: Literal["all", "interactive", "automation"] = "all",
+    scope: DashboardThreadScope = "all",
     automation_id: str | None = None,
+    bot: Annotated[str | None, Query(max_length=80)] = None,
     repo: str | None = None,
     ownerless: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
+    hierarchy: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     if all and not session_is_admin(session):
@@ -198,9 +201,11 @@ async def api_list_threads_page(
         query=q,
         scope=scope,
         automation_id=automation_id,
+        bot=bot,
         repo=repo,
         ownerless=ownerless,
         sort_by=sort_by,
+        hierarchy=hierarchy,
     )
 
 

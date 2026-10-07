@@ -16,7 +16,7 @@ from langgraph.prebuilt import InjectedState
 from agent.dashboard.admin import is_admin
 from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from agent.input_messages import input_message_text, message_sender_id
+from agent.input_messages import dynamic_context_hash, input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
 from agent.message_queue import QueuedMessage
 from agent.prompts import prompt
@@ -40,6 +40,7 @@ from agent.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from agent.tools.sandbox_preference import sandbox_only
 from agent.users import User
 from agent.utils.dashboard_links import (
     dashboard_plan_url,
@@ -129,6 +130,10 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     return _Actor(login=login, email=email, name=login)
 
 
+async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
+    return await _actor(state)
+
+
 def _failure(error: str, *, status_code: int | None = None) -> dict[str, Any]:
     response: dict[str, Any] = {"success": False, "error": error}
     if status_code is not None:
@@ -168,6 +173,7 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     result = dict(item)
     result.pop("messages", None)
     result.pop("sandboxId", None)
+    result.pop("sandboxBridgeClient", None)
     result["webUrl"] = _web_link(item)
     langsmith = _langsmith_identifiers(item.get("traceUrl"), locator)
     if any(value is not None for value in langsmith.values()):
@@ -211,6 +217,7 @@ def _exact_locator_filters(
     return filters
 
 
+@sandbox_only
 async def list_threads(
     participant: str | None = None,
     all_users: bool = False,
@@ -463,7 +470,10 @@ def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
     for message in reversed(messages):
         if _message_kind(message) not in {"human", "user"}:
             continue
-        sender_id = message_sender_id(_message_content(message))
+        content = _message_content(message)
+        if dynamic_context_hash(content) is not None or message_sender_id(content, kind="system"):
+            continue
+        sender_id = message_sender_id(content)
         if isinstance(sender_id, str) and sender_id.startswith("github:"):
             login = sender_id.removeprefix("github:").strip()
             return login or None
@@ -722,6 +732,7 @@ def _available_actions(
     return actions
 
 
+@sandbox_only
 async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,

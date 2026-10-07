@@ -1,12 +1,14 @@
 """Validated records shared by incident channels, agent tools, and the dashboard."""
 
 import re
-from typing import Literal
+from typing import Literal, NewType
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
 from agent.store import now_iso
+
+IncidentId = NewType("IncidentId", str)
 
 
 class IncidentPolicy(BaseModel):
@@ -74,7 +76,7 @@ IncidentStatus = Literal["watching", "paused", "needs_attention", "completed"]
 class Incident(BaseModel):
     """One enrolled Slack channel and its system-owned agent thread."""
 
-    id: str
+    id: IncidentId
     workspace_id: str
     channel_id: str
     channel_name: str = ""
@@ -95,7 +97,7 @@ class Incident(BaseModel):
 class IncidentReportRecord(BaseModel):
     """The latest report the agent recorded; written only by the report tool."""
 
-    incident_id: str
+    incident_id: IncidentId
     report: IncidentReport
     digest: str
     run_id: str = ""
@@ -113,7 +115,7 @@ class CommandReceipt(BaseModel):
     """A responder command claimed before its side effects, so retries cannot repeat it."""
 
     id: str
-    incident_id: str
+    incident_id: IncidentId
     action: str
     content_hash: str
     created_at: str = Field(default_factory=now_iso)

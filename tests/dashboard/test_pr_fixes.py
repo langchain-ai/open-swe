@@ -129,7 +129,7 @@ async def test_linked_thread_the_caller_cannot_post_to_is_never_reused(setup, mo
     }
     FakeRegistry.thread_ids = ["admin", "private"]
 
-    assert await pr_fixes._find_pr_threads("acme", "app", 12, "alice", None) == []
+    assert await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None) == []
     assert await pr_fixes.pull_request_thread_running(
         "acme", "app", 12, "alice"
     ) == pr_fixes.PullRequestThreadStatus(running=False)

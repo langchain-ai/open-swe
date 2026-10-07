@@ -40,7 +40,7 @@ _SYSTEM: SystemIdentity = {
     "platform": "open-swe",
 }
 _RETAINED = timedelta(days=RETAINED_DAYS)
-_KIND = "event_match"
+EVENT_MATCH_KIND = "event_match"
 _MAX_ATTEMPTS = 3
 
 
@@ -95,33 +95,47 @@ class EventMatch(Base):
     @classmethod
     async def owed(cls, thread_id: str, messages: Sequence[object]) -> list[Self]:
         """Matches no message in ``messages`` carries yet, oldest first."""
-        delivered = delivered_event_match_ids(messages)
+        delivered: list[UUID] = []
+        for match_id in delivered_event_match_ids(messages):
+            try:
+                delivered.append(UUID(match_id))
+            except ValueError:
+                logger.warning(
+                    "Ignoring a malformed delivered event-match id",
+                    extra={"agent_thread_id": thread_id, "event_match_id": match_id},
+                )
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
-                .where(cls.thread_id == thread_id, cls.matched_at >= func.now() - _RETAINED)
+                .where(
+                    cls.thread_id == thread_id,
+                    cls.matched_at >= func.now() - _RETAINED,
+                    cls.id.not_in(delivered),
+                )
                 .order_by(cls.matched_at, cls.id)
             )
-            return [row for row in rows if str(row.id) not in delivered]
+            return list(rows)
 
     @classmethod
     def messages(cls, matches: Sequence[Self]) -> list[RunMessage]:
         introduced: set[str] = set()
-        return [
-            message
-            for match in matches
-            for message in build_input_messages(
+        messages: list[RunMessage] = []
+        for match in matches:
+            data: dict[str, object] = {"event_match": str(match.id)}
+            built = build_input_messages(
                 match.content,
                 {
                     "sender_id": _SYSTEM["id"],
                     "surface": match.source,
                     "kind": "system",
-                    "data": {"event_match": str(match.id)},
+                    "data": data,
                 },
                 systems=[_SYSTEM],
                 injected_dynamic_context_hashes=introduced,
             )
-        ]
+            built[-1]["id"] = f"event-match:{match.id}"
+            messages.extend(built)
+        return messages
 
     @classmethod
     async def deliver(cls, thread_id: str, strategy: MultitaskStrategy) -> bool:
@@ -137,7 +151,7 @@ class EventMatch(Base):
         async with postgres.transaction() as lock:
             await lock.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-                {"key": f"{_KIND}:{thread_id}"},
+                {"key": f"{EVENT_MATCH_KIND}:{thread_id}"},
             )
             if strategy == "enqueue":
                 thread = _Thread.model_validate(await client.threads.get(thread_id))
@@ -155,13 +169,19 @@ class EventMatch(Base):
                     .values(delivery_attempts=cls.delivery_attempts + 1)
                 )
             latest = owed[-1]
+            turn_id = uuid7()
             await create_durable_run(
                 thread_id,
                 "agent",
                 input={"messages": cls.messages(owed)},
-                config={"configurable": latest.run_config},
+                config={
+                    "configurable": {
+                        **latest.run_config,
+                        "transcript_turn_id": str(turn_id),
+                    }
+                },
                 metadata={
-                    "kind": _KIND,
+                    "kind": EVENT_MATCH_KIND,
                     "event_match_ids": [str(match_id) for match_id in owed_ids],
                 },
                 source=latest.source,

@@ -2,6 +2,7 @@ import logging
 from importlib import resources
 from pathlib import Path
 
+from agent.bridge.constants import BridgeClient
 from agent.config import ENV
 from agent.prompts import prompt
 from agent.utils.authorship import (
@@ -126,9 +127,12 @@ def construct_system_prompt(
     slack_ask: bool = False,
     slack_breakout: bool = False,
     slack_by_the_way: bool = False,
+    slack_follow_up_suggestions: bool = False,
     sandbox_file_downloads: bool = False,
+    prefer_tools_in_sandbox: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
+    local_checkout_client: BridgeClient = "cli",
     recent_thread_context: str | None = None,
     workspace_repos: list[str] | None = None,
 ) -> str:
@@ -137,6 +141,8 @@ def construct_system_prompt(
     ``local_checkout`` says the working directory already *is* the user's own
     repository — a thread bridged to their machine — so the clone-or-sync and
     git-identity steps a hosted sandbox needs would rewrite their checkout.
+    ``local_checkout_client`` is the app serving that machine: only the CLI
+    prints a result the run must hand it.
     """
     del linear_project_id, linear_issue_number
     return prompt(
@@ -156,9 +162,12 @@ def construct_system_prompt(
         working_environment_section=prompt(
             _working_environment_prompt(source, local_checkout=local_checkout),
             working_dir=working_dir,
+            desktop=local_checkout_client == "desktop",
+            prefer_tools_in_sandbox=prefer_tools_in_sandbox,
         ),
         dashboard_context_section=prompt(
             "system/dashboard-context",
+            environment=ENV.OPENSWE_ENV.optional(),
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
             artifact_url=artifact_url or "(artifact link unavailable)",
         ),
@@ -166,6 +175,11 @@ def construct_system_prompt(
             "system/source-context",
             source_guidance=_render_source_guidance(
                 source, slack_context, slack_ask, slack_breakout, slack_by_the_way
+            )
+            + (
+                "\n" + prompt("system/slack-follow-up-suggestions")
+                if slack_context and slack_follow_up_suggestions
+                else ""
             ),
         ),
         default_prompt_section=_load_default_prompt(),

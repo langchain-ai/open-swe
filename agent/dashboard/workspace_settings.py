@@ -8,6 +8,7 @@ profile settings and a thread's ``configurable`` layer on top in the callers
 that honour them. Per-repo style prompts live in :mod:`agent.review.styles`.
 """
 
+import asyncio
 import logging
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
@@ -15,7 +16,8 @@ from typing import Any, Literal, TypedDict
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from agent.audit_logs.context import bind_workspace
+from agent.audit_logs.context import bind_workspace, current_audit_log
+from agent.audit_logs.models import SettingsChange
 from agent.config import ENV
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from agent.dashboard.options import (
@@ -30,6 +32,7 @@ from agent.dashboard.options import (
 )
 from agent.run_config import RunConfig
 from agent.store import delete_value, get_value, now_iso, put_value
+from agent.ui_invalidations import Topic
 from agent.utils.gateway import gateway_overrides, resolve_gateway_enabled
 from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
@@ -85,6 +88,10 @@ class WorkspaceSettingsUpdate(BaseModel):
     sandbox_openai_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    slack_follow_up_suggestions: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
+    human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -321,7 +328,9 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
+        "slack_follow_up_suggestions": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -468,11 +477,61 @@ def _record_values(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
     return {**update.model_dump(), "updated_at": now_iso()}
 
 
+def _audit_setting_value(field: str, value: object) -> bool | int | Literal["[REDACTED]"] | None:
+    if value is None:
+        return None
+    metadata = WorkspaceSettingsUpdate.model_fields[field].json_schema_extra
+    if isinstance(metadata, dict) and metadata.get("agent_feature_flag") and type(value) is bool:
+        return value
+    if field == "human_review_auto_assign_minutes" and type(value) is int:
+        return value
+    return "[REDACTED]"
+
+
+async def _settings_changes(
+    value: Mapping[str, object], *, workspace: str | None = None
+) -> dict[str, SettingsChange] | None:
+    if current_audit_log.get() is None:
+        return None
+    try:
+        async with asyncio.timeout(2):
+            before = (
+                await _instance_record()
+                if workspace is None
+                else await _workspace_record(workspace)
+            )
+        return {
+            field: SettingsChange(
+                before=_audit_setting_value(field, before.get(field)),
+                after=_audit_setting_value(field, value.get(field)),
+            )
+            for field in WorkspaceSettingsUpdate.model_fields
+            if before.get(field) != value.get(field)
+        }
+    except Exception:
+        logger.warning("Could not read settings for audit changes", exc_info=True)
+        return None
+
+
+def _bind_settings_changes(
+    changes: dict[str, SettingsChange] | None, *, workspace: str | None = None
+) -> None:
+    entry = current_audit_log.get()
+    if entry is not None:
+        entry.enrichments.settings_scope = "instance" if workspace is None else "workspace"
+        entry.enrichments.settings_changes = changes
+        if workspace is not None:
+            entry.enrichments.workspace = workspace
+
+
 async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
     """Replace the instance record. Raises ``ValueError`` for a Fable model saved as a default."""
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
+    changes = await _settings_changes(value)
     await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
+    _bind_settings_changes(changes)
+    await Topic.WORKSPACES.invalidate()
     return value
 
 
@@ -489,9 +548,12 @@ async def upsert_workspace_overrides(
         fable_enabled = (await get_instance_settings()).fable_enabled
     update.apply_fable_policy(fable_enabled=fable_enabled)
     value = {k: v for k, v in _record_values(update).items() if v is not None}
+    changes = await _settings_changes(value, workspace=slug)
     await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
+    _bind_settings_changes(changes, workspace=slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await Topic.WORKSPACES.invalidate()
     return await workspace_settings_view(slug)
 
 
@@ -500,6 +562,7 @@ async def delete_workspace_settings(slug: str) -> None:
     await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
     if slug != DEFAULT_WORKSPACE_SLUG:
         await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await Topic.WORKSPACES.invalidate()
 
 
 def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) -> tuple[str, str]:
@@ -684,6 +747,11 @@ class WorkspaceSettings(Mapping[str, Any]):
         """Whether the experimental expedited Slack review is switched on."""
         value = self.get("expedited_review_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def human_review_auto_assign_minutes(self) -> int:
+        value = self.get("human_review_auto_assign_minutes")
+        return value if type(value) is int and value > 0 else 120
 
     @property
     def sandbox_openai_enabled(self) -> bool:

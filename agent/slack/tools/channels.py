@@ -6,15 +6,17 @@ from fastapi import HTTPException
 
 from agent.run_config import RunConfig
 from agent.slack.blocks import block_payload
+from agent.slack.cards import origin_footer, run_slack_location
 from agent.slack.client import (
     SLACK_USER_ID_RE,
     convert_mentions_to_slack_format,
     get_slack_user_names,
     post_slack_top_level_message_with_ts,
 )
-from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_error
+from agent.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from agent.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from agent.slack.payloads import SlackChannelPayload
+from agent.tools.sandbox_preference import sandbox_only
 from agent.users import User
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,7 @@ class SlackMessageReceipt(TypedDict):
     message_ts: str
 
 
+@sandbox_only
 async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | SlackChannelError:
     """List a page of public and private channels the Open SWE bot belongs to."""
     try:
@@ -104,6 +107,7 @@ async def slack_list_channels(cursor: str | None = None) -> SlackChannelList | S
     return {"success": True, "channels": channels, "next_cursor": next_cursor}
 
 
+@sandbox_only
 async def slack_list_channel_members(
     channel_id: str, cursor: str | None = None
 ) -> SlackChannelMemberList | SlackChannelError:
@@ -191,14 +195,20 @@ async def slack_post_message(
             return {"success": False, "error": "invalid_slack_response"}
         seen_cursors.add(cursor)
 
-    blocks = markdown_blocks(message)
-    message_ts, error = await post_slack_top_level_message_with_ts(
-        channel_id,
-        markdown_to_mrkdwn(message),
-        unfurl_links=False,
-        unfurl_media=False,
-        blocks=block_payload(blocks) if blocks else None,
-    )
-    if not message_ts:
-        return {"success": False, "error": error or "post_failed"}
+    blocks = markdown_blocks(message) or []
+    cfg = RunConfig.from_runtime()
+    if cfg.thread_id:
+        location = await run_slack_location(cfg, cfg.thread_id)
+        if location[0] and location[1] and location[0] != channel_id:
+            blocks.extend(await origin_footer(cfg.thread_id, location))
+    try:
+        message_ts = await post_slack_top_level_message_with_ts(
+            channel_id,
+            markdown_to_mrkdwn(message),
+            unfurl_links=False,
+            unfurl_media=False,
+            blocks=block_payload(blocks) if blocks else None,
+        )
+    except SlackRequestError as exc:
+        return {"success": False, "error": exc.code or "post_failed"}
     return {"success": True, "channel_id": channel_id, "message_ts": message_ts}

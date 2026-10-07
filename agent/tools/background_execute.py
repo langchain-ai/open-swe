@@ -41,7 +41,9 @@ def encoded(value: str) -> str:
     return base64.b64encode(value.encode()).decode()
 
 
-def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
+def _runner(
+    task_id: str, command: str, timeout: int, callback: bool, *, owner_thread_id: str
+) -> str:
     return textwrap.dedent(
         f"""
         import base64, json, os, selectors, signal, subprocess, time
@@ -54,6 +56,12 @@ def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
         output_path = os.path.join(task_dir, "output.log")
         stop_path = os.path.join(task_dir, "stop")
         command = base64.b64decode({encoded(command)!r}).decode()
+        # Detach from the launching shell's session here rather than with
+        # `setsid(1)`, which macOS does not ship.
+        try:
+            os.setsid()
+        except OSError:
+            pass
         try:
             os.remove(__file__)
         except OSError:
@@ -115,6 +123,7 @@ def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
         def write_state(status, pid=None, exit_code=None):
             payload = {{
                 "task_id": task_id,
+                "owner_thread_id": {owner_thread_id!r},
                 "status": status,
                 "pid": pid,
                 "runner_pid": os.getpid(),
@@ -184,14 +193,15 @@ def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
             elif process.poll() is not None:
                 status = "completed" if process.returncode == 0 else "failed"
             if status in {{"stopped", "timed_out"}}:
+                # macOS answers EPERM, not ESRCH, for a group left with only zombies.
                 try:
                     os.killpg(process.pid, signal.SIGTERM)
                     process.wait(2)
-                except (subprocess.TimeoutExpired, ProcessLookupError):
+                except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError):
                     pass
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
                     pass
         if process.stdout:
             os.set_blocking(process.stdout.fileno(), False)
@@ -208,9 +218,11 @@ def _runner(task_id: str, command: str, timeout: int, callback: bool) -> str:
     ).strip()
 
 
-def _launch_command(task_id: str, command: str, timeout: int, *, callback: bool) -> str:
+def _launch_command(
+    task_id: str, command: str, timeout: int, *, callback: bool, owner_thread_id: str
+) -> str:
     task_dir = f"{TASK_ROOT}/{task_id}"
-    runner = encoded(_runner(task_id, command, timeout, callback))
+    runner = encoded(_runner(task_id, command, timeout, callback, owner_thread_id=owner_thread_id))
     lock = shlex.quote(LAUNCH_LOCK)
     callback_checks = (
         "command -v curl >/dev/null || { echo 'background execution requires curl' >&2; exit 74; }; "
@@ -220,7 +232,7 @@ def _launch_command(task_id: str, command: str, timeout: int, *, callback: bool)
         else ""
     )
     return (
-        "command -v setsid >/dev/null || { echo 'background execution requires setsid' >&2; exit 69; }; "
+        "command -v python3 >/dev/null || { echo 'background execution requires python3' >&2; exit 69; }; "
         f"{callback_checks}"
         f"mkdir -p {shlex.quote(TASK_ROOT)}; "
         f"acquired=; for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir {lock} 2>/dev/null && acquired=1 && break; sleep .1; done; "
@@ -230,7 +242,7 @@ def _launch_command(task_id: str, command: str, timeout: int, *, callback: bool)
         f"[ \"$active\" -lt {MAX_ACTIVE_TASKS} ] || {{ echo 'active task limit reached' >&2; exit 72; }}; "
         f"mkdir {shlex.quote(task_dir)} || exit 73; "
         f"printf %s {shlex.quote(runner)} | base64 -d > {shlex.quote(task_dir + '/runner.py')}; "
-        f"setsid python3 {shlex.quote(task_dir + '/runner.py')} </dev/null >/dev/null 2>&1 & "
+        f"python3 {shlex.quote(task_dir + '/runner.py')} </dev/null >/dev/null 2>&1 & "
         f"for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f {shlex.quote(task_dir + '/state.json')} ] && break; sleep .1; done; "
         f"[ -f {shlex.quote(task_dir + '/state.json')} ] || {{ echo 'background runner did not start' >&2; exit 70; }}; "
         f"rmdir {lock}; trap - 0; cat {shlex.quote(task_dir + '/state.json')}"
@@ -411,7 +423,10 @@ async def _launch_with_callback(
     # Tracked first: a fast command's completion callback can reconcile before launch returns.
     await _track(thread_id, task_id)
     try:
-        state = await execute(backend, _launch_command(task_id, command, timeout, callback=True))
+        state = await execute(
+            backend,
+            _launch_command(task_id, command, timeout, callback=True, owner_thread_id=thread_id),
+        )
     except Exception:
         await _track(thread_id, task_id, running=False)
         raise
@@ -435,7 +450,10 @@ async def _launch_with_cron(
     if getattr(wait, "exit_code", None) != 0:
         raise RuntimeError("background-task monitor is busy")
     task_id = f"{TASK_PREFIX}-{uuid.uuid4()}"
-    state = await execute(backend, _launch_command(task_id, command, timeout, callback=False))
+    state = await execute(
+        backend,
+        _launch_command(task_id, command, timeout, callback=False, owner_thread_id=thread_id),
+    )
     await _track(thread_id, task_id)
     wait = await backend.aexecute(wait_for_monitor, timeout=15)
     if getattr(wait, "exit_code", None) != 0:

@@ -94,6 +94,69 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
     assert filesystem._offload_binary_content
 
 
+@pytest.mark.parametrize(
+    ("enabled", "binding", "available"),
+    [
+        (False, {}, False),
+        (True, {}, True),
+        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True),
+        (True, {"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False),
+        (True, {"sandbox_id": "bridge:legacy-cli"}, False),
+    ],
+)
+async def test_task_tools_require_owner_opt_in_and_supported_sandbox(
+    saved_thread_scope: dict[str, object],
+    enabled: bool,
+    binding: dict[str, str],
+    available: bool,
+) -> None:
+    from agent.users import User, UserPreferences
+
+    saved_thread_scope.update(owner_type="user", owner_login="owner")
+    saved_thread_scope.update(binding)
+
+    async def preferences(login: str) -> UserPreferences:
+        return UserPreferences(experimental_task_coordination=enabled if login == "owner" else True)
+
+    with patch.object(User, "preferences_for_login", side_effect=preferences):
+        captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    names = {_registered_tool_name(tool) for tool in tools}
+    assert ("spawn_worker" in names) is available
+    assert ("control_worker" in names) is available
+
+
+@pytest.mark.parametrize("role", ["coordinator", "worker"])
+async def test_existing_task_keeps_controls_after_opt_out(
+    saved_thread_scope, role: Literal["coordinator", "worker"]
+):
+    from agent.tasks.store import Task, TaskContext, TaskMembership
+    from agent.users import User, UserPreferences
+    from agent.workspaces.rows import WorkspaceRow
+
+    saved_thread_scope.update(owner_type="user", owner_login="owner")
+    workspace = WorkspaceRow(slug="default", name="Default")
+    task = Task(
+        coordinator_thread_id="coordinator", title="Existing task", workspace_id=workspace.id
+    )
+    task.workspace = workspace
+    context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
+    with (
+        patch.object(User, "preferences_for_login", return_value=UserPreferences()),
+        patch(
+            "agent.middleware.task_coordination.TaskMembership.context_for_thread",
+            return_value=context,
+        ),
+    ):
+        captured = await _capture_create_deep_agent_kwargs()
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+    names = {_registered_tool_name(tool) for tool in tools}
+    assert "spawn_worker" not in names
+    assert {"control_worker", "message_task_thread", "task_status"} <= names
+
+
 @pytest.mark.asyncio
 async def test_unknown_scope_omits_workspace_and_personal_mcps():
     with (
@@ -429,7 +492,7 @@ SLACK_TOOL_NAMES = {
     "slack_no_reply_needed",
     "slack_post_message",
     "slack_read_thread_messages",
-    "slack_start_new_thread",
+    "slack_breakout_thread",
     "slack_reply",
 }
 
@@ -462,6 +525,22 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() -> None:
+    config = _base_config()
+    configurable = config.get("configurable")
+    assert isinstance(configurable, dict)
+    configurable.update({"source": "schedule", "slack_thread": None})
+
+    captured = await _capture_create_deep_agent_kwargs(config)
+    tools = captured["tools"]
+    assert isinstance(tools, list)
+
+    tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
+    # A prompt can ask it to report somewhere; the thread-bound tools stay out.
+    assert tool_names & SLACK_TOOL_NAMES == {"slack_list_channels", "slack_post_message"}
+
+
+@pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     config = _base_config()
     configurable = config.get("configurable")
@@ -485,7 +564,6 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     slack_names = {
         "manage_code_channel",
         "manage_incident",
-        "notify_automation_channel",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_list_channel_members",
@@ -493,7 +571,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_move_thread",
         "slack_post_message",
         "slack_read_thread_messages",
-        "slack_start_new_thread",
+        "slack_breakout_thread",
         "slack_reply",
     }
 
@@ -718,6 +796,43 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         assert agent["make_model_calls"][0][0] == expected_model
         prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
         assert prepare._requested_models is None
+
+
+@pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
+async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
+) -> None:
+    from agent.middleware.model_selection import ModelSelectionMiddleware
+    from agent.threads.runs import _build_dashboard_configurable
+
+    monkeypatch.setattr("agent.threads.runs.resolve_run_email", AsyncMock(return_value=None))
+    monkeypatch.setattr("agent.server._model_routing_mode", lambda _: "fast")
+    source_context = {
+        "slack_ask": True,
+        "slack_thread": {"channel_id": "C1", "triggering_user_id": "U1"},
+        "slack_by_the_way_thread_ts": reply_thread_ts,
+    }
+    for source in ("slack", "dashboard"):
+        config = _base_config()
+        config["configurable"].update(
+            await _build_dashboard_configurable(
+                "thread-ctx",
+                "octocat",
+                {"source": source, "source_context": source_context, "model_selection": "auto"},
+                profile={},
+            )
+        )
+        captured = await _capture_create_deep_agent_kwargs(
+            config, profile={"model_routing_enabled": True}
+        )
+        selection = next(
+            item
+            for item in cast(list[object], captured["middleware"])
+            if isinstance(item, ModelSelectionMiddleware)
+        )
+        assert await selection.select_route({"messages": []}) == (
+            "fast" if source == "dashboard" else "default"
+        )
 
 
 async def test_queued_images_reach_vision_fallback_for_text_only_main_model(

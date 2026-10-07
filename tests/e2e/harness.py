@@ -479,6 +479,7 @@ async def control_human_review_requests(owner: str = OWNER, repo: str = REPO) ->
                     {"github_login": r.github_login, "assigned_by_agent": r.assigned_by_agent}
                     for r in request.reviewers
                 ],
+                "picks": [p.github_login for p in request.picks],
             }
             for request in await HumanReviewRequest.all_for_repo(owner, repo)
             if request.kind == "standard"
@@ -544,14 +545,15 @@ async def control_repo_file(request: Request) -> JSONResponse:
 
 @app.get("/control/queued")
 async def control_queued(thread_id: str = "") -> JSONResponse:
-    """Count the follow-ups parked on a busy thread's message queue.
+    """The follow-ups parked on a busy thread's message queue, oldest first.
 
     While the agent is busy, debounced follow-ups accumulate in
     ``thread_queued_message`` until the active run drains them together at its
     next model call. Lets the E2E assert coalescing instead of per-message runs."""
     from agent.message_queue import QueuedMessage
 
-    return JSONResponse({"queued_count": len(await QueuedMessage.for_thread(thread_id))})
+    messages = [message.content for message in await QueuedMessage.for_thread(thread_id)]
+    return JSONResponse({"queued_count": len(messages), "messages": messages})
 
 
 _MAPPINGS_SEEDED = False
@@ -568,6 +570,7 @@ async def _seed_test_user_mappings() -> None:
         return
     from agent.users import User
 
+    await User.sign_in("github", "1003", login="octocat", display_name="PR Author")
     for user in TEST_USERS:
         signed_in = await User.sign_in(
             "github",
@@ -1328,6 +1331,20 @@ async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
             "merge_base_commit": {"sha": merge_base},
             "files": fakes.compare_files(owner, repo, base, head),
         }
+    )
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/commits")
+async def gh_list_commits(
+    owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH
+) -> JSONResponse:
+    """Commits touching ``path``; an author is a GitHub user only when a test user owns the email."""
+    logins = {user["email"]: user["login"] for user in TEST_USERS}
+    return JSONResponse(
+        [
+            {"author": {"login": logins[email], "type": "User"} if email in logins else None}
+            for email in fakes.commit_author_emails(owner, repo, path, sha)
+        ]
     )
 
 

@@ -9,6 +9,7 @@ import pytest
 
 from agent.act_as import gate
 from agent.act_as.records import ThreadActAs
+from agent.slack.http import SlackRequestError
 from agent.users import User, UserPreferences
 from agent.utils.json_types import JsonObject
 from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY
@@ -24,7 +25,7 @@ def dm(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) -> AsyncMoc
     monkeypatch.setattr(gate, "get_active_slack_thread", AsyncMock(return_value=None))
     monkeypatch.setattr(gate, "pr_author_login", author_login)
     monkeypatch.setattr(gate, "open_dm", AsyncMock(return_value="D-ALICE"))
-    send = AsyncMock(return_value=("123.456", None))
+    send = AsyncMock(return_value="123.456")
     monkeypatch.setattr(gate, "post_slack_top_level_message_with_ts", send)
     send.concierge = AsyncMock()
     monkeypatch.setattr(gate, "note_for_concierge", send.concierge)
@@ -149,7 +150,7 @@ async def test_person_without_slack_is_never_acted_as(dm, monkeypatch):
 @pytest.mark.asyncio
 async def test_failed_dm_refuses_instead_of_waiting(dm, monkeypatch):
     _alice(monkeypatch, "U-ALICE")
-    dm.return_value = (None, "channel_not_found")
+    dm.side_effect = SlackRequestError("channel_not_found")
 
     refusal = await _open()
 

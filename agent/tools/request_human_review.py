@@ -139,10 +139,30 @@ async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
         return _failure("No executable agent thread is available")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
-    if not await start_auto_assign(request, asked=True):
+    started = await start_auto_assign(request, asked=True)
+    if started.status == "failed":
         return _failure("Open SWE could not start picking a reviewer for this pull request.")
+    if started.status == "picked":
+        next_step = (
+            f"Open SWE picked @{started.reviewer}; they are tagged in the review's Slack thread "
+            "and messaged directly."
+        )
+    elif started.status == "claimed":
+        next_step = (
+            "This pull request already has a reviewer or pending pick; nobody else was assigned."
+        )
+    elif started.status == "waiting" and started.at is not None:
+        next_step = (
+            "Nobody who owns or recently changed this code is in their work hours, so Open SWE "
+            f"will pick a reviewer at {started.at.isoformat()}, when @{started.reviewer}'s "
+            "work day starts."
+        )
+    else:
+        next_step = (
+            "Open SWE is picking a reviewer; whoever it picks is tagged in the review's Slack "
+            "thread and messaged directly."
+        )
     return {
         "success": True,
-        "next": "Open SWE is picking a reviewer; whoever it picks is tagged in the review's "
-        "Slack thread and messaged directly. Tell the person who asked, and post nothing else.",
+        "next": f"{next_step} Tell the person who asked, and post nothing else.",
     }

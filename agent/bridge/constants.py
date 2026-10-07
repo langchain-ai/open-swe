@@ -1,11 +1,19 @@
 """Timings and the notification channel shared by the bridge's store and listener."""
 
+from typing import Literal
+
+BridgeClient = Literal["cli", "desktop"]
+"""The app serving a bridge: the ``oswe`` CLI, or the desktop app's "This Mac" threads."""
+
 CHANNEL = "open_swe_bridge"
 """LISTEN/NOTIFY channel carrying ``<bridge_id>:<request_id>:<event>`` — ids only."""
 
 REQUEST_EVENT = "request"
 RESULT_EVENT = "result"
 CLOSED_EVENT = "closed"
+
+HANDOFF_FROM_KEY = "sandbox_handoff_from"
+"""Thread metadata naming the sandbox whose checkout the next run carries over."""
 
 SANDBOX_ID_PREFIX = "bridge:"
 """What a thread's ``sandbox_id`` starts with when its sandbox is the machine running the CLI."""

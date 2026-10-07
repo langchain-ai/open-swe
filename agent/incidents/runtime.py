@@ -15,7 +15,7 @@ from langgraph.types import Command
 
 from agent.incidents import documents, service
 from agent.incidents.evidence_tools import EvidenceCollector, source_url
-from agent.incidents.models import Incident, IncidentPolicy, IncidentReportRecord
+from agent.incidents.models import Incident, IncidentId, IncidentPolicy, IncidentReportRecord
 from agent.incidents.presentation import report_message
 from agent.incidents.report import (
     INCIDENT_PROMPT,
@@ -29,6 +29,7 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import prompt
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_thread_reply_with_ts
+from agent.slack.http import SlackRequestError
 from agent.source_context import SlackThreadRef
 from agent.store import now_iso
 from agent.utils.dashboard_links import dashboard_incident_url
@@ -157,27 +158,30 @@ class IncidentSession:
                 dashboard_incident_url(record.id),
                 reason="answer" if explicit else "findings",
             )
-            ts, error = await post_slack_thread_reply_with_ts(
-                record.channel_id,
-                self.reply_thread_ts or SESSION_TS,
-                text,
-                blocks=blocks,
-                unfurl_links=False,
-                unfurl_media=False,
-            )
-            posted = ts is not None
-            if posted:
+            try:
+                await post_slack_thread_reply_with_ts(
+                    record.channel_id,
+                    self.reply_thread_ts or SESSION_TS,
+                    text,
+                    blocks=blocks,
+                    unfurl_links=False,
+                    unfurl_media=False,
+                )
+            except SlackRequestError as exc:
+                posted = False
+                logger.warning(
+                    "Incident report not delivered to Slack",
+                    extra={"incident_id": record.id, "slack_error": exc.code},
+                )
+            else:
+                posted = True
                 # Only a confirmed delivery suppresses the next post of the same digest, or
                 # spends the incident's one automatic message.
                 latest.posted_digest, latest.posted_run_id = digest, run_id
                 latest.posted_at = now_iso()
                 latest.investigation_posted = latest.investigation_posted or not explicit
                 await service.REPORTS.put(record.id, latest)
-            elif error:
-                logger.warning(
-                    "Incident report not delivered to Slack",
-                    extra={"incident_id": record.id, "slack_error": error},
-                )
+
         return {
             "recorded": True,
             "posted": posted,
@@ -190,7 +194,7 @@ class IncidentSession:
 
     async def _read_incident(self, incident_id: str) -> dict[str, Any]:
         await self.check()
-        context = await documents.document_context(incident_id)
+        context = await documents.document_context(IncidentId(incident_id))
         return self.collector.record_observation(
             source="incident",
             url="",
@@ -215,7 +219,7 @@ async def load_incident_session(config: Mapping[str, Any]) -> IncidentSession:
         raise PermissionError("Thread is not an incident conversation")
     if metadata.get("owner_type") != "system" or metadata.get("visibility") != "public":
         raise PermissionError("Incident conversation must be system owned and public")
-    incident_id = str(metadata.get("incident_id") or cfg.get("incident_id") or "")
+    incident_id = IncidentId(str(metadata.get("incident_id") or cfg.get("incident_id") or ""))
     record = await service.INCIDENTS.get(incident_id) if incident_id else None
     if record is None or record.thread_id != thread_id:
         raise PermissionError("Incident binding is missing")
