@@ -49,10 +49,6 @@ from openswe.review.reviews import (
     ReviewScoutTrigger,
     ReviewSummary,
     SubmittedReview,
-    add_pending_review_comment,
-    delete_pending_review_comment,
-    discard_pending_review,
-    get_pending_review,
     get_pull_request_preview,
     get_review,
     get_review_diff,
@@ -60,13 +56,9 @@ from openswe.review.reviews import (
     get_review_summaries,
     list_review_comments,
     list_reviews,
-    post_review_comment,
     proxy_pr_image,
-    submit_pull_request_review,
     trigger_re_review,
     trigger_review_scout,
-    update_pending_review_comment,
-    update_review_comment,
 )
 from openswe.review.session import ReviewSession
 from openswe.review.style_jobs import (
@@ -375,7 +367,7 @@ async def api_post_review_comment(
     session: dict[str, Any] = SESSION_DEP,
 ) -> PostedReviewComment:
     async with _as_viewer(session, owner, repo) as repository:
-        return await post_review_comment(repository.pull_request(pr_number), comment)
+        return await PostedReviewComment.post(repository.pull_request(pr_number), comment)
 
 
 class PullRequestReviewSubmit(BaseModel):
@@ -392,7 +384,7 @@ async def api_submit_pull_request_review(
     session: dict[str, Any] = SESSION_DEP,
 ) -> SubmittedReview:
     async with _as_viewer(session, owner, repo) as repository:
-        return await submit_pull_request_review(
+        return await SubmittedReview.submit(
             repository.pull_request(pr_number),
             login=session["sub"],
             event=review.event,
@@ -412,7 +404,7 @@ async def api_get_pending_review(
     owner: str, repo: str, pr_number: int, session: dict[str, Any] = SESSION_DEP
 ) -> PendingReview | None:
     async with _as_viewer(session, owner, repo) as repository:
-        return await get_pending_review(repository.pull_request(pr_number), login=session["sub"])
+        return await PendingReview.load(repository.pull_request(pr_number), login=session["sub"])
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/pending-review/comments")
@@ -424,7 +416,7 @@ async def api_add_pending_review_comment(
     session: dict[str, Any] = SESSION_DEP,
 ) -> PendingReview:
     async with _as_viewer(session, owner, repo) as repository:
-        return await add_pending_review_comment(
+        return await PendingReview.add_comment(
             repository.pull_request(pr_number), comment, login=session["sub"]
         )
 
@@ -443,7 +435,7 @@ async def api_update_pending_review_comment(
     session: dict[str, Any] = SESSION_DEP,
 ) -> PendingReview:
     async with _as_viewer(session, owner, repo) as repository:
-        return await update_pending_review_comment(
+        return await PendingReview.update_comment(
             repository.pull_request(pr_number),
             comment_id,
             update.body.strip(),
@@ -460,8 +452,8 @@ async def api_delete_pending_review_comment(
     session: dict[str, Any] = SESSION_DEP,
 ) -> PendingReview | None:
     async with _as_viewer(session, owner, repo) as repository:
-        await delete_pending_review_comment(repository, comment_id)
-        return await get_pending_review(repository.pull_request(pr_number), login=session["sub"])
+        await repository.delete(f"pulls/comments/{comment_id}")
+        return await PendingReview.load(repository.pull_request(pr_number), login=session["sub"])
 
 
 class PendingReviewDiscarded(BaseModel):
@@ -473,7 +465,7 @@ async def api_discard_pending_review(
     owner: str, repo: str, pr_number: int, session: dict[str, Any] = SESSION_DEP
 ) -> PendingReviewDiscarded:
     async with _as_viewer(session, owner, repo) as repository:
-        discarded = await discard_pending_review(
+        discarded = await PendingReview.discard(
             repository.pull_request(pr_number), login=session["sub"]
         )
     return PendingReviewDiscarded(discarded=discarded)
@@ -491,12 +483,12 @@ async def api_update_review_comment(
     comment_id: int,
     comment: ReviewCommentUpdate,
     session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
+) -> PostedReviewComment:
     body = comment.body.strip()
     if not body:
         raise HTTPException(422, "comment body is required")
     async with _as_viewer(session, owner, repo) as repository:
-        return await update_review_comment(
+        return await PostedReviewComment.edit(
             repository.pull_request(pr_number),
             comment_id,
             viewer_login=session["sub"],

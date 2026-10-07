@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from openswe.dashboard import profiles
 from openswe.github import http as github_http
 from openswe.github.checks import github_headers
+from openswe.github.http import GitHubError
 from openswe.review import conversation
 from openswe.review.conversation import (
     ConversationComment,
@@ -190,10 +191,10 @@ async def test_post_comment_surfaces_github_client_errors(
         )
     )
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(GitHubError) as exc:
         await api_post_review_conversation_comment(
             "acme", "app", 7, ConversationCommentCreate(body="hi"), SESSION
         )
 
-    assert exc.value.status_code == 403
-    assert exc.value.detail == "Resource not accessible by integration"
+    assert exc.value.response.status_code == 403
+    assert exc.value.message == "Resource not accessible by integration"

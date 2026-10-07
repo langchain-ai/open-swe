@@ -335,6 +335,12 @@ class PullRequestClient:
         payload = await or_none(self.repo.get(f"pulls/{self.number}"))
         return payload if isinstance(payload, dict) else None
 
+    async def head_sha(self) -> str | None:
+        pull = await self.pull()
+        head = pull.get("head") if pull is not None else None
+        sha = head.get("sha") if isinstance(head, dict) else None
+        return sha if isinstance(sha, str) and sha else None
+
     async def mergeable_pull(self) -> dict[str, Any] | None:
         """Read the pull request, waiting for GitHub to decide whether it merges.
 

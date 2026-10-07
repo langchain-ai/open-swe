@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
 
 import httpx2
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient
@@ -213,8 +214,9 @@ class GitHubClient:
     """GitHub's REST and GraphQL APIs over one HTTP client, with ``github_request``'s retries.
 
     Open one as the person or the App it acts for: ``as_user`` or ``as_app``.
-    Every call raises ``httpx2.HTTPError`` when GitHub fails or refuses it, and
-    ``ValueError`` when it answers with something other than the expected shape.
+    Every call raises ``GitHubError`` when GitHub refuses it, another
+    ``httpx2.HTTPError`` when it cannot be reached, and ``ValueError`` when it
+    answers with something other than the expected shape.
     """
 
     def __init__(
@@ -298,14 +300,29 @@ class GitHubClient:
         if response.status_code == 401 and self._reauthorize is not None:
             self.http.headers.update(github_headers(await self._reauthorize()))
             response = await github_request(self.http, method, url, **kwargs)
-        response.raise_for_status()
+        if not response.is_success:
+            raise GitHubError(response)
         return response
 
     async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
         return (await self.request("GET", path, params=params)).json()
 
+    async def post(self, path: str, json: Mapping[str, object]) -> object:
+        return _json_or_none(await self.request("POST", path, json=dict(json)))
+
+    async def patch(self, path: str, json: Mapping[str, object]) -> object:
+        return _json_or_none(await self.request("PATCH", path, json=dict(json)))
+
+    async def delete(self, path: str) -> None:
+        await self.request("DELETE", path)
+
     async def pages(
-        self, path: str, *, key: str | None = None, params: Mapping[str, str] | None = None
+        self,
+        path: str,
+        *,
+        key: str | None = None,
+        params: Mapping[str, str] | None = None,
+        max_pages: int | None = None,
     ) -> list[dict[str, Any]]:
         """Every item of a paginated list; ``key`` names the list inside each page's object."""
         items: list[dict[str, Any]] = []
@@ -320,7 +337,7 @@ class GitHubClient:
             if not isinstance(batch, list):
                 raise ValueError(f"GitHub answered {path} without a list")
             items.extend(item for item in batch if isinstance(item, dict))
-            if len(batch) < _PAGE_SIZE:
+            if len(batch) < _PAGE_SIZE or page == max_pages:
                 return items
             page += 1
 
@@ -365,10 +382,26 @@ class RepoClient:
     async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
         return await self.github.get(f"repos/{self.full_name}/{path}", params)
 
+    async def post(self, path: str, json: Mapping[str, object]) -> object:
+        return await self.github.post(f"repos/{self.full_name}/{path}", json)
+
+    async def patch(self, path: str, json: Mapping[str, object]) -> object:
+        return await self.github.patch(f"repos/{self.full_name}/{path}", json)
+
+    async def delete(self, path: str) -> None:
+        await self.github.delete(f"repos/{self.full_name}/{path}")
+
     async def pages(
-        self, path: str, *, key: str | None = None, params: Mapping[str, str] | None = None
+        self,
+        path: str,
+        *,
+        key: str | None = None,
+        params: Mapping[str, str] | None = None,
+        max_pages: int | None = None,
     ) -> list[dict[str, Any]]:
-        return await self.github.pages(f"repos/{self.full_name}/{path}", key=key, params=params)
+        return await self.github.pages(
+            f"repos/{self.full_name}/{path}", key=key, params=params, max_pages=max_pages
+        )
 
     async def graphql(
         self, query: str, variables: Mapping[str, object] | None = None
@@ -402,9 +435,53 @@ async def or_none[T](read: Awaitable[T]) -> T | None:
         return None
 
 
+def _json_or_none(response: httpx2.Response) -> object:
+    return None if response.status_code == 204 or not response.content else response.json()
+
+
+class _GitHubErrorBody(BaseModel):
+    message: str = ""
+    errors: list[object] = []
+
+
+class GitHubError(httpx2.HTTPStatusError):
+    """GitHub refused a request; ``message`` is GitHub's own explanation."""
+
+    def __init__(self, response: httpx2.Response) -> None:
+        super().__init__(
+            f"GitHub answered {response.status_code}",
+            request=response.request,
+            response=response,
+        )
+
+    @property
+    def message(self) -> str:
+        fallback = f"GitHub request failed ({self.response.status_code})"
+        try:
+            body = _GitHubErrorBody.model_validate(self.response.json())
+        except ValueError:
+            return fallback
+        details = "; ".join(
+            str(error["message"]) if isinstance(error, dict) and "message" in error else str(error)
+            for error in body.errors
+        )
+        if body.message and details:
+            return f"{body.message}: {details}"
+        return body.message or details or fallback
+
+
 class GraphQLError(ValueError):
     """GitHub answered a GraphQL query with errors."""
 
     def __init__(self, errors: object) -> None:
         super().__init__(f"GitHub GraphQL errors: {errors}")
         self.errors = errors
+
+    @property
+    def message(self) -> str:
+        messages = (
+            str(error["message"])
+            for error in (self.errors if isinstance(self.errors, list) else [])
+            if isinstance(error, dict) and "message" in error
+        )
+        return "; ".join(messages) or "GitHub rejected the request"
