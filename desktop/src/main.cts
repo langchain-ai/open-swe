@@ -496,8 +496,7 @@ async function handoffThreadToWorktree(threadId, params) {
   if (!branch) throw new Error("A valid new branch name is required");
   const base =
     (await validBranchName(repo, params.base_ref)) ??
-    (await defaultBranch(repo)) ??
-    (await currentBranch(repo));
+    (await defaultBranch(repo));
   if (!base) throw new Error("Pass base_ref: no default branch was found");
   const fromOrigin = params.start_from_origin !== false;
   if (fromOrigin) await git(repo, ["fetch", "origin", base], null, 60_000);

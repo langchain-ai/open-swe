@@ -50,6 +50,8 @@ logger = logging.getLogger(__name__)
 _SYNC_UNSUPPORTED = "BridgeSandboxBackend is async-only; use the a-prefixed method instead."
 _LIVENESS_TICK_SECONDS = 15.0
 _FILE_TRANSFER_TIMEOUT_SECONDS = 120
+# The desktop allows 60s for `git fetch` and 300s for `git worktree add`.
+_WORKTREE_HANDOFF_TIMEOUT_SECONDS = 360
 
 
 class ExecuteResult(BaseModel):
@@ -159,7 +161,7 @@ class BridgeSandboxBackend(BaseSandbox):
     async def ahandoff_worktree(self, params: WorktreeHandoffParams) -> JsonObject:
         """Ask the desktop app to move this thread into a new worktree."""
         return await self._round_trip(
-            "worktree_handoff", params, wait=_FILE_TRANSFER_TIMEOUT_SECONDS + WAIT_GRACE_SECONDS
+            "worktree_handoff", params, wait=_WORKTREE_HANDOFF_TIMEOUT_SECONDS + WAIT_GRACE_SECONDS
         )
 
     async def _is_alive(self) -> bool:

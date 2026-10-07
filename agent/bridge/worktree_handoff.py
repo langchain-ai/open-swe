@@ -1,12 +1,21 @@
 """Move a desktop thread out of the user's checkout into a worktree of its own."""
 
+import logging
+
 from pydantic import JsonValue
 
 from agent.bridge.backend import BridgeSandboxBackend
 from agent.bridge.protocol import WorktreeHandoffParams
 from agent.run_config import RunConfig
 from agent.sandboxes.paths import forget_work_dir
-from agent.sandboxes.state import SANDBOX_BACKENDS
+from agent.sandboxes.state import SANDBOX_BACKENDS, SandboxUnreachableError
+
+logger = logging.getLogger(__name__)
+
+_UNCONFIRMED = (
+    "The desktop app did not confirm the handoff, but it may still have moved the thread. "
+    "Run `pwd` and `git branch --show-current` before doing anything else."
+)
 
 
 async def worktree_handoff(
@@ -23,8 +32,14 @@ async def worktree_handoff(
     )
     try:
         result = await backend.ahandoff_worktree(params)
+    except TimeoutError, SandboxUnreachableError:
+        logger.warning(
+            "Worktree handoff went unconfirmed", extra={"agent_thread_id": thread_id}, exc_info=True
+        )
+        return {"success": False, "error": _UNCONFIRMED}
     except RuntimeError as exc:
         return {"success": False, "error": str(exc)}
-    forget_work_dir(proxy)
-    forget_work_dir(backend)
+    finally:
+        forget_work_dir(proxy)
+        forget_work_dir(backend)
     return {"success": True, **result}
