@@ -848,6 +848,11 @@ async def slack_interactivity(
         and interaction.view.callback_id == expedited_review.CHANNEL_MODAL
     ):
         return expedited_review.handle_picker_submission(interaction, background_tasks)
+    if (
+        interaction.type == "view_submission"
+        and interaction.view.callback_id == human_review.DECLINE_MODAL
+    ):
+        return await human_review.handle_decline_submission(interaction, background_tasks)
     if interaction.type == "block_actions" and any(
         action.action_id == expedited_review.CHANNEL_SELECT_ACTION for action in interaction.actions
     ):

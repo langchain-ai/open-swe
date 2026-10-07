@@ -38,7 +38,7 @@ from agent.github.codeowners import CodeOwners
 from agent.github.http import GITHUB_API_BASE, github_client, github_request
 from agent.github.pull_requests import PullRequest, PullRequestPayload
 from agent.github.repo_files import RepoFileUnreadableError, RepoSettings
-from agent.human_review.card import accept_button, mention
+from agent.human_review.card import accept_button, decline_button, mention
 from agent.human_review.lifecycle import (
     drop_picks,
     mark_approved,
@@ -514,6 +514,27 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
+async def decline(request: HumanReviewRequest, user: User | None, reason: str) -> Outcome:
+    if user is None:
+        return Outcome("Link your Open SWE account before declining a review.")
+    if request.state != "open":
+        return Outcome("This review request is no longer open.")
+    dropped = await drop_picks(
+        request,
+        {user.id},
+        f"You declined the review of {request.pull_request.url}: {reason}.",
+        expired=True,
+    )
+    if not dropped:
+        return Outcome("This reviewer pick is no longer pending for you.")
+    logger.info(
+        "Reviewer declined a pending pick",
+        extra={"request_id": str(request.id), "user_id": str(user.id), "reason": reason},
+    )
+    await start_auto_assign(request, asked=True)
+    return Outcome("Review declined; Open SWE will find another reviewer.")
+
+
 async def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> str:
     """Use deadline wording only when the reviewer's wait has passed."""
     now = datetime.now(UTC)
@@ -585,7 +606,7 @@ async def assign(request: HumanReviewRequest, github_login: str, reason: str) ->
         )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
-    accept = actions(accept_button(added))
+    accept = actions(accept_button(added), decline_button(added))
     thread_ts = added.slack_thread_ts or added.slack_message_ts
     thread_text = f"{notice}{why}{deadline}"
     await post_slack_thread_reply_with_ts(

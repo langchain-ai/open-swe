@@ -93,6 +93,14 @@ def accept_button(request: HumanReviewRequest) -> ButtonElement:
     )
 
 
+def decline_button(request: HumanReviewRequest) -> ButtonElement:
+    return button(
+        "Decline",
+        action_id="open_swe_option_select_decline",
+        value=_button_value("decline", request),
+    )
+
+
 def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     return [
         # Slack opens the URL and still delivers the click, so signing up lands on the PR.

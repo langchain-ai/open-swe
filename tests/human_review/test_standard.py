@@ -66,6 +66,38 @@ async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -
     )
 
 
+async def test_decline_only_withdraws_the_users_pending_pick() -> None:
+    from agent.human_review.standard import decline
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    picked = User()
+    participant = HumanReviewParticipant(user_id=picked.id, decision="picked")
+    participant.user = picked
+    request.participants.append(participant)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("agent.human_review.lifecycle.repo_token", AsyncMock(return_value=None)),
+        patch("agent.human_review.lifecycle.refresh_card", AsyncMock()),
+        patch("agent.human_review.standard.start_auto_assign", AsyncMock()) as rotate,
+    ):
+        await decline(request, User(), "Away or unavailable")
+        assert participant.decision == "picked"
+        rotate.assert_not_awaited()
+        await decline(request, picked, "Away or unavailable")
+        assert participant.decision == "expired"
+        rotate.assert_awaited_once()
+        await decline(request, picked, "Away or unavailable")
+        assert rotate.await_count == 1
+
+
 async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
     from agent.human_review.picking import Pick
     from agent.human_review.standard import RequestResult, _auto_assign
