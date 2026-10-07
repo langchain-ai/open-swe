@@ -33,6 +33,7 @@ from agent.dashboard.options import (
     provider_fallback_pair,
 )
 from agent.encryption import decrypt_token, encrypt_token
+from agent.sandboxes.environment import EnvironmentUpdate
 from agent.store import (
     delete_value,
     get_value,
@@ -400,6 +401,24 @@ async def has_access_token_record(login: str) -> bool:
 router = APIRouter(tags=["profiles"])
 # Not agent.dashboard.deps: that module imports repo_access, which imports this one.
 _SESSION_DEP = Depends(require_session)
+
+
+@router.get("/profile/sandbox-environment")
+async def get_my_sandbox_environment(
+    session: dict[str, Any] = _SESSION_DEP,
+) -> dict[str, list[str]]:
+    from agent.sandboxes.environment import environment_names
+
+    return {"names": await environment_names("user", session["sub"])}
+
+
+@router.put("/profile/sandbox-environment")
+async def put_my_sandbox_environment(
+    update: EnvironmentUpdate, session: dict[str, Any] = _SESSION_DEP
+) -> dict[str, list[str]]:
+    from agent.sandboxes.environment import save_environment
+
+    return {"names": await save_environment("user", session["sub"], update)}
 
 
 @router.get("/profile")

@@ -424,7 +424,11 @@ async def configure_sandbox_proxy(
         *([tools_rule] if tools_rule else []),
         *preserved_rules,
     ]
+    from agent.sandboxes.environment import thread_environment
+
     payload = {"proxy_config": proxy_config}
+    if thread_id:
+        payload["run_config"] = {"env_vars": await thread_environment(thread_id)}
     async with httpx2.AsyncClient(timeout=PROXY_CONFIG_TIMEOUT_SECONDS) as client:
         try:
             await _patch_proxy_config(client, url, payload, api_key, sandbox_name)

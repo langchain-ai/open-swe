@@ -197,6 +197,14 @@ async def publish_workspace(
         # ready() reconnects through the provider, which starts a stopped/idle box
         # before handing it back — so the capture always targets a running sandbox.
         backend = unwrap_sandbox_backend(await get_sandbox_backend(thread_id))
+        from langgraph_sdk import get_client
+
+        thread = await get_client().threads.get(thread_id)
+        if (thread.get("metadata") or {}).get("sandbox_personal_environment"):
+            return {
+                "ok": False,
+                "error": "A sandbox that received personal environment variables cannot be published as a shared image",
+            }
         snapshot_id = await store.capture_sandbox_snapshot(
             backend.id, published_name, timeout=refresh.capture_timeout()
         )

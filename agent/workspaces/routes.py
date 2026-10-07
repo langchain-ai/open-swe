@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from agent.audit_logs.context import bind_workspace
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
+from agent.sandboxes.environment import EnvironmentUpdate, environment_names, save_environment
 from agent.slack.channels import SlackChannel
 from agent.workspaces.refresh import (
     ensure_refresh_cron,
@@ -124,6 +125,26 @@ async def api_workspace_options(
     for option, default_repo in zip(options, defaults, strict=True):
         option["default_repo"] = default_repo
     return {"workspaces": options, "default_slug": DEFAULT_WORKSPACE_SLUG}
+
+
+@router.get("/workspaces/{slug}/sandbox-environment")
+async def get_workspace_environment(
+    slug: str, _admin: dict[str, Any] = ADMIN_DEP
+) -> dict[str, list[str]]:
+    normalized = _normalized_slug(slug)
+    if not await WORKSPACES.get(normalized):
+        raise HTTPException(404, "workspace not found")
+    return {"names": await environment_names("workspace", normalized)}
+
+
+@router.put("/workspaces/{slug}/sandbox-environment")
+async def put_workspace_environment(
+    slug: str, update: EnvironmentUpdate, _admin: dict[str, Any] = ADMIN_DEP
+) -> dict[str, list[str]]:
+    normalized = _normalized_slug(slug)
+    if not await WORKSPACES.get(normalized):
+        raise HTTPException(404, "workspace not found")
+    return {"names": await save_environment("workspace", normalized, update)}
 
 
 @router.get("/workspaces/{slug}")

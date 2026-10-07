@@ -42,6 +42,7 @@ import {
 } from "./WorkspaceEditor"
 import { WorkspaceSandboxSection } from "./WorkspaceSandboxSection"
 import { WorkspaceProxySection } from "./WorkspaceProxySection"
+import { SandboxEnvironmentSection } from "./SandboxEnvironmentSection"
 import {
   DefaultRepoSection,
   LLMGatewaySection,
@@ -295,6 +296,7 @@ export function WorkspaceSettingsPanel({
         canEdit={canEdit}
         onSaved={onSaved}
       />
+      {canEdit && <SandboxEnvironmentSection workspace={slug} />}
       <ModelDefaultsSection
         scope={scope}
         models={(modelOptions.data?.models ?? []).filter(
