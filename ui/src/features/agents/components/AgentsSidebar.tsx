@@ -903,8 +903,12 @@ export function AgentsSidebar({
                 <section className="mb-3">
                   <SidebarSectionHeader
                     label={workspaceMode ? "Workspaces" : "Repositories"}
-                    collapsed={sectionCollapsed("repos")}
-                    onToggleCollapsed={() => toggleSectionCollapsed("repos")}
+                    collapsed={!workspaceMode && sectionCollapsed("repos")}
+                    onToggleCollapsed={
+                      workspaceMode
+                        ? undefined
+                        : () => toggleSectionCollapsed("repos")
+                    }
                     menu={
                       <SidebarSectionMenu label="Repositories options">
                         {viewMenuItems}
@@ -921,7 +925,7 @@ export function AgentsSidebar({
                       ) : undefined
                     }
                   />
-                  {!sectionCollapsed("repos") && (
+                  {(workspaceMode || !sectionCollapsed("repos")) && (
                     <>
                       {workspaceMode
                         ? workspaceGroups.map((workspace) => (
