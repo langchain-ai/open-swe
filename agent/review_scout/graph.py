@@ -40,8 +40,7 @@ from agent.middleware.trace import OpenSWEMiddleware
 from agent.prompts import apply_tool_descriptions, prompt
 from agent.review.author_guidance import SteeringHistory
 from agent.review.walkthrough import Walkthrough
-from agent.review_scout.git import ScoutGitError, finalize, setup_working_tree
-from agent.review_scout.paths import scout_repo_dir
+from agent.review_scout.git import ScoutCheckout, ScoutGitError
 from agent.run_config import RunConfig
 from agent.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -115,10 +114,10 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         if cfg.repo is None or cfg.pr_number is None or not cfg.base_sha or not cfg.head_sha:
             raise RuntimeError("review scout run is missing its pull request")
         backend = await _ensure_scout_sandbox(self._thread_id, cfg)
-        repo_dir = await scout_repo_dir(backend, cfg)
-        if repo_dir is None:
+        checkout = await ScoutCheckout.locate(backend, cfg)
+        if checkout is None:
             raise RuntimeError("review scout repository name is invalid")
-        work_dir = repo_dir.rsplit("/", 1)[0]
+        work_dir = checkout.work_dir
         ready = await prepare_review_repo(
             backend,
             work_dir=work_dir,
@@ -130,15 +129,13 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         )
         if not ready:
             raise RuntimeError("review scout could not check out the pull request")
-        merge_base = await setup_working_tree(
-            backend, repo_dir, base_sha=cfg.base_sha, head_sha=cfg.head_sha
-        )
+        merge_base = await checkout.setup(base_sha=cfg.base_sha, head_sha=cfg.head_sha)
         system_prompt = prompt(
             "review-scout/main",
             pr_number=cfg.pr_number,
             repo_full_name=cfg.repo.full_name,
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
-            repo_dir=repo_dir,
+            repo_dir=checkout.repo_dir,
             merge_base=merge_base,
             patch_dir=f"{work_dir}/.scout-patches",
         )
@@ -186,12 +183,11 @@ class StoreWalkthroughMiddleware(OpenSWEMiddleware[ReviewScoutState]):
             "pr_number": cfg.pr_number,
             "scout_head_sha": cfg.head_sha,
         }
-        backend = get_cached_sandbox_backend(self._thread_id)
-        repo_dir = await scout_repo_dir(backend, cfg)
-        if repo_dir is None:
+        checkout = await ScoutCheckout.locate(get_cached_sandbox_backend(self._thread_id), cfg)
+        if checkout is None:
             return
         try:
-            steps = await finalize(backend, repo_dir, merge_base=merge_base, head_sha=cfg.head_sha)
+            steps = await checkout.finalize(merge_base=merge_base, head_sha=cfg.head_sha)
         except ScoutGitError:
             logger.exception("Review scout could not finalize its walkthrough", extra=extra)
             return
