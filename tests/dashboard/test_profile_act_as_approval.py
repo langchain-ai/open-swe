@@ -2,8 +2,8 @@
 
 import pytest
 
-from agent.dashboard.profiles import ProfileUpdate, put_my_profile
-from agent.users import User, UserPreferencesPatch
+from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
+from openswe.users import User, UserPreferencesPatch
 from tests.conftest import FakeStore
 
 pytestmark = pytest.mark.usefixtures("registry_db")

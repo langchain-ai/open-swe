@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
-from agent.dashboard.profiles import ProfileUpdate, put_my_profile
-from agent.run_config import RunConfig
-from agent.slack import client as slack_utils
-from agent.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
-from agent.users import User, UserPreferences
-from agent.utils import url_safety
+from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
+from openswe.run_config import RunConfig
+from openswe.slack import client as slack_utils
+from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
+from openswe.users import User, UserPreferences
+from openswe.utils import url_safety
 from tests.conftest import FakeStore
 from tests.support.slack_api import SlackAPI
 
@@ -50,6 +50,12 @@ async def test_interaction_response_failure_does_not_log_capability_url(
     ):
         assert not await slack_utils.respond_to_slack_interaction(url, {"delete_original": True})
     assert "test-response" not in caplog.text
+
+
+@pytest.mark.parametrize("status", ["Thinking…", ""])
+async def test_concierge_status_does_not_create_slack_threads(slack_api: SlackAPI, status: str):
+    assert await slack_utils.set_slack_thread_status("D1", "0", status)
+    assert slack_api.calls == []
 
 
 async def test_slack_stream_rate_limit_preserves_retry_after(slack_api):

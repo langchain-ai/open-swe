@@ -14,8 +14,8 @@ from typing import Any, Literal, cast
 
 from langgraph_sdk import get_client
 
-from agent.input_messages import build_run_input
-from agent.review.findings import (
+from openswe.input_messages import build_run_input
+from openswe.review.findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
     Finding,
     Severity,

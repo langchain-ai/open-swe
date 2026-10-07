@@ -22,6 +22,7 @@ import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as AdminAuditLogsRouteImport } from './routes/admin_.audit-logs'
 import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
 import { Route as AdminIncidentsRouteImport } from './routes/admin_.incidents'
 import { Route as AdminIntegrationsRouteImport } from './routes/admin_.integrations'
@@ -118,6 +119,11 @@ const UsageRoute = UsageRouteImport.update({
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
   path: '/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
+  id: '/admin_/audit-logs',
+  path: '/admin/audit-logs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminEvalsRoute = AdminEvalsRouteImport.update({
@@ -297,6 +303,7 @@ export interface FileRoutesByFullPath {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
+  '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/admin/incidents': typeof AdminIncidentsRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
@@ -341,6 +348,7 @@ export interface FileRoutesByTo {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
+  '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/admin/incidents': typeof AdminIncidentsRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
@@ -389,6 +397,7 @@ export interface FileRoutesById {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
+  '/admin_/audit-logs': typeof AdminAuditLogsRoute
   '/admin_/evals': typeof AdminEvalsRoute
   '/admin_/incidents': typeof AdminIncidentsRoute
   '/admin_/integrations': typeof AdminIntegrationsRoute
@@ -438,6 +447,7 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/workspaces'
+    | '/admin/audit-logs'
     | '/admin/evals'
     | '/admin/incidents'
     | '/admin/integrations'
@@ -482,6 +492,7 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/workspaces'
+    | '/admin/audit-logs'
     | '/admin/evals'
     | '/admin/incidents'
     | '/admin/integrations'
@@ -529,6 +540,7 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/workspaces'
+    | '/admin_/audit-logs'
     | '/admin_/evals'
     | '/admin_/incidents'
     | '/admin_/integrations'
@@ -577,6 +589,7 @@ export interface RootRouteChildren {
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRoute
+  AdminAuditLogsRoute: typeof AdminAuditLogsRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
   AdminIncidentsRoute: typeof AdminIncidentsRoute
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
@@ -687,6 +700,13 @@ declare module '@tanstack/react-router' {
       path: '/workspaces'
       fullPath: '/workspaces'
       preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin_/audit-logs': {
+      id: '/admin_/audit-logs'
+      path: '/admin/audit-logs'
+      fullPath: '/admin/audit-logs'
+      preLoaderRoute: typeof AdminAuditLogsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin_/evals': {
@@ -989,6 +1009,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRoute,
+  AdminAuditLogsRoute: AdminAuditLogsRoute,
   AdminEvalsRoute: AdminEvalsRoute,
   AdminIncidentsRoute: AdminIncidentsRoute,
   AdminIntegrationsRoute: AdminIntegrationsRoute,

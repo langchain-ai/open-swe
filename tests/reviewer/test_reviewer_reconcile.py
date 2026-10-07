@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.review.findings import is_thread_resolved
-from agent.review.reconcile import reconcile_findings_with_review_threads
+from openswe.review.findings import is_thread_resolved
+from openswe.review.reconcile import reconcile_findings_with_review_threads
 
 
 @pytest.mark.asyncio
@@ -20,8 +20,8 @@ async def test_reconcile_marks_resolved_github_thread_resolved() -> None:
     replace = AsyncMock()
 
     with (
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", replace),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", replace),
     ):
         result = await reconcile_findings_with_review_threads(
             "tid",
@@ -46,8 +46,8 @@ async def test_reconcile_backfills_comment_and_thread_ids_from_bot_marker() -> N
     replace = AsyncMock()
 
     with (
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", replace),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", replace),
     ):
         result = await reconcile_findings_with_review_threads(
             "tid",
@@ -83,8 +83,8 @@ async def test_reconcile_backfills_marker_from_graphql_app_login() -> None:
     replace = AsyncMock()
 
     with (
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", replace),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", replace),
     ):
         result = await reconcile_findings_with_review_threads(
             "tid",
@@ -124,8 +124,8 @@ async def test_reconcile_duplicate_markers_require_all_threads_terminal() -> Non
     )
 
     with (
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", replace),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", replace),
     ):
         result = await reconcile_findings_with_review_threads(
             "tid",
@@ -162,8 +162,8 @@ async def test_reconcile_duplicate_markers_stay_open_when_some_threads_only_outd
     )
 
     with (
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", replace),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", replace),
     ):
         result = await reconcile_findings_with_review_threads(
             "tid",
@@ -196,8 +196,8 @@ async def test_reconcile_ignores_spoofed_non_bot_marker() -> None:
     replace = AsyncMock()
 
     with (
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", replace),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", replace),
     ):
         result = await reconcile_findings_with_review_threads(
             "tid",
@@ -232,8 +232,8 @@ async def test_reconcile_records_latest_human_reply_after_bot_comment() -> None:
     replace = AsyncMock()
 
     with (
-        patch("agent.review.reconcile.list_findings", AsyncMock(return_value=findings)),
-        patch("agent.review.reconcile.replace_findings", replace),
+        patch("openswe.review.reconcile.list_findings", AsyncMock(return_value=findings)),
+        patch("openswe.review.reconcile.replace_findings", replace),
     ):
         result = await reconcile_findings_with_review_threads(
             "tid",

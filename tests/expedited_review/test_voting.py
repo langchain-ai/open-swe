@@ -7,13 +7,13 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from agent.expedited_review import voting
-from agent.human_review import lifecycle, people
-from agent.human_review.people import Outcome
-from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
-from agent.slack import cards
-from agent.slack.http import SlackRequestError
-from agent.users import User
+from openswe.expedited_review import voting
+from openswe.human_review import lifecycle, people
+from openswe.human_review.people import Outcome
+from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
+from openswe.slack import cards
+from openswe.slack.http import SlackRequestError
+from openswe.users import User
 from tests.expedited_review.conftest import OpenApproval
 
 
@@ -211,11 +211,11 @@ async def test_readiness_button_is_delivered_only_to_the_author(
         return "D_ADA", "4.0"
 
     ephemeral = AsyncMock(return_value=True)
-    monkeypatch.setattr("agent.slack.client.post_slack_ephemeral_message", ephemeral)
+    monkeypatch.setattr("openswe.slack.client.post_slack_ephemeral_message", ephemeral)
     monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
     monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
-    from agent.expedited_review.eligibility import ChangedFile
+    from openswe.expedited_review.eligibility import ChangedFile
 
     monkeypatch.setattr(
         lifecycle,
@@ -505,7 +505,7 @@ async def test_author_dm_success_is_quiet_only_when_the_status_card_updates(
 ) -> None:
     from contextlib import asynccontextmanager
 
-    from agent.human_review import clicks
+    from openswe.human_review import clicks
 
     approval = await open_approval(awaiting_ready=True)
     approval.slack_dm_channel_id = "D_ADA"

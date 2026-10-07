@@ -6,13 +6,13 @@ import pytest
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
-from agent.slack import client as slack_utils
-from agent.slack import events as slack_events
-from agent.slack import routes as slack_routes
-from agent.slack import webhook as slack_service
-from agent.slack.payloads import SlackChannelContext
-from agent.slack.request import SlackRequest
-from agent.webhooks import common as webhook_common
+from openswe.slack import client as slack_utils
+from openswe.slack import events as slack_events
+from openswe.slack import routes as slack_routes
+from openswe.slack import webhook as slack_service
+from openswe.slack.payloads import SlackChannelContext
+from openswe.slack.request import SlackRequest
+from openswe.webhooks import common as webhook_common
 
 
 class _FakeRequest:
@@ -59,7 +59,9 @@ async def test_untagged_code_channel_message_routes_to_the_channel_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     slack_events.reset_slack_event_claims()
-    monkeypatch.setattr("agent.incidents.channels.handle_slack_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+    )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         return SlackChannelContext(is_ext_shared=False, is_pending_ext_shared=False)

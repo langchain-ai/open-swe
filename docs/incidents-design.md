@@ -5,7 +5,7 @@ Incidents runs each enrolled Slack channel as one ordinary system-owned Open SWE
 ## Flow
 
 ```text
-Slack event ──► /webhooks/slack ──► agent.incidents.channels.handle_slack_event
+Slack event ──► /webhooks/slack ──► openswe.incidents.channels.handle_slack_event
                                      │  channel not enrolled and not an enrollment ──► regular Slack path
                                      ├─ channel_created / channel_rename with the prefix ──► enroll
                                      ├─ channel_archive ──► complete
@@ -20,14 +20,14 @@ main `agent` graph on the incident thread
   search_incidents / read_incident — retained history
   manage_incident — start (follow this channel), pause, resume, complete; also on regular Slack runs
 
-run-completion webhook ──► agent.incidents.turns.handle_run_completion
+run-completion webhook ──► openswe.incidents.turns.handle_run_completion
 ```
 
 One LangGraph run per turn. Nothing waits on another process.
 
 ## Identity and mapping
 
-An enrolled channel maps to one agent thread at the Slack location `(channel_id, "0")`, the session timestamp code channels use. Thread metadata carries `source: incidents_agent`, `owner_type: system`, `visibility: public`, `incident_id`, and the Slack location. Runs on the thread carry `configurable.source = "incidents_agent"` and no personal identity; `agent.incidents.runtime.load_incident_session` re-verifies the saved binding before assembling the agent and refuses forged sources. Background-task completions and scheduled wakeups return to the thread as normal turns. Generic dashboard thread routes hide these threads; the Incidents dashboard is the review surface.
+An enrolled channel maps to one agent thread at the Slack location `(channel_id, "0")`, the session timestamp code channels use. Thread metadata carries `source: incidents_agent`, `owner_type: system`, `visibility: public`, `incident_id`, and the Slack location. Runs on the thread carry `configurable.source = "incidents_agent"` and no personal identity; `openswe.incidents.runtime.load_incident_session` re-verifies the saved binding before assembling the agent and refuses forged sources. Background-task completions and scheduled wakeups return to the thread as normal turns. Generic dashboard thread routes hide these threads; the Incidents dashboard is the review surface.
 
 ## Context and debounce
 
