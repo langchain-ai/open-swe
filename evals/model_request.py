@@ -9,8 +9,8 @@ from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
 
-from agent.dashboard.options import available_requested_models
-from agent.model_request import ModelRequestIntent, infer_requested_model
+from openswe.dashboard.options import available_requested_models
+from openswe.model_request import ModelRequestIntent, infer_requested_model
 
 
 @dataclass(frozen=True)

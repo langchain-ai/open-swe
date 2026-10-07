@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import BackgroundTasks
 
-from agent.slack import forms
-from agent.slack.payloads import (
+from openswe.slack import forms
+from openswe.slack.payloads import (
     SlackChannelContext,
     SlackViewSubmission,
 )

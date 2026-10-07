@@ -1286,7 +1286,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "breakout": (
         _tool_step(
             "Starting a separate Slack thread for the breakout task.",
-            "slack_start_new_thread",
+            "slack_breakout_thread",
             {
                 "title": "Add greet() helper",
                 "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",

@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from agent.utils.html_artifact import (
+from openswe.utils.html_artifact import (
     artifact_skeleton,
     sandbox_wrap_command,
     wrap_html_artifact,

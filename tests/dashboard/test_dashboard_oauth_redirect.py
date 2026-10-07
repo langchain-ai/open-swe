@@ -9,9 +9,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import auth_routes, routes
-from agent.dashboard.oauth import COOKIE_NAME, GithubUser, decode_session, sanitize_redirect_to
-from agent.users import User
+from openswe.dashboard import auth_routes, routes
+from openswe.dashboard.oauth import COOKIE_NAME, GithubUser, decode_session, sanitize_redirect_to
+from openswe.users import User
 
 
 def _stub_sign_in(monkeypatch: pytest.MonkeyPatch, user: User) -> AsyncMock:

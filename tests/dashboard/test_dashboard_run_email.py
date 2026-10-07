@@ -2,8 +2,8 @@
 
 import pytest
 
-from agent.threads import access as thread_access
-from agent.users import User
+from openswe.threads import access as thread_access
+from openswe.users import User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 

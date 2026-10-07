@@ -6,8 +6,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import var_child_runnable_config
 from langsmith import get_current_run_tree, trace, tracing_context
 
-from agent.dashboard.options import available_requested_models
-from agent.model_request import ModelRequestIntent, infer_requested_model
+from openswe.dashboard.options import available_requested_models
+from openswe.model_request import ModelRequestIntent, infer_requested_model
 
 
 @pytest.mark.parametrize("trigger_kind", ["missing", "system"])
@@ -26,7 +26,7 @@ async def test_slack_request_never_falls_back_to_unrelated_human(
             )
         )
     classify = AsyncMock()
-    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
+    monkeypatch.setattr("openswe.model_request.select_jev_choices", classify)
     intent = await infer_requested_model(
         messages=messages,
         requested_models=available_requested_models(fable_enabled=False),
@@ -49,7 +49,7 @@ async def test_only_opening_human_request_reaches_classifier_without_run_context
         observed.append(task)
         return {"runtime_model": "anthropic:claude-opus-5-5", "runtime_effort": "max"}
 
-    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
+    monkeypatch.setattr("openswe.model_request.select_jev_choices", classify)
     token = stream.set("agent-stream")
     config_token = var_child_runnable_config.set({"configurable": {"secret": "not-for-classifier"}})
     try:
@@ -116,7 +116,7 @@ async def test_effort_selection_preserves_model_failure_safety(
     async def classify(task: str, **kwargs: object) -> dict[str, str | None]:
         return {"runtime_model": model_choice, "runtime_effort": effort_choice}
 
-    monkeypatch.setattr("agent.model_request.select_jev_choices", classify)
+    monkeypatch.setattr("openswe.model_request.select_jev_choices", classify)
     assert (
         await infer_requested_model(
             messages=[HumanMessage(content="Use Opus with max reasoning effort")],

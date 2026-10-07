@@ -3,13 +3,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack import ask as slack_ask
-from agent.slack import client as slack_client
-from agent.slack import routes as slack_routes
-from agent.slack.channels import SlackChannel
-from agent.slack.payloads import SlackChannelContext, SlackMessage
-from agent.slack.tools import reply as slack_reply
-from agent.threads.listing import _metadata_matches_filters
+from openswe.slack import ask as slack_ask
+from openswe.slack import client as slack_client
+from openswe.slack import routes as slack_routes
+from openswe.slack.channels import SlackChannel
+from openswe.slack.payloads import SlackChannelContext, SlackMessage
+from openswe.slack.tools import reply as slack_reply
+from openswe.tasks import schemas as task_schemas
+from openswe.tasks import service as task_service
+from openswe.threads.listing import _metadata_matches_filters
+from openswe.users import User
+from openswe.users.models import UserIdentity
 
 
 @pytest.fixture
@@ -41,7 +45,14 @@ def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("linked_asker")
-async def test_command_thread_is_private_and_unlisted(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
+async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
+) -> None:
+    status = AsyncMock()
+    monkeypatch.setattr("openswe.slack.thinking.set_slack_thread_status", status)
+    monkeypatch.setattr(slack_ask, "add_slack_reaction", AsyncMock())
+    monkeypatch.setattr(slack_ask, "acknowledge_slack_command", AsyncMock())
     upsert = AsyncMock(return_value=True)
     dispatch = AsyncMock()
     monkeypatch.setattr(
@@ -52,11 +63,17 @@ async def test_command_thread_is_private_and_unlisted(monkeypatch: pytest.Monkey
     monkeypatch.setattr(slack_ask.common, "upsert_agent_thread_metadata", upsert)
     monkeypatch.setattr(slack_ask, "dispatch_agent_run", dispatch)
 
-    await slack_ask.process_slack_ask(
-        slack_ask.SlackAskRequest(
-            channel_id="C1", user_id="U1", question="why?", thread_id="t-1", team_id="T1"
-        )
+    request = slack_ask.SlackAskRequest(
+        channel_id="C1",
+        user_id="U1",
+        question="why?",
+        thread_id="t-1",
+        team_id="T1",
+        reply_thread_ts=reply_thread_ts,
+        message_ts="123.789" if reply_thread_ts else "",
+        response_url="" if reply_thread_ts else "https://hooks.slack.com/commands/T1/1/x",
     )
+    await slack_ask.process_slack_ask(request)
 
     assert upsert.await_args.kwargs["unlisted"] is True
     assert upsert.await_args.kwargs["visibility"] == "private"
@@ -65,6 +82,51 @@ async def test_command_thread_is_private_and_unlisted(monkeypatch: pytest.Monkey
     assert configurable["slack_ask"] is True
     assert configurable["slack_thread"]["triggering_user_id"] == "U1"
     assert "thread_ts" not in configurable["slack_thread"]
+    status.assert_not_awaited()
+
+    client = AsyncMock()
+    saved = upsert.await_args.kwargs
+    client.threads.get.return_value = {
+        "metadata": {
+            "owner_type": "user",
+            "owner_login": saved["owner_login"],
+            "visibility": saved["visibility"],
+            "source": saved["source"],
+            "source_context": saved["source_context"].dump(),
+        }
+    }
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
+    owner = User(identities=[UserIdentity(provider="github", external_id="1", login="octocat")])
+    monkeypatch.setattr(task_schemas, "user_for_login", AsyncMock(return_value=owner))
+    monkeypatch.setattr(task_service, "langgraph_client", lambda: client)
+    monkeypatch.setattr(task_service, "get_profile", AsyncMock(return_value={}))
+    monkeypatch.setattr(task_service, "resolve_run_email", AsyncMock(return_value=None))
+    resumed = await task_service.recipient_config(request.thread_id)
+
+    from openswe.run_config import RunConfig
+    from openswe.server import _slack_tools_enabled
+
+    assert _slack_tools_enabled(RunConfig.parse(resumed))
+    monkeypatch.setattr(slack_reply, "get_config", lambda: {"configurable": resumed})
+    monkeypatch.setattr(slack_reply, "get_langgraph_client", lambda: client)
+    monkeypatch.setattr(slack_reply, "create_lock_thread", AsyncMock())
+    monkeypatch.setattr(slack_reply, "claim_slack_event", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_reply, "settle_slack_thread_status", AsyncMock())
+    replace = AsyncMock(return_value=True)
+    post = AsyncMock(return_value="123.999")
+    remove_reaction = AsyncMock()
+    monkeypatch.setattr(slack_reply, "replace_slack_command_message", replace)
+    monkeypatch.setattr(slack_reply, "post_slack_thread_reply_with_ts", post)
+    monkeypatch.setattr(slack_reply, "remove_slack_reaction", remove_reaction)
+
+    assert await slack_reply.slack_reply("the worker's answer", "final") == {"success": True}
+    if reply_thread_ts:
+        assert post.await_args.args == ("C1", reply_thread_ts, "the worker's answer")
+        remove_reaction.assert_awaited_once_with("C1", "123.789", "hourglass_flowing_sand")
+        replace.assert_not_awaited()
+    else:
+        assert replace.await_args.args == (request.response_url, "the worker's answer")
+        post.assert_not_awaited()
 
 
 @pytest.mark.asyncio
