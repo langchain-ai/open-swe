@@ -9,8 +9,11 @@ from agent.slack import routes as slack_routes
 from agent.slack.channels import SlackChannel
 from agent.slack.payloads import SlackChannelContext, SlackMessage
 from agent.slack.tools import reply as slack_reply
+from agent.tasks import schemas as task_schemas
 from agent.tasks import service as task_service
 from agent.threads.listing import _metadata_matches_filters
+from agent.users import User
+from agent.users.models import UserIdentity
 
 
 @pytest.fixture
@@ -93,6 +96,8 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
         }
     }
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
+    owner = User(identities=[UserIdentity(provider="github", external_id="1", login="octocat")])
+    monkeypatch.setattr(task_schemas, "user_for_login", AsyncMock(return_value=owner))
     monkeypatch.setattr(task_service, "langgraph_client", lambda: client)
     monkeypatch.setattr(task_service, "get_profile", AsyncMock(return_value={}))
     monkeypatch.setattr(task_service, "resolve_run_email", AsyncMock(return_value=None))
