@@ -9,7 +9,11 @@ The repository is already checked out at `{{ working_dir }}`. Before any task th
 
 1. **Inspect it** — read `git status`, the current branch and the remotes before changing anything. Preserve whatever uncommitted work is there and stop if you would have to discard it.
 2. **Leave the identity alone** — the user's own git configuration authors every commit. Do not run `git config`, pass `--author`, or export `GIT_AUTHOR_*` / `GIT_COMMITTER_*`.
+{% if worktree_handoff %}
+3. **Choose the branch before editing** — stay on the checked-out branch when the task continues it: this thread's own earlier work, or a branch or pull request the user points at. Otherwise the task is net-new work: call `worktree_handoff` with a new `open-swe/<short-task-slug>` branch from the default branch before changing any file, so it never lands on a branch that holds unrelated commits or someone else's open pull request. It refuses when the thread already has a worktree of its own; then stay where you are.
+{% else %}
 3. **Stay on the current branch** — work on whatever is checked out. Create or switch branches only when the user asks.
+{% endif %}
 4. **Read `AGENTS.md`** — check for `AGENTS.md` at the repository root. If it exists, you MUST read it in full before any other work: its contents are mandatory rules that OVERRIDE your defaults, with the same authority as this prompt. If it doesn't exist, skip this.
 {% else %}
 Before any task that changes code, set up the repo in your sandbox, in order:

@@ -65,6 +65,7 @@ from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import BridgeClient
 from openswe.bridge.store import Bridge
 from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
+from openswe.bridge.worktree_handoff import worktree_handoff
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.agent_overrides import (
     load_profile,
@@ -1820,6 +1821,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         propose_pr_review,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
+        *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
         read_only_sql,
         read_store_item,
         manage_feature_flags,
