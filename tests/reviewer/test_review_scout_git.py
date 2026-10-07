@@ -7,13 +7,7 @@ from pathlib import Path
 import pytest
 
 from agent.review.walkthrough import FileLines, StepDraft
-from agent.review_scout.git import (
-    OTHER_TITLE,
-    commit_staged,
-    committed_kinds,
-    finalize,
-    setup_working_tree,
-)
+from agent.review_scout.git import OTHER_TITLE, ScoutCheckout
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
@@ -71,19 +65,19 @@ async def test_steps_own_their_lines_and_the_rest_lands_in_other(
     pr_repo: tuple[Path, str, str], tmp_path: Path
 ) -> None:
     repo, base, head = pr_repo
-    shell = _LocalShell()
-    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
+    checkout = ScoutCheckout(_LocalShell(), str(repo))
+    merge_base = await checkout.setup(base_sha=base, head_sha=head)
 
     hunks = _git(repo, "diff", "-U0", "--", "core.py").split("\n@@")
     patch = tmp_path / "c.patch"
     patch.write_text(hunks[0] + "".join(f"\n@@{h}" for h in hunks[1:] if "def c" in h) + "\n")
     _git(repo, "apply", "--cached", "--unidiff-zero", "--recount", str(patch))
-    assert await commit_staged(shell, str(repo), title="Add `c`", summary="Sums both.", other=False)
+    assert await checkout.commit_staged(title="Add `c`", summary="Sums both.", other=False)
     _git(repo, "add", "--", "cli.py")
-    assert await commit_staged(shell, str(repo), title="Call `c`", summary="", other=False)
-    assert await commit_staged(shell, str(repo), title="Empty", summary="", other=False) is None
+    assert await checkout.commit_staged(title="Call `c`", summary="", other=False)
+    assert await checkout.commit_staged(title="Empty", summary="", other=False) is None
 
-    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+    steps = await checkout.finalize(merge_base=merge_base, head_sha=head)
 
     assert steps == [
         StepDraft(
@@ -106,17 +100,17 @@ async def test_steps_own_their_lines_and_the_rest_lands_in_other(
 
 async def test_other_committed_first_is_shown_last(pr_repo: tuple[Path, str, str]) -> None:
     repo, base, head = pr_repo
-    shell = _LocalShell()
-    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
-    assert await committed_kinds(shell, str(repo), base_sha=base, head_sha=head) == []
+    checkout = ScoutCheckout(_LocalShell(), str(repo))
+    merge_base = await checkout.setup(base_sha=base, head_sha=head)
+    assert await checkout.committed_kinds(base_sha=base, head_sha=head) == []
 
     _git(repo, "rm", "-q", "--cached", "--", "gone.txt")
-    assert await commit_staged(shell, str(repo), title="Other", summary="Drops.", other=True)
+    assert await checkout.commit_staged(title="Other", summary="Drops.", other=True)
     _git(repo, "add", "--", "cli.py", "core.py")
-    assert await commit_staged(shell, str(repo), title="Add `c`", summary="", other=False)
-    assert await committed_kinds(shell, str(repo), base_sha=base, head_sha=head) == [True, False]
+    assert await checkout.commit_staged(title="Add `c`", summary="", other=False)
+    assert await checkout.committed_kinds(base_sha=base, head_sha=head) == [True, False]
 
-    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+    steps = await checkout.finalize(merge_base=merge_base, head_sha=head)
 
     assert [(step.title, step.is_other) for step in steps] == [
         ("Add `c`", False),
@@ -127,14 +121,14 @@ async def test_other_committed_first_is_shown_last(pr_repo: tuple[Path, str, str
 
 async def test_an_empty_other_commit_adds_no_step(pr_repo: tuple[Path, str, str]) -> None:
     repo, base, head = pr_repo
-    shell = _LocalShell()
-    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
+    checkout = ScoutCheckout(_LocalShell(), str(repo))
+    merge_base = await checkout.setup(base_sha=base, head_sha=head)
 
-    assert await commit_staged(shell, str(repo), title="Other", summary="", other=True)
+    assert await checkout.commit_staged(title="Other", summary="", other=True)
     _git(repo, "add", "-A")
-    assert await commit_staged(shell, str(repo), title="Everything", summary="", other=False)
+    assert await checkout.commit_staged(title="Everything", summary="", other=False)
 
-    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+    steps = await checkout.finalize(merge_base=merge_base, head_sha=head)
 
     assert [step.title for step in steps] == ["Everything"]
 
@@ -153,16 +147,16 @@ async def test_owned_lines_are_exactly_the_pr_diffs_changed_lines(tmp_path: Path
     target.write_text("a\nb\nc\nb\nc\na\nb\nc\n")
     _git(repo, "commit", "-qam", "head")
     head = _git(repo, "rev-parse", "HEAD")
-    shell = _LocalShell()
-    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
+    checkout = ScoutCheckout(_LocalShell(), str(repo))
+    merge_base = await checkout.setup(base_sha=base, head_sha=head)
 
     # An intermediate step blame aligns differently from the PR diff, which adds head lines 4-5.
     target.write_text("a\nc\nb\nc\na\nb\nc\n")
     _git(repo, "add", "f")
     target.write_text("a\nb\nc\nb\nc\na\nb\nc\n")
-    assert await commit_staged(shell, str(repo), title="Step", summary="", other=False)
+    assert await checkout.commit_staged(title="Step", summary="", other=False)
 
-    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+    steps = await checkout.finalize(merge_base=merge_base, head_sha=head)
 
     owned = sorted(
         n
@@ -189,12 +183,12 @@ async def test_paths_with_spaces_keep_their_lines(tmp_path: Path) -> None:
     target.write_text("a\nB\n")
     _git(repo, "commit", "-qam", "head")
     head = _git(repo, "rev-parse", "HEAD")
-    shell = _LocalShell()
-    merge_base = await setup_working_tree(shell, str(repo), base_sha=base, head_sha=head)
+    checkout = ScoutCheckout(_LocalShell(), str(repo))
+    merge_base = await checkout.setup(base_sha=base, head_sha=head)
     _git(repo, "add", "--", "foo bar.txt")
-    assert await commit_staged(shell, str(repo), title="Edit", summary="", other=False)
+    assert await checkout.commit_staged(title="Edit", summary="", other=False)
 
-    steps = await finalize(shell, str(repo), merge_base=merge_base, head_sha=head)
+    steps = await checkout.finalize(merge_base=merge_base, head_sha=head)
 
     assert steps == [
         StepDraft(
