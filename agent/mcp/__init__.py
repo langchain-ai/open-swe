@@ -7,7 +7,7 @@ from agent.mcp.models import (
     MCPToolDescription,
     prepare_connection,
 )
-from agent.mcp.runtime import MCPSource, discover_tools, load_mcp_tools
+from agent.mcp.runtime import MCPSource, discover_tools, load_mcp_tools, match_skill_tools
 
 __all__ = [
     "MCPConnection",
@@ -17,5 +17,6 @@ __all__ = [
     "MCPToolDescription",
     "discover_tools",
     "load_mcp_tools",
+    "match_skill_tools",
     "prepare_connection",
 ]
