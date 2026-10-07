@@ -6,6 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { PersonalInstructionsSection } from "./PersonalInstructionsSection"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
 import { ModelPairControl } from "./WorkspaceSettingsSections"
 
@@ -119,6 +120,8 @@ export function AgentSettings() {
           fallback
         />
       </SettingsSection>
+
+      <PersonalInstructionsSection />
     </>
   )
 }
