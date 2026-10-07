@@ -186,27 +186,24 @@ async def sidebar_memberships(
         for offset in range(0, len(thread_ids), 1000):
             ids = thread_ids[offset : offset + 1000]
             statement = (
-                select(TaskMembership, CoordinatedTask, TaskDelegation)
-                .join(CoordinatedTask, CoordinatedTask.id == TaskMembership.task_id)
+                select(TaskMembership, Task, TaskDelegation)
+                .join(Task, Task.id == TaskMembership.task_id)
                 .outerjoin(
                     TaskDelegation,
                     (TaskDelegation.worker_thread_id == TaskMembership.thread_id)
                     & (TaskDelegation.task_id == TaskMembership.task_id)
-                    & (
-                        TaskDelegation.coordinator_thread_id
-                        == CoordinatedTask.coordinator_thread_id
-                    ),
+                    & (TaskDelegation.coordinator_thread_id == Task.coordinator_thread_id),
                 )
             )
             if workers_of:
                 statement = statement.where(
-                    CoordinatedTask.coordinator_thread_id.in_(ids),
+                    Task.coordinator_thread_id.in_(ids),
                     TaskMembership.role == "worker",
                 )
             else:
                 statement = statement.where(TaskMembership.thread_id.in_(ids))
             for membership, task, delegation in await session.execute(statement):
-                if (
+                if task.coordinator_thread_id is None or (
                     membership.role == "coordinator"
                     and membership.thread_id != task.coordinator_thread_id
                 ):
