@@ -17,6 +17,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from agent.mcp.models import MCPToolProvenance
 from agent.middleware.dynamic_tools import DynamicToolMiddleware
 from agent.middleware.trace import OpenSWEMiddleware
 from agent.sandboxes import tool_access, tool_data, tool_routes, tool_runtime
@@ -186,6 +187,7 @@ async def test_mcp_discovery_invocation_and_middleware_without_a_model_call() ->
     state: dict[str, object] = {"messages": []}
     await tools.prepare(state)
     assert [tool.name for tool in tools.catalog("connected SEARCHABLE")] == ["integration_echo"]
+    assert "mcp_provenance" not in tools.catalog()[0].model_dump()
     properties = tools.catalog()[0].parameters["properties"]
     assert isinstance(properties, dict) and set(properties) == {"value"}
     config: RunnableConfig = {"configurable": {"thread_id": "thread-a"}}
@@ -213,6 +215,13 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
     state: dict[str, object] = {"messages": []}
     await tools.prepare(state)
     config: RunnableConfig = {"configurable": {"thread_id": "thread-a"}}
+    tools.tools["integration_echo"].metadata = {
+        "mcp_provenance": MCPToolProvenance(
+            connection_name="echo", scope="user", overridden_scopes=["instance", "workspace"]
+        ),
+        "headers": {"Authorization": "secret-value"},
+        "namespace": ["user_mcps", "private-owner"],
+    }
     monkeypatch.setattr(
         tool_runtime, "load_tool_surface", AsyncMock(return_value=(tools, config, state))
     )
@@ -235,6 +244,16 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
         assert result.headers["cache-control"] == "no-store"
         listed = await http.get("/dashboard/api/sandbox-tools/list", headers=headers)
         assert listed.json()["total"] == 1
+        for response in (result, listed):
+            discovered = response.json()["tools"][0]
+            assert set(discovered) == {"name", "description", "parameters", "mcp_provenance"}
+            assert discovered["mcp_provenance"] == {
+                "connection_name": "echo",
+                "scope": "user",
+                "overridden_scopes": ["instance", "workspace"],
+            }
+            assert "secret-value" not in response.text
+            assert "private-owner" not in response.text
         invoked = await http.post(
             "/dashboard/api/sandbox-tools/invoke/integration_echo",
             headers=headers,

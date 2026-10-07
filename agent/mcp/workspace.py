@@ -97,6 +97,7 @@ async def delete_workspace_mcp(workspace: str, name: str) -> None:
 def workspace_mcp_source(workspace: str) -> MCPSource:
     workspace = workspace.strip().lower()
     return MCPSource(
+        scope="workspace",
         namespace=(*WORKSPACE_MCPS_NAMESPACE, workspace),
         list_connections=partial(list_workspace_mcp_records, workspace),
         get_connection=partial(get_workspace_mcp, workspace),

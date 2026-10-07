@@ -111,6 +111,7 @@ async def discover_instance_mcp(
 
 def instance_mcp_source() -> MCPSource:
     return MCPSource(
+        scope="instance",
         namespace=tuple(INSTANCE_MCPS_NAMESPACE),
         list_connections=list_instance_mcp_records,
         get_connection=get_instance_mcp,

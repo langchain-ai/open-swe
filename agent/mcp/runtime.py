@@ -7,7 +7,7 @@ import logging
 import re
 from collections import Counter
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import partial
 from typing import Any, Literal, get_args
@@ -24,7 +24,7 @@ from langchain_mcp_adapters.sessions import (
 from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
 
 from agent.analytics.segment import record_mcp_tool
-from agent.mcp.models import MCPConnection
+from agent.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
 from agent.mcp.oauth import MCPOAuthError, connection_auth
 from agent.mcp.transport import MCPDiscoveryError, mcp_http_client
 from agent.utils.startup_trace import asubphase
@@ -48,6 +48,7 @@ class MCPSource:
     only a genuinely absent connection may return None.
     """
 
+    scope: MCPScope = field(kw_only=True)
     namespace: tuple[str, ...]
     list_connections: Callable[[], Awaitable[list[MCPConnection]]]
     get_connection: Callable[[str], Awaitable[MCPConnection | None]]
@@ -162,6 +163,7 @@ def _wrap_tool(
     definition: Tool,
     namespace: tuple[str, ...],
     sources: tuple[MCPSource, ...],
+    provenance: MCPToolProvenance,
 ) -> BaseTool:
     async def invoke(**arguments: Any) -> Any:
         is_error = True
@@ -221,7 +223,7 @@ def _wrap_tool(
         args_schema=definition.inputSchema,
         response_format="content_and_artifact",
         handle_tool_error=True,
-        metadata={"mcp_tool_name": definition.name},
+        metadata={"mcp_tool_name": definition.name, "mcp_provenance": provenance},
     )
 
 
@@ -255,12 +257,23 @@ async def _load_tools(
     source: MCPSource,
     record: MCPConnection,
     sources: tuple[MCPSource, ...],
+    overridden_scopes: list[MCPScope],
 ) -> tuple[list[BaseTool], CatalogOutcome]:
     try:
         definitions, outcome = await _cached_definitions(source, record)
         tools = [
             _wrap_tool(
-                record.name, record.url, record.transport, definition, source.namespace, sources
+                record.name,
+                record.url,
+                record.transport,
+                definition,
+                source.namespace,
+                sources,
+                MCPToolProvenance(
+                    connection_name=record.name,
+                    scope=source.scope,
+                    overridden_scopes=overridden_scopes,
+                ),
             )
             for definition in definitions
             if definition.name in record.allowed_tools
@@ -275,11 +288,12 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
     """Combine sources in precedence order; later connections replace earlier names entirely."""
     try:
         catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
-        resolved = {
-            record.name: (source, record)
-            for source, records in zip(sources, catalogs, strict=True)
-            for record in records
-        }
+        resolved: dict[str, tuple[MCPSource, MCPConnection]] = {}
+        scopes: dict[str, list[MCPScope]] = {}
+        for source, records in zip(sources, catalogs, strict=True):
+            for record in records:
+                resolved[record.name] = (source, record)
+                scopes.setdefault(record.name, []).append(source.scope)
     except Exception:
         # Missing scope data must not silently expose a lower-precedence connection.
         logger.warning("MCP settings unavailable")
@@ -292,7 +306,10 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
         and (connection_name is None or record.name == connection_name)
     ]
     groups = await asyncio.gather(
-        *(_load_tools(source, record, sources) for source, record in connections)
+        *(
+            _load_tools(source, record, sources, scopes[record.name][:-1])
+            for source, record in connections
+        )
     )
     outcomes = Counter(outcome for _, outcome in groups)
     logger.info(
