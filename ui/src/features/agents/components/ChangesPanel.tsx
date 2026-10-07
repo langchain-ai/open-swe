@@ -16,6 +16,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 export type ChangesStatus = "ready" | "missing" | "error"
 
 interface ChangesPanelProps {
+  onComment?: (content: string) => Promise<void>
   files: Array<PanelFile>
   status?: ChangesStatus
   isLoading: boolean
@@ -118,6 +119,7 @@ function ScopeSwitcher(props: {
 
 export function ChangesPanel({
   files,
+  onComment,
   status,
   isLoading,
   isFetching,
@@ -180,6 +182,7 @@ export function ChangesPanel({
       )}
       <DiffFilesView
         files={files}
+        onComment={onComment}
         revealFilePath={revealFilePath}
         fullScreen={fullScreen}
         emptyLabel={emptyLabel}

@@ -130,7 +130,7 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 
 Before reporting readiness, verify `/ok` on localhost, open the dashboard in a browser, and check tunnel forwarding and the OAuth callback redirect. A healthy `/ok` does not mean the UI is ready: `make dev` needs a dashboard build or a running Vite server to serve it.
 
-**Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages appear. Set **Admin → Global defaults → Default Repository**, then start a task from the composer.
+**Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Administration** pages appear. Set **Admin → Defaults → Default repository**, then start a task from the composer.
 
 **Slack.** With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`. It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
@@ -144,7 +144,7 @@ Record the worktree, process IDs, fixed tunnel domain, and state location in ign
 
 ## Backend API documentation
 
-[`swagger.json`](../swagger.json) is the generated OpenAPI 3.1 schema for the custom FastAPI backend (`agent.webapp:app`). Import it into an OpenAPI 3.1-compatible viewer. After local setup, `make run` serves interactive documentation at `http://localhost:8000/docs` and the live schema at `/openapi.json`; this server does not include the LangGraph runtime or support creating runs.
+[`swagger.json`](../swagger.json) is the generated OpenAPI 3.1 schema for the custom FastAPI backend (`openswe.webapp:app`). Import it into an OpenAPI 3.1-compatible viewer. After local setup, `make run` serves interactive documentation at `http://localhost:8000/docs` and the live schema at `/openapi.json`; this server does not include the LangGraph runtime or support creating runs.
 
 Regenerate the checked-in schema with `make swagger` after changing backend routes or models. The checked-in file can lag the running backend; use its live schema when inspecting deployed routes. Some request/response schemas and authentication requirements are not yet documented. LangGraph runtime endpoints such as `/runs`, `/threads`, and `/assistants` are not included.
 

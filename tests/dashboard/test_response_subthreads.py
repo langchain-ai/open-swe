@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.openai_responses.associations import record_guest_thread
-from agent.threads import listing
-from agent.threads.summary import thread_is_unlisted
+from openswe.openai_responses.associations import record_guest_thread
+from openswe.threads import listing
+from openswe.threads.summary import thread_is_unlisted
 
 
 @pytest.mark.asyncio

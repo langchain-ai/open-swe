@@ -10,7 +10,7 @@ import type {
 } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
-import { api, connectLangSmith, connectService } from "@/lib/api"
+import { api, connectService } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
 
@@ -161,6 +161,7 @@ export function ConnectLangSmithButton({
 }: {
   size?: "sm" | "default"
 }) {
+  const qc = useQueryClient()
   const status = useLangSmithConnection()
   const [connecting, setConnecting] = useState(false)
   return (
@@ -168,7 +169,10 @@ export function ConnectLangSmithButton({
       size={size}
       onClick={() => {
         setConnecting(true)
-        connectLangSmith(window.location.href)
+        void connectService("langsmith", window.location.href)?.finally(() => {
+          setConnecting(false)
+          void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
+        })
       }}
       disabled={connecting || status.isLoading}
     >
@@ -227,10 +231,7 @@ function LangSmithRow() {
 
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
-    <SettingsSection
-      title="Personal connections"
-      description="Accounts and credentials Open SWE can use on your behalf. Workspace MCP tools configured by an admin are shared with everyone."
-    >
+    <SettingsSection title="Accounts">
       <SlackRow user={user} />
       <NotionRow />
       <LangSmithRow />

@@ -12,6 +12,7 @@ import {
   MagnifyingGlassIcon,
   NotePencilIcon,
   PlusIcon,
+  RobotIcon,
   TrashIcon,
   PushPinIcon,
   PushPinSlashIcon,
@@ -103,6 +104,9 @@ import {
   sidebarRepoKey,
   sidebarRepoOptions,
   sortSidebarThreads,
+  sidebarItemContains,
+  withoutNestedWorkers,
+  pinnedThreadShortcuts,
 } from "@/features/agents/lib/sidebarThreads"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -137,6 +141,7 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
 const NAV = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
+  { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
   { to: "/incidents", label: "Incidents", icon: Radar },
 ] as const
@@ -396,7 +401,7 @@ export function AgentsSidebar({
   const aliases = cloudRepoAliases(cloudRepos)
   const alignedLocalItems = applyRepoKeyAliases(localItems, aliases)
   const pinnedItems = [
-    ...pinnedThreads.map(cloudSidebarThread),
+    ...pinnedThreadShortcuts(pinnedThreads).map(cloudSidebarThread),
     ...alignedLocalItems.filter((item) => localPinnedIds.has(item.id)),
   ]
   const threadItems: Array<SidebarThreadItem> = [
@@ -538,6 +543,7 @@ export function AgentsSidebar({
   ) => ({
     item,
     isActive: item.key === activeKey,
+    activeThreadId,
     pinned: isPinned(item),
     archived: isArchived(item),
     live,
@@ -901,8 +907,12 @@ export function AgentsSidebar({
                 <section className="mb-3">
                   <SidebarSectionHeader
                     label={workspaceMode ? "Workspaces" : "Repositories"}
-                    collapsed={sectionCollapsed("repos")}
-                    onToggleCollapsed={() => toggleSectionCollapsed("repos")}
+                    collapsed={!workspaceMode && sectionCollapsed("repos")}
+                    onToggleCollapsed={
+                      workspaceMode
+                        ? undefined
+                        : () => toggleSectionCollapsed("repos")
+                    }
                     menu={
                       <SidebarSectionMenu label="Repositories options">
                         {viewMenuItems}
@@ -919,7 +929,7 @@ export function AgentsSidebar({
                       ) : undefined
                     }
                   />
-                  {!sectionCollapsed("repos") && (
+                  {(workspaceMode || !sectionCollapsed("repos")) && (
                     <>
                       {workspaceMode
                         ? workspaceGroups.map((workspace) => (
@@ -1134,10 +1144,10 @@ function RepoGroup({
     sort,
     enabled: !collapsed,
   })
-  const cloudThreads = [
+  const cloudThreads = withoutNestedWorkers([
     ...(group.activeThread ? [group.activeThread] : []),
     ...repo.items.filter((thread) => thread.id !== group.activeThread?.id),
-  ]
+  ])
   useSeedAgentThreadDetails(cloudThreads, activeThreadId)
   useRunCompletionNotifier(cloudThreads, activeThreadId, openThread)
   const threads = sortSidebarThreads(
@@ -1149,7 +1159,9 @@ function RepoGroup({
     Boolean(group.repoFullName)
   )
   const preview = threads.slice(0, REPO_PREVIEW_COUNT)
-  const active = threads.find((thread) => thread.key === activeKey)
+  const active = threads.find((thread) =>
+    sidebarItemContains(thread, activeKey)
+  )
   const shown = expanded
     ? threads
     : active && !preview.includes(active)

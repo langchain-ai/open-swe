@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
-from agent.slack import move as slack_move
-from agent.slack import thinking as slack_thinking
-from agent.slack.channels import SlackChannel
-from agent.slack.client import lookup_slack_thread_id
-from agent.slack.tools import move_thread
-from agent.source_context import SlackThreadRef
+from openswe.slack import move as slack_move
+from openswe.slack import thinking as slack_thinking
+from openswe.slack.channels import SlackChannel
+from openswe.slack.client import lookup_slack_thread_id
+from openswe.slack.tools import move_thread
+from openswe.source_context import SlackThreadRef
 
 StatusCall = tuple[str, str, str]
 
@@ -290,7 +290,7 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
         }
     }
     monkeypatch.setattr(move_thread, "get_config", lambda: config)
-    monkeypatch.setattr("agent.run_config.get_config", lambda: config)
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(move_thread, "langgraph_client", lambda: client)
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=True)))
     root = AsyncMock(return_value="2.0")

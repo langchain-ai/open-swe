@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.profiles import ProfileUpdate, upsert_profile
+from openswe.dashboard.profiles import ProfileUpdate, upsert_profile
 
 
 @pytest.mark.asyncio
@@ -12,7 +12,7 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
 
     with (
         patch(
-            "agent.dashboard.profiles.get_profile",
+            "openswe.dashboard.profiles.get_profile",
             new_callable=AsyncMock,
             return_value={
                 "draft_prs": False,
@@ -21,7 +21,7 @@ async def test_omitted_draft_preference_preserves_existing_value() -> None:
                 "slack_onboarding_dismissed": True,
             },
         ),
-        patch("agent.store.store_client") as client,
+        patch("openswe.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
         profile = await upsert_profile("octocat", "octocat@example.com", update)
@@ -46,8 +46,8 @@ async def test_explicit_draft_preference_is_persisted() -> None:
     put_item = AsyncMock()
 
     with (
-        patch("agent.dashboard.profiles.get_profile", new_callable=AsyncMock, return_value=None),
-        patch("agent.store.store_client") as client,
+        patch("openswe.dashboard.profiles.get_profile", new_callable=AsyncMock, return_value=None),
+        patch("openswe.store.store_client") as client,
     ):
         client.return_value.store.put_item = put_item
         profile = await upsert_profile("octocat", "octocat@example.com", update)

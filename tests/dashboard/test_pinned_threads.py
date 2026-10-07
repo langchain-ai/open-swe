@@ -8,7 +8,7 @@ import httpx
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
-from agent.threads import listing, pins, summary
+from openswe.threads import listing, pins, summary
 from tests.conftest import FakeStore
 
 

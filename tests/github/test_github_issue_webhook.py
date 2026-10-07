@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from agent.github import routes as github_routes
-from agent.github import webhook as github_webhooks
-from agent.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
-from agent.slack.client import GitHubPrRef
-from agent.slack.payloads import SlackChannelContext
-from agent.users import User
-from agent.webhooks import common as webhook_common
+from openswe.github import routes as github_routes
+from openswe.github import webhook as github_webhooks
+from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from openswe.slack.client import GitHubPrRef
+from openswe.slack.payloads import SlackChannelContext
+from openswe.users import User
+from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
-request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
+request_pr_review_module = importlib.import_module("openswe.slack.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
@@ -413,6 +413,26 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     assert "&lt;/body_&gt;" in message_content
 
 
+def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
+    monkeypatch.setattr(
+        webhook_common,
+        "get_github_app_installation_token_with_expiry",
+        AsyncMock(return_value=("app-token", None)),
+    )
+    monkeypatch.setattr(
+        webhook_common, "fetch_github_pr_metadata", AsyncMock(return_value={"draft": True})
+    )
+    ref = GitHubPrRef(
+        owner="langchain-ai",
+        repo="open-swe",
+        number=1244,
+        url="https://github.com/langchain-ai/open-swe/pull/1244",
+    )
+    result = asyncio.run(github_webhooks.trigger_pr_review_from_ref(ref, source="slack"))
+    assert result["success"] is False
+    assert ref.url in result["error"]
+
+
 def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     captured: dict[str, object] = {}
     auto_review_checked = False
@@ -643,8 +663,9 @@ def test_process_github_issue_followup_keeps_the_threads_workspace(monkeypatch) 
     captured: dict[str, object] = {}
 
     class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
+        async def create(self, *args, **kwargs) -> dict[str, str]:
             captured["configurable"] = kwargs["config"]["configurable"]
+            return {"run_id": "run-1"}
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
@@ -724,8 +745,9 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
     captured: dict[str, object] = {}
 
     class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
+        async def create(self, *args, **kwargs) -> dict[str, str]:
             captured["run_created"] = True
+            return {"run_id": "run-1"}
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()

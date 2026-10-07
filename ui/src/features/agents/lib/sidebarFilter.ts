@@ -15,6 +15,7 @@ export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
 interface FilterableThread {
   source?: AgentSource
   threadCategory?: string
+  taskWorkers?: Array<FilterableThread>
 }
 
 function threadSource(thread: FilterableThread): AgentSource {
@@ -33,21 +34,16 @@ export function filterThreads<T extends FilterableThread>(
   threads: Array<T>,
   filters: SidebarFilters
 ): Array<T> {
-  return threads.filter((thread) => {
-    if (
-      !filters.includeAutomations &&
-      isAutomationThread(thread) &&
-      !filters.sources.includes("schedule")
-    ) {
-      return false
-    }
-    if (
-      filters.sources.length > 0 &&
-      !filters.sources.includes(threadSource(thread))
-    ) {
-      return false
-    }
-    return true
+  const matches = (thread: FilterableThread) =>
+    (filters.includeAutomations ||
+      !isAutomationThread(thread) ||
+      filters.sources.includes("schedule")) &&
+    (filters.sources.length === 0 ||
+      filters.sources.includes(threadSource(thread)))
+  return threads.flatMap((thread) => {
+    if (matches(thread)) return [thread]
+    const taskWorkers = thread.taskWorkers?.filter(matches)
+    return taskWorkers?.length ? [{ ...thread, taskWorkers }] : []
   })
 }
 

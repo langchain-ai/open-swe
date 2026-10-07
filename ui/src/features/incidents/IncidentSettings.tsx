@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { SlackChannelMultiCombobox } from "@/components/SlackChannelCombobox"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { incidentsApi } from "./api"
 import type { IncidentPolicy, IncidentSettingsPayload } from "./api"
 import { ErrorState, formatTime, LoadingState } from "./shared"
@@ -357,7 +358,7 @@ export function IncidentSettings() {
     queryKey: ["incidents", "settings"],
     queryFn: incidentsApi.settings,
     retry: false,
-    refetchInterval: 5000,
+    meta: { invalidatedBy: [invalidationTopic("incident-settings")] },
   })
   if (settings.isPending) return <LoadingState />
   if (settings.error)
