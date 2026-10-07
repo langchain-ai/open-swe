@@ -4369,6 +4369,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "claimed": {
+            "default": false,
+            "title": "Claimed",
+            "type": "boolean"
+          },
           "error": {
             "default": "",
             "title": "Error",
