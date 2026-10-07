@@ -6,7 +6,10 @@ from agent.utils import thread_ops
 
 
 @pytest.mark.asyncio
-async def test_queue_message_for_thread_deduplicates_queue_id(monkeypatch) -> None:
+@pytest.mark.parametrize("report_new_item", [False, True])
+async def test_queue_message_for_thread_deduplicates_queue_id(
+    monkeypatch: pytest.MonkeyPatch, report_new_item: bool
+) -> None:
     existing = {
         "content": {
             "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777001",
@@ -24,7 +27,8 @@ async def test_queue_message_for_thread_deduplicates_queue_id(monkeypatch) -> No
             "queue_id": "8a60896d-65ca-4e40-8a2d-1fbe81777001",
             "text": "follow up",
         },
+        report_new_item=report_new_item,
     )
 
-    assert queued is True
+    assert queued is not report_new_item
     client.store.put_item.assert_not_awaited()

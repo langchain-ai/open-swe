@@ -9,7 +9,10 @@ from fastapi import BackgroundTasks, HTTPException
 
 from agent.incidents import channels, service, turns
 from agent.incidents.models import Incident, IncidentPolicy
+from agent.incidents.turns import queue_context
 from agent.slack.channels import SlackChannel
+from agent.utils import thread_ops
+from tests.conftest import FakeStore
 
 CHANNEL = {
     "id": "C1",
@@ -146,6 +149,72 @@ async def test_duplicate_deliveries_are_dropped(enrolled):
     response, _ = await handle({"type": "message", "channel": "C1", "text": "again"})
     assert response == {"status": "duplicate"}
     turns.queue_context.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"bot_id": "B1", "text": "alert"},
+        {"user": "U1", "text": "alert", "attachments": [{"fallback": "link preview"}]},
+        {"user": "U1", "text": "alert", "edited": {"ts": "4.0"}},
+    ],
+)
+async def test_unchanged_message_updates_do_not_wake_incident(
+    enrolled: Incident, message: dict[str, object]
+) -> None:
+    response, _ = await handle(
+        {
+            "type": "message",
+            "subtype": "message_changed",
+            "channel": "C1",
+            "message": {"ts": "3.0", **message},
+            "previous_message": {"ts": "3.0", "text": "alert"},
+        }
+    )
+
+    assert response == {"status": "ignored"}
+    turns.queue_context.assert_not_awaited()
+    turns.schedule_automatic_turn.assert_not_awaited()
+
+
+async def test_consumed_evidence_stays_deduplicated_but_human_edits_wake_incident(
+    enrolled: Incident, fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = SimpleNamespace(store=fake_store, threads=SimpleNamespace(update=AsyncMock()))
+    monkeypatch.setattr(thread_ops, "langgraph_client", lambda: client)
+    monkeypatch.setattr(turns, "queue_context", queue_context)
+    event = {
+        "type": "message",
+        "channel": "C1",
+        "ts": "3.0",
+        "user": "U1",
+        "text": "alert",
+    }
+    response, _ = await handle(event)
+    assert response == {"status": "accepted"}
+    namespace = ("queue", enrolled.thread_id)
+    await fake_store.delete_item(namespace, "pending_messages")
+
+    response, _ = await handle(event, event_id="E2")
+    assert response == {"status": "ignored"}
+    assert not fake_store.values(namespace)
+    turns.schedule_automatic_turn.assert_awaited_once()
+
+    response, _ = await handle(
+        {
+            "type": "message",
+            "subtype": "message_changed",
+            "channel": "C1",
+            "message": {**event, "text": "resolved", "edited": {"ts": "4.0"}},
+            "previous_message": event,
+        },
+        event_id="E3",
+    )
+    assert response == {"status": "accepted"}
+    queued = fake_store.values(namespace)["pending_messages"]["messages"]
+    assert len(queued) == 1
+    assert queued[0]["content"]["queue_id"] == "incident:C1:slack:3.0:4.0"
+    assert turns.schedule_automatic_turn.await_count == 2
 
 
 async def test_paused_channels_keep_context_without_scheduling(enrolled):

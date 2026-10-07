@@ -321,6 +321,11 @@ async def handle_slack_event(
     message = event.get("message") if event.get("subtype") == "message_changed" else event
     if not isinstance(message, dict):
         return {"status": "ignored"}
+    if event.get("subtype") == "message_changed" and (
+        "edited" not in message
+        or turns.message_text(message) == turns.message_text(event.get("previous_message") or {})
+    ):
+        return {"status": "ignored"}
     text = str(message.get("text") or "")
     bot_user = ENV.SLACK_BOT_USER_ID.get()
     user = message.get("user")
@@ -352,7 +357,8 @@ async def handle_slack_event(
         return {"status": "ignored"}
     if record.status == "completed" or not _is_context(message, policy):
         return {"status": "ignored"}
-    await turns.queue_context(record, message)
+    if not await turns.queue_context(record, message):
+        return {"status": "ignored"}
     if record.status in {"watching", "needs_attention"}:
         background_tasks.add_task(turns.schedule_automatic_turn, record, policy)
     return {"status": "accepted"}

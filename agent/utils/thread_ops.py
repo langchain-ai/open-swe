@@ -63,13 +63,12 @@ async def get_thread_active_status(thread_id: str) -> bool | None:
 
 
 async def queue_message_for_thread(
-    thread_id: str, message_content: str | list[dict[str, Any]] | dict[str, Any]
+    thread_id: str,
+    message_content: str | list[dict[str, Any]] | dict[str, Any],
+    *,
+    report_new_item: bool = False,
 ) -> bool:
-    """Queue a follow-up message for a busy thread (FIFO store namespace).
-
-    Used by the dashboard to inject a follow-up into a run that's already in
-    flight; webhook triggers use ``multitask_strategy="interrupt"`` instead.
-    """
+    """Queue a follow-up, optionally returning False when its queue ID is already pending."""
     client = langgraph_client()
     try:
         namespace = ("queue", thread_id)
@@ -90,7 +89,7 @@ async def queue_message_for_thread(
             and existing["content"].get("queue_id") == queue_id
             for existing in existing_messages
         ):
-            return True
+            return not report_new_item
 
         existing_messages.append(new_message)
         if len(existing_messages) > MAX_QUEUED_MESSAGES:

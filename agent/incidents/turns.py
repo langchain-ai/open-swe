@@ -25,7 +25,7 @@ from agent.slack.client import (
     slack_message_bot_id,
     slack_message_bot_name,
 )
-from agent.store import store_client
+from agent.store import get_value, put_value, store_client
 from agent.ui_invalidations import Topic
 from agent.utils.thread_ops import queue_message_for_thread
 
@@ -98,9 +98,15 @@ def context_block(channel_id: str, message: dict[str, Any]) -> dict[str, Any]:
 
 
 async def queue_context(record: Incident, message: dict[str, Any]) -> bool:
-    return await queue_message_for_thread(
-        record.thread_id, context_block(record.channel_id, message)
-    )
+    payload = context_block(record.channel_id, message)
+    queue_id = str(payload["queue_id"])
+    namespace = ("incidents", "queued_evidence", record.thread_id)
+    if await get_value(namespace, queue_id) is not None:
+        return False
+    if not await queue_message_for_thread(record.thread_id, payload, report_new_item=True):
+        return False
+    await put_value(namespace, queue_id, {"queued": True})
+    return True
 
 
 async def _runs(thread_id: str, status: Literal["pending", "running"]) -> list[dict[str, Any]]:
