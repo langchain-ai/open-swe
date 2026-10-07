@@ -1095,6 +1095,8 @@ async def test_performance_directive_switches_only_when_unquoted(
             }
         ),
     )
+    feedback = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhooks, "create_langsmith_feedback", feedback)
     notice = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
     dispatch = AsyncMock(return_value={"run_id": "run-perf"})
@@ -1116,7 +1118,9 @@ async def test_performance_directive_switches_only_when_unquoted(
     if quoted:
         assert "agent_model_id" not in configurable
         notice.assert_not_awaited()
+        feedback.assert_not_awaited()
     else:
+        assert feedback.call_args.args == ("run-perf", "performance_model_switch_slack")
         assert configurable["agent_model_id"] == "openai:gpt-6-astra"
         assert configurable["model_selection"] == "explicit"
         assert notice.call_args.args[:2] == ("C123", "U123")

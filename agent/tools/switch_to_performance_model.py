@@ -10,6 +10,7 @@ from langgraph.types import Command
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.run_config import RunConfig
 from agent.slack.client import post_slack_ephemeral_message
+from agent.utils.langsmith import create_langsmith_feedback
 from agent.utils.thread_ops import langgraph_client
 from agent.utils.thread_settings import load_thread_settings, store_thread_settings
 
@@ -37,6 +38,13 @@ async def switch_to_performance_model(
         model_routing_enabled=False,
     )
     await store_thread_settings(client, cfg.thread_id, settings, strict=True)
+    if cfg.run_id:
+        await create_langsmith_feedback(
+            cfg.run_id,
+            "performance_model_switch_tool",
+            score=1,
+            source_info={"model_id": model_id, "effort": effort},
+        )
     confirmation = f"Switched to {model_id} (reasoning effort: {effort or 'default'})."
     if cfg.slack_thread and cfg.slack_thread.triggering_user_id:
         await post_slack_ephemeral_message(

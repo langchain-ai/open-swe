@@ -52,7 +52,7 @@ from agent.slack.thinking import (
 from agent.source_context import SlackThreadRef, SourceContext
 from agent.users import User, persist_display_name
 from agent.utils.json_types import as_json_object
-from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.langsmith import create_langsmith_feedback, get_langsmith_trace_url
 from agent.utils.message_commands import (
     PERFORMANCE_COMMAND,
     find_message_command,
@@ -1348,6 +1348,14 @@ async def _process_slack_mention_impl(
             thread_ts=reply_thread_ts or thread_ts,
         )
     run_id = run.get("run_id")
+    if performance_command and thread_model_choice and isinstance(run_id, str) and run_id:
+        selected_model = image_model_override or thread_model_choice
+        await create_langsmith_feedback(
+            run_id,
+            "performance_model_switch_slack",
+            score=1,
+            source_info={"model_id": selected_model[0], "effort": selected_model[1]},
+        )
     if code_channel and isinstance(run_id, str) and run_id:
         stream_thread_ts = reply_thread_ts or thread_ts
         await stream_slack_thinking_steps(
