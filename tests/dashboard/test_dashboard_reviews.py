@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.github import repos
-from agent.review import reviews as review_api
-from agent.review.findings import REVIEWER_THREAD_KIND
+from openswe.github import repos
+from openswe.review import reviews as review_api
+from openswe.review.findings import REVIEWER_THREAD_KIND
 
 pytestmark = pytest.mark.usefixtures("findings_from_metadata")
 

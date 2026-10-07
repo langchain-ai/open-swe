@@ -6,10 +6,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.dashboard import routes
-from agent.dashboard.oauth import COOKIE_NAME, issue_session
-from agent.slack import connect, oauth
-from agent.users import User
+from openswe.dashboard import routes
+from openswe.dashboard.oauth import COOKIE_NAME, issue_session
+from openswe.slack import connect, oauth
+from openswe.users import User
 
 
 @pytest.mark.parametrize("public_url", [None, "https://example.ngrok-free.dev/"])

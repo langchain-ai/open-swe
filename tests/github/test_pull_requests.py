@@ -9,12 +9,12 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github import pull_request_dashboard_routes, pull_requests, routes
-from agent.github.check_runs import CheckRun
-from agent.github.pull_requests import PullRequest, PullRequestEvent
-from agent.github.repositories import Repository
-from agent.review import reviews
-from agent.webhooks import common
+from openswe.github import pull_request_dashboard_routes, pull_requests, routes
+from openswe.github.check_runs import CheckRun
+from openswe.github.pull_requests import PullRequest, PullRequestEvent
+from openswe.github.repositories import Repository
+from openswe.review import reviews
+from openswe.webhooks import common
 from scripts import sync_pull_request_descriptions
 from tests.conftest import post_signed_github_webhook
 

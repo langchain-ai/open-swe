@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent.middleware.check_message_queue import (
+from openswe.middleware.check_message_queue import (
     LinearNotifyState,
     check_message_queue_before_model,
 )
@@ -66,10 +66,10 @@ async def test_check_message_queue_announces_the_move_to_web_only_once() -> None
 
     with (
         patch(
-            "agent.middleware.check_message_queue.get_config",
+            "openswe.middleware.check_message_queue.get_config",
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
-        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+        patch("openswe.middleware.check_message_queue.get_store", return_value=store),
     ):
         result = await check_message_queue_before_model.abefore_model(
             cast(LinearNotifyState, {"messages": [], "reply_surface": "web"}),
@@ -94,16 +94,16 @@ async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds() -> 
 
     with (
         patch(
-            "agent.middleware.check_message_queue.get_config",
+            "openswe.middleware.check_message_queue.get_config",
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
-        patch("agent.middleware.check_message_queue.get_store", return_value=store),
+        patch("openswe.middleware.check_message_queue.get_store", return_value=store),
         patch(
-            "agent.middleware.check_message_queue._resolve_thread_model_id",
+            "openswe.middleware.check_message_queue._resolve_thread_model_id",
             return_value=None,
         ),
         patch(
-            "agent.middleware.check_message_queue._build_blocks_from_payload",
+            "openswe.middleware.check_message_queue._build_blocks_from_payload",
             side_effect=build_and_append,
         ),
     ):

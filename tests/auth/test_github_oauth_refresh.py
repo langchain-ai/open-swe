@@ -3,12 +3,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.oauth import (
+from openswe.dashboard.oauth import (
     GithubOAuthError,
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
 )
-from agent.dashboard.profiles import _token_expired, get_valid_access_token
+from openswe.dashboard.profiles import _token_expired, get_valid_access_token
 
 
 def test_expires_at_from_github_response() -> None:
@@ -38,14 +38,14 @@ async def test_get_valid_access_token_refreshes_when_near_expiry() -> None:
     }
     with (
         patch(
-            "agent.dashboard.profiles.get_value",
+            "openswe.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             return_value=record,
         ),
-        patch("agent.dashboard.profiles._decrypt_access_token", return_value="old-access"),
-        patch("agent.dashboard.profiles._decrypt_refresh_token", return_value="ghr_test"),
+        patch("openswe.dashboard.profiles._decrypt_access_token", return_value="old-access"),
+        patch("openswe.dashboard.profiles._decrypt_refresh_token", return_value="ghr_test"),
         patch(
-            "agent.dashboard.profiles.refresh_user_access_token",
+            "openswe.dashboard.profiles.refresh_user_access_token",
             new_callable=AsyncMock,
             return_value={
                 "access_token": "new-access",
@@ -55,7 +55,7 @@ async def test_get_valid_access_token_refreshes_when_near_expiry() -> None:
             },
         ),
         patch(
-            "agent.dashboard.profiles.upsert_access_token_from_github_response",
+            "openswe.dashboard.profiles.upsert_access_token_from_github_response",
             new_callable=AsyncMock,
         ) as mock_upsert,
     ):
@@ -87,21 +87,21 @@ async def test_get_valid_access_token_drops_record_on_dead_refresh_token() -> No
     }
     with (
         patch(
-            "agent.dashboard.profiles.get_value",
+            "openswe.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             return_value=record,
         ),
-        patch("agent.dashboard.profiles._decrypt_access_token", return_value="stale-access"),
-        patch("agent.dashboard.profiles._decrypt_refresh_token", return_value="ghr_dead"),
+        patch("openswe.dashboard.profiles._decrypt_access_token", return_value="stale-access"),
+        patch("openswe.dashboard.profiles._decrypt_refresh_token", return_value="ghr_dead"),
         patch(
-            "agent.dashboard.profiles.refresh_user_access_token",
+            "openswe.dashboard.profiles.refresh_user_access_token",
             new_callable=AsyncMock,
             side_effect=GithubOAuthError(
                 400, "github oauth error: bad refresh token", error_code="bad_refresh_token"
             ),
         ),
         patch(
-            "agent.dashboard.profiles.delete_access_token",
+            "openswe.dashboard.profiles.delete_access_token",
             new_callable=AsyncMock,
         ) as mock_delete,
     ):
@@ -127,24 +127,24 @@ async def test_get_valid_access_token_keeps_fresh_reauth_on_dead_refresh_token()
     }
     with (
         patch(
-            "agent.dashboard.profiles.get_value",
+            "openswe.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             side_effect=[stale, stale, reauthed],
         ),
         patch(
-            "agent.dashboard.profiles._decrypt_access_token",
+            "openswe.dashboard.profiles._decrypt_access_token",
             side_effect=lambda r: "fresh-access" if r is reauthed else "stale-access",
         ),
-        patch("agent.dashboard.profiles._decrypt_refresh_token", return_value="ghr_dead"),
+        patch("openswe.dashboard.profiles._decrypt_refresh_token", return_value="ghr_dead"),
         patch(
-            "agent.dashboard.profiles.refresh_user_access_token",
+            "openswe.dashboard.profiles.refresh_user_access_token",
             new_callable=AsyncMock,
             side_effect=GithubOAuthError(
                 400, "github oauth error: bad refresh token", error_code="bad_refresh_token"
             ),
         ),
         patch(
-            "agent.dashboard.profiles.delete_access_token",
+            "openswe.dashboard.profiles.delete_access_token",
             new_callable=AsyncMock,
         ) as mock_delete,
     ):
@@ -164,19 +164,19 @@ async def test_get_valid_access_token_keeps_record_on_transient_refresh_failure(
     }
     with (
         patch(
-            "agent.dashboard.profiles.get_value",
+            "openswe.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             return_value=record,
         ),
-        patch("agent.dashboard.profiles._decrypt_access_token", return_value="still-usable"),
-        patch("agent.dashboard.profiles._decrypt_refresh_token", return_value="ghr_ok"),
+        patch("openswe.dashboard.profiles._decrypt_access_token", return_value="still-usable"),
+        patch("openswe.dashboard.profiles._decrypt_refresh_token", return_value="ghr_ok"),
         patch(
-            "agent.dashboard.profiles.refresh_user_access_token",
+            "openswe.dashboard.profiles.refresh_user_access_token",
             new_callable=AsyncMock,
             side_effect=GithubOAuthError(503, "github oauth temporarily unavailable"),
         ),
         patch(
-            "agent.dashboard.profiles.delete_access_token",
+            "openswe.dashboard.profiles.delete_access_token",
             new_callable=AsyncMock,
         ) as mock_delete,
     ):
@@ -195,13 +195,13 @@ async def test_get_valid_access_token_returns_stored_when_not_expiring() -> None
     }
     with (
         patch(
-            "agent.dashboard.profiles.get_value",
+            "openswe.dashboard.profiles.get_value",
             new_callable=AsyncMock,
             return_value=record,
         ),
-        patch("agent.dashboard.profiles._decrypt_access_token", return_value="still-good"),
+        patch("openswe.dashboard.profiles._decrypt_access_token", return_value="still-good"),
         patch(
-            "agent.dashboard.profiles.refresh_user_access_token",
+            "openswe.dashboard.profiles.refresh_user_access_token",
             new_callable=AsyncMock,
         ) as mock_refresh,
     ):

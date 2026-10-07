@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 
-from agent.expedited_review import merge, reviews
-from agent.expedited_review.eligibility import ChangedFile, diff_fingerprint
-from agent.expedited_review.readiness import PullRequestSnapshot, Readiness
-from agent.github.pull_request_status import PullRequestClient
-from agent.human_review import lifecycle, merging
-from agent.human_review.requests import HumanReviewParticipant, HumanReviewRequest
-from agent.users import User
+from openswe.expedited_review import merge, reviews
+from openswe.expedited_review.eligibility import ChangedFile, diff_fingerprint
+from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
+from openswe.github.pull_request_status import PullRequestClient
+from openswe.human_review import lifecycle, merging
+from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
+from openswe.users import User
 from tests.expedited_review.conftest import OpenApproval
 
 _SOURCE = ChangedFile(filename="src/app.py", additions=1, patch="+fixed")

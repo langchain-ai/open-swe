@@ -6,14 +6,14 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
 
-from agent.dashboard import repo_access
-from agent.database import postgres
-from agent.database.notifications import LISTENER
-from agent.ui_invalidations import Topic, outbox
-from agent.ui_invalidations.hub import HUB
-from agent.ui_invalidations.routes import _stream
-from agent.ui_invalidations.topics import BaseTopic
-from agent.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
+from openswe.dashboard import repo_access
+from openswe.database import postgres
+from openswe.database.notifications import LISTENER
+from openswe.ui_invalidations import Topic, outbox
+from openswe.ui_invalidations.hub import HUB
+from openswe.ui_invalidations.routes import _stream
+from openswe.ui_invalidations.topics import BaseTopic
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 
 def _parse(frame: str) -> tuple[str, dict[str, object]]:
