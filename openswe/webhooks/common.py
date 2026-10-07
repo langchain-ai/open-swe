@@ -44,7 +44,6 @@ from openswe.github.checks import (  # noqa: F401
     complete_review_check_run,
     create_review_check_run,
 )
-from openswe.github.ci import fetch_open_pr_for_branch as github_fetch_open_pr_for_branch
 from openswe.github.comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,  # noqa: F401
@@ -60,6 +59,7 @@ from openswe.github.comments import (
     sanitize_github_comment_body,  # noqa: F401
     verify_github_signature,
 )
+from openswe.github.http import GitHubClient
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
 from openswe.github.pull_requests import PullRequestEvent
 from openswe.github.thread_token import (
@@ -1316,12 +1316,10 @@ async def fetch_open_pr_for_branch(
     repo_config: dict[str, str], head_ref: str, *, token: str
 ) -> dict[str, Any] | None:
     """Find the open PR whose head ref matches ``head_ref``, if one exists."""
-    return await github_fetch_open_pr_for_branch(
-        owner=repo_config.get("owner", ""),
-        repo=repo_config.get("name", ""),
-        branch=head_ref,
-        token=token,
-    )
+    async with GitHubClient.connect(token=token) as github:
+        return await github.repo(
+            repo_config.get("owner", ""), repo_config.get("name", "")
+        ).open_pull_for_branch(head_ref)
 
 
 def _normalized_diff_hash(diff_text: str) -> str:

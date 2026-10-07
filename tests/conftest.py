@@ -284,6 +284,17 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def github_app(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """The App installation token ``GitHubClient.as_app`` mints; ``return_value = None`` fails it."""
+    from openswe.github import app
+
+    monkeypatch.setattr(app, "get_github_app_installation_id_for_repo", AsyncMock(return_value=42))
+    token = AsyncMock(return_value="app-token")
+    monkeypatch.setattr(app, "get_github_app_installation_token", token)
+    return token
+
+
+@pytest.fixture
 def slack_api(monkeypatch: pytest.MonkeyPatch):
     from openswe.slack import channels, client, code_channels, http
     from tests.support.slack_api import slack_api_server

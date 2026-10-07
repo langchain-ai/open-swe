@@ -35,7 +35,6 @@ async def test_configured_channel_hides_send_controls(monkeypatch: pytest.Monkey
         slack_channel_choices=[{"id": "C1", "name": "kitchen"}],
     )
     approval.pull_request = pr
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     settings = RepoSettings(review_channel="C2")
     monkeypatch.setattr(RepoSettings, "cached", AsyncMock(return_value=settings))
 

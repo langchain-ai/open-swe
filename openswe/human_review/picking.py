@@ -18,12 +18,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx2
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
-from openswe.expedited_review.eligibility import ChangedFile, fetch_changed_files
-from openswe.github.ci import has_repo_write_permission
+from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github.codeowners import CodeOwners
-from openswe.github.http import GITHUB_API_BASE, github_client, github_request
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
 from openswe.github.org_membership import team_members
-from openswe.human_review.people import repo_token
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.client import get_slack_user_info
 from openswe.users import User
@@ -184,27 +183,22 @@ async def _owned(codeowners: CodeOwners, files: list[ChangedFile]) -> Counter[st
     return owned
 
 
-async def _touched(
-    owner: str, repo: str, ref: str | None, files: list[ChangedFile], token: str
-) -> Counter[str]:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits"
+async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) -> Counter[str]:
     since = (datetime.now(UTC) - HISTORY_WINDOW).isoformat()
     busiest = sorted(files, key=lambda f: (-f.changed_lines, f.filename))[:HISTORY_MAX_FILES]
     gate = asyncio.Semaphore(_HISTORY_CONCURRENCY)
 
-    async def authors(client: httpx2.AsyncClient, path: str) -> set[str]:
+    async def authors(path: str) -> set[str]:
         params = {"path": path, "since": since, "per_page": "100"}
         if ref:
             params["sha"] = ref
         async with gate:
             try:
-                response = await github_request(client, "GET", url, params=params)
-                response.raise_for_status()
-                commits = _COMMITS.validate_json(response.content)
-            except httpx2.HTTPError, ValidationError:
+                commits = _COMMITS.validate_python(await repo.get("commits", params))
+            except httpx2.HTTPError, ValueError, ValidationError:
                 logger.warning(
                     "Could not read a changed file's history",
-                    extra={"repository": f"{owner}/{repo}", "path": path},
+                    extra={"repository": repo.full_name, "path": path},
                     exc_info=True,
                 )
                 return set()
@@ -215,9 +209,8 @@ async def _touched(
         }
 
     touched: Counter[str] = Counter()
-    async with github_client(token=token) as client:
-        for logins in await asyncio.gather(*(authors(client, f.filename) for f in busiest)):
-            touched.update(logins)
+    for logins in await asyncio.gather(*(authors(f.filename) for f in busiest)):
+        touched.update(logins)
     return touched
 
 
@@ -230,20 +223,27 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
         "pr_number": pr.number,
     }
     logger.info("Picking a reviewer", extra={**extra, "base_ref": pr.base_ref})
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
+    try:
+        async with GitHubClient.as_app(pr.owner, pr.repo) as github:
+            return await _choose_reviewer(
+                request, github.repo(pr.owner, pr.repo).pull_request(pr.number), extra
+            )
+    except GitHubAppUnavailable:
         logger.warning("No GitHub App token to pick a reviewer", extra=extra)
         return None
-    files = await fetch_changed_files(
-        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
-    )
+
+
+async def _choose_reviewer(
+    request: HumanReviewRequest, pull: PullRequestClient, extra: dict[str, object]
+) -> Pick | Wait | None:
+    pr = request.pull_request
+    files = await ChangedFile.of_pull(pull)
     if not files:
         logger.warning("Could not read the changed files to pick a reviewer", extra=extra)
         return None
     ref = pr.base_ref or None
     codeowners, touched = await asyncio.gather(
-        CodeOwners.fetch(pr.owner, pr.repo, ref, token=token),
-        _touched(pr.owner, pr.repo, ref, files, token),
+        CodeOwners.fetch(pull.repo, ref), _touched(pull.repo, ref, files)
     )
     owned = await _owned(codeowners, files) if codeowners is not None else Counter[str]()
     logger.info(
@@ -322,9 +322,7 @@ async def choose_reviewer(request: HumanReviewRequest) -> Pick | Wait | None:
     )
     by_start = sorted(ranked, key=lambda c: hours[c.login].next_start(now))
     for candidate in by_start:
-        if not await has_repo_write_permission(
-            owner=pr.owner, repo=pr.repo, username=candidate.login, token=token
-        ):
+        if not await pull.repo.can_write(candidate.login):
             logger.info(
                 "Skipped a reviewer candidate without write access",
                 extra={**extra, "github_login": candidate.login},

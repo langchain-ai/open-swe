@@ -34,13 +34,13 @@ async def test_github_request_retries_on_secondary_rate_limit() -> None:
         _make_response(200),
     ]
     client = AsyncMock()
-    client.get = AsyncMock(side_effect=responses)
+    client.request = AsyncMock(side_effect=responses)
 
     with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         response = await github_request(client, "GET", "https://api.github.com/test")
 
     assert response.status_code == 200
-    assert client.get.await_count == 2
+    assert client.request.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -48,12 +48,12 @@ async def test_github_request_does_not_retry_transport_error_on_post() -> None:
     """Transport errors on POST must not retry — the server may have already
     processed the write, and retrying would duplicate the resource."""
     client = AsyncMock()
-    client.post = AsyncMock(side_effect=httpx2.TimeoutException("timeout"))
+    client.request = AsyncMock(side_effect=httpx2.TimeoutException("timeout"))
 
     with pytest.raises(httpx2.TimeoutException):
         await github_request(client, "POST", "https://api.github.com/test")
 
-    assert client.post.await_count == 1
+    assert client.request.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -65,13 +65,13 @@ async def test_github_request_retries_on_429_even_for_post() -> None:
         _make_response(201),
     ]
     client = AsyncMock()
-    client.post = AsyncMock(side_effect=responses)
+    client.request = AsyncMock(side_effect=responses)
 
     with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         response = await github_request(client, "POST", "https://api.github.com/test")
 
     assert response.status_code == 201
-    assert client.post.await_count == 2
+    assert client.request.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -81,13 +81,13 @@ async def test_github_request_retries_on_503_even_for_post() -> None:
         _make_response(201),
     ]
     client = AsyncMock()
-    client.post = AsyncMock(side_effect=responses)
+    client.request = AsyncMock(side_effect=responses)
 
     with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         response = await github_request(client, "POST", "https://api.github.com/test")
 
     assert response.status_code == 201
-    assert client.post.await_count == 2
+    assert client.request.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -96,12 +96,12 @@ async def test_github_request_does_not_retry_502_on_post() -> None:
     gateway returned an error.  Must not retry for non-idempotent methods."""
     response_502 = _make_response(502)
     client = AsyncMock()
-    client.post = AsyncMock(return_value=response_502)
+    client.request = AsyncMock(return_value=response_502)
 
     response = await github_request(client, "POST", "https://api.github.com/test")
 
     assert response.status_code == 502
-    assert client.post.await_count == 1
+    assert client.request.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -110,12 +110,12 @@ async def test_github_request_does_not_retry_504_on_post() -> None:
     gateway timed out.  Must not retry for non-idempotent methods."""
     response_504 = _make_response(504)
     client = AsyncMock()
-    client.post = AsyncMock(return_value=response_504)
+    client.request = AsyncMock(return_value=response_504)
 
     response = await github_request(client, "POST", "https://api.github.com/test")
 
     assert response.status_code == 504
-    assert client.post.await_count == 1
+    assert client.request.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -126,36 +126,36 @@ async def test_github_request_retries_502_on_get() -> None:
         _make_response(200),
     ]
     client = AsyncMock()
-    client.get = AsyncMock(side_effect=responses)
+    client.request = AsyncMock(side_effect=responses)
 
     with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         response = await github_request(client, "GET", "https://api.github.com/test")
 
     assert response.status_code == 200
-    assert client.get.await_count == 2
+    assert client.request.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_github_request_raises_after_exhausting_transport_retries() -> None:
     client = AsyncMock()
-    client.get = AsyncMock(side_effect=httpx2.ConnectTimeout("timeout"))
+    client.request = AsyncMock(side_effect=httpx2.ConnectTimeout("timeout"))
 
     with patch("openswe.github.http.asyncio.sleep", new_callable=AsyncMock):
         with pytest.raises(httpx2.ConnectTimeout):
             await github_request(client, "GET", "https://api.github.com/test", max_retries=1)
 
-    assert client.get.await_count == 2
+    assert client.request.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_github_request_propagates_non_retryable_http_error() -> None:
     client = AsyncMock()
-    client.get = AsyncMock(side_effect=httpx2.HTTPError("boom"))
+    client.request = AsyncMock(side_effect=httpx2.HTTPError("boom"))
 
     with pytest.raises(httpx2.HTTPError):
         await github_request(client, "GET", "https://api.github.com/test")
 
-    assert client.get.await_count == 1
+    assert client.request.await_count == 1
 
 
 async def test_as_user_refreshes_a_rejected_token_once(monkeypatch: pytest.MonkeyPatch) -> None:

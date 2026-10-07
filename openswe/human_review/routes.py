@@ -7,12 +7,11 @@ from pydantic import BaseModel
 
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
-from openswe.github.ci import fetch_pr
+from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import dismiss_by
-from openswe.human_review.people import repo_token
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import Origin, RequestResult, request_review
 from openswe.slack.client import GitHubPrRef
@@ -56,18 +55,13 @@ async def api_human_review_availability(
 ) -> HumanReviewAvailability:
     _pr_ref(owner, repo, number)
     await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
-    token = await repo_token(owner, repo)
-    if token is None:
-        raise HTTPException(503, "Repository installation is unavailable")
-    pr = await fetch_pr(owner=owner, repo=repo, pr_number=number, token=token)
-    if pr is None:
-        raise HTTPException(404, "Pull request is unavailable")
-    head = pr.get("head")
-    sha = head.get("sha") if isinstance(head, dict) else None
-    if not isinstance(sha, str):
-        raise HTTPException(503, "Pull request head is unavailable")
-    settings = await RepoSettings.fetch(owner, repo, token=token, ref=sha)
-    channel = await settings.channel_for_pr(owner, repo, number, token=token)
+    async with GitHubClient.as_app(owner, repo) as github:
+        pull = github.repo(owner, repo).pull_request(number)
+        sha = await pull.head_sha()
+        if sha is None:
+            raise HTTPException(404, "Pull request is unavailable")
+        settings = await RepoSettings.fetch(pull.repo, ref=sha)
+        channel = await settings.channel_for_pr(pull)
     return HumanReviewAvailability(available=bool(channel))
 
 

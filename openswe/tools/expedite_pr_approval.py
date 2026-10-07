@@ -8,13 +8,13 @@ from langgraph.config import get_config
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
+    ChangedFile,
     Ineligible,
     assess_eligibility,
-    fetch_changed_files,
     fingerprint_matches,
 )
-from openswe.github.ci import fetch_pr
 from openswe.github.comments import derive_pr_state
+from openswe.github.http import GitHubClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.github.token import resolve_github_token
@@ -146,7 +146,10 @@ async def expedite_pr_approval(
         )
     except Exception as exc:
         return _failure(f"GitHub authentication failed: {exc}")
-    pr = await fetch_pr(owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=token)
+    async with GitHubClient.connect(token=token) as github:
+        pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)
+        pr = await pull.pull()
+        files = await ChangedFile.of_pull(pull) if pr else None
     if not pr:
         return _failure("Pull request is unavailable")
     if pr.get("state") != "open":
@@ -156,9 +159,6 @@ async def expedite_pr_approval(
     if not isinstance(head_sha, str) or not head_sha:
         return _failure("Pull request head SHA is unavailable")
 
-    files = await fetch_changed_files(
-        owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=token
-    )
     if files is None:
         return _failure("Could not read the pull request's changed files")
     verdict = assess_eligibility(files)
@@ -173,7 +173,7 @@ async def expedite_pr_approval(
     payload = PullRequestPayload.model_validate(pr)
     if await User.for_login("github", payload.author) is None:
         return _failure("Expedited review is only available for PRs authored by Open SWE users.")
-    settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
+    settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo)
     review_channel = settings.channel_for_files([file.filename for file in files])
     broadcast_target = await SlackChannel.resolve(review_channel) if review_channel else None
     if review_channel and broadcast_target is None:

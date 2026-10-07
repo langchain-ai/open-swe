@@ -1,6 +1,5 @@
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 import httpx2
@@ -43,21 +42,19 @@ async def test_strict_codeowners_fetch_distinguishes_missing_from_unreadable(
     status: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from openswe.github import http as github_http
     from openswe.github import repo_files
 
-    @asynccontextmanager
-    async def client(**kwargs: object):
-        yield object()
-
-    monkeypatch.setattr(repo_files, "github_client", client)
-    monkeypatch.setattr(
-        repo_files, "github_request", AsyncMock(return_value=httpx2.Response(status, text=""))
+    response = httpx2.Response(
+        status, text="", request=httpx2.Request("GET", "https://api.github.com")
     )
+    monkeypatch.setattr(github_http, "github_request", AsyncMock(return_value=response))
+    repo = github_http.GitHubClient(MagicMock()).repo("lc", "repo")
     if status in {403, 429, 500}:
         with pytest.raises(repo_files.RepoFileUnreadableError):
-            await CodeOwners.fetch("lc", "repo", "main", token="token", strict=True)
+            await CodeOwners.fetch(repo, "main", strict=True)
     else:
-        owners = await CodeOwners.fetch("lc", "repo", "main", token="token", strict=True)
+        owners = await CodeOwners.fetch(repo, "main", strict=True)
         assert (owners is None) == (status == 404)
 
 

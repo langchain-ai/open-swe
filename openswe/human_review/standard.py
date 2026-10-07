@@ -26,16 +26,16 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.expedited_review.eligibility import MAX_FILES, fetch_changed_files
+from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
-    assess_readiness,
+    Readiness,
     latest_review_states,
     review_authors,
 )
-from openswe.github.ci import fetch_pr
 from openswe.github.codeowners import CodeOwners
-from openswe.github.http import GITHUB_API_BASE, github_client, github_request
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, GitHubError, RepoClient
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, mention
@@ -52,7 +52,7 @@ from openswe.human_review.lifecycle import (
     update_blocked_reactions,
 )
 from openswe.human_review.merging import merge_pull_request
-from openswe.human_review.people import Outcome, Participant, repo_token, resolve_writer
+from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.picking import Pick, Wait, choose_reviewer
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from openswe.prompts import prompt
@@ -94,10 +94,10 @@ class ReviewChannelUnknownError(Exception):
     """The repository's review channels could not be read, so membership is unknown."""
 
 
-async def in_review_channel(owner: str, repo: str, channel_id: str, token: str) -> bool:
+async def in_review_channel(repo: RepoClient, channel_id: str) -> bool:
     """Whether ``channel_id`` is one of the repository's configured review channels."""
     try:
-        settings = await RepoSettings.fetch(owner, repo, token=token, strict=True)
+        settings = await RepoSettings.fetch(repo, strict=True)
     except RepoFileUnreadableError as exc:
         raise ReviewChannelUnknownError(str(exc)) from exc
     unresolved: list[str] = []
@@ -186,15 +186,13 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
 
 
 async def _target_channel(
-    pr_ref: GitHubPrRef, override: str, token: str
+    pr_ref: GitHubPrRef, pull: PullRequestClient, override: str
 ) -> SlackChannel | RequestResult:
     configured = override.strip()
     if not configured:
-        settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo, token=token)
+        settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo)
         try:
-            configured = await settings.channel_for_pr(
-                pr_ref.owner, pr_ref.repo, pr_ref.number, token=token
-            )
+            configured = await settings.channel_for_pr(pull)
         except httpx2.HTTPError, ValueError:
             logger.exception("Could not resolve review channel from changed files")
             return _failure(
@@ -313,16 +311,14 @@ async def _resummarize(active: HumanReviewRequest, tldr: str) -> RequestResult:
 
 
 async def record_pull_request(
-    pr_ref: GitHubPrRef, token: str
+    pull: PullRequestClient,
 ) -> tuple[PullRequest, PullRequestPayload] | None:
     """Fetch the pull request and save what a review request shows of it; ``None`` if unavailable."""
-    payload = await fetch_pr(
-        owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=token
-    )
+    payload = await pull.pull()
     if payload is None:
         return None
     details = PullRequestPayload.model_validate(payload)
-    pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    pull_request = await PullRequest.load(pull.repo.owner, pull.repo.name, pull.number)
     pull_request.title = details.title
     pull_request.body = details.body or ""
     pull_request.head_ref = details.head_ref
@@ -342,9 +338,23 @@ async def request_review(
 
     ``inline_summary`` is the card's summary; ``None`` shows the start of the PR description.
     """
-    token = await repo_token(pr_ref.owner, pr_ref.repo)
-    if token is None:
+    try:
+        async with PullRequestClient.as_app(pr_ref.owner, pr_ref.repo, pr_ref.number) as pull:
+            return await _request_review(
+                pr_ref, pull, origin, channel=channel, inline_summary=inline_summary
+            )
+    except GitHubAppUnavailable:
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
+
+
+async def _request_review(
+    pr_ref: GitHubPrRef,
+    pull: PullRequestClient,
+    origin: Origin,
+    *,
+    channel: str,
+    inline_summary: str | None,
+) -> RequestResult:
     # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if active is not None:
@@ -352,9 +362,7 @@ async def request_review(
             return await _resummarize(active, summary_line(inline_summary))
         return await _existing(active)
 
-    readiness = await assess_readiness(
-        owner=pr_ref.owner, repo=pr_ref.repo, pr_number=pr_ref.number, token=token
-    )
+    readiness = await Readiness.assess(pull)
     if readiness is None:
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers := request_blockers(readiness.snapshot):
@@ -365,10 +373,10 @@ async def request_review(
             + prompt("tools/human-review-blocked")
         )
 
-    target = await _target_channel(pr_ref, channel, token)
+    target = await _target_channel(pr_ref, pull, channel)
     if isinstance(target, RequestResult):
         return target
-    recorded = await record_pull_request(pr_ref, token)
+    recorded = await record_pull_request(pull)
     if recorded is None:
         return _failure("Pull request is unavailable")
     pull_request, details = recorded
@@ -435,24 +443,26 @@ async def _discard(request_id: UUID) -> None:
 
 async def _request_github_review(request: HumanReviewRequest, login: str) -> bool:
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
-        return False
-    url = f"{GITHUB_API_BASE}/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/requested_reviewers"
     try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "POST", url, json={"reviewers": [login]})
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            await pull.repo.post(f"pulls/{pull.number}/requested_reviewers", {"reviewers": [login]})
+    except GitHubAppUnavailable:
+        return False
+    except GitHubError as refused:
+        logger.warning(
+            "GitHub refused a review request",
+            extra={
+                "request_id": str(request.id),
+                "status_code": refused.response.status_code,
+                "github_message": refused.message,
+            },
+        )
+        return False
     except httpx2.HTTPError:
         logger.warning(
             "GitHub review request did not complete",
             extra={"request_id": str(request.id)},
             exc_info=True,
-        )
-        return False
-    if response.status_code not in {200, 201}:
-        logger.warning(
-            "GitHub refused a review request",
-            extra={"request_id": str(request.id), "status_code": response.status_code},
         )
         return False
     return True
@@ -560,11 +570,11 @@ async def _pick_notice(request: HumanReviewRequest, who: str, label: str) -> str
 async def _github_approvers(request: HumanReviewRequest) -> list[str]:
     """Who has approved the pull request on GitHub; empty when GitHub cannot be read."""
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            states = await latest_review_states(pull, pr.author)
+    except GitHubAppUnavailable:
         return []
-    async with github_client(token=token) as client:
-        states = await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author)
     if states is None:
         logger.warning(
             "Could not read reviews before picking a reviewer",
@@ -668,7 +678,10 @@ def merge_wait(
 
 
 async def _settle_posted(
-    request: HumanReviewRequest, snapshot: PullRequestSnapshot, states: dict[str, str], token: str
+    request: HumanReviewRequest,
+    pull: PullRequestClient,
+    snapshot: PullRequestSnapshot,
+    states: dict[str, str],
 ) -> None:
     """React once the pull request's owners approve; until then, time how long it has sat green."""
     approvers = {login for login, state in states.items() if state == "APPROVED"}
@@ -676,9 +689,7 @@ async def _settle_posted(
     if approved:
         pr = request.pull_request
         try:
-            codeowners = await CodeOwners.fetch(
-                pr.owner, pr.repo, pr.base_ref or None, token=token, strict=True
-            )
+            codeowners = await CodeOwners.fetch(pull.repo, pr.base_ref or None, strict=True)
         except RepoFileUnreadableError:
             logger.warning(
                 "Cannot confirm codeowner approvals",
@@ -688,9 +699,7 @@ async def _settle_posted(
             approved = False
             codeowners = None
         if codeowners is not None:
-            files = await fetch_changed_files(
-                owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
-            )
+            files = await ChangedFile.of_pull(pull)
             approved = (
                 files is not None
                 and len(files) < MAX_FILES
@@ -766,12 +775,15 @@ async def settle(request: HumanReviewRequest) -> bool:
     if request.kind not in SETTLED_KINDS or request.state != "open":
         return True
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            return await _settle(request, pull)
+    except GitHubAppUnavailable:
         return False
-    readiness = await assess_readiness(
-        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
-    )
+
+
+async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
+    readiness = await Readiness.assess(pull)
     if readiness is None:
         return False
     snapshot = readiness.snapshot
@@ -785,12 +797,11 @@ async def settle(request: HumanReviewRequest) -> bool:
         await mark_closed(request)
         return True
     await update_blocked_reactions(request, snapshot)
-    async with github_client(token=token) as client:
-        states = await latest_review_states(client, pr.owner, pr.repo, pr.number, snapshot.author)
+    states = await latest_review_states(pull, snapshot.author)
     if states is None:
         return False
     if request.kind == "posted":
-        await _settle_posted(request, snapshot, states, token)
+        await _settle_posted(request, pull, snapshot, states)
         return True
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
         picked = len(request.reviewers) + len(request.picks)
@@ -817,7 +828,7 @@ async def settle(request: HumanReviewRequest) -> bool:
         if row is None or row.state != "open":
             return True
         result = await merge_pull_request(
-            row, snapshot.head_sha, snapshot.allowed_merge_methods, token
+            row, snapshot.head_sha, snapshot.allowed_merge_methods, pull.repo
         )
         if result.status != "merged":
             row.detail = result.message
@@ -988,18 +999,17 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         await _schedule(request, f"remind:{user_id}", remaining)
         return "scheduled"
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
-        await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
-        return "retrying"
-    details = await fetch_pr(owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token)
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            details = await pull.pull()
+            authors = await review_authors(pull) if details is not None else None
+    except GitHubAppUnavailable:
+        details = authors = None
     if details is None:
         await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
         return "retrying"
     if details.get("state") != "open" or details.get("merged"):
         return "closed"
-    async with github_client(token=token) as client:
-        authors = await review_authors(client, pr.owner, pr.repo, pr.number)
     if authors is None:
         await _schedule(request, f"remind:{user_id}", _DEADLINE_RETRY)
         return "retrying"
@@ -1069,11 +1079,11 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     if not stale:
         return "accepted"
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    reviewed: set[str] | None = None
-    if token is not None:
-        async with github_client(token=token) as client:
-            reviewed = await review_authors(client, pr.owner, pr.repo, pr.number)
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            reviewed = await review_authors(pull)
+    except GitHubAppUnavailable:
+        reviewed = None
     if reviewed is None:
         await _schedule(request, "pick_expiry", _DEADLINE_RETRY)
         return "retrying"
@@ -1145,12 +1155,12 @@ async def _auto_assign_hold(request: HumanReviewRequest, step: str) -> str | Non
     if request.kind != "posted" or _AUTO_ASSIGN_ASKED in request.run_config:
         return None
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
-        return None
     try:
-        if await in_review_channel(pr.owner, pr.repo, request.slack_channel_id, token):
-            return None
+        async with GitHubClient.as_app(pr.owner, pr.repo) as github:
+            if await in_review_channel(github.repo(pr.owner, pr.repo), request.slack_channel_id):
+                return None
+    except GitHubAppUnavailable:
+        return None
     except ReviewChannelUnknownError:
         logger.warning(
             "Could not tell whether a posted pull request is in a review channel",
