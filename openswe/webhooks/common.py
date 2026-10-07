@@ -70,6 +70,7 @@ from openswe.github.token import (
     is_bot_token_only_mode,
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
+from openswe.input_messages import PersonIdentity
 from openswe.linear.comments import get_recent_comments  # noqa: F401
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
@@ -153,11 +154,7 @@ from openswe.utils.multimodal import (
 )
 from openswe.utils.repo import extract_repo_from_text
 from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
-from openswe.utils.thread_participants import (
-    PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    merge_participants,
-)
+from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
@@ -605,25 +602,24 @@ async def upsert_agent_thread_metadata(
         ):
             return False
     sender_login = github_login or await User.login_for_email(user_email) or ""
-    if sender_login:
-        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
-            existing_meta.get(PARTICIPANT_LOGINS_KEY), sender_login
+    slack_ids = set(slack_participant_user_ids)
+    triggering_slack = source_context.slack_thread if source_context else None
+    if triggering_slack and triggering_slack.triggering_user_id:
+        slack_ids.add(triggering_slack.triggering_user_id)
+    slack_logins = await asyncio.gather(*(User.login_for_slack(user_id) for user_id in slack_ids))
+    people: list[PersonIdentity] = []
+    for user_id, login in zip(slack_ids, slack_logins, strict=True):
+        person: PersonIdentity = {"id": f"slack:{user_id}"}
+        if triggering_slack and user_id == triggering_slack.triggering_user_id:
+            login = login or sender_login
+        if isinstance(login, str) and login:
+            person["github_login"] = login
+        people.append(person)
+    metadata.update(
+        await participant_metadata(
+            existing_meta, login=sender_login, email=user_email, people=people
         )
-    # Slack human senders with linked Open SWE accounts join the thread as
-    # participants on every event, so later conversations credit everyone.
-    slack_logins = await asyncio.gather(
-        *(User.login_for_slack(user_id) for user_id in slack_participant_user_ids)
     )
-    resolved_slack_logins = [login for login in slack_logins if isinstance(login, str) and login]
-    if resolved_slack_logins:
-        metadata[PARTICIPANT_LOGINS_KEY] = merge_participants(
-            metadata.get(PARTICIPANT_LOGINS_KEY, existing_meta.get(PARTICIPANT_LOGINS_KEY)),
-            *resolved_slack_logins,
-        )
-    if user_email:
-        metadata[PARTICIPANT_EMAILS_KEY] = merge_participants(
-            existing_meta.get(PARTICIPANT_EMAILS_KEY), user_email
-        )
     # The context that opened the thread identifies it; later messages arrive
     # through the same surface and must not repoint it.
     if not existing_context.is_empty:

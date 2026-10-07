@@ -149,6 +149,7 @@ def construct_system_prompt(
         "system/main",
         working_dir=working_dir,
         local_checkout=local_checkout,
+        worktree_handoff=local_checkout and local_checkout_client == "desktop",
         desktop=source == "desktop",
         admin_workspaces=admin_workspaces,
         sole_writer=sole_writer,

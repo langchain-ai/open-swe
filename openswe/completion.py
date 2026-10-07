@@ -543,6 +543,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         if pickup_allowed:
             await _start_run_for_pending_follow_ups(thread_id)
     if is_worker:
+        await sync_slack_background_status(langgraph_client(), thread_id)
         if status in _TERMINAL_FAILURE_STATUSES:
             _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}
