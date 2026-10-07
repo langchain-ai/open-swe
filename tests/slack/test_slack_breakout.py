@@ -3,11 +3,11 @@ from unittest.mock import ANY, AsyncMock
 
 import pytest
 
-from agent.slack import breakout
-from agent.slack.channels import SlackChannel
-from agent.slack.request import SlackRequest
-from agent.users import User
-from agent.workspaces import routing
+from openswe.slack import breakout
+from openswe.slack.channels import SlackChannel
+from openswe.slack.request import SlackRequest
+from openswe.users import User
+from openswe.workspaces import routing
 
 Command = breakout.BreakoutCommand
 

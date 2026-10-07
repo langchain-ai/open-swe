@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent import thread_feedback as feedback
-from agent.scheduler import get_scheduler
-from agent.slack import thread_feedback as slack_feedback
+from openswe import thread_feedback as feedback
+from openswe.scheduler import get_scheduler
+from openswe.slack import thread_feedback as slack_feedback
 
 
 @pytest.fixture

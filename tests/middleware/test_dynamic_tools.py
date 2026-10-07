@@ -14,7 +14,7 @@ from langchain_openai.chatgpt_oauth import _ChatGPTToken  # noqa: PLC2701
 from langgraph.types import Command
 from pydantic import SecretStr
 
-from agent.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
+from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
 
 
 def _tool(name: str, description: str = "schema details that must stay hidden") -> BaseTool:

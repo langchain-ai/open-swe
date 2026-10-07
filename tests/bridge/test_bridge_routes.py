@@ -5,8 +5,8 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
-from agent.bridge.protocol import JsonObject
-from agent.bridge.routes import (
+from openswe.bridge.protocol import JsonObject
+from openswe.bridge.routes import (
     BridgeClaimBody,
     BridgeOpenBody,
     BridgeReplyBody,
@@ -16,8 +16,8 @@ from agent.bridge.routes import (
     api_close_bridge,
     api_open_bridge,
 )
-from agent.bridge.store import BridgeStore
-from agent.threads.principals import Principal
+from openswe.bridge.store import BridgeStore
+from openswe.threads.principals import Principal
 
 OWNER = Principal.of_login("test-user")
 INTRUDER = Principal.of_login("someone-else")
