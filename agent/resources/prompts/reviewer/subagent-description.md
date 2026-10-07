@@ -1,1 +1,1 @@
-Reviews one explicit, disjoint file partition and returns candidate defects for parent validation. Invoke at most once per review.
+Investigates whatever part of the PR review the parent assigns and returns its results. Cannot record findings or publish.
