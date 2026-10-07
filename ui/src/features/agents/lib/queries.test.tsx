@@ -482,7 +482,7 @@ describe("sidebar queries", () => {
           loadedThreads,
         }),
       {
-        initialProps: [],
+        initialProps: [] as Array<AgentThread>,
         wrapper: ({ children }) => (
           <QueryClientProvider client={client}>{children}</QueryClientProvider>
         ),
