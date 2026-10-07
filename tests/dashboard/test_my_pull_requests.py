@@ -18,6 +18,10 @@ async def client(**kwargs):
     yield object()
 
 
+def _client(number: int) -> prs.PullRequestClient:
+    return prs.PullRequestClient(github_http.GitHubClient(MagicMock()).repo("acme", "app"), number)
+
+
 def response(payload, status=200):
     return httpx2.Response(
         status, json=payload, request=httpx2.Request("GET", "https://api.github.com")
@@ -129,8 +133,8 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
         "base": {"ref": "main"},
     }
     monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
-    monkeypatch.setattr(prs.PullRequestClient, "check_runs", AsyncMock(return_value=runs))
-    monkeypatch.setattr(prs.PullRequestClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         prs.PullRequestClient,
         "reviewers",
@@ -186,10 +190,6 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
         await pr_routes.api_list_pull_requests(session={"sub": "another-user"})
     assert error.value.status_code == 401
     assert listing.await_count == 1
-
-
-def _client(number: int) -> prs.PullRequestClient:
-    return prs.PullRequestClient(github_http.GitHubClient(MagicMock()), "acme", "app", number)
 
 
 async def _decision() -> prs.ReviewDecision:
@@ -286,8 +286,8 @@ def _patch_detail_fetchers(monkeypatch):
             }
         ),
     )
-    monkeypatch.setattr(prs.PullRequestClient, "check_runs", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs.PullRequestClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         prs.PullRequestClient,
         "reviewers",

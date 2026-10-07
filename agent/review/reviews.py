@@ -1205,7 +1205,9 @@ async def get_pull_request_preview(
                 token,
                 params={"per_page": _PREVIEW_FILES_PER_PAGE},
             ),
-            PullRequestClient(GitHubClient(client), owner, repo, pr_number).unresolved_threads(),
+            PullRequestClient(
+                GitHubClient(client).repo(owner, repo), pr_number
+            ).unresolved_threads(),
         )
     pull = _GithubPreviewPull.model_validate(pull_payload if isinstance(pull_payload, dict) else {})
     raw_files = file_payload if isinstance(file_payload, list) else []

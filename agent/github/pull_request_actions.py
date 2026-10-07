@@ -355,7 +355,7 @@ async def resolve_review_threads(
         raise HTTPException(422, "invalid pull request")
     async with github_client(token=token) as client:
         threads = await PullRequestClient(
-            GitHubClient(client), owner, repo, number
+            GitHubClient(client).repo(owner, repo), number
         ).unresolved_threads()
         if threads is None:
             logger.warning(

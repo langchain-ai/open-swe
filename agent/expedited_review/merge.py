@@ -140,7 +140,7 @@ async def merge_approved(
             )
         async with GitHubClient.connect(token=token) as github:
             threads = await PullRequestClient(
-                github, pr.owner, pr.repo, pr.number
+                github.repo(pr.owner, pr.repo), pr.number
             ).unresolved_threads()
         if threads is None:
             return MergeResult("error", "GitHub was unavailable while checking review threads.")
