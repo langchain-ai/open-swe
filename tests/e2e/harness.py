@@ -1,6 +1,6 @@
 """HTTP app for the full-flow E2E (served as langgraph dev's http.app).
 
-Mounts, on top of the REAL ``agent.webapp`` app:
+Mounts, on top of the REAL ``openswe.webapp`` app:
   - fake GitHub REST API  (/fake-gh/...)   the real open_pull_request hits this
   - fake Slack API         (/fake-slack/...) the real slack code hits this
   - mock UIs               (/mock/slack, /mock/github) what the user/Playwright sees
@@ -73,10 +73,10 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
 
 from langgraph_sdk import get_client  # noqa: E402
 
-from agent.api.app import app  # noqa: E402
-from agent.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
-from agent.slack.client import lookup_slack_thread_id  # noqa: E402
-from agent.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
+from openswe.api.app import app  # noqa: E402
+from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
+from openswe.slack.client import lookup_slack_thread_id  # noqa: E402
+from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -136,10 +136,10 @@ async def control_reset_default_workspace() -> JSONResponse:
     """Put back the seeded ``default`` workspace, which the app itself refuses to delete."""
     from sqlalchemy import text
 
-    from agent.dashboard.workspace_settings import delete_workspace_settings
-    from agent.database import postgres
-    from agent.workspaces import store
-    from agent.workspaces.refresh import remove_refresh_cron
+    from openswe.dashboard.workspace_settings import delete_workspace_settings
+    from openswe.database import postgres
+    from openswe.workspaces import store
+    from openswe.workspaces.refresh import remove_refresh_cron
 
     record = await store.WORKSPACES.get(store.DEFAULT_WORKSPACE_SLUG)
     if record is not None:
@@ -168,14 +168,14 @@ async def _reset_durable_pr_state() -> None:
     ``repository`` stays: ``workspace_repository`` references it, so truncating
     it cascades away the workspace assignments every routable-repo check needs.
     """
-    from agent.baby_sit import WATCHES, stop_watch
+    from openswe.baby_sit import WATCHES, stop_watch
 
     for watch in await WATCHES.search_all():
         await stop_watch(watch.key)
 
     from sqlalchemy import text
 
-    from agent.database import postgres
+    from openswe.database import postgres
 
     if postgres.configured():
         async with postgres.transaction() as connection:
@@ -198,8 +198,8 @@ async def control_state() -> JSONResponse:
 @app.post("/control/slack-run-complete")
 async def control_slack_run_complete() -> JSONResponse:
     """Deliver the platform completion event omitted by the local runtime."""
-    from agent.completion import handle_run_completion
-    from agent.slack.client import lookup_slack_thread_run_mapping
+    from openswe.completion import handle_run_completion
+    from openswe.slack.client import lookup_slack_thread_run_mapping
 
     client = get_client(url=BASE_URL)
     channel = CURRENT_THREAD["channel"]
@@ -328,7 +328,7 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
 @app.post("/control/walkthrough")
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
     """Store a one-step walkthrough for a fake pull request's current head, as a scout would."""
-    from agent.review.walkthrough import FileLines, StepDraft, Walkthrough
+    from openswe.review.walkthrough import FileLines, StepDraft, Walkthrough
 
     body = await request.json()
     pull = _seeded_pull(body)
@@ -403,12 +403,12 @@ async def control_team_settings(request: Request) -> JSONResponse:
     reset unrelated fields — the default agent model included, which the
     dashboard's first-run onboarding reads — for every spec that follows.
     """
-    from agent.dashboard.workspace_settings import (
+    from openswe.dashboard.workspace_settings import (
         WorkspaceSettingsUpdate,
         get_instance_settings,
         upsert_instance_settings,
     )
-    from agent.utils import ttl_cache
+    from openswe.utils import ttl_cache
 
     body = await request.json()
     current = await get_instance_settings()
@@ -425,7 +425,7 @@ async def control_team_settings(request: Request) -> JSONResponse:
 @app.get("/control/expedited-approvals")
 async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> JSONResponse:
     """Every expedited approval row for a repository, newest last."""
-    from agent.human_review.requests import HumanReviewRequest
+    from openswe.human_review.requests import HumanReviewRequest
 
     approvals = [
         request
@@ -460,7 +460,7 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
 @app.get("/control/human-review-requests")
 async def control_human_review_requests(owner: str = OWNER, repo: str = REPO) -> JSONResponse:
     """Every standard human review request for a repository, newest last."""
-    from agent.human_review.requests import HumanReviewRequest
+    from openswe.human_review.requests import HumanReviewRequest
 
     return JSONResponse(
         [
@@ -495,9 +495,9 @@ async def control_human_review_deadline(request: Request) -> JSONResponse:
     """
     from sqlalchemy import update
 
-    from agent.database import postgres
-    from agent.human_review.requests import HumanReviewRequest
-    from agent.human_review.standard import run_deadline
+    from openswe.database import postgres
+    from openswe.human_review.requests import HumanReviewRequest
+    from openswe.human_review.standard import run_deadline
 
     body = await request.json()
     request_id = str(body.get("request_id") or "")
@@ -516,7 +516,7 @@ async def control_human_review_deadline(request: Request) -> JSONResponse:
 @app.post("/control/user-preferences")
 async def control_user_preferences(request: Request) -> JSONResponse:
     """Change a person's preferences, as their settings pages do."""
-    from agent.users import User, UserPreferencesPatch
+    from openswe.users import User, UserPreferencesPatch
 
     await _seed_test_user_mappings()
     body = await request.json()
@@ -583,7 +583,7 @@ async def _seed_test_user_mappings() -> None:
     global _MAPPINGS_SEEDED
     if _MAPPINGS_SEEDED:
         return
-    from agent.users import User
+    from openswe.users import User
 
     await User.sign_in("github", "1003", login="octocat", display_name="PR Author")
     for user in TEST_USERS:
@@ -682,7 +682,7 @@ async def control_forget_slack_events() -> JSONResponse:
     A redelivery normally lands on a different instance than the original, which
     only has the LangGraph store to dedupe on. Clearing the local cache lets the
     E2E exercise that path instead of the same-process fast path."""
-    from agent.slack.events import reset_slack_event_claims
+    from openswe.slack.events import reset_slack_event_claims
 
     reset_slack_event_claims()
     return JSONResponse({"ok": True})
@@ -789,7 +789,7 @@ async def control_login(request: Request) -> JSONResponse:
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
-    from agent.users import User
+    from openswe.users import User
 
     await _seed_test_user_mappings()
     user = await User.for_login("github", login)
@@ -828,7 +828,7 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     if not email:
         match = next((u for u in TEST_USERS if u["login"] == login), None)
         email = match["email"] if match else f"{login}@example.com"
-    from agent.users import User
+    from openswe.users import User
 
     await _seed_test_user_mappings()
     user = await User.for_login("github", login)
@@ -882,7 +882,7 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    from agent.users import User
+    from openswe.users import User
 
     await _seed_test_user_mappings()
     user = await User.for_login("github", login)

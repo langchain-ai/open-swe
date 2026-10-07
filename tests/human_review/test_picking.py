@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 import httpx2
 import pytest
 
-from agent.github.codeowners import CodeOwners
-from agent.human_review.picking import WorkHours
+from openswe.github.codeowners import CodeOwners
+from openswe.human_review.picking import WorkHours
 
 _CODEOWNERS = CodeOwners.parse(
     """
@@ -43,7 +43,7 @@ async def test_strict_codeowners_fetch_distinguishes_missing_from_unreadable(
     status: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agent.github import repo_files
+    from openswe.github import repo_files
 
     @asynccontextmanager
     async def client(**kwargs: object):

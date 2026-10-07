@@ -35,6 +35,7 @@ interface SidebarThreadItemBase {
   reviewPage?: ReviewPageRef
   /** Subagents the thread spawned, listed as sub-threads under its row. */
   subagents?: Array<AgentSubagentSummary>
+  taskWorkers?: Array<AgentThread>
 }
 
 export interface CloudSidebarThreadItem extends SidebarThreadItemBase {
@@ -113,13 +114,20 @@ export function cloudSidebarThread(
     status: thread.status,
     viewed: thread.viewed,
     resolved: thread.resolved,
-    createdAt: thread.createdAt,
-    updatedAt: thread.updatedAt,
+    createdAt: Math.max(
+      thread.createdAt,
+      ...(thread.taskWorkers ?? []).map((worker) => worker.createdAt)
+    ),
+    updatedAt: Math.max(
+      thread.updatedAt,
+      ...(thread.taskWorkers ?? []).map((worker) => worker.updatedAt)
+    ),
     planStatus: thread.planStatus,
     pr: thread.pr,
     prRef: pullRequestRef(thread),
     reviewPage: thread.reviewPage,
     subagents: thread.subagents,
+    taskWorkers: thread.taskWorkers,
     thread,
   }
 }
@@ -341,4 +349,83 @@ export function sortSidebarThreads(
 function localRepoName(cwd: string): string | null {
   const segments = cwd.split(/[\\/]/).filter(Boolean)
   return segments.at(-1) ?? null
+}
+
+export function threadFamily(thread: AgentThread): Array<AgentThread> {
+  return [thread, ...(thread.taskWorkers ?? [])]
+}
+
+export function withoutNestedWorkers(
+  threads: Array<AgentThread>
+): Array<AgentThread> {
+  const nestedIds = new Set(
+    threads
+      .flatMap((thread) => thread.taskWorkers ?? [])
+      .map((worker) => worker.id)
+  )
+  return threads.filter((thread) => !nestedIds.has(thread.id))
+}
+
+export function sidebarItemContains(
+  item: SidebarThreadItem,
+  key: string | undefined
+): boolean {
+  return (
+    item.key === key ||
+    (item.location === "cloud" &&
+      (item.taskWorkers ?? []).some((worker) => `cloud:${worker.id}` === key))
+  )
+}
+
+export function sidebarRefreshInterval(
+  threads: ReadonlyArray<AgentThread> = [],
+  hierarchy = true
+): number | false {
+  if (
+    threads.some((thread) =>
+      (hierarchy ? threadFamily(thread) : [thread]).some(
+        (member) => member.status === "running"
+      )
+    )
+  )
+    return 2000
+  return hierarchy &&
+    threads.some((thread) => thread.taskMembership?.role === "coordinator")
+    ? 30_000
+    : false
+}
+
+export function sidebarThreadForMode(
+  thread: AgentThread,
+  hierarchy: boolean
+): AgentThread {
+  if (
+    hierarchy ||
+    (!thread.taskWorkers && thread.taskMembership?.role !== "coordinator")
+  )
+    return thread
+  return {
+    ...thread,
+    taskWorkers: undefined,
+    taskMembership:
+      thread.taskMembership?.role === "worker"
+        ? thread.taskMembership
+        : undefined,
+  }
+}
+
+export function pinnedThreadShortcuts(
+  threads: Array<AgentThread>
+): Array<AgentThread> {
+  const pinnedIds = new Set(threads.map((thread) => thread.id))
+  return threads.map((thread) =>
+    thread.taskWorkers
+      ? {
+          ...thread,
+          taskWorkers: thread.taskWorkers.filter(
+            (worker) => !pinnedIds.has(worker.id)
+          ),
+        }
+      : thread
+  )
 }

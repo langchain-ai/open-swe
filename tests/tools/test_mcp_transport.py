@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from agent.mcp import transport as mcp_transport
+from openswe.mcp import transport as mcp_transport
 
 
 async def test_public_address_is_pinned_and_tls_hostname_preserved(monkeypatch):

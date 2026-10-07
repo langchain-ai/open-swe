@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.tools import tool as make_tool
 
-from agent.thread_feedback import Feedback, feedback_store
-from agent.tools.submit_thread_feedback import submit_thread_feedback
+from openswe.thread_feedback import Feedback, feedback_store
+from openswe.tools.submit_thread_feedback import submit_thread_feedback
 
-tool = importlib.import_module("agent.tools.submit_thread_feedback")
+tool = importlib.import_module("openswe.tools.submit_thread_feedback")
 
 
 @pytest.fixture
