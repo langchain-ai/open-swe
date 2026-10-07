@@ -702,10 +702,18 @@ async def assign(
         dm_text = (
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
+        origin = added.dm_origin
         await send_dm(
             user.slack_user_id,
             dm_text,
-            blocks=block_payload([section(dm_text), accept, *await origin_footer(added.thread_id)]),
+            blocks=block_payload(
+                [
+                    section(dm_text),
+                    accept,
+                    *await origin_footer(added.thread_id, origin.location if origin else None),
+                ]
+            ),
+            origin=origin,
         )
     await _schedule(added, f"remind:{user.id}", timedelta(0))
     return RequestResult(
@@ -1271,6 +1279,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
+            origin=request.dm_origin,
         )
         if sent:
             row.run_config = {**row.run_config, marker: True}
@@ -1439,6 +1448,7 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
             return {"status": "snoozed"}
         if participant.user.slack_user_id:
             text = f"Your review snooze ended: {request.pull_request.url}."
+            origin = request.dm_origin
             await send_dm(
                 participant.user.slack_user_id,
                 text,
@@ -1448,9 +1458,12 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
                         actions(
                             accept_button(request), decline_button(request), snooze_button(request)
                         ),
-                        *await origin_footer(request.thread_id),
+                        *await origin_footer(
+                            request.thread_id, origin.location if origin else None
+                        ),
                     ]
                 ),
+                origin=origin,
             )
         return {"status": "reminded"}
     if step.startswith("remind:"):

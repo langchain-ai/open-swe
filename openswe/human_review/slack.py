@@ -36,7 +36,7 @@ from openswe.slack.dm import note_for_concierge
 from openswe.slack.http import SlackRequestError
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.slack.responses import FeedbackResponse, WebhookResponse, accepted, ignored
-from openswe.slack.thread_owner import note_for_thread_owner
+from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -214,10 +214,10 @@ async def _process(
             pr_url=request.pull_request.url,
             outcome=outcome.message,
         )
+        origin = request.dm_origin
+        await note_for_thread_owner(*(origin.location if origin else (channel_id, thread_ts)), note)
         if channel_id.startswith("D"):
             await note_for_concierge(slack_user_id, channel_id, note)
-        else:
-            await note_for_thread_owner(channel_id, thread_ts, note)
         handled.append(outcome)
         return outcome
 

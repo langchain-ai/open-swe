@@ -33,12 +33,12 @@ from openswe.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.prompts import load_prompt
+from openswe.prompts import load_prompt, prompt
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from openswe.slack.channels import SlackChannel
-from openswe.slack.dm import dm_thread_title, is_concierge_thread, is_dm_channel
+from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
@@ -1159,10 +1159,33 @@ async def _process_slack_mention_impl(
         )
         if section
     )
+    # A thread started under a DM Open SWE sent for another thread is about that thread's work.
+    dm_origin = (
+        await DmOrigin.of(channel_id, thread_ts)
+        if is_first_mention
+        and not concierge_mode
+        and event_ts != thread_ts
+        and is_dm_channel(channel_context)
+        else None
+    )
+    dm_origin_section = (
+        prompt(
+            "slack/dm-origin",
+            origin=dm_origin,
+            permalink=await slack_utils.get_slack_permalink(*dm_origin.location) or "",
+            agent_thread_id=await common.lookup_slack_thread_id(
+                langgraph_client, *dm_origin.location
+            )
+            or "",
+        )
+        if dm_origin is not None
+        else ""
+    )
     turn_context = "\n\n".join(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
+            dm_origin_section,
             load_prompt("runs/slack-review-request.md")
             if event_ts != thread_ts
             and context_thread_ts == thread_ts

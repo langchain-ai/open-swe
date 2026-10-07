@@ -999,9 +999,33 @@ test.describe("Human review in Slack", () => {
         timeout: 90_000,
       })
       .toEqual([next.login]);
-    await pickedDm(request, `D_${next.slack.replace(/^U_/, "")}`);
+    const nextDmChannel = `D_${next.slack.replace(/^U_/, "")}`;
+    const nextPicked = await pickedDm(request, nextDmChannel);
     await expectNoPickReplies(request, posted);
     await showSlack(page, REVIEW_CHANNEL, "decline-4-card-repicked");
+
+    // 7. The pick DM links back to the review's thread, and a thread started under it
+    //    knows which review it came from.
+    expect(cardText(nextPicked)).toContain("Slack thread");
+    const reply = (await control(request, "/mock/slack/send", {
+      channel: nextDmChannel,
+      channel_type: "im",
+      user: next.slack,
+      mention_bot: false,
+      thread_ts: nextPicked.ts,
+      text: "Why me? E2E_HELLO",
+    })) as { thread_id: string };
+    await expect
+      .poll(
+        async () =>
+          JSON.stringify(
+            await (
+              await request.get(`/threads/${reply.thread_id}/state`)
+            ).json(),
+          ),
+        { timeout: 60_000 },
+      )
+      .toContain("on behalf of the Slack thread");
   });
 
   test("the agent dismisses the review request its thread posted", async ({

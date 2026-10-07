@@ -83,6 +83,7 @@ HUMAN_REVIEW_DISMISS_REASON = "posted with the wrong summary"
 HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 _DECLINED_MARKER = "declined the review of"
+_PICK_REQUEST = "reviewer for it"
 _SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
 
 # The seeded remote holds only a README, so the first turn writes the file. Two
@@ -565,9 +566,12 @@ def _human_review_dismiss_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
-    """Nobody signed up: take Open SWE's suggestion, else the reviewer CODEOWNERS names."""
-    humans = _script_humans(messages)
-    text = _text(humans[-1].content) if humans else ""
+    """Nobody signed up: take Open SWE's suggestion, else the reviewer CODEOWNERS names.
+
+    Notes queued for the thread can land after the pick request, so find the request itself.
+    """
+    texts = [_text(m.content) for m in messages if isinstance(m, HumanMessage)]
+    text = next((t for t in reversed(texts) if _PICK_REQUEST in t), texts[-1] if texts else "")
     suggested = _SUGGESTED_REVIEWER.search(text)
     return AIMessage(
         content="Picking a reviewer from CODEOWNERS.",

@@ -1,4 +1,4 @@
-"""Hand background events to the agent that owns a Slack thread instead of posting there."""
+"""Hand background events that need action to the agent that owns a Slack thread."""
 
 import logging
 import time
@@ -6,9 +6,9 @@ import time
 from openswe.prompts import prompt
 from openswe.slack import webhook
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import lookup_slack_thread_id, resolve_slack_thread_id
+from openswe.slack.client import resolve_slack_thread_id
 from openswe.slack.request import SlackRequest
-from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
+from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
@@ -54,15 +54,3 @@ async def wake_thread_owner(channel_id: str, thread_ts: str, slack_user_id: str,
     if not started:
         raise ThreadOwnerWakeError(f"No run started for the agent of Slack thread {thread_ts}")
     return thread_id
-
-
-async def note_for_thread_owner(channel_id: str, thread_ts: str, note: str) -> None:
-    """Queue ``note`` for the thread's owning agent, if it has one, without starting a run."""
-    thread_id = await lookup_slack_thread_id(langgraph_client(), channel_id, thread_ts)
-    if thread_id is None:
-        return
-    if not await queue_message_for_thread(thread_id, [{"type": "text", "text": note}]):
-        logger.warning(
-            "Could not queue a note for the Slack thread's agent",
-            extra={"slack_channel": channel_id, "agent_thread_id": thread_id},
-        )
