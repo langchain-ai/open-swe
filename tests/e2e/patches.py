@@ -203,12 +203,7 @@ def apply() -> None:
     # the real ownership/authorization checks still run.
     from agent.dashboard import profiles, repo_access
     from agent.github import http as github_http
-    from agent.github import (
-        pull_request_actions,
-        pull_request_context,
-        pull_request_status,
-        repo_merge_methods,
-    )
+    from agent.github import pull_request_actions, pull_request_context, pull_request_status
     from agent.threads import access as thread_access
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:
@@ -260,8 +255,6 @@ def apply() -> None:
     # the one their calls read.
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_actions.GITHUB_API_BASE = FAKE_GITHUB_API
-    repo_merge_methods.GITHUB_API_BASE = FAKE_GITHUB_API
-    pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_actions.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
 

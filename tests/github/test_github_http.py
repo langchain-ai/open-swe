@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, patch
 import httpx2
 import pytest
 
+from agent.dashboard import profiles
+from agent.github import http as github_http
 from agent.github.http import (
+    GitHubClient,
+    GitHubSignInRequired,
     _compute_backoff,
     github_request,
 )
@@ -151,3 +155,29 @@ async def test_github_request_propagates_non_retryable_http_error() -> None:
         await github_request(client, "GET", "https://api.github.com/test")
 
     assert client.get.await_count == 1
+
+
+async def test_as_user_refreshes_a_rejected_token_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    tokens = AsyncMock(side_effect=["stale", "fresh"])
+    monkeypatch.setattr(profiles, "get_valid_access_token", tokens)
+    sent: list[str] = []
+
+    async def request(client: httpx2.AsyncClient, method: str, url: str, **_kwargs: object):
+        sent.append(client.headers["Authorization"])
+        status = 401 if len(sent) == 1 else 200
+        return httpx2.Response(status, json={}, request=httpx2.Request(method, url))
+
+    monkeypatch.setattr(github_http, "github_request", request)
+    async with GitHubClient.as_user("octocat") as github:
+        assert await github.get("user") == {}
+    assert sent == ["Bearer stale", "Bearer fresh"]
+    tokens.assert_awaited_with("octocat", force_refresh=True)
+
+
+async def test_as_user_without_a_usable_token_asks_for_sign_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value=None))
+    with pytest.raises(GitHubSignInRequired):
+        async with GitHubClient.as_user("octocat"):
+            pass

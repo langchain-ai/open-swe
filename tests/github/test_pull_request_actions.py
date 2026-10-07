@@ -1,19 +1,17 @@
-from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
 from fastapi import HTTPException
 
 from agent.github import pull_request_actions as actions
-from agent.github import pull_request_dashboard_routes as pr_routes
 from agent.github import squash_message
+from agent.github.http import GitHubClient
+from agent.github.pull_request_status import PullRequestClient
 
 
-@asynccontextmanager
-async def client(**kwargs):
-    assert kwargs == {"token": "user-token"}
-    yield object()
+def _pull(number: int) -> PullRequestClient:
+    return GitHubClient(MagicMock()).repo("acme", "app").pull_request(number)
 
 
 def response(payload, status=200):
@@ -24,8 +22,6 @@ def response(payload, status=200):
 
 @pytest.fixture
 def github(monkeypatch):
-    monkeypatch.setattr(actions, "github_client", client)
-
     def _install(request: AsyncMock) -> AsyncMock:
         monkeypatch.setattr(actions, "github_request", request)
         monkeypatch.setattr(squash_message, "github_request", request)
@@ -41,11 +37,11 @@ async def test_merge_requires_github_confirmation(github, status, merged):
     )
     action = actions.MergeAction(action="merge", sha="a" * 40, merge_method="squash")
     if status == 200 and merged:
-        result = await actions.act_on_pull_request("acme", "app", 1, action, "user-token")
+        result = await actions.act_on_pull_request(_pull(1), action)
         assert result == actions.PullRequestActionResult(action="merge", done=True)
     else:
         with pytest.raises(HTTPException, match="Head changed") as error:
-            await actions.act_on_pull_request("acme", "app", 1, action, "user-token")
+            await actions.act_on_pull_request(_pull(1), action)
         assert error.value.status_code == (status if 400 <= status < 500 else 502)
     assert request.await_args.args[1:] == (
         "PUT",
@@ -72,7 +68,7 @@ async def test_squash_merge_sends_the_description_and_commits(github):
     request = github(AsyncMock(side_effect=lambda _, __, url, **___: response(payloads[url])))
     action = actions.MergeAction(action="merge", sha="a" * 40, merge_method="squash")
 
-    await actions.act_on_pull_request("acme", "app", 1, action, "user-token")
+    await actions.act_on_pull_request(_pull(1), action)
 
     assert request.await_args.kwargs["json"] == {
         "sha": "a" * 40,
@@ -88,11 +84,11 @@ async def test_close_requires_github_confirmation(github, status, state):
     )
     action = actions.CloseAction(action="close")
     if status == 200 and state == "closed":
-        result = await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+        result = await actions.act_on_pull_request(_pull(7), action)
         assert result == actions.PullRequestActionResult(action="close", done=True)
     else:
         with pytest.raises(HTTPException, match="Not permitted"):
-            await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+            await actions.act_on_pull_request(_pull(7), action)
     assert request.await_args.args[1:] == ("PATCH", "https://api.github.com/repos/acme/app/pulls/7")
     assert request.await_args.kwargs == {"json": {"state": "closed"}, "max_retries": 0}
 
@@ -109,7 +105,7 @@ async def test_a_close_reason_is_posted_as_a_comment_before_closing(github):
     )
     action = actions.CloseAction(action="close", reason="  Superseded by #8  ")
 
-    await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+    await actions.act_on_pull_request(_pull(7), action)
 
     calls = [(call.args[1:], call.kwargs.get("json")) for call in request.await_args_list]
     assert calls == [
@@ -134,7 +130,7 @@ async def test_retrying_a_close_does_not_post_the_same_reason_twice(github):
     )
     action = actions.CloseAction(action="close", reason="Stale")
 
-    await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+    await actions.act_on_pull_request(_pull(7), action)
 
     assert [call.args[1:] for call in request.await_args_list] == [
         ("GET", "https://api.github.com/repos/acme/app/issues/7"),
@@ -150,7 +146,7 @@ async def test_a_refused_reason_comment_leaves_the_pull_request_open(github):
     action = actions.CloseAction(action="close", reason="Stale")
 
     with pytest.raises(HTTPException, match="Locked"):
-        await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+        await actions.act_on_pull_request(_pull(7), action)
 
     assert request.await_count == 2
 
@@ -171,7 +167,7 @@ async def test_marking_ready_reads_the_node_id_over_rest_then_confirms_the_mutat
         )
     )
     result = await actions.act_on_pull_request(
-        "acme", "app", 7, actions.MarkReadyAction(action="mark-ready"), "user-token"
+        _pull(7), actions.MarkReadyAction(action="mark-ready")
     )
     assert result == actions.PullRequestActionResult(action="mark-ready", done=True)
     assert [call.args[1:] for call in request.await_args_list] == [
@@ -185,23 +181,9 @@ async def test_marking_ready_reads_the_node_id_over_rest_then_confirms_the_mutat
 async def test_an_unreadable_pull_request_never_reaches_the_mutation(github):
     request = github(AsyncMock(return_value=response({"message": "Not Found"}, 404)))
     with pytest.raises(HTTPException, match="Not Found") as error:
-        await actions.act_on_pull_request(
-            "acme", "app", 7, actions.MarkReadyAction(action="mark-ready"), "user-token"
-        )
+        await actions.act_on_pull_request(_pull(7), actions.MarkReadyAction(action="mark-ready"))
     assert error.value.status_code == 404
     assert request.await_count == 1
-
-
-async def test_without_a_user_token_the_route_never_calls_github(monkeypatch):
-    monkeypatch.setattr(pr_routes, "get_valid_access_token", AsyncMock(return_value=None))
-    act = AsyncMock()
-    monkeypatch.setattr(pr_routes, "act_on_pull_request", act)
-    with pytest.raises(HTTPException) as error:
-        await pr_routes.api_act_on_pull_request(
-            "acme", "app", 7, actions.CloseAction(action="close"), {"sub": "octocat"}
-        )
-    assert error.value.status_code == 401
-    act.assert_not_awaited()
 
 
 @pytest.mark.parametrize("status", [202, 422])
@@ -211,11 +193,11 @@ async def test_updating_the_branch_pins_the_head_the_viewer_saw(github, status):
     )
     action = actions.UpdateBranchAction(action="update-branch", sha="b" * 40)
     if status == 202:
-        result = await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+        result = await actions.act_on_pull_request(_pull(7), action)
         assert result == actions.PullRequestActionResult(action="update-branch", done=True)
     else:
         with pytest.raises(HTTPException, match="expected head sha") as error:
-            await actions.act_on_pull_request("acme", "app", 7, action, "user-token")
+            await actions.act_on_pull_request(_pull(7), action)
         assert error.value.status_code == 422
     assert request.await_args.args[1:] == (
         "PUT",

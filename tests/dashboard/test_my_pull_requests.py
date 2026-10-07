@@ -1,21 +1,15 @@
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
 from fastapi import HTTPException
 
+from agent.dashboard import profiles
 from agent.github import http as github_http
 from agent.github import pull_request_dashboard_routes as pr_routes
 from agent.github import pull_request_status as prs
 from agent.github.ci import RequiredCheck
 from agent.review import routes as review_routes
-
-
-@asynccontextmanager
-async def client(**kwargs):
-    assert kwargs["token"] == "user-token"
-    yield object()
 
 
 def _client(number: int) -> prs.PullRequestClient:
@@ -29,7 +23,6 @@ def response(payload, status=200):
 
 
 async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypatch):
-    monkeypatch.setattr(github_http, "github_client", client)
     queries = []
 
     async def request(_client, method, url, **kwargs):
@@ -92,7 +85,9 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
         )
 
     monkeypatch.setattr(github_http, "github_request", request)
-    result = await prs.list_open_pull_requests("octocat", "user-token", "acme/app")
+    result = await prs.list_open_pull_requests(
+        github_http.GitHubClient(MagicMock()), "octocat", "acme/app"
+    )
     assert queries == ["is:pr is:open author:octocat repo:acme/app"]
     assert [pr.number for pr in result.pull_requests] == [1, 3, 4]
     live, unavailable, no_checks = result.pull_requests
@@ -110,7 +105,7 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
 @pytest.mark.parametrize("repo", ["acme/app is:closed", "acme/../secrets", "acme/.."])
 async def test_repository_filter_cannot_change_query_or_path(repo):
     with pytest.raises(HTTPException) as error:
-        await prs.list_open_pull_requests("octocat", "user-token", repo)
+        await prs.list_open_pull_requests(github_http.GitHubClient(MagicMock()), "octocat", repo)
     assert error.value.status_code == 422
 
 
@@ -169,22 +164,16 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
             pull_requests=[], next_page=None, incomplete=False, updated_at="2026-01-01T00:00:00Z"
         )
     )
-    monkeypatch.setattr(pr_routes, "get_valid_access_token", token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", token)
     monkeypatch.setattr(pr_routes, "list_open_pull_requests", listing)
     await pr_routes.api_list_pull_requests(repo="acme/app", session={"sub": "octocat"})
-    listing.assert_awaited_once_with(
-        "octocat",
-        "user-token",
-        "acme/app",
-        lightweight=False,
-        sort="updated",
-        direction="desc",
-        page=1,
-    )
+    token.assert_awaited_once_with("octocat")
+    github, *args = listing.await_args.args
+    assert github.http.headers["Authorization"] == "Bearer user-token"
+    assert args == ["octocat", "acme/app"]
     token.return_value = None
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(github_http.GitHubSignInRequired):
         await pr_routes.api_list_pull_requests(session={"sub": "another-user"})
-    assert error.value.status_code == 401
     assert listing.await_count == 1
 
 

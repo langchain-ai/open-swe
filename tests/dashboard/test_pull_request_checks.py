@@ -1,4 +1,10 @@
+from unittest.mock import MagicMock
+
+import httpx2
+
 import agent.github.pull_request_checks as checks_module
+from agent.github import http as github_http
+from agent.github.http import GitHubClient
 from agent.github.pull_request_checks import get_pull_request_check_states
 
 
@@ -14,34 +20,15 @@ def _rollup(state: str | None, pr_state: str = "OPEN", is_draft: bool = False) -
     }
 
 
-class _Response:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self._payload = payload
-
-    def raise_for_status(self) -> None:
-        return None
-
-    def json(self) -> dict[str, object]:
-        return self._payload
+_GITHUB = GitHubClient(MagicMock())
 
 
 def _patch_github(monkeypatch, payload, calls: list[dict[str, object]]):
-    class _Client:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_):
-            return False
-
-    def client(**_kwargs):
-        return _Client()
-
-    async def request(_client, _method, _url, *, json, **_kwargs):
+    async def request(_client, method, url, *, json, **_kwargs):
         calls.append(json)
-        return _Response(payload)
+        return httpx2.Response(200, json=payload, request=httpx2.Request(method, url))
 
-    monkeypatch.setattr(checks_module, "github_client", client)
-    monkeypatch.setattr(checks_module, "github_request", request)
+    monkeypatch.setattr(github_http, "github_request", request)
 
 
 async def test_maps_pull_request_state_and_skips_invalid_records(monkeypatch):
@@ -62,6 +49,7 @@ async def test_maps_pull_request_state_and_skips_invalid_records(monkeypatch):
     )
 
     result = await get_pull_request_check_states(
+        _GITHUB,
         [
             {"repoFullName": "acme/alpha", "number": 1},
             {"repoFullName": "acme/beta", "number": 2},
@@ -72,7 +60,6 @@ async def test_maps_pull_request_state_and_skips_invalid_records(monkeypatch):
             {"repoFullName": "no-slash", "number": 7},
         ],
         "octocat",
-        "token",
     )
 
     # A merged or closed PR must stop reading as open — the sidebar renders from this.
@@ -95,11 +82,11 @@ async def test_caches_per_login(monkeypatch):
     record = [{"repoFullName": "acme/alpha", "number": 1}]
 
     expected = {"acme/alpha#1": {"checks": "failing", "state": "open"}}
-    assert await get_pull_request_check_states(record, "octocat", "token") == expected
-    assert await get_pull_request_check_states(record, "octocat", "token") == expected
+    assert await get_pull_request_check_states(_GITHUB, record, "octocat") == expected
+    assert await get_pull_request_check_states(_GITHUB, record, "octocat") == expected
     assert len(calls) == 1
 
-    await get_pull_request_check_states(record, "someone-else", "token")
+    await get_pull_request_check_states(_GITHUB, record, "someone-else")
     assert len(calls) == 2
 
 
@@ -109,7 +96,7 @@ async def test_returns_unknown_when_github_fails(monkeypatch):
     _patch_github(monkeypatch, {"errors": [{"message": "nope"}]}, calls)
 
     result = await get_pull_request_check_states(
-        [{"repoFullName": "acme/alpha", "number": 1}], "octocat", "token"
+        _GITHUB, [{"repoFullName": "acme/alpha", "number": 1}], "octocat"
     )
 
     assert result == {"acme/alpha#1": {"checks": "unknown", "state": None}}
