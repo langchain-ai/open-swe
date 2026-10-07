@@ -376,11 +376,14 @@ class EventSubscription(Base):
             )
 
     @classmethod
-    async def forget(cls, thread_id: str) -> None:
+    async def forget(cls, thread_id: str, *, session: AsyncSession | None = None) -> None:
+        if session is not None:
+            await session.execute(delete(cls).where(cls.thread_id == thread_id))
+            await session.execute(delete(EventMatch).where(EventMatch.thread_id == thread_id))
+            return
         try:
             async with postgres.session() as session:
-                await session.execute(delete(cls).where(cls.thread_id == thread_id))
-            await EventMatch.forget(thread_id)
+                await cls.forget(thread_id, session=session)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Deleting a gone thread's event subscriptions failed",

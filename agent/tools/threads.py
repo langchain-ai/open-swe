@@ -16,7 +16,7 @@ from langgraph.prebuilt import InjectedState
 from agent.dashboard.admin import is_admin
 from agent.dashboard.oauth import enforce_github_login_gate
 from agent.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from agent.input_messages import input_message_text, message_sender_id
+from agent.input_messages import dynamic_context_hash, input_message_text, message_sender_id
 from agent.invocation import resolve_invocation_id
 from agent.prompts import prompt
 from agent.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
@@ -127,6 +127,10 @@ async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:
     except HTTPException:
         return None
     return _Actor(login=login, email=email, name=login)
+
+
+async def resolve_thread_actor(state: Mapping[str, object] | None = None) -> _Actor | None:
+    return await _actor(state)
 
 
 def _failure(error: str, *, status_code: int | None = None) -> dict[str, Any]:
@@ -465,7 +469,10 @@ def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
     for message in reversed(messages):
         if _message_kind(message) not in {"human", "user"}:
             continue
-        sender_id = message_sender_id(_message_content(message))
+        content = _message_content(message)
+        if dynamic_context_hash(content) is not None or message_sender_id(content, kind="system"):
+            continue
+        sender_id = message_sender_id(content)
         if isinstance(sender_id, str) and sender_id.startswith("github:"):
             login = sender_id.removeprefix("github:").strip()
             return login or None

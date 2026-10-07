@@ -574,13 +574,17 @@ def _slack_context_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    rendered_request = _slack_message_text(
-        {**current_message, "text": ""} if is_breakout else current_message,
-        bot_user_id,
-        user_names_by_id,
-        channel_names,
-    )
-    _, _, forwarded_context = rendered_request.partition("\n")
+    if is_breakout or not str(current_message.get("text") or "").strip():
+        rendered_request = _slack_message_text(
+            {**current_message, "text": ""}, bot_user_id, user_names_by_id, channel_names
+        )
+        _, _, forwarded_context = rendered_request.partition("\n")
+    else:
+        forwarded_context = _label_slack_mentions(
+            slack_utils.format_forwarded_slack_attachments(current_message.get("attachments")),
+            user_names_by_id,
+            channel_names,
+        )
     if forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}

@@ -12,6 +12,7 @@ Before making any change, first till the soil: refactor the surrounding code so 
 
 - Async-only. Add a sync method only when an interface requires it, and make it raise `NotImplementedError`.
 - Strong types in Python and TypeScript. Never use `Any`/`any`, including to silence a type error; use a union, generic, protocol, or `object`/`unknown` with narrowing.
+- Put behavior on the object it acts on. If functions keep passing the same value around (a request, a client, a `(backend, repo_dir)` pair), that value is a missing class. Free functions are for framework entrypoints (routes, graph nodes, tools) and helpers spanning unrelated types. A new class must own real state, never be a bag of arguments.
 - Absolute imports across packages; same-package imports may start with one dot. Never use parent-relative imports.
 - New dashboard endpoints go in the `router` of the package that owns the feature, never in `agent/dashboard/routes.py`.
 - Model-facing prompts live in `agent/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`. Never inline prompt text in Python. User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
