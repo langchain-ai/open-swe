@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from agent.database import postgres
+from openswe.database import postgres
 
 
 async def test_read_only_transaction_rejects_writes(registry_db: None) -> None:

@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx2
 import pytest
 
-from agent.github import pull_request_dashboard_routes, pull_requests, routes
-from agent.github.pull_requests import PullRequest, PullRequestEvent
-from agent.github.repositories import Repository
-from agent.webhooks import common
+from openswe.github import pull_request_dashboard_routes, pull_requests, routes
+from openswe.github.pull_requests import PullRequest, PullRequestEvent
+from openswe.github.repositories import Repository
+from openswe.webhooks import common
 from scripts import sync_pull_request_descriptions
 from tests.conftest import post_signed_github_webhook
 

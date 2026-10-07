@@ -5,8 +5,8 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github import dashboard_routes as repo_routes
-from agent.github import repo_merge_methods as merge_methods
+from openswe.github import dashboard_routes as repo_routes
+from openswe.github import repo_merge_methods as merge_methods
 
 
 def _client(expected_token: str):
