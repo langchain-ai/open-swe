@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import pytest
 
-from agent.audit_logs import tools
-from agent.audit_logs.models import AuditLog
-from agent.run_config import RunConfig
-from agent.users import User
+from openswe.audit_logs import tools
+from openswe.audit_logs.models import AuditLog
+from openswe.run_config import RunConfig
+from openswe.users import User
 
 
 @pytest.mark.parametrize(

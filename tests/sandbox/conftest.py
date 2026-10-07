@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.sandboxes import lifecycle
+from openswe.sandboxes import lifecycle
 
 
 @pytest.fixture(autouse=True)

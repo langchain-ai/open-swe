@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.tools import switch_to_performance_model as switch_tool
-from agent.utils.thread_settings import ThreadSettings
+from openswe.tools import switch_to_performance_model as switch_tool
+from openswe.utils.thread_settings import ThreadSettings
 
 
 async def test_switch_persists_and_updates_the_running_model(
@@ -11,7 +11,7 @@ async def test_switch_persists_and_updates_the_running_model(
 ) -> None:
     import importlib
 
-    module = importlib.import_module("agent.tools.switch_to_performance_model")
+    module = importlib.import_module("openswe.tools.switch_to_performance_model")
     settings: ThreadSettings = {
         "model_id": "openai:gpt-5.4",
         "routing_models": {"performance": {"model_id": "openai:gpt-6-astra", "effort": "low"}},

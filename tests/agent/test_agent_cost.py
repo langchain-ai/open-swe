@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent import agent_cost
+from openswe import agent_cost
 
 
 class _Runs:

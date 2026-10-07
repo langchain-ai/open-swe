@@ -218,6 +218,19 @@ describe("liveActivityLabel", () => {
     expect(liveActivityLabel(chunks, repoPath)).toBe("Exploring · AGENTS.md")
   })
 
+  it("keeps showing an active parallel tool until all tools finish", () => {
+    const running = chunk({
+      toolCallId: "running",
+      toolKind: "execute",
+      status: "in_progress",
+      input: { command: "pnpm test" },
+    })
+    expect(liveActivityLabel([running, chunk()])).toBe("Running · pnpm test")
+    expect(
+      liveActivityLabel([{ ...running, status: "completed" }, chunk()])
+    ).toBe("Thinking…")
+  })
+
   it("switches to response status when final text starts streaming", () => {
     expect(
       liveActivityLabel([
