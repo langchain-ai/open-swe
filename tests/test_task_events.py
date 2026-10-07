@@ -486,9 +486,8 @@ async def test_first_spawn_adds_task_context_without_changing_system_prompt(
     assert received[0].system_message == received[1].system_message
     assert received[1].system_message is not None
     assert str(task.id) not in received[1].system_message.text
-    assert str(task.id) in received[1].messages[0].text
-    assert _COORDINATOR in received[1].messages[0].text
-    assert received[1].messages[-1] == request.messages[-1]
+    assert str(task.id) in received[1].messages[-1].text
+    assert _COORDINATOR in received[1].messages[-1].text
     assert len(received[0].messages) + 1 == len(received[1].messages)
 
 
