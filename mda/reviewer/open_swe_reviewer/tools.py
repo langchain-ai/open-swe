@@ -1,21 +1,29 @@
-"""The reviewer's tools, each a call to the Open SWE backend as the current run.
+"""The reviewer's tools.
 
-Names, descriptions and argument schemas come from ``spec.json``, which the
-backend exports from the tools it serves (``scripts/export_remote_reviewer_spec.py``),
-so the model sees exactly what the in-process reviewer shows it.
+Most are calls to the Open SWE backend as the current run. The ones that act on
+the sandbox run here, because this deployment owns it. Names, descriptions and
+argument schemas come from ``spec.json``, which the backend exports from its
+tools (``scripts/export_remote_reviewer_spec.py``), so the model sees exactly
+what the in-process reviewer shows it.
 """
 
 import json
+import re
 from importlib.resources import files
 from typing import Final, TypedDict
 
+from langchain.tools import ToolRuntime
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from managed_deepagents import ManagedToolRuntime
 from pydantic import JsonValue
 
 from open_swe_reviewer.backend import BackendCallError, call_backend
+from open_swe_reviewer.middleware import RunState, prepared_run
 
 # Long enough for publish_review, which posts the review and settles the check run.
 _TOOL_TIMEOUT_SECONDS: Final = 600.0
+_MAX_CHANGED_FILES: Final = 200
+_DIFF_FILE_HEADER_RE: Final = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+?)$")
 
 
 class ToolSpec(TypedDict):
@@ -32,6 +40,7 @@ class SubagentSpec(TypedDict):
 
 class RuntimeSpec(TypedDict):
     tools: list[ToolSpec]
+    sandbox_tools: list[ToolSpec]
     subagent: SubagentSpec
 
 
@@ -66,5 +75,53 @@ def _backend_tool(spec: ToolSpec) -> BaseTool:
     )
 
 
-def backend_tools() -> list[BaseTool]:
-    return [_backend_tool(spec) for spec in runtime_spec()["tools"]]
+async def fetch_review_diff(runtime: ToolRuntime[None, RunState]) -> dict[str, JsonValue]:
+    """Write this run's review diff to the sandbox and describe it."""
+    prepared = prepared_run(runtime.state)
+    checkout = prepared.checkout if prepared is not None else None
+    if checkout is None:
+        return {"success": False, "error": "review repository unavailable"}
+    if not isinstance(runtime, ManagedToolRuntime) or runtime.backend is None:
+        return {"success": False, "error": "review sandbox unavailable"}
+    uploads = await runtime.backend.aupload_files(
+        [(checkout.diff_path, checkout.diff_text.encode())]
+    )
+    if uploads and uploads[0].error:
+        return {"success": False, "error": f"failed to materialize review diff: {uploads[0].error}"}
+    paths = (
+        match.group("b")
+        for line in checkout.diff_text.splitlines()
+        if (match := _DIFF_FILE_HEADER_RE.match(line))
+    )
+    all_files = list(dict.fromkeys(paths))
+    shown = all_files[:_MAX_CHANGED_FILES]
+    return {
+        "success": True,
+        "path": checkout.diff_path,
+        "bytes": len(checkout.diff_text.encode()),
+        "files": shown,
+        "file_count": len(all_files),
+        "files_truncated": len(all_files) > len(shown),
+        "base_sha": checkout.diff_base_ref,
+        "head_sha": checkout.head_sha,
+        "cached": False,
+    }
+
+
+_SANDBOX_TOOLS: Final = {"fetch_review_diff": fetch_review_diff}
+
+
+def _sandbox_tool(spec: ToolSpec) -> BaseTool:
+    return StructuredTool.from_function(
+        coroutine=_SANDBOX_TOOLS[spec["name"]],
+        name=spec["name"],
+        description=spec["description"],
+    )
+
+
+def reviewer_tools() -> list[BaseTool]:
+    spec = runtime_spec()
+    return [
+        *(_backend_tool(tool) for tool in spec["tools"]),
+        *(_sandbox_tool(tool) for tool in spec["sandbox_tools"]),
+    ]

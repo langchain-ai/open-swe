@@ -1,10 +1,5 @@
 {
-  "subagent": {
-    "description": "Investigates whatever part of the PR review the parent assigns and returns its results. Cannot record findings or publish.",
-    "name": "reviewer",
-    "system_prompt": "You are a code-review subagent. Do the review work the parent assigns and\nreturn your results to it. Do not call finding or publication tools; the\nparent records findings and publishes the review."
-  },
-  "tools": [
+  "sandbox_tools": [
     {
       "description": "Write the current review diff to a file and return bounded metadata.",
       "name": "fetch_review_diff",
@@ -14,7 +9,14 @@
         "title": "fetch_review_diff",
         "type": "object"
       }
-    },
+    }
+  ],
+  "subagent": {
+    "description": "Investigates whatever part of the PR review the parent assigns and returns its results. Cannot record findings or publish.",
+    "name": "reviewer",
+    "system_prompt": "You are a code-review subagent. Do the review work the parent assigns and\nreturn your results to it. Do not call finding or publication tools; the\nparent records findings and publishes the review."
+  },
+  "tools": [
     {
       "description": "Record a review finding on the reviewer thread.\n\nFindings persist on the reviewer thread's metadata so they survive sandbox\neviction and are queryable across runs by the watch-mode reconciliation\nflow and the future UI.\n\n**When to use:** Once per distinct issue you find while reviewing the\ndiff. Prefer one finding per issue, with a concise generated ``title`` that\nnames the failure mode, a clear ``description`` body, and, when you can\noffer a concrete fix, a ``suggestion`` that exactly replaces lines\n``start_line..end_line``.\n\n**In-diff only:** ``start_line..end_line`` must be inside the PR diff.\nFindings anchored to lines outside the diff are rejected (out-of-diff\nfindings are disabled). File-level findings (both ``start_line`` and\n``end_line`` None) are accepted but won't render as inline GitHub\ncomments \u2014 only use when the issue truly isn't anchored to a line.\n\nArgs:\n    severity: One of ``low``, ``medium``, ``high``, ``critical``.\n    confidence: One of ``low``, ``medium``, ``high``.\n    category: Short category label (``correctness``, ``security``, ``perf``,\n        ``style``, ``flag``, etc.). Free-form; used for grouping in the UI.\n    file: Repo-relative path of the file the finding refers to.\n    title: Concise generated headline for the finding. Name the failure mode\n        in roughly 4-10 words; do not copy or truncate the description.\n    description: Markdown body the user sees. Do not repeat ``title`` as the\n        first line.\n    start_line: 1-based line in the new (post-PR) file where the\n        relevant range begins. For a single-line finding, this is the\n        line the issue is about. For a multi-line finding, this is the\n        first line of the relevant range. Omit (with ``end_line``) for\n        file-level findings.\n    end_line: 1-based line where the relevant range ends. GitHub\n        anchors the inline comment at ``end_line`` and renders the\n        ``start_line..end_line`` span as the highlighted snippet, so\n        choose ``end_line`` as the *last* line that matters \u2014 typically\n        the line the comment is most directly about. For a single-line\n        finding, set ``end_line == start_line`` (or omit it). Prefer\n        the natural range of the issue over a single line: GitHub\n        shows context above ``end_line``, so a one-line anchor often\n        buries the issue under unrelated context. Defaults to\n        ``start_line`` when omitted.\n    suggestion: Replacement text for ``start_line..end_line``. When set,\n        the published GitHub comment includes a ```suggestion``` block so\n        the user can click \"Commit suggestion\". **Only set this for small,\n        obvious fixes that fit in 4 lines or fewer** (e.g. a one-liner\n        rename, a missing guard, a typo). Longer suggestions are dropped\n        because they read as rewrites rather than reviews \u2014 leave those\n        cases as a description-only finding so the author can decide how\n        to fix it.\n    side: ``RIGHT`` (post-PR file, default) or ``LEFT`` (base file). Almost\n        always ``RIGHT``.\n\nReturns:\n    Dictionary with ``success``, ``finding_id`` and (on rejection) ``error``.",
       "name": "add_finding",

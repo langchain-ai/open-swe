@@ -1,5 +1,6 @@
 """Clients for graphs hosted in another deployment, and the run token dispatch stamps for them."""
 
+from typing import NotRequired, TypedDict
 from urllib.parse import urlsplit
 
 from langgraph_sdk import get_client
@@ -13,8 +14,16 @@ from openswe.remote_runtime.tokens import (
     runtime_tokens_configured,
     sign_runtime_token,
 )
+from openswe.run_config import RunConfig
+from openswe.sandboxes.lifecycle import SandboxCreateConfig
 
 _configurable = TypeAdapter(dict[str, JsonValue])
+
+
+class RemoteRunContext(TypedDict):
+    """The run context a remote deployment builds its graph from."""
+
+    snapshot_id: NotRequired[str]
 
 
 class RemoteRuntimeConfigurationError(RuntimeError):
@@ -42,6 +51,15 @@ def remote_runtime_client(assistant_id: str) -> LangGraphClient | None:
             "REMOTE_RUNTIME_TOKEN_SECRET is required to run graphs in another deployment"
         )
     return get_client(url=url.rstrip("/"), api_key=ENV.REVIEWER_RUNTIME_API_KEY.optional())
+
+
+async def remote_run_context(configurable: dict[str, JsonValue]) -> RemoteRunContext:
+    """The workspace snapshot the remote deployment boots this run's sandbox from."""
+    sandbox = await SandboxCreateConfig.resolve(RunConfig.parse(configurable).workspace_slug)
+    context: RemoteRunContext = {}
+    if sandbox.snapshot_id:
+        context["snapshot_id"] = sandbox.snapshot_id
+    return context
 
 
 def stamp_runtime_token(

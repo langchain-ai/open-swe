@@ -45,7 +45,11 @@ from openswe.input_messages import (
     build_run_input,
 )
 from openswe.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
-from openswe.remote_runtime.client import remote_runtime_client, stamp_runtime_token
+from openswe.remote_runtime.client import (
+    remote_run_context,
+    remote_runtime_client,
+    stamp_runtime_token,
+)
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
@@ -350,6 +354,7 @@ async def create_durable_run(
         run_config["configurable"] = stamp_runtime_token(
             run_config["configurable"], thread_id=thread_id, assistant_id=assistant_id
         )
+        create_kwargs["context"] = await remote_run_context(run_config["configurable"])
         run = await remote_client.runs.create(thread_id, assistant_id, **create_kwargs)
     else:
         run = await client.runs.create(thread_id, assistant_id, **create_kwargs)

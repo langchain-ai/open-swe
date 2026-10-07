@@ -1,14 +1,14 @@
 # Reviewer on Managed Deep Agents
 
-Open SWE's pull request reviewer packaged as a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project. Only the model loop and its checkpoints run here. The Open SWE backend keeps everything else and serves it over MCP at `/remote-runtime/mcp`:
+Open SWE's pull request reviewer packaged as a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project. The model loop, its checkpoints and its sandbox run here. The Open SWE backend keeps everything else and serves it over MCP at `/remote-runtime/mcp`:
 
-- run preparation (sandbox, checkout, diff, rendered review prompt, model choice)
-- every reviewer tool
-- the GitHub proxy refresh, the follow-up queue and the check-run settle
+- run preparation (diff, rendered review prompt, model choice)
+- every reviewer tool except `fetch_review_diff`, which writes into this deployment's sandbox
+- the follow-up queue and the check-run settle
 
 Dispatch signs a run token into each reviewer run it starts here, and every call back presents it. The backend reads the thread, repository and pull request from the token, never from tool arguments. This deployment holds no GitHub, Slack or database credentials.
 
-The sandbox is the backend's. This project declares no `sandbox/`; its `FilesystemMiddleware` replaces deepagents' default by name and attaches to the sandbox the backend prepared, so file and shell calls go straight to it.
+MDA creates the sandbox. The factory in `agent.py` boots it from the workspace snapshot that dispatch passes as the run's `snapshot_id` context, and the run's first step clones the pull request's repository into `/workspace` and writes the review diff there. Only public repositories are supported: the clone is unauthenticated.
 
 This directory is its own project and is never imported by the backend.
 
@@ -19,8 +19,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | Variable | Purpose |
 |---|---|
 | `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
-| `LANGSMITH_API_KEY` | Attaches to sandboxes in the backend's LangSmith workspace; also authenticates the LLM Gateway |
-| `OPEN_SWE_SANDBOX_API_KEY` | Optional sandbox key when `LANGSMITH_API_KEY` is for another workspace |
+| `LANGSMITH_API_KEY` | Creates sandboxes in the workspace that holds the snapshots; also authenticates the LLM Gateway |
 | `ANTHROPIC_API_KEY` | Backs deepagents' summarization model, and model calls when the gateway is off |
 | `LANGSMITH_GATEWAY_API_KEY` | Optional gateway key, as on the backend |
 
@@ -41,4 +40,4 @@ mda build
 mda deploy --name open-swe-reviewer
 ```
 
-`open_swe_reviewer/spec.json` holds the tool schemas and subagent prompts this project binds at build time. The backend exports it from the tools it serves; after changing a reviewer tool or the subagent prompts, run `uv run python -m scripts.export_remote_reviewer_spec` from the repository root. A test fails while it is stale.
+`open_swe_reviewer/spec.json` holds the tool schemas and subagent prompts this project binds at build time. The backend exports it from its reviewer tools; after changing a reviewer tool or the subagent prompts, run `uv run python -m scripts.export_remote_reviewer_spec` from the repository root. A test fails while it is stale.

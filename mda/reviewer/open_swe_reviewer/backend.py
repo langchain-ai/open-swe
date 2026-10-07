@@ -6,12 +6,12 @@ request from the token, so nothing the model writes can point a call elsewhere.
 """
 
 import os
-from datetime import timedelta
 from typing import Final
 
+import httpx2
 from langgraph.config import get_config
 from mcp import ClientSession, types
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from pydantic import JsonValue
 
 RUNTIME_TOKEN_CONFIG_KEY: Final = "__open_swe_runtime_token__"
@@ -21,7 +21,6 @@ _TOOL_SERVER_PATH: Final = "/remote-runtime/mcp"
 _RESPONSE_HEADROOM_SECONDS: Final = 30.0
 
 PREPARE_HOOK: Final = "runtime__prepare_run"
-REFRESH_HOOK: Final = "runtime__refresh_sandbox_credentials"
 DRAIN_HOOK: Final = "runtime__drain_message_queue"
 SETTLE_HOOK: Final = "runtime__settle_review_check"
 
@@ -65,32 +64,27 @@ async def call_backend(
     headers = {"Authorization": f"Bearer {_run_token()}"}
     try:
         async with (
-            streamablehttp_client(url, headers=headers, timeout=wait, sse_read_timeout=wait) as (
-                read,
-                write,
-                _,
-            ),
+            create_mcp_http_client(headers=headers, timeout=httpx2.Timeout(wait)) as http_client,
+            streamable_http_client(url, http_client=http_client) as (read, write),
             ClientSession(read, write) as session,
         ):
             await session.initialize()
             # Sent directly rather than through call_tool, which lists every tool on a
             # fresh session to look up output schemas these tools do not declare.
             result = await session.send_request(
-                types.ClientRequest(
-                    types.CallToolRequest(
-                        params=types.CallToolRequestParams(name=name, arguments=arguments)
-                    )
+                types.CallToolRequest(
+                    params=types.CallToolRequestParams(name=name, arguments=arguments)
                 ),
                 types.CallToolResult,
-                request_read_timeout_seconds=timedelta(seconds=wait),
+                request_read_timeout_seconds=wait,
             )
     except Exception as exc:
         # Named by type only: transport errors can echo the request, and it carries the token.
         raise BackendCallError(
             f"{name} could not reach the backend ({type(exc).__name__})"
         ) from exc
-    if result.isError:
+    if result.is_error:
         raise BackendCallError(_error_text(result))
-    if result.structuredContent is None:
+    if result.structured_content is None:
         raise BackendCallError(f"{name} answered without a structured result")
-    return dict(result.structuredContent)
+    return dict(result.structured_content)

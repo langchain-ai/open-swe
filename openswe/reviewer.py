@@ -65,6 +65,7 @@ from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
     changed_files,
     compute_diff_line_set,
+    fetch_compare_diff,
     fetch_pr_diff,
     fetch_pr_metadata,
     materialize_review_diff,
@@ -599,38 +600,51 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
 
 
 async def prepare_reviewer_run(
-    thread_id: str, config: RunnableConfig, runtime: Runtime
+    thread_id: str,
+    config: RunnableConfig,
+    runtime: Runtime,
+    *,
+    remote_work_dir: str | None = None,
 ) -> dict[str, Any]:
-    """Ready the sandbox, checkout and diff, and render this run's system prompt."""
-    cfg = RunConfig.from_config(config)
-    try:
-        sandbox_backend, github_token = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
-    except SandboxUnreachableError as exc:
-        # Replacement was allowed and still failed, so this run dies without a
-        # sandbox. Say so on the PR instead of leaving it looking unreviewed.
-        await post_sandbox_unreachable_notification(
-            config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
-        )
-        raise
-    work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+    """Ready the sandbox, checkout and diff, and render this run's system prompt.
 
+    With ``remote_work_dir`` the reviewer runs on another deployment that checks
+    the repo out there itself, so no sandbox is created here.
+    """
+    cfg = RunConfig.from_config(config)
     repo_owner = cfg.repo.owner if cfg.repo else ""
     repo_name = cfg.repo.name if cfg.repo else ""
     base_sha = cfg.base_sha or ""
     head_sha = cfg.head_sha or ""
     pr_number = cfg.pr_number
 
-    repo_ready = await prepare_review_repo(
-        sandbox_backend,
-        work_dir=work_dir,
-        repo_owner=repo_owner,
-        repo_name=repo_name,
-        head_sha=head_sha,
-        pr_number=pr_number,
-        base_sha=base_sha,
-    )
+    sandbox_backend: SandboxBackendProtocol | None = None
+    if remote_work_dir is not None:
+        github_token = await ensure_reviewer_github_token(thread_id, cfg)
+        work_dir = remote_work_dir
+        repo_ready = True
+    else:
+        try:
+            sandbox_backend, github_token = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
+        except SandboxUnreachableError as exc:
+            # Replacement was allowed and still failed, so this run dies without a
+            # sandbox. Say so on the PR instead of leaving it looking unreviewed.
+            await post_sandbox_unreachable_notification(
+                config or {}, sandbox_id=exc.sandbox_id, replacement_attempted=True
+            )
+            raise
+        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+        repo_ready = await prepare_review_repo(
+            sandbox_backend,
+            work_dir=work_dir,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            head_sha=head_sha,
+            pr_number=pr_number,
+            base_sha=base_sha,
+        )
     skill_sources: list[str] = []
-    if repo_ready and repo_name:
+    if sandbox_backend is not None and repo_ready and repo_name:
         skill_sources = await materialize_trusted_skills(
             sandbox_backend, repo_dir=f"{work_dir}/{repo_name}", trusted_ref=base_sha
         )
@@ -659,6 +673,19 @@ async def prepare_reviewer_run(
             )
             if fetched_diff is None:
                 return "", None
+        if sandbox_backend is None:
+            diff_text = fetched_diff
+            if diff_text is None:
+                diff_text = await fetch_compare_diff(
+                    owner=repo_owner,
+                    repo=repo_name,
+                    base_ref=last_reviewed_sha,
+                    head_ref=head_sha,
+                    token=github_token,
+                )
+            if diff_text is None:
+                return "", None
+            return diff_text, compute_diff_line_set(diff_text)
         try:
             diff_base, diff_head, merge_base = review_diff_range(
                 base_sha=base_sha,
@@ -881,7 +908,7 @@ async def prepare_reviewer_run(
     human_input_block = _format_human_input(walkthrough)
     if human_input_block:
         system_prompt = f"{system_prompt}\n\n{human_input_block}"
-    if skill_sources:
+    if skill_sources and sandbox_backend is not None:
         skill_middleware = SkillsMiddleware(backend=sandbox_backend, sources=skill_sources)
         skill_update = (
             await skill_middleware.abefore_agent(

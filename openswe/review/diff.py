@@ -245,6 +245,44 @@ async def fetch_pr_diff(
     return response.text
 
 
+async def fetch_compare_diff(
+    *,
+    owner: str,
+    repo: str,
+    base_ref: str,
+    head_ref: str,
+    token: str,
+    timeout: float = 30.0,
+) -> str | None:
+    """Fetch the unified diff between two commits from the GitHub REST API.
+
+    GitHub compares from the merge base (``base...head``), which matches the
+    two-dot range whenever ``base_ref`` is an ancestor of ``head_ref``.
+    """
+    import httpx2
+
+    from openswe.github.http import github_client, github_request
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/compare/{base_ref}...{head_ref}"
+    try:
+        async with github_client(token=token) as client:
+            response = await github_request(
+                client,
+                "GET",
+                url,
+                headers={"Accept": "application/vnd.github.diff"},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+    except httpx2.HTTPError:
+        logger.exception(
+            "Failed to fetch compare diff",
+            extra={"repository": f"{owner}/{repo}", "base_ref": base_ref, "head_ref": head_ref},
+        )
+        return None
+    return response.text
+
+
 async def fetch_pr_metadata(
     *,
     owner: str,

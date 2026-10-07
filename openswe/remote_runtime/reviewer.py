@@ -1,43 +1,38 @@
 """The reviewer's tools and run hooks, served to a reviewer graph running in another deployment.
 
-The remote graph keeps only the model loop and its checkpoints. Everything that
-needs this backend's database, Store, GitHub App or sandbox lifecycle runs here:
-run preparation, every reviewer tool, the GitHub proxy refresh, the follow-up
-queue and the check-run settle. Each call runs as the run the token names.
+The remote graph keeps the model loop, its checkpoints and its sandbox, which
+the remote deployment creates from the workspace snapshot. Everything that needs
+this backend's database, Store or GitHub App runs here: run preparation, the
+reviewer tools, the follow-up queue and the check-run settle. Each call runs as
+the run the token names.
 """
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Final, Literal, TypedDict
+from typing import Final, TypedDict
 
-from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from openswe.config import ENV
-from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.github.thread_token import resolve_thread_github_token
 from openswe.middleware import check_message_queue_before_model, settle_review_check_on_exit
 from openswe.middleware.check_message_queue import LinearNotifyState
 from openswe.prompts import load_prompt
 from openswe.remote_runtime.tokens import RemoteRun
-from openswe.review.diff import compute_diff_line_set
+from openswe.review.diff import compute_diff_line_set, review_diff_path, review_diff_range
 from openswe.reviewer import (
     REVIEWER_SUBAGENT_SYSTEM_PROMPT,
     PrepareReviewerRunState,
     ReviewerModelChoice,
     ensure_reviewer_github_token,
-    ensure_reviewer_sandbox_for_thread,
     prepare_reviewer_run,
     resolve_reviewer_models,
     reviewer_tools,
 )
 from openswe.run_config import RunConfig
-from openswe.runtime import get_cached_sandbox_backend
-from openswe.sandboxes.state import get_sandbox_id_from_metadata
 from openswe.sandboxes.tool_runtime import invoke_tool_node, tool_parameters
 from openswe.sandboxes.tool_store import ToolStore
 from openswe.store import get_value, put_value
@@ -46,10 +41,14 @@ logger = logging.getLogger(__name__)
 
 ASSISTANT_ID: Final = "reviewer"
 PREPARE_HOOK: Final = "runtime__prepare_run"
-REFRESH_HOOK: Final = "runtime__refresh_sandbox_credentials"
 DRAIN_HOOK: Final = "runtime__drain_message_queue"
 SETTLE_HOOK: Final = "runtime__settle_review_check"
-RUNTIME_HOOKS: Final = frozenset({PREPARE_HOOK, REFRESH_HOOK, DRAIN_HOOK, SETTLE_HOOK})
+RUNTIME_HOOKS: Final = frozenset({PREPARE_HOOK, DRAIN_HOOK, SETTLE_HOOK})
+
+# Where the remote deployment checks the repository out in its own sandbox.
+REMOTE_WORK_DIR: Final = "/workspace"
+# Tools the remote deployment serves itself because they act on its sandbox.
+REMOTE_SANDBOX_TOOLS: Final = frozenset({"fetch_review_diff"})
 
 # What preparation computed that later tool calls need, keyed by thread: the
 # remote graph's state holds it in the in-process reviewer, but tool calls land
@@ -76,6 +75,7 @@ class RuntimeSpec(TypedDict):
     """What the remote project binds at build time, exported to its ``spec.json``."""
 
     tools: list[ToolSpec]
+    sandbox_tools: list[ToolSpec]
     subagent: SubagentSpec
 
 
@@ -84,17 +84,25 @@ class ModelSpec(BaseModel):
     kwargs: dict[str, JsonValue]
 
 
-class SandboxSpec(BaseModel):
-    provider: Literal["langsmith"]
-    sandbox_id: str
+class CheckoutSpec(BaseModel):
+    """What the remote deployment checks out in its sandbox, and where it writes the diff."""
+
+    repository: str
+    pr_number: int | None
+    base_sha: str
+    head_sha: str
+    repo_dir: str
+    diff_base_ref: str
+    diff_path: str
+    diff_text: str
 
 
 class PreparedRun(BaseModel):
     """A prepared run as the remote graph receives it; never carries credentials."""
 
     system_prompt: str
-    work_dir: str | None
-    sandbox: SandboxSpec
+    work_dir: str
+    checkout: CheckoutSpec | None
     model: ModelSpec
     subagent_model: ModelSpec
     use_gateway: bool
@@ -112,16 +120,18 @@ class _NodeState(BaseModel):
 
 
 def _tool_node() -> ToolNode:
-    return ToolNode(reviewer_tools())
+    tools = ToolNode(reviewer_tools()).tools_by_name
+    return ToolNode([tool for name, tool in tools.items() if name not in REMOTE_SANDBOX_TOOLS])
 
 
 def runtime_spec() -> RuntimeSpec:
-    tools: list[ToolSpec] = [
-        {"name": name, "description": tool.description, "parameters": tool_parameters(tool)}
-        for name, tool in _tool_node().tools_by_name.items()
-    ]
+    specs: dict[str, ToolSpec] = {
+        name: {"name": name, "description": tool.description, "parameters": tool_parameters(tool)}
+        for name, tool in ToolNode(reviewer_tools()).tools_by_name.items()
+    }
     return {
-        "tools": tools,
+        "tools": [spec for name, spec in specs.items() if name not in REMOTE_SANDBOX_TOOLS],
+        "sandbox_tools": [spec for name, spec in specs.items() if name in REMOTE_SANDBOX_TOOLS],
         "subagent": {
             "name": "reviewer",
             "description": load_prompt("reviewer/subagent-description.md"),
@@ -166,15 +176,37 @@ def _model_spec(choice: ReviewerModelChoice) -> ModelSpec:
     return ModelSpec(model_id=choice.model_id, kwargs=_json.validate_python(dict(choice.kwargs)))
 
 
+def _checkout_spec(cfg: RunConfig, diff_text: str) -> CheckoutSpec | None:
+    if cfg.repo is None or not cfg.head_sha:
+        return None
+    repo_dir = f"{REMOTE_WORK_DIR}/{cfg.repo.name}"
+    base_ref, head_ref, merge_base = review_diff_range(
+        base_sha=cfg.base_sha or "",
+        head_sha=cfg.head_sha,
+        last_reviewed_sha=cfg.last_reviewed_sha or "",
+        re_review=bool(cfg.re_review),
+    )
+    return CheckoutSpec(
+        repository=cfg.repo.full_name,
+        pr_number=cfg.pr_number,
+        base_sha=cfg.base_sha or "",
+        head_sha=cfg.head_sha,
+        repo_dir=repo_dir,
+        diff_base_ref=base_ref,
+        diff_path=review_diff_path(repo_dir, base_ref, head_ref, merge_base),
+        diff_text=diff_text,
+    )
+
+
 async def prepare_run(run: RemoteRun) -> PreparedRun:
-    if ENV.SANDBOX_TYPE.get() != "langsmith":
-        raise RuntimeError("Remote reviewer runs require the langsmith sandbox provider")
     config = _run_config(run)
     cfg = RunConfig.from_config(config)
     prepared = await _in_graph_context(
-        config, lambda runtime: prepare_reviewer_run(run.thread_id, config, runtime)
+        config,
+        lambda runtime: prepare_reviewer_run(
+            run.thread_id, config, runtime, remote_work_dir=REMOTE_WORK_DIR
+        ),
     )
-    work_dir = prepared.get("work_dir")
     diff_text = prepared.get("diff_text")
     approval_policy = prepared.get("review_approval_policy")
     system_prompt = prepared.get("rendered_system_prompt")
@@ -182,19 +214,16 @@ async def prepare_run(run: RemoteRun) -> PreparedRun:
         raise RuntimeError("Reviewer preparation rendered no system prompt")
     context = _RunContext(
         invocation_id=cfg.invocation_id,
-        work_dir=work_dir if isinstance(work_dir, str) else None,
+        work_dir=REMOTE_WORK_DIR,
         diff_text=diff_text if isinstance(diff_text, str) else "",
         review_approval_policy=approval_policy if isinstance(approval_policy, str) else None,
     )
     await put_value(_RUN_CONTEXT_NAMESPACE, run.thread_id, context.model_dump())
-    sandbox_id = await get_sandbox_id_from_metadata(run.thread_id)
-    if not sandbox_id:
-        raise RuntimeError("Reviewer preparation left the thread without a sandbox")
     models = await resolve_reviewer_models(cfg)
     return PreparedRun(
         system_prompt=system_prompt,
-        work_dir=context.work_dir,
-        sandbox=SandboxSpec(provider="langsmith", sandbox_id=sandbox_id),
+        work_dir=REMOTE_WORK_DIR,
+        checkout=_checkout_spec(cfg, context.diff_text),
         model=_model_spec(models.main),
         subagent_model=_model_spec(models.subagent),
         use_gateway=models.use_gateway,
@@ -236,12 +265,6 @@ async def call_tool(
     if await resolve_thread_github_token(config) is None:
         # This replica did not prepare the run, so it holds no token for the thread yet.
         await ensure_reviewer_github_token(run.thread_id, cfg)
-
-    async def reconnect() -> SandboxBackendProtocol:
-        backend, _ = await ensure_reviewer_sandbox_for_thread(run.thread_id, cfg)
-        return backend
-
-    get_cached_sandbox_backend(run.thread_id, reconnect=reconnect)
     # ty does not yet treat TypedDict classes as LangGraph's TypedDictLike state bound.
     return await invoke_tool_node(
         node,
@@ -251,10 +274,6 @@ async def call_tool(
         name,
         arguments,
     )
-
-
-async def refresh_sandbox_credentials(run: RemoteRun) -> dict[str, JsonValue]:
-    return {"refreshed": await maybe_refresh_proxy_token(run.thread_id)}
 
 
 async def drain_message_queue(run: RemoteRun) -> dict[str, JsonValue]:
@@ -282,8 +301,6 @@ async def call(
     """Answer one tool server call for a reviewer run: a run hook or a model's tool call."""
     if name == PREPARE_HOOK:
         return _json.validate_python((await prepare_run(run)).model_dump())
-    if name == REFRESH_HOOK:
-        return await refresh_sandbox_credentials(run)
     if name == DRAIN_HOOK:
         return await drain_message_queue(run)
     if name == SETTLE_HOOK:
