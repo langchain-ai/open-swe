@@ -278,6 +278,12 @@ async def trigger_pr_review_from_ref(
     if not pr_metadata:
         return {"success": False, "error": "Could not fetch pull request metadata"}
 
+    if pr_metadata.get("draft"):
+        return {
+            "success": False,
+            "error": f"{pr_ref.url} is a draft. " + load_prompt("tools/human-review-blocked.md"),
+        }
+
     repo_private = common.repo_private_from_pr_metadata(pr_metadata)
     repo_id = common.repo_id_from_pr_metadata(pr_metadata)
     app_token, app_token_expires_at = await common.reviewer_token_for_repo(
