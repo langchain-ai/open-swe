@@ -1,6 +1,7 @@
 from typing import Any
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
+from uuid import UUID
 
 import pytest
 from cryptography.fernet import Fernet
@@ -11,6 +12,8 @@ from openswe import store as agent_store
 from openswe.dashboard import notion_oauth as no
 from openswe.dashboard import notion_routes
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session
+from openswe.users import User
+from openswe.users.models import UserIdentity
 
 
 class _FakeStore:
@@ -115,14 +118,22 @@ async def test_store_and_pop_notion_oauth_flow(
 
 
 @pytest.mark.parametrize(
-    ("target", "expected"),
+    ("target", "expected", "delivery"),
     [
         (
             "/agents/thread-1?from=chat#latest",
             "https://dashboard.example/agents/thread-1?from=chat#latest",
+            True,
         ),
-        ("https://evil.example/steal", "https://dashboard.example"),
-        (None, "https://dashboard.example/my-settings/connections"),
+        ("https://evil.example/steal", "https://dashboard.example", True),
+        (None, "https://dashboard.example/my-settings/connections", True),
+        ("slack", "Notion connected. A confirmation was sent", True),
+        ("slack", "Notion connected, but we couldn't send a Slack confirmation.", False),
+        (
+            "slack",
+            "Notion connected, but we couldn't send a Slack confirmation.",
+            RuntimeError("Slack unavailable"),
+        ),
     ],
 )
 def test_notion_browser_connection_returns_to_safe_target(
@@ -130,6 +141,7 @@ def test_notion_browser_connection_returns_to_safe_target(
     monkeypatch: pytest.MonkeyPatch,
     target: str | None,
     expected: str,
+    delivery: bool | Exception,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
@@ -150,6 +162,15 @@ def test_notion_browser_connection_returns_to_safe_target(
     )
     exchange = AsyncMock(return_value={"access_token": "notion-token"})
     monkeypatch.setattr(notion_routes, "exchange_notion_code", exchange)
+    user_id = UUID("00000000-0000-0000-0000-000000000001")
+    user = User(id=user_id, identities=[UserIdentity(provider="slack", external_id="U_ALICE")])
+    get_user = AsyncMock(return_value=user)
+    monkeypatch.setattr(User, "get", get_user)
+    notify = AsyncMock(
+        return_value=delivery if isinstance(delivery, bool) else False,
+        side_effect=delivery if isinstance(delivery, Exception) else None,
+    )
+    monkeypatch.setattr(notion_routes, "send_dm", notify)
     app = FastAPI()
     app.include_router(notion_routes.router, prefix="/dashboard/api")
     with TestClient(app, base_url="https://dashboard.example") as client:
@@ -157,31 +178,58 @@ def test_notion_browser_connection_returns_to_safe_target(
         def sign_in(login: str) -> None:
             client.cookies.set(
                 COOKIE_NAME,
-                issue_session(login=login, email=None, avatar_url=None, user_id="test-user-id"),
+                issue_session(login=login, email=None, avatar_url=None, user_id=str(user_id)),
             )
 
         sign_in("alice")
-        start = client.get(
-            "/dashboard/api/notion/login",
-            params={"redirect_to": target} if target else {},
-            follow_redirects=False,
-        )
+        params = {"redirect_to": target} if target else {}
+        if target == "slack":
+            params = {
+                "source": "slack",
+                "redirect_to": "/agents/thread-1",
+                "slack_user_id": "U_ATTACKER",
+            }
+        start = client.get("/dashboard/api/notion/login", params=params, follow_redirects=False)
         assert start.status_code == 302
         state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
         nonce = client.cookies[no.NOTION_STATE_COOKIE_NAME]
         client.cookies.delete(no.NOTION_STATE_COOKIE_NAME)
         callback = {"code": "notion-code", "state": state}
         assert client.get("/dashboard/api/notion/callback", params=callback).status_code == 400
-        client.cookies.set(no.NOTION_STATE_COOKIE_NAME, nonce)
+        client.cookies.set(
+            no.NOTION_STATE_COOKIE_NAME,
+            nonce,
+            domain="dashboard.example",
+            path="/dashboard/api/notion",
+        )
         sign_in("bob")
         assert client.get("/dashboard/api/notion/callback", params=callback).status_code == 400
         exchange.assert_not_awaited()
+        notify.assert_not_awaited()
         sign_in("alice")
+        denied = client.get(
+            "/dashboard/api/notion/callback",
+            params={"state": state, "error": "access_denied"},
+        )
+        assert denied.status_code == 400
+        notify.assert_not_awaited()
         response = client.get(
             "/dashboard/api/notion/callback", params=callback, follow_redirects=False
         )
-        assert response.status_code == 302
-        assert response.headers["location"] == expected
+        if target == "slack":
+            assert response.status_code == 200
+            assert "location" not in response.headers
+            assert response.text.startswith(expected)
+            get_user.assert_awaited_once_with(user_id)
+            assert notify.await_args is not None
+            assert notify.await_args.args[0] == "U_ALICE"
+        else:
+            assert response.status_code == 302
+            assert response.headers["location"] == expected
+            notify.assert_not_awaited()
+        assert no.NOTION_STATE_COOKIE_NAME not in client.cookies
         assert client.get("/dashboard/api/my-credentials/notion").json()["connected"] is True
+        assert client.get("/dashboard/api/notion/callback", params=callback).status_code == 400
+        assert notify.await_count == (1 if target == "slack" else 0)
         sign_in("bob")
         assert client.get("/dashboard/api/my-credentials/notion").json() == {"connected": False}
