@@ -253,6 +253,9 @@ class SlackInteraction(SlackPayload):
 
     type: str = ""
     trigger_id: str = ""
+    callback_id: str = ""
+    response_url: str = ""
+    team: SlackRef = Field(default_factory=SlackRef)
     action_id: str = ""
     value: str = ""
     container: SlackInteractionContainer = Field(default_factory=SlackInteractionContainer)

@@ -27,6 +27,36 @@ def _request(payload: dict[str, Any]) -> Request:
     )
 
 
+@pytest.mark.asyncio
+async def test_explain_shortcut_preserves_selected_message_and_private_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    process = AsyncMock()
+    monkeypatch.setattr(slack_routes, "process_slack_ask", process)
+    background = BackgroundTasks()
+    payload = {
+        "type": "message_action",
+        "callback_id": "open_swe_explain",
+        "trigger_id": "trigger-1",
+        "response_url": "https://hooks.slack.com/actions/T1/1/x",
+        "team": {"id": "T1"},
+        "channel": {"id": "C1"},
+        "user": {"id": "U1"},
+        "message": {"ts": "2.0", "thread_ts": "1.0", "text": "Ship the migration"},
+    }
+
+    assert await slack_routes.slack_interactivity(_request(payload), background) == {}
+    await background()
+
+    selected = process.await_args.args[0]
+    assert selected.selected_message == "Ship the migration"
+    assert selected.user_id == "U1"
+    assert selected.response_url == payload["response_url"]
+    assert selected.message_ts == "2.0"
+    assert not selected.by_the_way
+
+
 def _option_payload() -> dict[str, Any]:
     action = {
         "action_id": "open_swe_option_select_1",

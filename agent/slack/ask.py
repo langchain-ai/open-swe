@@ -69,6 +69,7 @@ class SlackAskRequest(BaseModel):
     command: str = ASK_COMMAND
     team_id: str = ""
     response_url: str = ""
+    selected_message: str = ""
     # `/btw` only: the Slack thread the public answer goes to, and the mention's own ts.
     reply_thread_ts: str = ""
     message_ts: str = ""
@@ -301,10 +302,16 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "environment": workspace,
     }
     run_prompt = prompt(
-        "runs/slack-by-the-way" if request.by_the_way else "runs/slack-ask",
+        "runs/slack-explain"
+        if request.selected_message
+        else "runs/slack-by-the-way"
+        if request.by_the_way
+        else "runs/slack-ask",
         command=request.command,
         asked_by=user_name or f"<@{request.user_id}>",
         request=request.question,
+        selected_message=_CONTEXT_FENCE_RE.sub(r"&lt;\1", request.selected_message),
+        message_ts=request.message_ts,
         channel_id=request.channel_id,
         channel_name=_channel_label(channel_context),
         in_slack_thread=request.in_slack_thread,
