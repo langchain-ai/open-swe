@@ -457,6 +457,14 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
     assert worker_context is not None
     assert worker_context.task.id == context.task.id
     assert worker_context.membership.role == "worker"
+    memberships = await store.sidebar_memberships([COORDINATOR, worker_id, "unrelated"])
+    assert set(memberships) == {COORDINATOR, worker_id}
+    assert memberships[worker_id].coordinator_thread_id == COORDINATOR
+    assert memberships[worker_id].instructions == "Implement login fix"
+    assert memberships[worker_id].launch_error is True
+    assert await store.sidebar_memberships([COORDINATOR], workers_of=True) == {
+        worker_id: memberships[worker_id]
+    }
     assert client.created_runs[0]["status"] == "pending"
     delegation = await store.TaskDelegation.get(worker_id)
     assert delegation is not None and delegation.launch_error
