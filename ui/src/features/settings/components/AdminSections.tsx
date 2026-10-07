@@ -146,9 +146,13 @@ export function RunningAgentsSection() {
     >
       <div className="flex flex-col gap-3 p-4">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
-            {running.length} running
-          </span>
+          {threads.isFetching ? (
+            <Skeleton className="h-4 w-16" />
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {running.length} running
+            </span>
+          )}
           <Button
             size="sm"
             variant="outline"
