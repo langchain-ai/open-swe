@@ -23,10 +23,7 @@ from openswe.source_context import SourceContext
 logger = logging.getLogger(__name__)
 
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
-_QUEUE_RECORDS = (
-    (("queue",), "pending_messages"),
-    (("autofix",), "pending_event"),
-)
+_QUEUE_RECORDS = ((("queue",), "pending_messages"),)
 
 
 def _mapping_value(value: object, key: str) -> object:

@@ -30,7 +30,6 @@ from openswe.middleware.require_user_reply import (
     current_reply_surface,
 )
 from openswe.middleware.trace import scrub_middleware_inputs
-from openswe.prompts import prompt
 from openswe.users import User
 from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -174,33 +173,6 @@ async def _consume_queued_messages(
         await store.adelete(namespace, "pending_messages")
 
 
-async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
-    """Pull and clear a batched PR-babysitting event from the store (no thread fetch)."""
-    namespace = ("autofix", thread_id)
-    try:
-        item = await store.aget(namespace, "pending_event")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not read pending auto-fix event for thread %s", thread_id, exc_info=True
-        )
-        return None
-    if item is None or not item.value.get("reason"):
-        return None
-    try:
-        await store.adelete(namespace, "pending_event")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
-        )
-    message = prompt("runs/autofix-event")
-    details = item.value.get("details")
-    if isinstance(details, list):
-        joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
-        if joined:
-            message += "\n\nNewly arrived feedback to address:\n" + joined
-    return message
-
-
 @scrub_middleware_inputs
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(  # noqa: PLR0911
@@ -236,10 +208,6 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         queued_updates: list[dict[str, Any]] = []
         content_blocks: list[dict[str, Any]] = []
         injected = visible_dynamic_context_hashes(state)
-        pending_autofix = await _consume_pending_autofix_event(store, thread_id)
-        if pending_autofix:
-            content_blocks.append({"type": "text", "text": pending_autofix})
-
         namespace = ("queue", thread_id)
 
         try:

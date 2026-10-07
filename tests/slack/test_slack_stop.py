@@ -159,7 +159,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     client.store.items[(("queue", thread_id), "pending_messages")] = {
         "value": {"messages": [{"content": "later"}]}
     }
-    client.store.items[(("autofix", thread_id), "pending_event")] = {"value": {"reason": "ci"}}
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
     await process_slack_stop_reaction(_event("2.000"), event_id="EvStop")
@@ -173,7 +172,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
         }
     ]
     assert (("queue", thread_id), "pending_messages") in client.store.deleted
-    assert (("autofix", thread_id), "pending_event") in client.store.deleted
     assert client.threads.updates[0][1]["latest_run_status"] == "interrupted"
     assert len(dispatched) == 1
     assert dispatched[0]["thread_id"] == thread_id
