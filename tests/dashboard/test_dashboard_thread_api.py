@@ -9,25 +9,25 @@ from uuid import UUID, uuid7
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import deps
-from agent.dashboard.workspace_settings import (
+from openswe.dashboard import deps
+from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
     WorkspaceSettingsUpdate,
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from agent.message_queue import QueuedMessage
-from agent.tasks.store import SidebarTaskMembership
-from agent.threads import diffs as thread_diffs
-from agent.threads import handlers
-from agent.threads import listing as thread_listing
-from agent.threads import proxy as thread_proxy
-from agent.threads import runs as thread_runs
-from agent.threads.summary import TRANSCRIPT_VERSION
-from agent.transcript.engine import AppendResult
-from agent.transcript.turns import OpenTurn
-from agent.users import User, UserPreferences
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.message_queue import QueuedMessage
+from openswe.tasks.store import SidebarTaskMembership
+from openswe.threads import diffs as thread_diffs
+from openswe.threads import handlers
+from openswe.threads import listing as thread_listing
+from openswe.threads import proxy as thread_proxy
+from openswe.threads import runs as thread_runs
+from openswe.threads.summary import TRANSCRIPT_VERSION
+from openswe.transcript.engine import AppendResult
+from openswe.transcript.turns import OpenTurn
+from openswe.users import User, UserPreferences
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
@@ -1423,8 +1423,8 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "append", fake_append)
-    monkeypatch.setattr("agent.utils.thread_ops.langgraph_client", lambda: FakeClient())
-    monkeypatch.setattr("agent.thread_feedback.note_feedback_activity", AsyncMock())
+    monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr("openswe.thread_feedback.note_feedback_activity", AsyncMock())
 
     result = await thread_runs.steer_running_thread(
         "tid",

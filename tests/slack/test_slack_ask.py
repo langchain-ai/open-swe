@@ -3,17 +3,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack import ask as slack_ask
-from agent.slack import client as slack_client
-from agent.slack import routes as slack_routes
-from agent.slack.channels import SlackChannel
-from agent.slack.payloads import SlackChannelContext, SlackMessage
-from agent.slack.tools import reply as slack_reply
-from agent.tasks import schemas as task_schemas
-from agent.tasks import service as task_service
-from agent.threads.listing import _metadata_matches_filters
-from agent.users import User
-from agent.users.models import UserIdentity
+from openswe.slack import ask as slack_ask
+from openswe.slack import client as slack_client
+from openswe.slack import routes as slack_routes
+from openswe.slack.channels import SlackChannel
+from openswe.slack.payloads import SlackChannelContext, SlackMessage
+from openswe.slack.tools import reply as slack_reply
+from openswe.tasks import schemas as task_schemas
+from openswe.tasks import service as task_service
+from openswe.threads.listing import _metadata_matches_filters
+from openswe.users import User
+from openswe.users.models import UserIdentity
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
 ) -> None:
     status = AsyncMock()
-    monkeypatch.setattr("agent.slack.thinking.set_slack_thread_status", status)
+    monkeypatch.setattr("openswe.slack.thinking.set_slack_thread_status", status)
     monkeypatch.setattr(slack_ask, "add_slack_reaction", AsyncMock())
     monkeypatch.setattr(slack_ask, "acknowledge_slack_command", AsyncMock())
     upsert = AsyncMock(return_value=True)
@@ -103,8 +103,8 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
     monkeypatch.setattr(task_service, "resolve_run_email", AsyncMock(return_value=None))
     resumed = await task_service.recipient_config(request.thread_id)
 
-    from agent.run_config import RunConfig
-    from agent.server import _slack_tools_enabled
+    from openswe.run_config import RunConfig
+    from openswe.server import _slack_tools_enabled
 
     assert _slack_tools_enabled(RunConfig.parse(resumed))
     monkeypatch.setattr(slack_reply, "get_config", lambda: {"configurable": resumed})

@@ -45,7 +45,7 @@ define
   Recorded(m) == \E i \in 1..Len(log) : log[i] = m
   Pos(m) == CHOOSE i \in 1..Len(log) : log[i] = m
   Open(t) == turnState[t] \in {"requested", "running"}
-  \* agent/transcript/turns.py _open_turn
+  \* openswe/transcript/turns.py _open_turn
   OpenTurnFor(rid) ==
     IF \E t \in Turns : turnRun[t] = rid
     THEN LET t == CHOOSE t \in Turns : turnRun[t] = rid IN IF Open(t) THEN t ELSE None

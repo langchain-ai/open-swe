@@ -3,8 +3,8 @@ from typing import Any
 
 import pytest
 
-from agent.run_config import RunConfig
-from agent.tools import automations
+from openswe.run_config import RunConfig
+from openswe.tools import automations
 
 
 @pytest.fixture(autouse=True)

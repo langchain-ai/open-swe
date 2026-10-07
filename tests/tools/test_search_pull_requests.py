@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 
-from agent.github.sandbox_access import SandboxGitHubAccess
-from agent.run_config import Repo, RunConfig
+from openswe.github.sandbox_access import SandboxGitHubAccess
+from openswe.run_config import Repo, RunConfig
 
-search = import_module("agent.tools.search_pull_requests")
+search = import_module("openswe.tools.search_pull_requests")
 
 
 @pytest.fixture

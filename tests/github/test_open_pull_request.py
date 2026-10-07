@@ -8,9 +8,9 @@ import httpx2
 import langgraph_sdk
 import pytest
 
-import agent.tools.open_pull_request  # noqa: F401
+import openswe.tools.open_pull_request  # noqa: F401
 
-opr = sys.modules["agent.tools.open_pull_request"]
+opr = sys.modules["openswe.tools.open_pull_request"]
 
 
 @pytest.fixture(autouse=True)
@@ -131,7 +131,7 @@ def _set_config(
             threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": metadata}))
         ),
     )
-    monkeypatch.setattr("agent.run_config.get_config", lambda: {"configurable": configurable})
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: {"configurable": configurable})
     monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable}, raising=False)
 
 
@@ -162,7 +162,7 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
         metadata={"visibility": "public", "owner_type": "user", "owner_login": "Alice"},
     )
     monkeypatch.setattr(
-        "agent.dashboard.profiles.get_valid_access_token",
+        "openswe.dashboard.profiles.get_valid_access_token",
         AsyncMock(side_effect={"Alice": "alice-token", "bob": "bob-token"}.get),
     )
     monkeypatch.setattr(
@@ -235,7 +235,7 @@ def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.Mo
 def test_private_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from agent.dashboard import profiles
+    from openswe.dashboard import profiles
 
     async def no_user_token(login: str, **_kw: Any) -> str | None:
         return None
@@ -261,7 +261,7 @@ def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch, fake_store)
         metadata={"visibility": "public", "owner_type": "user", "owner_login": "alice"},
     )
 
-    from agent.dashboard import profiles
+    from openswe.dashboard import profiles
 
     monkeypatch.setattr(
         profiles,
@@ -633,7 +633,7 @@ def test_updating_pr_preserves_original_feedback_run() -> None:
 def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, fake_store) -> None:
     from cryptography.fernet import Fernet
 
-    from agent.dashboard import profiles
+    from openswe.dashboard import profiles
 
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})

@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.message_queue import QueuedMessage
+from openswe.message_queue import QueuedMessage
 
-threads_tool = importlib.import_module("agent.tools.threads")
+threads_tool = importlib.import_module("openswe.tools.threads")
 
 
 def _actor(*, login: str = "octocat", admin: bool = False) -> object:

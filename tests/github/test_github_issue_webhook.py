@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from agent.github import routes as github_routes
-from agent.github import webhook as github_webhooks
-from agent.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
-from agent.slack.client import GitHubPrRef
-from agent.slack.payloads import SlackChannelContext
-from agent.users import User
-from agent.webhooks import common as webhook_common
+from openswe.github import routes as github_routes
+from openswe.github import webhook as github_webhooks
+from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from openswe.slack.client import GitHubPrRef
+from openswe.slack.payloads import SlackChannelContext
+from openswe.users import User
+from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
-request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
+request_pr_review_module = importlib.import_module("openswe.slack.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"

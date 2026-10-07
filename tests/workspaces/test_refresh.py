@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.workspaces import refresh
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.workspaces import refresh
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _Result:

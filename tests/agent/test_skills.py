@@ -3,11 +3,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from agent.skill_store.store import (
+from openswe.skill_store.store import (
     SkillCreate,
     create_skill,
 )
-from agent.tools.organization_skills import save_organization_skill
+from openswe.tools.organization_skills import save_organization_skill
 
 
 async def test_skill_validation_and_persistence() -> None:
@@ -20,7 +20,7 @@ async def test_skill_validation_and_persistence() -> None:
 
     client.store.get_item.return_value = None
 
-    with patch("agent.store.store_client", return_value=client):
+    with patch("openswe.store.store_client", return_value=client):
         record = await create_skill(
             "octocat",
             SkillCreate(
@@ -45,7 +45,7 @@ async def test_skill_validation_and_persistence() -> None:
 async def test_save_organization_skill_requires_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     with patch(
-        "agent.run_config.get_config",
+        "openswe.run_config.get_config",
         return_value={"configurable": {"github_login": "someone-else"}},
     ):
         result = await save_organization_skill("deslop", "Minimize diffs")

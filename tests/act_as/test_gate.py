@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.act_as import gate
-from agent.act_as.records import ThreadActAs
-from agent.slack.http import SlackRequestError
-from agent.users import User, UserPreferences
-from agent.utils.json_types import JsonObject
-from agent.utils.thread_participants import PARTICIPANT_LOGINS_KEY
+from openswe.act_as import gate
+from openswe.act_as.records import ThreadActAs
+from openswe.slack.http import SlackRequestError
+from openswe.users import User, UserPreferences
+from openswe.utils.json_types import JsonObject
+from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY
 
 
 @pytest.fixture

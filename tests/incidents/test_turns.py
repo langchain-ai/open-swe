@@ -6,15 +6,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.incidents import service, turns
-from agent.incidents.models import (
+from openswe.incidents import service, turns
+from openswe.incidents.models import (
     Incident,
     IncidentPolicy,
     IncidentReport,
     IncidentReportRecord,
 )
-from agent.incidents.report import CONTEXT_MARKER
-from agent.message_queue import QueuedMessage
+from openswe.incidents.report import CONTEXT_MARKER
+from openswe.message_queue import QueuedMessage
 
 
 @pytest.fixture
