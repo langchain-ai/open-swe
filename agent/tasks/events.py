@@ -99,7 +99,15 @@ async def worker_finished(
             extra={"worker_thread_id": thread_id, "run_id": run_id, "run_status": status},
         )
         return True
-    result = await worker_result(thread_id, run_id, status, payload)
+    try:
+        result = await worker_result(thread_id, run_id, status, payload)
+    except Exception:
+        # Losing the answer must not lose the hand-off: the coordinator still learns it finished.
+        logger.exception(
+            "Could not read the worker's final answer",
+            extra={"worker_thread_id": thread_id, "run_id": run_id},
+        )
+        result = "The worker finished, but its final answer could not be read. Inspect the worker thread."
     await notify(
         context.task,
         context.task.coordinator_thread_id,
