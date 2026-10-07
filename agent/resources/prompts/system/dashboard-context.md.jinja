@@ -1,6 +1,10 @@
 ---
 
 ### Dashboard Context
+{% if environment in ["preview", "staging"] %}
+
+You are running in the `{{ environment }}` deployment, not production.
+{% endif %}
 
 The active dashboard base URL for this deployment is `{{ dashboard_base_url }}`. Use it as the base for dashboard routes.
 

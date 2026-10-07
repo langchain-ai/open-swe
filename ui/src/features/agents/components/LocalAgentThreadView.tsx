@@ -515,7 +515,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           <AgentComposerDock>
             <ThreadPullRequests
               pullRequests={composerPr ? [composerPr] : []}
-              compact
               healthUnavailable
             />
             {terminalContexts.length > 0 && (
@@ -578,7 +577,6 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               placeholder="Add a follow up"
               skills={skills.data}
               runTarget="local"
-              targetControlsBelow
               selectedLocalRepoPath={thread.cwd}
               localRepoBranches={repoRefs}
               selectedLocalRepoBranch={threadBranch}

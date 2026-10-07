@@ -538,9 +538,12 @@ test.describe("Human review in Slack", () => {
       mention_bot: true,
     })) as { thread_ts?: string };
     await expect
-      .poll(async () => (await reviewRequests(request)).length, {
-        timeout: 90_000,
-      })
+      .poll(
+        async () =>
+          (await reviewRequests(request)).filter((req) => req.slack_message_ts)
+            .length,
+        { timeout: 90_000 },
+      )
       .toBe(1);
     const posted = await latestRequest(request);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
@@ -706,11 +709,16 @@ test.describe("Human review in Slack", () => {
     await expectNoPickReplies(request, posted);
     expect(picked.thread_ts).toBe(picked.ts);
     await expect
-      .poll(async () =>
-        JSON.stringify(
-          await (await request.get(`/threads/${dm.thread_id}/state`)).json(),
-        ),
-      )
+      .poll(async () => {
+        const queued = await request.get(`${HARNESS}/store/items`, {
+          params: {
+            namespace: `queue.${dm.thread_id}`,
+            key: "pending_messages",
+          },
+        });
+        const state = await request.get(`/threads/${dm.thread_id}/state`);
+        return JSON.stringify([await queued.json(), await state.json()]);
+      })
       .toContain("picked you to review");
     await shootCard(page, "picked");
 

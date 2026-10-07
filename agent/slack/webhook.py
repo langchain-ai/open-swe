@@ -114,10 +114,13 @@ async def _dispatch_or_queue_slack_run(
             thread_id,
             None,
             configurable,
-            source="slack",
+            source="web" if configurable.get("source") == "web" else "slack",
             thread_title=None,
             input=run_input,
-            metadata={**common.AGENT_VERSION_METADATA, "slack_trigger_ts": trigger_ts},
+            metadata={
+                **common.AGENT_VERSION_METADATA,
+                **({} if configurable.get("source") == "web" else {"slack_trigger_ts": trigger_ts}),
+            },
             client=client,
             multitask_strategy="interrupt" if explicitly_tagged else "enqueue",
         )
@@ -443,6 +446,7 @@ def _slack_context_input(
     visible_context_hashes: set[str] | None = None,
     trigger_bot: AllowedSlackBot | None = None,
     explicit_mention: bool = False,
+    web_only: bool = False,
 ) -> RunInput:
     channel_entity_id = channel["id"]
     channel_names = channel_names_by_id or {}
@@ -489,7 +493,7 @@ def _slack_context_input(
         # message an earlier dispatch handed it.
         if timestamp == str(event_ts) or timestamp in already_dispatched:
             continue
-        if slack_utils.is_own_slack_message(message, bot_user_id):
+        if not web_only and slack_utils.is_own_slack_message(message, bot_user_id):
             continue
         sender_id, identity, kind = _slack_sender(
             message, user_names_by_id, logins_by_user_id, person_ids_by_user_id
@@ -570,13 +574,17 @@ def _slack_context_input(
     current_message = next(
         (message for message in messages if str(message.get("ts", "")) == str(event_ts)), {}
     )
-    rendered_request = _slack_message_text(
-        {**current_message, "text": ""} if is_breakout else current_message,
-        bot_user_id,
-        user_names_by_id,
-        channel_names,
-    )
-    _, _, forwarded_context = rendered_request.partition("\n")
+    if is_breakout or not str(current_message.get("text") or "").strip():
+        rendered_request = _slack_message_text(
+            {**current_message, "text": ""}, bot_user_id, user_names_by_id, channel_names
+        )
+        _, _, forwarded_context = rendered_request.partition("\n")
+    else:
+        forwarded_context = _label_slack_mentions(
+            slack_utils.format_forwarded_slack_attachments(current_message.get("attachments")),
+            user_names_by_id,
+            channel_names,
+        )
     if forwarded_context:
         request_text = f"{request_text}\n{forwarded_context}"
     request_blocks[0] = {**request_blocks[0], "text": request_text}
@@ -586,7 +594,7 @@ def _slack_context_input(
             {
                 "sender_id": trigger_sender_id,
                 "channel_id": channel_entity_id,
-                "surface": "slack",
+                "surface": "web" if web_only else "slack",
                 "kind": trigger_kind,
                 "data": {
                     "timestamp": event_ts,
@@ -761,6 +769,18 @@ async def _mark_slack_thread_errored(
         common.logger.warning("Could not mark Slack thread %s as errored", thread_id, exc_info=True)
 
 
+async def process_slack_web_mention(
+    request: SlackRequest,
+    repo: common.SlackRepoResolution | None,
+    *,
+    inherited_workspace: str | None = None,
+) -> bool:
+    """Dispatch a web-only request seeded from Slack without Slack delivery."""
+    return await _process_slack_mention_impl(
+        request.model_copy(update={"web_only": True}), repo, inherited_workspace=inherited_workspace
+    )
+
+
 async def _process_slack_mention_impl(
     request: SlackRequest,
     repo_resolution: common.SlackRepoResolution | None,
@@ -785,8 +805,10 @@ async def _process_slack_mention_impl(
         else SlackChannelContext(id=channel_id)
     )
     treat_all_messages_as_mentions = request.treat_all_messages_as_mentions
-    code_channel = request.code_channel
-    concierge_mode = request.concierge_mode or is_concierge_thread(channel_context, thread_ts)
+    code_channel = request.code_channel and not request.web_only
+    concierge_mode = not request.web_only and (
+        request.concierge_mode or is_concierge_thread(channel_context, thread_ts)
+    )
 
     if not channel_id or not thread_ts or not event_ts:
         common.logger.warning(
@@ -1199,10 +1221,15 @@ async def _process_slack_mention_impl(
     # Pass the login resolved above (from the stable Slack user id) so the thread is
     # always tagged with github_login — the key the dashboard searches by. Without
     # it, upsert re-resolves from the Slack profile email, which can miss.
-    visibility = _slack_thread_visibility(channel_context)
+    visibility = "private" if request.web_only else _slack_thread_visibility(channel_context)
+    if request.web_only:
+        configurable.pop("slack_thread", None)
+        configurable.pop("slack_breakout", None)
+        configurable.pop("admin_thread", None)
+        configurable["source"] = "web"
     persisted = await common.upsert_agent_thread_metadata(
         thread_id,
-        source="slack",
+        source="web" if request.web_only else "slack",
         repo_config=repo_dict,
         github_login=mapped_login or "",
         user_email=user_email or "",
@@ -1212,7 +1239,11 @@ async def _process_slack_mention_impl(
         if (is_first_mention or concierge_mode)
         else "",
         static_title=concierge_mode,
-        source_context=SourceContext.parse({"slack_thread": configurable["slack_thread"]}),
+        source_context=(
+            None
+            if request.web_only
+            else SourceContext.parse({"slack_thread": configurable["slack_thread"]})
+        ),
         workspace=thread_workspace,
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
@@ -1279,7 +1310,8 @@ async def _process_slack_mention_impl(
         prior_message_text=request.prior_message_text,
         is_breakout=bool(request.context_thread_ts),
         turn_context=turn_context,
-        constant_context=constant_context,
+        constant_context="" if request.web_only else constant_context,
+        web_only=request.web_only,
         dispatched_timestamps=dispatched_timestamps,
         run_described_person_ids={
             person_id
@@ -1334,6 +1366,8 @@ async def _process_slack_mention_impl(
             recipient_user_id=user_id,
             recipient_team_id=request.team_id,
         )
+    if request.web_only:
+        return bool(isinstance(run_id, str) and run_id)
     if is_first_mention:
         if isinstance(run_id, str) and run_id:
             await common.store_slack_run_mapping(

@@ -167,6 +167,7 @@ def construct_system_prompt(
         ),
         dashboard_context_section=prompt(
             "system/dashboard-context",
+            environment=ENV.OPENSWE_ENV.optional(),
             dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
             artifact_url=artifact_url or "(artifact link unavailable)",
         ),
