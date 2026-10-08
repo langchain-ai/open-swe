@@ -1,11 +1,15 @@
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 import httpx2
 import pytest
 from fastapi import HTTPException
 
+from openswe.dashboard import profiles
+from openswe.github import http as github_http
 from openswe.github.checks import github_headers
+from openswe.github.http import GitHubError
 from openswe.review import conversation
 from openswe.review.conversation import (
     ConversationComment,
@@ -32,7 +36,7 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], list[httpx2.R
         return "viewer-token"
 
     monkeypatch.setattr(conversation, "require_repo_access_for_user", allow)
-    monkeypatch.setattr(conversation, "get_valid_access_token", token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", token)
 
     def install(handler: Handler) -> list[httpx2.Request]:
         seen: list[httpx2.Request] = []
@@ -41,14 +45,14 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], list[httpx2.R
             seen.append(request)
             return handler(request)
 
-        def client(token: str) -> httpx2.AsyncClient:
-            return httpx2.AsyncClient(
-                base_url="https://api.github.com",
-                headers=github_headers(token),
-                transport=httpx2.MockTransport(record),
-            )
+        @asynccontextmanager
+        async def client(*, token: str, **_kwargs: object) -> AsyncIterator[httpx2.AsyncClient]:
+            async with httpx2.AsyncClient(
+                headers=github_headers(token), transport=httpx2.MockTransport(record)
+            ) as http:
+                yield http
 
-        monkeypatch.setattr(conversation, "_client", client)
+        monkeypatch.setattr(github_http, "github_client", client)
         return seen
 
     return install
@@ -187,10 +191,10 @@ async def test_post_comment_surfaces_github_client_errors(
         )
     )
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(GitHubError) as exc:
         await api_post_review_conversation_comment(
             "acme", "app", 7, ConversationCommentCreate(body="hi"), SESSION
         )
 
-    assert exc.value.status_code == 403
-    assert exc.value.detail == "Resource not accessible by integration"
+    assert exc.value.response.status_code == 403
+    assert exc.value.message == "Resource not accessible by integration"

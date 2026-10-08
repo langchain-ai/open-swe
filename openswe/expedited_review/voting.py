@@ -17,6 +17,7 @@ from openswe.expedited_review.channels import sendable_channel, still_internal
 from openswe.expedited_review.eligibility import fetch_changed_files, fingerprint_matches
 from openswe.expedited_review.reviews import github_token_hint, submit_approval
 from openswe.github.ci import fetch_pr
+from openswe.github.http import GitHubClient, GitHubSignInRequired
 from openswe.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.human_review.clicks import answer_click
@@ -146,16 +147,17 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
     """Undraft the PR as its author, then open the card for approval."""
     if not approval.awaiting_ready:
         return Outcome("This pull request is already ready for review.", dm_card_success=True)
-    token = await get_valid_access_token(voter.github_login)
-    if not token:
+    pr = approval.pull_request
+    try:
+        async with GitHubClient.as_user(voter.github_login) as github:
+            await act_on_pull_request(
+                github.repo(pr.owner, pr.repo).pull_request(pr.number),
+                MarkReadyAction(action="mark-ready"),
+            )
+    except GitHubSignInRequired:
         return Outcome(
             f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot mark the "
             f"pull request ready. {github_token_hint()}"
-        )
-    pr = approval.pull_request
-    try:
-        await act_on_pull_request(
-            pr.owner, pr.repo, pr.number, MarkReadyAction(action="mark-ready"), token
         )
     except HTTPException as exc:
         return Outcome(f"GitHub did not mark the pull request ready: {exc.detail}")

@@ -14122,9 +14122,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Update Review Comment Dashboard Api Reviews  Owner   Repo   Pr Number  Comments  Comment Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/PostedReviewComment"
                 }
               }
             },

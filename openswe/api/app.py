@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
 from openswe.api.request_ids import add_request_ids
 from openswe.api.tracing import add_trace_resource_names, configure_datadog_environment
@@ -166,6 +167,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AuditLogMiddleware)
     add_trace_resource_names(app)
     add_request_ids(app)
+    add_github_error_handlers(app)
     app.add_exception_handler(UnknownUser, _unknown_user)
     app.include_router(dashboard_router)
     app.include_router(plan_router)
