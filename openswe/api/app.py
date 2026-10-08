@@ -4,8 +4,9 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from openswe.api.health import router as health_router
 from openswe.api.request_ids import add_request_ids
@@ -20,6 +21,7 @@ from openswe.sandboxes.tool_routes import router as sandbox_tool_router
 from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
 from openswe.threads.workflow_approval_api import workflow_approval_router
+from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
 from openswe.utils.event_loop import pin_single_event_loop
 
@@ -135,6 +137,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await database.close()
 
 
+async def _unknown_user(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
 def create_app() -> FastAPI:
     configure_datadog_environment()
     app = FastAPI(lifespan=lifespan)
@@ -158,6 +164,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AuditLogMiddleware)
     add_trace_resource_names(app)
     add_request_ids(app)
+    app.add_exception_handler(UnknownUser, _unknown_user)
     app.include_router(dashboard_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
