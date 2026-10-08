@@ -1,3 +1,9 @@
+import {
+  type CommittedDiffSelection,
+  readDiffSelection,
+  useDiffLineSelection,
+} from "@/features/agents/utils/diffSelection"
+import { DiffSelectionPopover } from "@/features/agents/components/DiffSelectionPopover"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   Fragment,
@@ -43,16 +49,16 @@ import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 import {
   FileDiff,
-  MultiFileDiff,
+  PatchDiff,
   Virtualizer,
   WorkerPoolContextProvider,
   useVirtualizer,
 } from "@pierre/diffs/react"
 import type { Icon } from "@phosphor-icons/react"
-import type { FileContents } from "@pierre/diffs/react"
 import type {
   FileDiff as CoreFileDiff,
   DiffLineAnnotation,
+  FileDiffLoadedFiles,
   FileDiffMetadata,
   SelectedLineRange,
   SelectionSide,
@@ -61,7 +67,6 @@ import type {
 import type {
   PrReviewComment,
   ReviewCheckRun,
-  ReviewCommentCreate,
   ReviewCommentsPayload,
   ReviewDetail,
   ReviewDiffFile,
@@ -74,7 +79,7 @@ import type {
   ReviewSidebarGroup,
   ReviewSidebarView,
 } from "@/features/reviews/components/ReviewSidebar"
-import type { ChatAttachment } from "@/features/reviews/components/ReviewChat"
+import { selectionExcerpts } from "@/features/agents/utils/codeExcerpt"
 import type {
   DiffRange,
   ProposedComment,
@@ -85,12 +90,17 @@ import { ReviewPageActions } from "@/features/reviews/components/ReviewPageActio
 import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
 import { ReviewConversation } from "@/features/reviews/components/ReviewConversation"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import {
+  buildCommentPayload,
+  commentRangeLabel,
+} from "@/features/reviews/lib/lineRange"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { HumanInputCard } from "@/features/reviews/components/HumanInputCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
+import { PullRequestLabels } from "@/features/reviews/components/PullRequestLabels"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
   rangeLineCount,
@@ -121,6 +131,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
+import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 
@@ -150,121 +161,6 @@ function readStoredDiffStyle(): DiffStyle {
   return window.localStorage.getItem(REVIEW_DIFF_STYLE_STORAGE_KEY) === "split"
     ? "split"
     : "unified"
-}
-
-// One attachment for a single-side line range. Deletions resolve against the
-// original file, additions against the modified file.
-const SELECTION_CONTEXT_LINES = 2
-
-function makeSideAttachment(
-  file: ReviewDiffFile,
-  side: "deletions" | "additions",
-  fromLine: number,
-  toLine: number
-): ChatAttachment {
-  const source =
-    side === "deletions" ? file.originalContent : file.modifiedContent
-  const lines = source.split("\n")
-  const start = Math.max(1, Math.min(fromLine, toLine))
-  const end = Math.min(lines.length, Math.max(fromLine, toLine))
-  const first = Math.max(1, start - SELECTION_CONTEXT_LINES)
-  const last = Math.min(lines.length, end + SELECTION_CONTEXT_LINES)
-  const width = String(last).length
-  const snippet = lines
-    .slice(first - 1, last)
-    .map((text, i) => {
-      const n = first + i
-      const marker = n >= start && n <= end ? ">" : " "
-      return `${marker} ${String(n).padStart(width)} | ${text}`
-    })
-    .join("\n")
-  const sideLabel = side === "deletions" ? "L" : "R"
-  const lineLabel =
-    start === end ? `${sideLabel}${start}` : `${sideLabel}${start}-${end}`
-  const language = file.path.includes(".")
-    ? (file.path.split(".").pop() ?? "")
-    : ""
-  return {
-    id: crypto.randomUUID(),
-    path: file.path,
-    lineLabel,
-    language,
-    snippet,
-  }
-}
-
-// Build chat attachments from the selected range. A range can span from a
-// deletion to an addition (side !== endSide) when dragging across a replaced
-// block; slicing one file by start..end would paste the wrong lines, so each
-// side is collected separately.
-function buildSelectionAttachments(
-  file: ReviewDiffFile,
-  range: SelectedLineRange
-): Array<ChatAttachment> {
-  const startSide = range.side ?? "additions"
-  const endSide = range.endSide ?? startSide
-  if (startSide === endSide) {
-    return [makeSideAttachment(file, startSide, range.start, range.end)]
-  }
-  const deletionLine = startSide === "deletions" ? range.start : range.end
-  const additionLine = startSide === "additions" ? range.start : range.end
-  return [
-    makeSideAttachment(file, "deletions", deletionLine, deletionLine),
-    makeSideAttachment(file, "additions", additionLine, additionLine),
-  ]
-}
-
-interface ShadowRootWithSelection {
-  getSelection?: () => Selection | null
-}
-
-// Read the active selection inside a <diffs-container>'s open shadow root.
-// Chromium exposes ShadowRoot.getSelection(); elsewhere fall back to the document
-// selection (events from open shadow DOM are composed/retargeted).
-function readDiffSelection(
-  container: Element | null | undefined
-): Selection | null {
-  const root = container?.shadowRoot
-  if (root) {
-    const scoped = (root as ShadowRoot & ShadowRootWithSelection).getSelection
-    if (typeof scoped === "function") return scoped.call(root)
-  }
-  return typeof document !== "undefined" ? document.getSelection() : null
-}
-
-// Map a selection boundary node to its file line number + side via the
-// data-line / data-line-type attributes Pierre stamps on every line div.
-function lineMetaFromNode(
-  node: Node | null
-): { line: number; side: SelectionSide } | null {
-  const el = node instanceof Element ? node : (node?.parentElement ?? null)
-  const lineEl = el?.closest("[data-line]")
-  if (!lineEl) return null
-  const line = Number(lineEl.getAttribute("data-line"))
-  if (!Number.isInteger(line)) return null
-  const type = lineEl.getAttribute("data-line-type") ?? ""
-  return { line, side: type.includes("deletion") ? "deletions" : "additions" }
-}
-
-// Resolve the current native text selection inside a diff to a line range, so a
-// plain text highlight can drive "Add to Chat" (Devin-style) instead of a
-// gutter drag.
-function selectedRangeFromDiff(
-  container: Element | null | undefined
-): SelectedLineRange | null {
-  const selection = readDiffSelection(container)
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0)
-    return null
-  const range = selection.getRangeAt(0)
-  const start = lineMetaFromNode(range.startContainer)
-  const end = lineMetaFromNode(range.endContainer)
-  if (!start || !end) return null
-  return {
-    start: start.line,
-    side: start.side,
-    end: end.line,
-    endSide: end.side,
-  }
 }
 
 // Scroll a file card / group flush to the top of the diff scroller (fallback
@@ -517,52 +413,6 @@ function findingSelectedRange(
     side,
     endSide: side,
   }
-}
-
-function selectionSideToGithub(
-  side: SelectionSide | undefined
-): "LEFT" | "RIGHT" {
-  return side === "deletions" ? "LEFT" : "RIGHT"
-}
-
-// Map a Pierre selection range to a GitHub inline-comment payload. GitHub
-// forbids multi-line ranges that span sides, so a cross-side selection collapses
-// to a single line on the end side; same-side ranges keep their start_line.
-function buildCommentPayload(
-  path: string,
-  range: SelectedLineRange,
-  body: string
-): ReviewCommentCreate {
-  const startSide = range.side ?? "additions"
-  const endSide = range.endSide ?? startSide
-  if (startSide !== endSide) {
-    return {
-      path,
-      line: range.end,
-      side: selectionSideToGithub(endSide),
-      body,
-      start_line: null,
-      start_side: null,
-    }
-  }
-  const side = selectionSideToGithub(endSide)
-  const lo = Math.min(range.start, range.end)
-  const hi = Math.max(range.start, range.end)
-  return {
-    path,
-    line: hi,
-    side,
-    body,
-    start_line: lo < hi ? lo : null,
-    start_side: lo < hi ? side : null,
-  }
-}
-
-function commentRangeLabel(range: SelectedLineRange): string {
-  const side = (range.endSide ?? range.side) === "deletions" ? "L" : "R"
-  const lo = Math.min(range.start, range.end)
-  const hi = Math.max(range.start, range.end)
-  return lo === hi ? `${side}${hi}` : `${side}${lo}-${hi}`
 }
 
 function findingClipboardText(finding: ReviewFinding): string {
@@ -1109,17 +959,33 @@ function ReviewBodyInner({
   )
 
   const addToChat = useCallback(
-    (path: string, range: SelectedLineRange) => {
+    async (path: string, range: SelectedLineRange) => {
       const file = filesByPathRef.current.get(path)
       if (!file) return
-      for (const attachment of buildSelectionAttachments(file, range)) {
-        composer?.addAttachment(attachment)
-      }
       setSideTab("chat")
       setSidePanelOpen(true)
-      setUserSelection(null)
+      try {
+        const contents = await loadReviewFileContents(
+          detail.owner,
+          detail.repo,
+          detail.number,
+          file
+        )
+        for (const excerpt of selectionExcerpts(file.path, contents, range)) {
+          composer?.addAttachment({ id: crypto.randomUUID(), ...excerpt })
+        }
+        setUserSelection(null)
+      } catch (error) {
+        setUserSelection({ file: path, range })
+        toast.error("Couldn’t add selection to chat", {
+          description:
+            error instanceof Error
+              ? error.message
+              : "Failed to load file contents",
+        })
+      }
     },
-    [composer]
+    [composer, detail.owner, detail.repo, detail.number]
   )
 
   // Open the inline comment composer for a line (gutter "+" click). Clearing the
@@ -1537,6 +1403,8 @@ function ReviewBodyInner({
                   headRef={detail.pr.head_ref}
                   baseRef={detail.pr.base_ref}
                   author={detail.pr.author?.login}
+                  createdAt={detail.pr.created_at}
+                  mergedAt={detail.pr.merged_at}
                   stats={{
                     changedFiles: detail.pr.changed_files,
                     additions: detail.pr.additions,
@@ -1574,6 +1442,7 @@ function ReviewBodyInner({
                     <Markdown
                       content={detail.pr.body}
                       transformImageUrl={transformPrImage}
+                      enlargeImages
                     />
                   ) : (
                     <p className="text-xs text-muted-foreground">
@@ -2019,19 +1888,25 @@ const FileDiffCard = memo(function FileDiffCard({
   /** This file's comments in the viewer's pending GitHub review. */
   pendingComments: ReadonlyArray<PendingReviewComment>
 }) {
-  // No chat means no line-selection → "Add to Chat" affordance (embedded view).
-  const selectable = Boolean(onAddToChat)
-  // Commenting rides the same gutter "+" as selection, so it's available only
-  // where the gutter utility is enabled (the full reviews page).
-  const commentable = selectable && Boolean(onStartComment)
   const diffOptions = useDiffOptions(diffStyle)
-  const diffWrapperRef = useRef<HTMLDivElement | null>(null)
-  const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
-  const [popup, setPopup] = useState<{
-    range: SelectedLineRange
-    x: number
-    y: number
-  } | null>(null)
+  const selectFileLines = useCallback(
+    (range: SelectedLineRange | null) => onSelectLines(file.path, range),
+    [onSelectLines, file.path]
+  )
+  // Line-number drags and the gutter "+" comment; text highlights add to chat.
+  const routeSelection = useCallback(
+    ({ range, source }: CommittedDiffSelection) => {
+      if (source === "lines") onStartComment?.(file.path, range)
+    },
+    [onStartComment, file.path]
+  )
+  // No chat means no line selection or commenting (embedded view).
+  const lineSelection = useDiffLineSelection({
+    enabled: Boolean(onAddToChat && onStartComment),
+    selectedLines,
+    onSelectedLinesChange: selectFileLines,
+    onCommit: routeSelection,
+  })
 
   const findingAnnotations = useMemo<
     Array<DiffLineAnnotation<ReviewAnnotation>>
@@ -2099,34 +1974,31 @@ const FileDiffCard = memo(function FileDiffCard({
     file.path,
   ])
 
-  // The gutter "+" drives comments: a click comments on one line, and a drag down
-  // the gutter comments across a range (Pierre's gutter selection, which needs
-  // enableLineSelection). "Add to Chat" instead comes from a native text highlight
-  // on the code (handleTextSelection) — Pierre leaves code content user-selectable
-  // and only line-selects from the gutter, so the two don't collide. onLineSelectionEnd
-  // bails if a native text selection is present, so a code highlight never opens the
-  // composer (belt-and-suspenders in case Pierre ever reports a content drag).
+  // Pierre calls this the first time a viewer expands context past the hunks
+  // the patch carried, and upgrades the parsed diff in place.
+  const loadDiffFiles = useCallback(async (): Promise<FileDiffLoadedFiles> => {
+    const contents = await loadReviewFileContents(owner, repo, prNumber, file)
+    const original = contents.originalContent ?? ""
+    const modified = contents.modifiedContent ?? ""
+    return {
+      oldFile: {
+        name: file.previousPath ?? file.path,
+        contents: original,
+        cacheKey: fileContentsCacheKey(file.path, "old", original),
+      },
+      newFile: {
+        name: file.path,
+        contents: modified,
+        cacheKey: fileContentsCacheKey(file.path, "new", modified),
+      },
+    }
+  }, [owner, repo, prNumber, file])
+
   const cardOptions = useMemo(
     () => ({
       ...diffOptions,
-      enableLineSelection: commentable,
-      enableGutterUtility: commentable,
-      onGutterUtilityClick: commentable
-        ? (range: SelectedLineRange) => onStartComment?.(file.path, range)
-        : undefined,
-      onLineSelectionChange: commentable
-        ? (range: SelectedLineRange | null) => onSelectLines(file.path, range)
-        : undefined,
-      onLineSelectionEnd: commentable
-        ? (range: SelectedLineRange | null) => {
-            if (!range) return
-            const host =
-              diffWrapperRef.current?.querySelector("diffs-container")
-            const native = readDiffSelection(host)
-            if (native && !native.isCollapsed && native.rangeCount > 0) return
-            onStartComment?.(file.path, range)
-          }
-        : undefined,
+      loadDiffFiles,
+      ...lineSelection.diffOptions,
       onPostRender: (
         node: HTMLElement,
         instance: CoreFileDiff<ReviewAnnotation>
@@ -2134,55 +2006,23 @@ const FileDiffCard = memo(function FileDiffCard({
     }),
     [
       diffOptions,
-      commentable,
-      onStartComment,
-      onSelectLines,
+      loadDiffFiles,
+      lineSelection.diffOptions,
       file.path,
       slice,
       registerDiffInstance,
     ]
   )
 
-  // On mouse release, turn any native text highlight inside the diff into a line
-  // range: highlight rows (controlled selection) + show the "Add to Chat" popup
-  // at the cursor. A collapsed selection (plain click) is ignored.
-  const handleTextSelection = useCallback(() => {
-    if (!selectable) return
-    const container = diffWrapperRef.current?.querySelector("diffs-container")
-    const range = selectedRangeFromDiff(container)
-    if (!range) return
-    onSelectLines(file.path, range)
-    const pointer = lastPointerRef.current
-    if (pointer) setPopup({ range, x: pointer.x, y: pointer.y })
-  }, [selectable, file.path, onSelectLines])
-
-  const visiblePopup = selectedLines && !commentDraftRange ? popup : null
-
-  const addPopupToChat = useCallback(() => {
-    if (visiblePopup) onAddToChat?.(file.path, visiblePopup.range)
-    setPopup(null)
+  const addSelectionToChat = () => {
+    const committed = lineSelection.committed
+    if (committed) onAddToChat?.(file.path, committed.range)
+    lineSelection.close()
     // Clear the lingering native highlight once added.
     readDiffSelection(
-      diffWrapperRef.current?.querySelector("diffs-container")
+      lineSelection.wrapperProps.ref.current?.querySelector("diffs-container")
     )?.removeAllRanges()
-  }, [visiblePopup, onAddToChat, file.path])
-
-  const oldFile = useMemo<FileContents>(
-    () => ({
-      name: file.path,
-      contents: file.originalContent,
-      cacheKey: fileContentsCacheKey(file.path, "old", file.originalContent),
-    }),
-    [file.path, file.originalContent]
-  )
-  const newFile = useMemo<FileContents>(
-    () => ({
-      name: file.path,
-      contents: file.modifiedContent,
-      cacheKey: fileContentsCacheKey(file.path, "new", file.modifiedContent),
-    }),
-    [file.path, file.modifiedContent]
-  )
+  }
 
   const sectionRef = useCallback(
     (node: HTMLDivElement | null) => registerSection(file.path, node),
@@ -2301,17 +2141,13 @@ const FileDiffCard = memo(function FileDiffCard({
         </label>
       </div>
       {expanded &&
-        (file.unrenderable ? (
+        (file.unrenderable || file.patch === null ? (
           <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
             Binary or large file — diff not shown.
           </div>
         ) : (
           <div
-            ref={diffWrapperRef}
-            onPointerUpCapture={(event) => {
-              lastPointerRef.current = { x: event.clientX, y: event.clientY }
-            }}
-            onMouseUp={handleTextSelection}
+            {...lineSelection.wrapperProps}
             className="overflow-x-auto bg-card font-mono text-[11px] leading-5"
           >
             {fileDiff ? (
@@ -2327,9 +2163,9 @@ const FileDiffCard = memo(function FileDiffCard({
                 renderAnnotation={renderAnnotation}
               />
             ) : (
-              <MultiFileDiff<ReviewAnnotation>
-                oldFile={oldFile}
-                newFile={newFile}
+              <PatchDiff<ReviewAnnotation>
+                patch={file.patch}
+                disableWorkerPool
                 options={cardOptions}
                 metrics={DIFF_VIRTUAL_METRICS}
                 lineAnnotations={lineAnnotations}
@@ -2337,73 +2173,29 @@ const FileDiffCard = memo(function FileDiffCard({
                 renderAnnotation={renderAnnotation}
               />
             )}
-            {visiblePopup && (
-              <AddToChatPopup
-                x={visiblePopup.x}
-                y={visiblePopup.y}
-                onAdd={addPopupToChat}
-                onDismiss={() => setPopup(null)}
-              />
-            )}
           </div>
         ))}
+      <DiffSelectionPopover
+        selection={lineSelection}
+        open={lineSelection.committed?.source === "text" && !commentDraftRange}
+        initialFocus={false}
+        className="rounded-md p-0"
+      >
+        <button
+          type="button"
+          data-add-to-chat
+          onClick={addSelectionToChat}
+          className="inline-flex items-center gap-1.5 px-2 py-1 font-sans text-[11px] font-medium"
+        >
+          Add to Chat
+          <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
+            ⌘L
+          </kbd>
+        </button>
+      </DiffSelectionPopover>
     </div>
   )
 })
-
-function AddToChatPopup({
-  x,
-  y,
-  onAdd,
-  onDismiss,
-}: {
-  x: number
-  y: number
-  onAdd: () => void
-  onDismiss: () => void
-}) {
-  // Positioned fixed at the pointer-release point so it escapes the diff's
-  // overflow clipping. Dismiss on Escape, scroll, or any outside pointer-down.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onDismiss()
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (target instanceof Element && target.closest("[data-add-to-chat]"))
-        return
-      onDismiss()
-    }
-    window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("pointerdown", onPointerDown)
-    // Capture so it also catches scrolls from the diff scroll container.
-    window.addEventListener("scroll", onDismiss, true)
-    return () => {
-      window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("pointerdown", onPointerDown)
-      window.removeEventListener("scroll", onDismiss, true)
-    }
-  }, [onDismiss])
-
-  return (
-    <div
-      data-add-to-chat
-      style={{ position: "fixed", top: y, left: x }}
-      className="z-50 -translate-y-[calc(100%+4px)] font-sans"
-    >
-      <button
-        type="button"
-        onClick={onAdd}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-md hover:bg-[linear-gradient(var(--muted),var(--muted)),linear-gradient(var(--popover),var(--popover))]"
-      >
-        Add to Chat
-        <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
-          ⌘L
-        </kbd>
-      </button>
-    </div>
-  )
-}
 
 type MarkdownAction =
   | "heading"
@@ -3276,20 +3068,11 @@ function SidePanel({
             <PeopleSection title="Assignees" people={detail.pr.assignees} />
             <section className="px-3 py-3">
               <h3 className="mb-2 text-xs font-medium">Labels</h3>
-              {detail.pr.labels.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">None</p>
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {detail.pr.labels.map((label) => (
-                    <span
-                      key={label.name}
-                      className="rounded-full border border-border px-2 py-0.5 text-[11px]"
-                    >
-                      {label.name}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <PullRequestLabels
+                owner={detail.owner}
+                repo={detail.repo}
+                number={detail.number}
+              />
             </section>
           </div>
         )}

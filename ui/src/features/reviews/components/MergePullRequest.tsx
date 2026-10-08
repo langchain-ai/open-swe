@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
+import { expiresInBrowser } from "@/lib/query"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import {
   mergeMethodLabels,
@@ -20,17 +21,19 @@ function asMergeMethod(value: string): MergeMethod | "" | null {
 
 export function MergePullRequest({
   pr,
+  apply,
   onMerged,
 }: {
   pr: OpenPullRequest
-  onMerged: () => void
+  apply: () => () => void
+  onMerged?: () => void
 }) {
   const [choice, setChoice] = useState<MergeMethod | "">("")
   const [preferred] = useState(readPreferredMergeMethod)
   const allowed = useQuery({
     queryKey: ["repo-merge-methods", pr.repo],
     queryFn: () => api.repoMergeMethods(pr.repo),
-    staleTime: Infinity,
+    ...expiresInBrowser,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
@@ -52,9 +55,10 @@ export function MergePullRequest({
     pr,
     action: "merge",
     method: method || undefined,
+    apply,
     onDone: () => {
       if (method) writePreferredMergeMethod(method)
-      onMerged()
+      onMerged?.()
     },
   })
   return (
@@ -64,6 +68,7 @@ export function MergePullRequest({
       onClick={() => merge.mutate()}
     >
       <select
+        hidden={options.length === 1}
         className={control}
         aria-label={`Merge method for PR #${pr.number}`}
         value={method}

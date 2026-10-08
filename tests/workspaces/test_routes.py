@@ -6,10 +6,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.dashboard import deps, oauth, routes
-from agent.slack.channels import SlackChannel
-from agent.workspaces import routes as workspace_routes
-from agent.workspaces.store import WORKSPACES
+from openswe.dashboard import deps, oauth, routes
+from openswe.slack.channels import SlackChannel
+from openswe.workspaces import routes as workspace_routes
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 
@@ -38,10 +38,61 @@ async def admin_client(
         yield client
 
 
+@pytest.mark.parametrize(
+    ("setup_script", "run_id"), [("", None), ("echo setup", "run-1"), ("echo setup", None)]
+)
+async def test_create_starts_initial_build_when_setup_is_provided(
+    admin_client: httpx.AsyncClient, setup_script: str, run_id: str | None
+) -> None:
+    with (
+        patch.object(
+            workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")
+        ) as cron,
+        patch.object(
+            workspace_routes, "start_refresh_run", AsyncMock(return_value=run_id)
+        ) as start,
+    ):
+        response = await admin_client.post(
+            "/dashboard/api/workspaces",
+            json={
+                "name": "OSS",
+                "repos": ["acme/oss"],
+                "inherit_default_sandbox": False,
+                "setup_script": setup_script,
+                "update_script": "echo update",
+            },
+        )
+
+    stored = await WORKSPACES.get("oss")
+    assert stored is not None
+    assert stored.setup_script == setup_script
+    assert stored.update_script == "echo update"
+    if not setup_script:
+        assert response.status_code == 200
+        assert response.json()["refresh_status"] == "never"
+        cron.assert_not_awaited()
+        start.assert_not_awaited()
+    else:
+        cron.assert_awaited_once_with("oss")
+        start.assert_awaited_once_with("oss")
+        if run_id is None:
+            assert response.status_code == 502
+            assert response.json()["detail"] == (
+                "workspace was created but its initial image build could not start; "
+                "retry the build from workspace settings"
+            )
+        else:
+            assert response.status_code == 200
+            assert response.json()["refresh_status"] == "refreshing"
+            assert response.json()["refresh_run_id"] == run_id
+
+
 async def test_repo_update_starts_snapshot_rebuild(admin_client: httpx.AsyncClient) -> None:
-    await admin_client.post(
-        "/dashboard/api/workspaces",
-        json={"name": "OSS", "repos": ["acme/oss"], "setup_script": "echo setup"},
+    await WORKSPACES.create(
+        WorkspaceCreate(
+            name="OSS", repos=["acme/oss"], setup_script="echo setup", inherit_default_sandbox=False
+        ),
+        "admin",
     )
     with (
         patch.object(workspace_routes, "ensure_refresh_cron", AsyncMock(return_value="cron-1")),
@@ -125,9 +176,8 @@ async def test_newly_enabled_kitchen_channels_check_fresh_slack_eligibility(
 async def test_a_prompt_edit_during_a_refresh_outlives_it(
     admin_client: httpx.AsyncClient,
 ) -> None:
-    await admin_client.post(
-        "/dashboard/api/workspaces",
-        json={"name": "Core", "repos": ["acme/api"], "setup_script": "echo tools"},
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", repos=["acme/api"], setup_script="echo tools"), "admin"
     )
     await WORKSPACES.mark_refreshing("core")
     response = await admin_client.put("/dashboard/api/workspaces/core", json={"prompt": "new"})

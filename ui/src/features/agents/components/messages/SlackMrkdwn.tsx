@@ -1,4 +1,6 @@
+import { useQuery } from "@tanstack/react-query"
 import { Fragment } from "react"
+import { api } from "@/lib/api"
 import type { ReactNode } from "react"
 
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
@@ -64,12 +66,25 @@ function closingDelimiter(
   return -1
 }
 
+export function SlackUserMention({ userId }: { userId: string }) {
+  const { data } = useQuery({
+    queryKey: ["slackUserName", userId],
+    queryFn: () => api.slackUserName(userId),
+    staleTime: 60 * 60 * 1000,
+  })
+  return <span className="text-foreground/90">@{data?.name || userId}</span>
+}
+
 function slackTokenNode(token: string, key: string): ReactNode {
   const separator = token.indexOf("|")
   const rawTarget = separator === -1 ? token : token.slice(0, separator)
   const rawLabel = separator === -1 ? "" : token.slice(separator + 1)
   const target = decodeSlackText(rawTarget)
   const label = decodeSlackText(rawLabel)
+
+  if (!label && /^@[UW][A-Z0-9]{2,}$/.test(target)) {
+    return <SlackUserMention key={key} userId={target.slice(1)} />
+  }
 
   if (target.startsWith("@") || target.startsWith("#")) {
     const sigil = target[0]

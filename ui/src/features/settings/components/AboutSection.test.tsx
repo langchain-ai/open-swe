@@ -16,6 +16,7 @@ const user: SessionUser = {
     "https://user:secret@backend.example.com/mount?token=secret#private",
   build_info: {
     backend: {
+      environment: "preview",
       revision_id: "rev-42",
       commit: "abc123",
       built_at: null,
@@ -38,10 +39,19 @@ it("shows session build and safe API diagnostics without an analytics report", (
   }
   render(<AboutSection user={user} />)
   expect(screen.getByText("About")).toBeTruthy()
+  expect(screen.getByText(/OPENSWE_ENV:/).textContent).toBe(
+    "OPENSWE_ENV: preview"
+  )
   expect(screen.getByText("rev-42")).toBeTruthy()
-  expect(screen.getByText("abc123")).toBeTruthy()
-  expect(screen.getByText("def456")).toBeTruthy()
-  expect(screen.getByText("fedcba")).toBeTruthy()
+  for (const commit of ["abc123", "def456", "fedcba"]) {
+    const link = screen.getByRole("link", { name: commit })
+    expect(link.getAttribute("href")).toBe(
+      `https://github.com/langchain-ai/open-swe/commit/${commit}`
+    )
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer")
+  }
+  expect(screen.getAllByRole("link")).toHaveLength(3)
   expect(screen.getByText(/different from the bundle/)).toBeTruthy()
   expect(screen.getByText(/API:/).textContent).toBe(
     "API: https://backend.example.com /dashboard/api"
@@ -56,6 +66,9 @@ it("retains the running bundle identity when an older backend omits build info",
   }
   render(<AboutSection user={{ ...user, build_info: undefined }} />)
   expect(screen.getByText(/does not report them/)).toBeTruthy()
+  expect(screen.getByText(/OPENSWE_ENV:/).textContent).toBe(
+    "OPENSWE_ENV: Unavailable"
+  )
   expect(screen.getByText("fedcba")).toBeTruthy()
   expect(screen.queryByText(/different from the bundle/)).toBeNull()
 })
@@ -115,7 +128,7 @@ it("copies only environment diagnostics from session data", async () => {
   expect(JSON.parse(text)).toMatchObject({
     report: "open-swe-environment-diagnostics",
     api: { origin: "https://backend.example.com", path: "/dashboard/api" },
-    build: { backend: { revision_id: "rev-42" } },
+    build: { backend: { environment: "preview", revision_id: "rev-42" } },
     running_bundle: { commit: "running123" },
   })
   for (const excluded of [

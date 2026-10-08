@@ -10,10 +10,11 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.pregel import Pregel
 
-import agent.server as server
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.middleware.model_selection import ModelSelectionMiddleware
-from agent.utils.thread_settings import ThreadSettings
+import openswe.server as server
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.middleware.model_selection import ModelSelectionMiddleware
+from openswe.tools.access import Access
+from openswe.utils.thread_settings import ThreadSettings
 
 
 @pytest.fixture
@@ -31,10 +32,13 @@ def factory_settings(monkeypatch: pytest.MonkeyPatch) -> ThreadSettings:
         "store_thread_settings",
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
-    for name in ("_admin_thread", "_private_thread", "_bridged_thread"):
-        monkeypatch.setattr(server, name, AsyncMock(return_value=False))
-    for name in ("_mcp_tools_for", "_notion_tools_for"):
-        monkeypatch.setattr(server, name, AsyncMock(return_value=[]))
+    monkeypatch.setattr(server, "_admin_thread", AsyncMock(return_value=False))
+    monkeypatch.setattr(server, "_bridge_client", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        server.TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(server, "resolve_access", AsyncMock(return_value=Access()))
+    monkeypatch.setattr(server, "_mcp_tools_for", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         server, "load_thread_settings", AsyncMock(side_effect=lambda *_: settings.copy())
     )
@@ -46,11 +50,16 @@ def factory_settings(monkeypatch: pytest.MonkeyPatch) -> ThreadSettings:
     monkeypatch.setattr(
         server,
         "_make_model_or_defer",
-        lambda model_id, **_: FakeListChatModel(responses=[model_id]),
+        lambda model_id, **kwargs: FakeListChatModel(
+            responses=[
+                f"{model_id}:{kwargs.get('effort') or kwargs.get('reasoning', {}).get('effort')}"
+            ]
+        ),
     )
     return settings
 
 
+@pytest.mark.parametrize("effort", ["low", "max"])
 @pytest.mark.parametrize(
     ("source", "routing", "requested_model"),
     [
@@ -65,6 +74,7 @@ async def test_resume_after_model_handoff(
     source: Literal["dashboard", "slack"],
     routing: bool,
     requested_model: str | None,
+    effort: str,
 ) -> None:
     settings = factory_settings
     settings["model_routing_enabled"] = routing
@@ -95,6 +105,7 @@ async def test_resume_after_model_handoff(
         {
             "messages": [HumanMessage("Continue the task")],
             "requested_model": requested_model,
+            "requested_effort": effort if requested_model else None,
             "model_route": "default",
         },
         config,
@@ -106,9 +117,10 @@ async def test_resume_after_model_handoff(
     settings["model_routing_enabled"] = False
     if requested_model:
         settings["model_id"] = requested_model
+        settings["effort"] = effort
 
     resumed = await server.build_agent(config)
     result = await resumed.ainvoke(None, config)
     assert isinstance(result["messages"][-1], AIMessage)
-    assert result["messages"][-1].content == settings["model_id"]
+    assert result["messages"][-1].content == f"{settings['model_id']}:{settings['effort']}"
     assert (await resumed.aget_state(config)).next == ()

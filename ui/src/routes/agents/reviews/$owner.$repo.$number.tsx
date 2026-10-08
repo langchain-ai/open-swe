@@ -39,6 +39,8 @@ function ReviewDetailPage() {
   const session = useSession()
   const sidebar = useSidebarControls()
   const sidebarCollapsed = sidebar?.collapsed ?? false
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
   // A comment picked from the dropdown, shown inline in the diff (not GitHub).
   const [activeComment, setActiveComment] = useState<PrReviewComment | null>(
     null
@@ -127,10 +129,11 @@ function ReviewDetailPage() {
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
       <header
+        data-desktop-drag-region=""
         className={cn(
           "flex h-12 shrink-0 items-center gap-3 border-b border-border pr-4 text-xs",
           // Clear room for the fixed collapse toggle when the sidebar is hidden.
-          sidebarCollapsed ? "pl-14" : "pl-4"
+          sidebarCollapsed ? (isDesktop ? "pl-32" : "pl-14") : "pl-4"
         )}
       >
         <Link

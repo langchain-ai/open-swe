@@ -166,6 +166,62 @@ async function typeIntoComposer(page: Page, text: string) {
 }
 
 test.describe("Workspaces", () => {
+  test("creating a workspace with scripts builds its first image", async ({
+    page,
+  }) => {
+    await loginAs(page, ADMIN);
+    const slug = "initial-build";
+    await deleteWorkspace(page, slug);
+    try {
+      await page.goto("/workspaces");
+      await page.getByRole("button", { name: "Add workspace" }).click();
+      await page.getByLabel("Workspace name").fill("Initial Build");
+      await page.getByRole("button", { name: "Choose repositories" }).click();
+      await page
+        .getByLabel("Add a repository by name")
+        .fill("e2e/initial-build");
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      await page.getByRole("button", { name: "Save 1 repository" }).click();
+      for (const [label, script] of [
+        ["Setup script", "set -euo pipefail\necho initial-setup-complete"],
+        ["Update script", "echo initial-update-complete"],
+      ]) {
+        await page
+          .getByRole("button", { name: `Edit ${label.toLowerCase()}` })
+          .click();
+        await page.getByRole("textbox", { name: label, exact: true }).focus();
+        await page.keyboard.insertText(script);
+        await page.getByRole("button", { name: "Done", exact: true }).click();
+      }
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.route("**/dashboard/api/workspaces", async (route) => {
+        const request = route.request();
+        if (request.method() !== "POST") return route.continue();
+        await route.continue({
+          postData: JSON.stringify({
+            ...request.postDataJSON(),
+            inherit_default_sandbox: false,
+          }),
+        });
+      });
+      await page
+        .getByRole("button", { name: "Create workspace", exact: true })
+        .click();
+      await expect(page.getByLabel("Workspace name")).toHaveCount(0);
+      await expect
+        .poll(async () => (await findWorkspace(page, slug))?.refresh_status, {
+          timeout: 60_000,
+        })
+        .toBe("success");
+      const workspace = await findWorkspace(page, slug);
+      expect(workspace?.snapshot_status).toBe("ready");
+      expect(workspace?.refresh_log).toContain("initial-setup-complete");
+      expect(workspace?.refresh_log).toContain("initial-update-complete");
+    } finally {
+      await deleteWorkspace(page, slug);
+    }
+  });
+
   test("an admin views workspaces and editing instructions in Settings", async ({
     page,
   }) => {
@@ -445,7 +501,7 @@ test.describe("Workspaces", () => {
     expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
 
     await page.goto("/workspaces");
-    await expect(page.getByText("Default")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Default")).toBeVisible();
     await expect(page.getByText("Snapshot ready")).toBeVisible();
     // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
     await expect(page.getByText(/^Rebuilt /)).toBeVisible();

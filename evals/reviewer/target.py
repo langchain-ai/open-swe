@@ -14,9 +14,8 @@ from typing import Any, Literal, cast
 
 from langgraph_sdk import get_client
 
-from agent.input_messages import build_run_input
-from agent.review.findings import (
-    REVIEW_FINDING_CAP,
+from openswe.input_messages import build_run_input
+from openswe.review.findings import (
     REVIEWER_EVAL_PUBLICATION_KEY,
     Finding,
     Severity,
@@ -71,7 +70,7 @@ def drain_thread_ids() -> set[str]:
 
 
 def get_langgraph_url() -> str:
-    return os.getenv("LANGGRAPH_URL", DEFAULT_LANGGRAPH_URL)
+    return os.getenv("LANGGRAPH_URL") or DEFAULT_LANGGRAPH_URL
 
 
 def get_reviewer_assistant_id() -> str:
@@ -124,7 +123,6 @@ def _build_configurable(inputs: dict[str, Any]) -> dict[str, Any]:
         "head_sha": inputs.get("head_sha", ""),
         "branch_name": inputs.get("head_ref", ""),
         "reviewer_eval_severity_threshold": _score_severity_threshold(),
-        "reviewer_eval_cap": _score_cap(),
     }
     model_id = get_reviewer_model_id()
     if model_id:
@@ -186,10 +184,11 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
         )
         _record_completed()
         return {
+            "thread_id": thread_id,
+            "pr_url": pr_url,
             "comments": comments,
             "score_mode": score_mode,
             "publish_completed": publish_completed,
-            "score_cap": REVIEW_FINDING_CAP,
         }
     except Exception:
         logger.exception("Reviewer eval example failed: repo=%s pr=%s", repo, pr_number)
@@ -246,23 +245,17 @@ async def _extract_surfaced_comments(
 ) -> tuple[list[dict[str, Any]], bool]:
     thread = await client.threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
-    findings_value = metadata.get("findings") if isinstance(metadata, dict) else None
-    findings = _coerce_findings(findings_value)
-    publication_value = (
+    publication = (
         metadata.get(REVIEWER_EVAL_PUBLICATION_KEY) if isinstance(metadata, dict) else None
     )
-    if not isinstance(publication_value, dict):
+    if not isinstance(publication, dict):
         logger.warning("Reviewer eval thread %s has no publication snapshot", thread_id)
         return [], False
-    finding_ids = publication_value.get("finding_ids")
-    if not isinstance(finding_ids, list) or not all(
-        isinstance(finding_id, str) for finding_id in finding_ids
-    ):
+    surfaced = publication.get("findings")
+    if not isinstance(surfaced, list):
         logger.warning("Reviewer eval thread %s has an invalid publication snapshot", thread_id)
         return [], False
-    by_id = {finding.get("id"): finding for finding in findings}
-    surfaced = [by_id[finding_id] for finding_id in finding_ids if finding_id in by_id]
-    return [_normalize_finding(finding) for finding in surfaced], True
+    return [_normalize_finding(finding) for finding in _coerce_findings(surfaced)], True
 
 
 def _coerce_findings(value: Any) -> list[Finding]:
@@ -295,12 +288,3 @@ def _score_severity_threshold() -> Severity:
     if value in _VALID_SEVERITIES:
         return cast(Severity, value)
     return "low"
-
-
-def _score_cap() -> int:
-    raw = os.getenv("REVIEWER_EVAL_CAP", str(REVIEW_FINDING_CAP))
-    try:
-        cap = int(raw)
-    except ValueError:
-        return REVIEW_FINDING_CAP
-    return max(cap, 0)

@@ -25,7 +25,9 @@ vi.mock("./api", async (importOriginal) => ({
 function payloadFor(login: string): ReposPayload {
   return {
     installations: [],
-    repositories: [{ full_name: `${login}/api`, private: false }],
+    repositories: [
+      { full_name: `${login}/api`, private: false, archived: false },
+    ],
   }
 }
 

@@ -8,6 +8,7 @@ const {
   backendRequestUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  desktopDeepLinkUrl,
   connectExchangeUrl,
   connectLoginUrl,
   isAppLoginUrl,
@@ -170,8 +171,8 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
     "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
   );
   assert.equal(
-    connectExchangeUrl("https://backend.example", "notion"),
-    "https://backend.example/dashboard/api/notion/desktop/exchange",
+    connectExchangeUrl("https://backend.example", "langsmith"),
+    "https://backend.example/dashboard/api/langsmith/desktop/exchange",
   );
 });
 
@@ -224,6 +225,30 @@ test("localizes backend OAuth callbacks and post-login redirects", () => {
     ),
     `${APP_URL}agents/thread-1?from=oauth#latest`,
   );
+});
+
+test("opens only dashboard links from the configured backend", () => {
+  const backend = "https://openswe.langchain.dev";
+  assert.equal(
+    desktopDeepLinkUrl(`${backend}/agents/thread-1?tab=plan#latest`, backend),
+    `${APP_URL}agents/thread-1?tab=plan#latest`,
+  );
+  assert.equal(
+    desktopDeepLinkUrl(`${backend}/review`, backend),
+    `${APP_URL}review`,
+  );
+  assert.equal(
+    desktopDeepLinkUrl(`${backend}/agents/local/private-thread`, backend),
+    `${APP_URL}agents/local/private-thread`,
+  );
+  for (const url of [
+    "https://openswe.vercel.app/agents/thread-1",
+    `${backend}/dashboard/api/auth/callback?code=secret`,
+    `${backend}/assets/app.js`,
+    "open-swe://link/agents/thread-1",
+    "javascript:alert(1)",
+  ])
+    assert.equal(desktopDeepLinkUrl(url, backend), null);
 });
 
 test("keeps static file resolution inside the bundled UI root", () => {

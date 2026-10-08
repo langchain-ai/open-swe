@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
-import { SiNotion } from "react-icons/si"
 
-import type { NotionCredentialStatus, SessionUser } from "@/lib/api"
+import type { LangSmithConnectionStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
@@ -79,42 +78,70 @@ function SlackRow({ user }: { user: SessionUser }) {
   )
 }
 
-function NotionRow() {
-  const qc = useQueryClient()
-  const creds = useQuery({
-    queryKey: ["myNotion"],
-    queryFn: api.getMyNotionStatus,
-  })
-  const [connecting, setConnecting] = useState(false)
+export const LANGSMITH_CONNECTION_KEY = ["myLangSmith"]
 
+/** The caller's own LangSmith connection, shared by every feature that calls LangSmith as them. */
+export function useLangSmithConnection() {
+  return useQuery({
+    queryKey: LANGSMITH_CONNECTION_KEY,
+    queryFn: api.getMyLangSmithStatus,
+  })
+}
+
+export function ConnectLangSmithButton({
+  size = "sm",
+}: {
+  size?: "sm" | "default"
+}) {
+  const qc = useQueryClient()
+  const status = useLangSmithConnection()
+  const [connecting, setConnecting] = useState(false)
+  return (
+    <Button
+      size={size}
+      onClick={() => {
+        setConnecting(true)
+        void connectService("langsmith", window.location.href)?.finally(() => {
+          setConnecting(false)
+          void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
+        })
+      }}
+      disabled={connecting || status.isLoading}
+    >
+      {connecting ? "Redirecting…" : "Connect LangSmith"}
+    </Button>
+  )
+}
+
+function LangSmithRow() {
+  const qc = useQueryClient()
+  const status = useLangSmithConnection()
   const disconnect = useMutation({
-    meta: { errorTitle: "Couldn't disconnect Notion" },
-    mutationFn: () => api.disconnectNotion(),
+    meta: { errorTitle: "Couldn't disconnect LangSmith" },
+    mutationFn: () => api.disconnectLangSmith(),
     onMutate: async () => ({
-      undo: await optimisticUpdate<NotionCredentialStatus>(
+      undo: await optimisticUpdate<LangSmithConnectionStatus>(
         qc,
-        ["myNotion"],
-        (current) => ({ ...current, connected: false })
+        LANGSMITH_CONNECTION_KEY,
+        (current) => ({ ...current, connected: false, email: null })
       ),
     }),
     onError: (_e, _v, ctx) => ctx?.undo(),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["myNotion"] }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
+      void qc.invalidateQueries({ queryKey: ["myManagedTools"] })
+    },
   })
-
-  const connected = !!creds.data?.connected
-  const connect = () => {
-    setConnecting(true)
-    void qc.invalidateQueries({ queryKey: ["myNotion"] })
-    void connectService("notion")?.finally(() => {
-      setConnecting(false)
-      void qc.invalidateQueries({ queryKey: ["myNotion"] })
-    })
-  }
-
+  if (!status.data?.available) return null
+  const connected = status.data.connected
   return (
     <SettingsRow
-      label="Notion"
-      description="Let agent runs use Notion MCP tools with your workspace permissions. OAuth tokens are encrypted at rest and scoped to your account."
+      label="LangSmith"
+      description={
+        connected
+          ? `Signed in${status.data.email ? ` as ${status.data.email}` : ""}. Open SWE can call LangSmith as you in your private threads.`
+          : "Sign in with LangSmith so Open SWE can call LangSmith as you in your private threads."
+      }
       control={
         <div className="flex items-center gap-2">
           <StatusPill connected={connected} />
@@ -123,18 +150,12 @@ function NotionRow() {
               variant="outline"
               size="sm"
               onClick={() => disconnect.mutate()}
+              disabled={disconnect.isPending}
             >
               Disconnect
             </Button>
           ) : (
-            <Button
-              size="sm"
-              onClick={connect}
-              disabled={connecting || creds.isLoading}
-            >
-              <SiNotion className="size-4" />
-              {connecting ? "Redirecting…" : "Connect"}
-            </Button>
+            <ConnectLangSmithButton />
           )}
         </div>
       }
@@ -144,12 +165,9 @@ function NotionRow() {
 
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
-    <SettingsSection
-      title="Personal connections"
-      description="Accounts and credentials Open SWE can use on your behalf. Workspace MCP tools configured by an admin are shared with everyone."
-    >
+    <SettingsSection title="Accounts">
       <SlackRow user={user} />
-      <NotionRow />
+      <LangSmithRow />
     </SettingsSection>
   )
 }

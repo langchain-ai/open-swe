@@ -170,7 +170,7 @@ export function MCPImport({
           Review connections
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
-          Cancel import
+          {text ? "Cancel import" : "Close import"}
         </Button>
       </div>
     </form>

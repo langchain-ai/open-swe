@@ -21,8 +21,7 @@ from langgraph_sdk import get_client
 from langsmith import Client, aevaluate
 from langsmith.schemas import Example
 
-from agent.review.eval_store import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
-from agent.review.findings import REVIEW_FINDING_CAP
+from evals.reviewer.costs import print_summary, record_experiment_costs
 from evals.reviewer.judge import aggregate_pr, judge_match
 from evals.reviewer.store_reporter import StoreReporter, is_enabled
 from evals.reviewer.target import (
@@ -31,6 +30,7 @@ from evals.reviewer.target import (
     get_langgraph_url,
     review_pr,
 )
+from openswe.review.eval_store import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,12 @@ _ENV_MAPPING: dict[str, str] = {
     "max_concurrency": "REVIEWER_EVAL_MAX_CONCURRENCY",
     "langgraph_url": "LANGGRAPH_URL",
     "langsmith_project": "LANGSMITH_PROJECT",
+    "reviewer_langsmith_project": "REVIEWER_LANGSMITH_PROJECT",
     "assistant_id": "REVIEWER_ASSISTANT_ID",
     "model_id": "REVIEWER_EVAL_MODEL_ID",
     "reasoning_effort": "REVIEWER_EVAL_REASONING_EFFORT",
     "score_mode": "REVIEWER_EVAL_SCORE_MODE",
     "severity_threshold": "REVIEWER_EVAL_SEVERITY_THRESHOLD",
-    "cap": "REVIEWER_EVAL_CAP",
 }
 
 
@@ -62,26 +62,25 @@ class ReviewerEvalConfig(TypedDict, total=False):
     max_concurrency: int
     langgraph_url: str
     langsmith_project: str
+    reviewer_langsmith_project: str
     assistant_id: str
     model_id: str
     reasoning_effort: str
     score_mode: ScoreMode
     severity_threshold: Severity
-    cap: int
 
 
 DEFAULT_CONFIG: ReviewerEvalConfig = {
-    "dataset_name": "openswe-reviewer-v1",
+    "dataset_name": "openswe-reviewer-v2",
     "experiment_prefix": "openswe-reviewer-baseline",
-    "max_concurrency": 5,
+    "max_concurrency": 10,
     "langgraph_url": "",
     "langsmith_project": DEFAULT_LANGSMITH_PROJECT,
     "assistant_id": "reviewer",
-    "model_id": "google_genai:gemini-3.8-flash",
-    "reasoning_effort": "medium",
+    "model_id": "anthropic:claude-opus-5-5",
+    "reasoning_effort": "high",
     "score_mode": "surfaced_findings",
     "severity_threshold": "low",
-    "cap": REVIEW_FINDING_CAP,
 }
 
 
@@ -118,6 +117,10 @@ def _coerce_config(raw: dict[str, Any]) -> ReviewerEvalConfig:
     if isinstance(langsmith_project, str) and langsmith_project:
         config["langsmith_project"] = langsmith_project
 
+    reviewer_langsmith_project = raw.get("reviewer_langsmith_project")
+    if isinstance(reviewer_langsmith_project, str) and reviewer_langsmith_project:
+        config["reviewer_langsmith_project"] = reviewer_langsmith_project
+
     assistant_id = raw.get("assistant_id")
     if isinstance(assistant_id, str) and assistant_id:
         config["assistant_id"] = assistant_id
@@ -141,10 +144,6 @@ def _coerce_config(raw: dict[str, Any]) -> ReviewerEvalConfig:
     severity_threshold = raw.get("severity_threshold")
     if severity_threshold in _VALID_SEVERITIES:
         config["severity_threshold"] = severity_threshold
-
-    cap = raw.get("cap")
-    if isinstance(cap, int) and cap >= 0:
-        config["cap"] = cap
     return config
 
 
@@ -154,7 +153,7 @@ def _load_env_config(env: Mapping[str, str] = os.environ) -> ReviewerEvalConfig:
         value = env.get(env_key)
         if value is None or value == "":
             continue
-        if config_key in {"max_concurrency", "cap"}:
+        if config_key == "max_concurrency":
             parsed = _parse_int(value)
             if parsed is not None:
                 raw[config_key] = parsed
@@ -286,6 +285,22 @@ async def _cleanup_threads(thread_ids: Iterable[str]) -> None:
             logger.warning("Failed to delete thread %s: %s", tid, exc)
 
 
+async def _record_costs(experiment: str, reviewer_project: str | None) -> None:
+    if not reviewer_project:
+        logger.warning(
+            "Skipping cost collection: pass --reviewer-langsmith-project",
+            extra={"experiment": experiment},
+        )
+        return
+    try:
+        print_summary(await record_experiment_costs(experiment, reviewer_project))
+    except Exception:
+        logger.exception(
+            "Cost collection failed; re-run evals.reviewer.costs",
+            extra={"experiment": experiment, "reviewer_project": reviewer_project},
+        )
+
+
 async def main() -> None:
     logging.basicConfig(
         level=os.environ.get("REVIEWER_EVAL_LOG_LEVEL", "INFO"),
@@ -300,6 +315,12 @@ async def main() -> None:
     ap.add_argument("--max-concurrency", dest="max_concurrency", type=int)
     ap.add_argument("--langgraph-url", dest="langgraph_url")
     ap.add_argument("--langsmith-project", dest="langsmith_project")
+    ap.add_argument(
+        "--reviewer-langsmith-project",
+        dest="reviewer_langsmith_project",
+        help="Project the reviewer server traces into, for per-PR cost "
+        "(default: LANGSMITH_PROJECT before the eval overrides it).",
+    )
     ap.add_argument("--assistant-id", dest="assistant_id")
     ap.add_argument("--model-id", dest="model_id")
     ap.add_argument("--reasoning-effort", dest="reasoning_effort")
@@ -309,7 +330,6 @@ async def main() -> None:
         dest="severity_threshold",
         choices=sorted(_VALID_SEVERITIES),
     )
-    ap.add_argument("--cap", type=int)
     ap.add_argument(
         "--no-cleanup",
         action="store_true",
@@ -317,6 +337,11 @@ async def main() -> None:
     )
     args = ap.parse_args()
     config = _resolve_config(_config_from_args(args))
+    # The eval process retargets LANGSMITH_PROJECT at the eval project; the local
+    # server loads the same .env, so the original value is where its traces go.
+    reviewer_project = config.get("reviewer_langsmith_project") or os.environ.get(
+        "LANGSMITH_PROJECT"
+    )
     _apply_config_to_env(config)
 
     dataset_name = config["dataset_name"]
@@ -324,7 +349,7 @@ async def main() -> None:
     max_concurrency = config["max_concurrency"]
     logger.info(
         "Starting reviewer eval: dataset=%s experiment_prefix=%s max_concurrency=%s "
-        "model=%s effort=%s score_mode=%s severity_threshold=%s cap=%s project=%s "
+        "model=%s effort=%s score_mode=%s severity_threshold=%s project=%s "
         "assistant_id=%s langgraph_url=%s limit=%s",
         dataset_name,
         experiment_prefix,
@@ -333,7 +358,6 @@ async def main() -> None:
         config["reasoning_effort"],
         config["score_mode"],
         config["severity_threshold"],
-        config["cap"],
         config["langsmith_project"],
         config["assistant_id"],
         config["langgraph_url"] or "(default)",
@@ -373,7 +397,7 @@ async def main() -> None:
 
     eval_error: BaseException | None = None
     try:
-        await aevaluate(
+        results = await aevaluate(
             review_pr,
             data=data,
             evaluators=[judge_match],
@@ -382,6 +406,7 @@ async def main() -> None:
             max_concurrency=max_concurrency,
             num_repetitions=1,
         )
+        await _record_costs(results.experiment_name, reviewer_project)
     except BaseException as exc:
         eval_error = exc
         raise

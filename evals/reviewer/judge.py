@@ -5,29 +5,35 @@ claude-opus-4-5 (the judge model used by the martian benchmark). Returns
 precision/recall/f1 per example, plus aggregate micro/macro metrics across
 the experiment via a summary evaluator.
 
+The unprefixed metrics count every golden (martian's "all" profile). The
+``strict_`` and ``core_`` metrics follow martian's category profiles
+(`analysis/score_profiles.py`); martian's headline is ``core_micro_f2``.
+
 The judge prompt is kept verbatim from
 withmartian/code-review-benchmark `step3_judge_comments.py` so scores are
 directly comparable to martian's published numbers.
 """
 
 import json
-import os
 import threading
 from functools import cache
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 from uuid import UUID
 
-from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models import BaseChatModel
 from langsmith.schemas import Example, Run
 
-from agent.review.findings import REVIEW_FINDING_CAP
+from openswe.utils.gateway import gateway_overrides
+from openswe.utils.model import make_model
 
-JUDGE_MODEL = "claude-opus-4-5"
+JUDGE_MODEL = "anthropic:claude-opus-4-5"
 
-# Call Anthropic directly. Without an explicit base_url the Anthropic SDK falls
-# back to ANTHROPIC_BASE_URL, which in dev shells points at the LangSmith
-# gateway and 403s for this model — silently nulling every judge score.
-JUDGE_BASE_URL = os.environ.get("JUDGE_ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+ScoringProfile = Literal["strict", "core"]
+_STRICT_CATEGORIES = frozenset({"bug", "security", "concurrency", "data", "api"})
+PROFILE_CATEGORIES: dict[ScoringProfile, frozenset[str]] = {
+    "strict": _STRICT_CATEGORIES,
+    "core": _STRICT_CATEGORIES | {"perf", "test_gap", "doc_defect"},
+}
 
 JUDGE_SYSTEM = "You are a precise code review evaluator. Always respond with valid JSON."
 
@@ -49,7 +55,7 @@ Respond with ONLY a JSON object:
 {{"reasoning": "brief explanation", "match": true/false, "confidence": 0.0-1.0}}"""
 
 
-_judge: ChatAnthropic | None = None
+_judge: BaseChatModel | None = None
 
 
 class ReviewComment(TypedDict):
@@ -58,6 +64,7 @@ class ReviewComment(TypedDict):
     file: NotRequired[str]
     line: NotRequired[int | None]
     severity: NotRequired[str]
+    category: NotRequired[str]
 
 
 class PairResult(TypedDict):
@@ -69,6 +76,12 @@ class PairResult(TypedDict):
 class MatrixCell(PairResult):
     candidate_index: int
     golden_index: int
+
+
+class ProfileCounts(TypedDict):
+    tp: int
+    fp: int
+    fn: int
 
 
 class ExampleCounts(TypedDict):
@@ -84,25 +97,21 @@ class ExampleCounts(TypedDict):
     medium_plus_precision: float
     medium_plus_recall: float
     medium_plus_f1: float
+    profiles: dict[ScoringProfile, ProfileCounts]
     is_synthetic: bool
 
 
-def _get_judge() -> ChatAnthropic:
+def _get_judge() -> BaseChatModel:
     global _judge
     if _judge is None:
-        api_key = os.environ.get("JUDGE_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
+        # Without gateway credentials make_model silently calls Anthropic directly.
+        if gateway_overrides(JUDGE_MODEL) is None:
             raise RuntimeError(
-                "No Anthropic API key for the judge. Set JUDGE_ANTHROPIC_API_KEY or "
-                "ANTHROPIC_API_KEY (the judge calls Anthropic directly, not via a gateway)."
+                "The judge calls Anthropic through the LangSmith gateway; set "
+                "LANGSMITH_GATEWAY_API_KEY or LANGSMITH_API_KEY."
             )
-        _judge = ChatAnthropic(
-            model=JUDGE_MODEL,
-            temperature=0.0,
-            max_tokens=512,
-            base_url=JUDGE_BASE_URL,
-            api_key=api_key,
-            max_retries=3,
+        _judge = make_model(
+            JUDGE_MODEL, use_gateway=True, temperature=0.0, max_tokens=512, max_retries=3
         )
     return _judge
 
@@ -194,6 +203,9 @@ def _coerce_comments(value: object) -> list[ReviewComment]:
         severity = item.get("severity")
         if isinstance(severity, str):
             comment["severity"] = severity
+        category = item.get("category")
+        if isinstance(category, str):
+            comment["category"] = category
         line = item.get("line")
         if isinstance(line, int) or line is None:
             comment["line"] = line
@@ -261,19 +273,28 @@ def _metrics(
     fn = max(0, golden_count - tp)
     precision = tp / candidate_count if candidate_count else 0.0
     recall = tp / golden_count if golden_count else 0.0
-    return fp, fn, precision, recall, _f1(precision, recall)
+    return fp, fn, precision, recall, _fbeta(precision, recall)
+
+
+def _profile_counts(
+    goldens: list[ReviewComment],
+    matched_goldens: set[int],
+    fp: int,
+    categories: frozenset[str],
+) -> ProfileCounts:
+    # A match on an out-of-profile golden is neither a TP nor an FP, as upstream.
+    in_profile = [i for i, golden in enumerate(goldens) if golden.get("category") in categories]
+    tp = sum(1 for i in in_profile if i in matched_goldens)
+    return {"tp": tp, "fp": fp, "fn": len(in_profile) - tp}
+
+
+def _precision_recall(counts: ProfileCounts) -> tuple[float, float]:
+    tp, fp, fn = counts["tp"], counts["fp"], counts["fn"]
+    return (tp / (tp + fp) if tp + fp else 0.0, tp / (tp + fn) if tp + fn else 0.0)
 
 
 def _is_medium_plus(comment: ReviewComment) -> bool:
     return comment.get("severity", "").casefold() in {"medium", "high", "critical"}
-
-
-def _recall_at_cap(tp: int, golden_count: int, cap: int) -> tuple[float, float]:
-    if golden_count == 0:
-        return 0.0, 0.0
-    reachable_goldens = min(cap, golden_count)
-    recall_at_cap = min(tp, reachable_goldens) / reachable_goldens if reachable_goldens else 0.0
-    return recall_at_cap, reachable_goldens / golden_count
 
 
 def judge_match(run: Run, example: Example) -> dict[str, Any]:
@@ -302,6 +323,11 @@ def judge_match(run: Run, example: Example) -> dict[str, Any]:
     medium_fp, medium_fn, medium_precision, medium_recall, medium_f1 = _metrics(
         medium_tp, len(medium_candidate_indices), len(medium_golden_indices)
     )
+    matched_goldens = {golden_index for _, golden_index in selected_pairs}
+    profiles: dict[ScoringProfile, ProfileCounts] = {
+        name: _profile_counts(goldens, matched_goldens, fp, categories)
+        for name, categories in PROFILE_CATEGORIES.items()
+    }
     repo = (example.inputs or {}).get("repo")
     is_synthetic = isinstance(repo, str) and repo.startswith("ai-code-review-evaluation/")
 
@@ -320,6 +346,7 @@ def judge_match(run: Run, example: Example) -> dict[str, Any]:
             "medium_plus_precision": medium_precision,
             "medium_plus_recall": medium_recall,
             "medium_plus_f1": medium_f1,
+            "profiles": profiles,
             "is_synthetic": is_synthetic,
         },
     )
@@ -349,7 +376,16 @@ def judge_match(run: Run, example: Example) -> dict[str, Any]:
             if not any(pair[0] == index for pair in selected)
         ],
     }
-    recall_at_cap, recall_ceiling_at_cap = _recall_at_cap(tp, len(goldens), REVIEW_FINDING_CAP)
+    profile_results: list[dict[str, Any]] = []
+    for name, counts in profiles.items():
+        profile_precision, profile_recall = _precision_recall(counts)
+        profile_results.extend(
+            [
+                {"key": f"{name}_precision", "score": profile_precision},
+                {"key": f"{name}_recall", "score": profile_recall},
+                {"key": f"{name}_f2", "score": _fbeta(profile_precision, profile_recall, 2.0)},
+            ]
+        )
 
     return {
         "results": [
@@ -363,18 +399,19 @@ def judge_match(run: Run, example: Example) -> dict[str, Any]:
             {"key": "n_candidates_raw", "score": len(raw_candidates)},
             {"key": "n_duplicates", "score": duplicate_count},
             {"key": "n_goldens", "score": len(goldens)},
-            {"key": "recall_at_cap", "score": recall_at_cap},
-            {"key": "recall_ceiling_at_cap", "score": recall_ceiling_at_cap},
             {"key": "medium_plus_f1", "score": medium_f1},
             {"key": "medium_plus_precision", "score": medium_precision},
             {"key": "medium_plus_recall", "score": medium_recall},
+            *profile_results,
             {"key": "pairwise_match_matrix", "value": json.dumps(matrix_feedback)},
         ]
     }
 
 
-def _f1(p: float, r: float) -> float:
-    return 2 * p * r / (p + r) if (p + r) else 0.0
+def _fbeta(p: float, r: float, beta: float = 1.0) -> float:
+    beta2 = beta * beta
+    denom = beta2 * p + r
+    return (1 + beta2) * p * r / denom if denom else 0.0
 
 
 def aggregate_pr(runs: list[Run], examples: list[Example]) -> dict[str, Any]:
@@ -392,6 +429,8 @@ def aggregate_pr(runs: list[Run], examples: list[Example]) -> dict[str, Any]:
     results.extend(
         _aggregate_metrics(counts, key_prefix="medium_plus_", field_prefix="medium_plus_")
     )
+    for profile in PROFILE_CATEGORIES:
+        results.extend(_aggregate_profile(counts, profile))
     synthetic = [count for count in counts if count["is_synthetic"]]
     upstream = [count for count in counts if not count["is_synthetic"]]
     if synthetic:
@@ -422,7 +461,8 @@ def _aggregate_metrics(
     return [
         {"key": f"{key_prefix}micro_precision", "score": micro_precision},
         {"key": f"{key_prefix}micro_recall", "score": micro_recall},
-        {"key": f"{key_prefix}micro_f1", "score": _f1(micro_precision, micro_recall)},
+        {"key": f"{key_prefix}micro_f1", "score": _fbeta(micro_precision, micro_recall)},
+        {"key": f"{key_prefix}micro_f2", "score": _fbeta(micro_precision, micro_recall, 2.0)},
         {
             "key": f"{key_prefix}macro_precision",
             "score": sum(float(item[precision_key]) for item in counts) / count,
@@ -438,4 +478,24 @@ def _aggregate_metrics(
         {"key": f"{key_prefix}total_tp", "score": micro_tp},
         {"key": f"{key_prefix}total_fp", "score": micro_fp},
         {"key": f"{key_prefix}total_fn", "score": micro_fn},
+    ]
+
+
+def _aggregate_profile(
+    counts: list[ExampleCounts], profile: ScoringProfile
+) -> list[dict[str, Any]]:
+    total: ProfileCounts = {
+        "tp": sum(count["profiles"][profile]["tp"] for count in counts),
+        "fp": sum(count["profiles"][profile]["fp"] for count in counts),
+        "fn": sum(count["profiles"][profile]["fn"] for count in counts),
+    }
+    precision, recall = _precision_recall(total)
+    return [
+        {"key": f"{profile}_micro_precision", "score": precision},
+        {"key": f"{profile}_micro_recall", "score": recall},
+        {"key": f"{profile}_micro_f1", "score": _fbeta(precision, recall)},
+        {"key": f"{profile}_micro_f2", "score": _fbeta(precision, recall, 2.0)},
+        {"key": f"{profile}_total_tp", "score": total["tp"]},
+        {"key": f"{profile}_total_fp", "score": total["fp"]},
+        {"key": f"{profile}_total_fn", "score": total["fn"]},
     ]

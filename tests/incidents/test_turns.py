@@ -6,14 +6,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.incidents import service, turns
-from agent.incidents.models import (
+from openswe.incidents import service, turns
+from openswe.incidents.models import (
     Incident,
     IncidentPolicy,
     IncidentReport,
     IncidentReportRecord,
 )
-from agent.incidents.report import CONTEXT_MARKER
+from openswe.incidents.report import CONTEXT_MARKER
+from openswe.message_queue import QueuedMessage
 
 
 @pytest.fixture
@@ -36,9 +37,7 @@ def platform(fake_store, monkeypatch):
     monkeypatch.setattr(turns, "store_client", lambda: client)
     monkeypatch.setattr(turns, "create_durable_run", AsyncMock(return_value={"run_id": "r1"}))
     monkeypatch.setattr(turns, "queue_message_for_thread", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        turns, "post_slack_thread_reply_with_ts", AsyncMock(return_value=("9.0", None))
-    )
+    monkeypatch.setattr(turns, "post_slack_thread_reply_with_ts", AsyncMock(return_value="9.0"))
     return client
 
 
@@ -115,13 +114,15 @@ async def test_explicit_turn_interrupts_and_carries_request_and_thread(record, p
     assert "Why are we seeing 500s?" in rendered and "slack:U1" in rendered
 
 
-async def test_completion_reschedules_only_stranded_context(record, policy, platform, fake_store):
+async def test_completion_reschedules_only_stranded_context(
+    record, policy, platform, fake_store, registry_db
+):
     assert (await turns.handle_run_completion("thread-1", "r1", "success"))["reason"] == (
         "incident turn complete"
     )
     turns.create_durable_run.assert_not_awaited()
 
-    fake_store.seed(("queue", "thread-1"), "pending_messages", {"messages": [{"content": "late"}]})
+    await QueuedMessage.put("thread-1", "late")
     result = await turns.handle_run_completion("thread-1", "r1", "success")
     assert result["reason"] == "queued incident context rescheduled"
     turns.create_durable_run.assert_awaited_once()

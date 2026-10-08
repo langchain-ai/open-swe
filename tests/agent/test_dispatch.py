@@ -1,14 +1,16 @@
 import importlib
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import uuid7
 from xml.etree import ElementTree
 
 import pytest
 
-from agent.slack import thinking as slack_thinking
-from agent.users import User
+from openswe.slack import thinking as slack_thinking
+from openswe.users import User
 
-dispatch = importlib.import_module("agent.dispatch")
+dispatch = importlib.import_module("openswe.dispatch")
 
 _ABSOLUTE = "https://open-swe-v3-abc.us.langgraph.app/webhooks/run-complete"
 
@@ -54,7 +56,16 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
         input={"messages": [{"role": "user", "content": "hi"}]},
         source="test",
         thread_title=None,
-        config={"configurable": {"thread_id": "thread-1"}, "metadata": {"kind": "test"}},
+        config={
+            "configurable": {
+                "thread_id": "thread-1",
+                "slack_thread": {
+                    "channel_id": "C123",
+                    "channel_context": {"name": "team-openswe"},
+                },
+            },
+            "metadata": {"kind": "test"},
+        },
         client=client,
     )
 
@@ -81,6 +92,8 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     invocation_id = created["config"]["configurable"]["invocation_id"]
     assert created["config"]["metadata"] == {
         "kind": "test",
+        "slack_channel_id": "C123",
+        "slack_channel_name": "team-openswe",
         "invocation_id": invocation_id,
         "prepare_run_id": invocation_id,
         "invocation_started_at": created["config"]["configurable"]["invocation_started_at"],
@@ -89,6 +102,74 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["config"]["configurable"]["thread_id"] == "thread-1"
     assert created["config"]["configurable"]["prepare_run_id"] == invocation_id
     assert isinstance(invocation_id, str)
+
+
+async def test_run_metadata_uses_users_id_across_slack_and_github(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid7()
+
+    async def by_identity(provider: str, external_id: str) -> SimpleNamespace | None:
+        if (provider, external_id) in {("slack", "U123"), ("github", "2001")}:
+            return SimpleNamespace(id=user_id)
+        return None
+
+    async def by_login(provider: str, login: str) -> SimpleNamespace | None:
+        return SimpleNamespace(id=user_id) if (provider, login) == ("github", "mason-gh") else None
+
+    monkeypatch.setattr(User, "for_identity", by_identity)
+    monkeypatch.setattr(User, "for_login", by_login)
+    client = _FakeClient()
+
+    for source, configurable in (
+        ("slack", {"slack_thread": {"triggering_user_id": "U123"}}),
+        ("github", {"github_user_id": "2001", "github_login": "mason-gh"}),
+        ("dashboard", {"github_login": "mason-gh"}),
+    ):
+        await dispatch.create_durable_run(
+            "thread-1",
+            "agent",
+            input={"messages": []},
+            source=source,
+            thread_title=None,
+            config={"configurable": configurable},
+            client=client,
+        )
+        created = client.runs.created[-1]
+        assert created["metadata"]["user_id"] == str(user_id)
+        assert created["config"]["metadata"]["user_id"] == str(user_id)
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        thread_title=None,
+        config={"configurable": {"slack_thread": {"triggering_user_id": "unknown"}}},
+        metadata={"user_id": str(user_id)},
+        client=client,
+    )
+    assert "user_id" not in client.runs.created[-1]["metadata"]
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        thread_title=None,
+        config={
+            "configurable": {
+                "background_task_completion": True,
+                "github_login": "mason-gh",
+                "slack_thread": {"triggering_user_id": "U123"},
+            },
+            "metadata": {"user_id": str(user_id)},
+        },
+        client=client,
+    )
+    completion = client.runs.created[-1]
+    assert "user_id" not in completion["metadata"]
+    assert "user_id" not in completion["config"]["configurable"]
 
 
 @pytest.mark.asyncio

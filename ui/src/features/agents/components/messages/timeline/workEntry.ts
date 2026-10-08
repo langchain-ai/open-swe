@@ -7,6 +7,7 @@ import type {
 import {
   formatPathDisplayParts,
   formatToolDisplayParts,
+  toolTextArguments,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
 
@@ -107,15 +108,20 @@ const MAX_EXPANDED_TEXT_LENGTH = 4000
 
 function expandedTextForChunk(
   chunk: ToolExecutionChunk,
-  repoPath?: string
+  repoPath?: string,
+  loadedOutput?: string
 ): string | null {
   const blocks: Array<string> = []
 
   const command =
     typeof chunk.input?.command === "string" ? chunk.input.command.trim() : ""
   if (command) blocks.push(command)
+  const textArguments = toolTextArguments(chunk.input)
+  for (const [key, value] of textArguments) {
+    blocks.push(`${key.replace(/_/g, " ")}:\n${value}`)
+  }
 
-  const rawOutput = chunk.output ?? ""
+  const rawOutput = loadedOutput ?? chunk.output ?? ""
   const output = rawOutput.trim()
   const jsonOutput = formatJsonToolResult(rawOutput)
   if (output) blocks.push(jsonOutput ?? output)
@@ -129,7 +135,12 @@ function expandedTextForChunk(
 
   if (blocks.length === 0) return null
   const joined = blocks.join("\n\n")
-  if (jsonOutput !== null && !command) return joined
+  if (
+    loadedOutput !== undefined ||
+    textArguments.length ||
+    (jsonOutput !== null && !command)
+  )
+    return joined
   return joined.length > MAX_EXPANDED_TEXT_LENGTH
     ? `${joined.slice(0, MAX_EXPANDED_TEXT_LENGTH)}\n…`
     : joined
@@ -180,6 +191,7 @@ export function describeWorkEntry(
     repoPath
   )
   const resolvedPreview = preview ?? firstLocationPath(chunk, repoPath)
+  const loadOutput = chunk.loadOutput
 
   return {
     icon: iconForChunk(chunk),
@@ -193,7 +205,13 @@ export function describeWorkEntry(
     tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, repoPath),
-    loadExpandedText: chunk.loadOutput ?? null,
+    loadExpandedText:
+      loadOutput && toolTextArguments(chunk.input).length
+        ? async () => {
+            const output = await loadOutput()
+            return expandedTextForChunk(chunk, repoPath, output) ?? ""
+          }
+        : (loadOutput ?? null),
   }
 }
 
@@ -221,6 +239,8 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
     case "slack":
     case "linear":
       return "Sending update"
+    case "managed-tools":
+      return "Offering connection"
     case "other":
       return describeWorkEntry(chunk).heading
   }
@@ -231,7 +251,7 @@ export function liveActivityLabel(
   repoPath?: string
 ): string {
   for (let index = chunks.length - 1; index >= 0; index -= 1) {
-    const chunk = chunks[index]
+    let chunk = chunks[index]
     if (!chunk) continue
 
     if (chunk.kind === "reasoning") return "Thinking…"
@@ -248,6 +268,16 @@ export function liveActivityLabel(
       return "Preparing response…"
     }
     if (chunk.kind === "todo") return "Planning next steps…"
+
+    if (chunk.status === "completed") {
+      const activeTool = chunks.findLast(
+        (candidate): candidate is ToolExecutionChunk =>
+          candidate.kind === "tool-execution" &&
+          (candidate.status === "in_progress" || candidate.status === "pending")
+      )
+      if (!activeTool) return "Thinking…"
+      chunk = activeTool
+    }
 
     if (chunk.status === "pending") return "Waiting for approval…"
     if (chunk.status === "error") return "Recovering from an error…"

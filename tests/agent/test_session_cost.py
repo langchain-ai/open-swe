@@ -7,8 +7,8 @@ import httpx
 import pytest
 from langsmith.utils import LangSmithError
 
-from agent import session_cost
-from agent.utils import langsmith as ls_utils
+from openswe import session_cost
+from openswe.utils import langsmith as ls_utils
 
 
 class _LangSmithThreads:
@@ -139,8 +139,10 @@ async def test_cost_lookup_distinguishes_rejected_requests_from_retryable_failur
         assert await ls_utils.get_langsmith_thread_cost("thread-1", "prepare-1") is None
 
 
+@pytest.mark.parametrize("run_cost", [3.25, None])
 async def test_refresh_updates_exact_mapped_slack_message_in_place(
     monkeypatch: pytest.MonkeyPatch,
+    run_cost: float | None,
 ) -> None:
     class _Store:
         async def get_item(self, namespace: Any, key: str) -> dict[str, Any] | None:
@@ -168,11 +170,19 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             ],
         },
     ]
-    monkeypatch.setattr(
-        session_cost,
-        "get_langsmith_thread_cost",
-        AsyncMock(return_value=SimpleNamespace(total_cost=0.42)),
-    )
+
+    async def get_cost(
+        thread_id: str,
+        invocation_id: str,
+        *,
+        run_only: bool = False,
+        lookup_start: str | None = None,
+    ) -> SimpleNamespace | None:
+        if run_only:
+            return SimpleNamespace(total_cost=run_cost) if run_cost is not None else None
+        return SimpleNamespace(total_cost=12.50)
+
+    monkeypatch.setattr(session_cost, "get_langsmith_thread_cost", get_cost)
     monkeypatch.setattr(
         session_cost,
         "fetch_slack_thread_message_by_ts",
@@ -183,17 +193,22 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             }
         ),
     )
-    update = AsyncMock(return_value=(True, None))
+    update = AsyncMock(return_value=None)
     monkeypatch.setattr(session_cost, "update_slack_message", update)
 
     status, reason = await session_cost._refresh_once(_state(0), client)
 
+    if run_cost is None:
+        assert status == "pending"
+        update.assert_not_awaited()
+        return
     assert (status, reason) == ("updated", "Slack footer updated")
     update.assert_awaited_once()
     args = update.await_args
     assert args is not None
     assert args.args[:2] == ("C1", "1.1")
-    assert args.args[2].endswith("model-a • $0.42")
+    assert args.args[2].endswith("model-a • $12.50 ($3.25)")
+    assert args.kwargs["blocks"][-1]["elements"][0]["text"].endswith("$12.50 ($3.25)")
     assert "main-agent tokens" not in args.args[2]
     assert args.kwargs["blocks"][1] == blocks[1]
 

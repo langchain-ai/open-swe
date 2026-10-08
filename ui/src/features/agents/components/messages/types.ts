@@ -25,7 +25,6 @@ export interface MessagesProps extends ApprovalCallbacks {
   messages: Array<Message>
   /** Cloud threads only; enables the git-sourced changed-files card per turn. */
   threadId?: string
-  showUserNames?: boolean
   /** Identity for remembering the scroll position across navigation. */
   scrollKey?: string
   showPlanArtifact?: boolean

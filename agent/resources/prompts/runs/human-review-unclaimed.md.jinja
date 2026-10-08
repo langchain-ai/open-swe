@@ -1,8 +1,0 @@
-Nobody has signed up to review {{ pr_url }} in the {{ minutes }} minutes since its review was requested in Slack. Pick one reviewer for it.
-
-1. Read the repository's CODEOWNERS (`.github/CODEOWNERS`, `CODEOWNERS`, or `docs/CODEOWNERS`) for the files the pull request changes.
-2. Look at who has recently reviewed or changed those files: `gh api` for recent merged pull requests touching them and their reviewers, and `git log` on the files.
-3. Choose one person with write access who is not the author (@{{ author }}) and is likely to know this code. Prefer a code owner who has reviewed nearby changes recently; skip bots and teams.
-4. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them. It tags them on the review card and messages them directly.
-
-If `assign_human_reviewer` refuses someone, pick the next best candidate. Do not post anything else in Slack and do not change the pull request.

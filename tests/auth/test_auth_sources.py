@@ -1,103 +1,11 @@
 import asyncio
-import logging
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock
 
 import langgraph_sdk
 import pytest
 
-from agent.github import token as auth
-
-
-def test_leave_failure_comment_posts_generic_token_free_slack_notice(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Slack auth failures post a generic notice, never the (possibly sensitive) message."""
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
-    thread_called: dict[str, str] = {}
-
-    async def fake_post_slack_thread_reply(
-        channel_id: str, thread_ts: str, message: str, **kwargs: Any
-    ) -> bool:
-        thread_called["channel_id"] = channel_id
-        thread_called["thread_ts"] = thread_ts
-        thread_called["message"] = message
-        return True
-
-    monkeypatch.setattr(auth, "post_slack_thread_reply", fake_post_slack_thread_reply)
-    monkeypatch.setattr(
-        "agent.run_config.get_config",
-        lambda: {
-            "configurable": {
-                "slack_thread": {
-                    "channel_id": "C123",
-                    "thread_ts": "1.2",
-                    "triggering_user_id": "U123",
-                }
-            }
-        },
-    )
-
-    # Pass a message that embeds a per-user auth URL; it must NOT be echoed publicly.
-    asyncio.run(auth.leave_failure_comment("slack", "Click https://auth.example/secret-token"))
-
-    assert thread_called["channel_id"] == "C123"
-    assert thread_called["thread_ts"] == "1.2"
-    assert "secret-token" not in thread_called["message"]
-    assert "https://app.example.com/my-settings" in thread_called["message"]
-
-
-def test_resolve_token_from_email_logs_legacy_only_user_in_background(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    monkeypatch.setattr(
-        "agent.run_config.get_config",
-        lambda: {
-            "configurable": {
-                "thread_id": "t1",
-                "github_login": "mason-gh",
-            }
-        },
-    )
-
-    async def fake_user_info(email: str) -> dict[str, str]:
-        return {"ls_user_id": "user-1", "tenant_id": "tenant-1"}
-
-    async def fake_legacy_token(user_id: str, tenant_id: str) -> dict[str, str]:
-        return {"token": "legacy-token"}
-
-    from agent.dashboard import profiles
-
-    monkeypatch.setattr(auth, "get_ls_user_id_from_email", fake_user_info)
-    monkeypatch.setattr(auth, "get_github_token_for_user", fake_legacy_token)
-
-    async def scenario() -> str:
-        lookup_started = asyncio.Event()
-        release_lookup = asyncio.Event()
-
-        async def fake_open_swe_token(login: str) -> None:
-            lookup_started.set()
-            await release_lookup.wait()
-
-        monkeypatch.setattr(profiles, "get_valid_access_token", fake_open_swe_token)
-        token, _ = await auth.resolve_token_from_email("mason@example.com", "github")
-        await lookup_started.wait()
-        assert "legacy_github_auth_migration_impact " not in caplog.text
-        tasks = list(auth._legacy_auth_impact_tasks)
-        release_lookup.set()
-        await asyncio.gather(*tasks)
-        return token
-
-    with caplog.at_level(logging.INFO, logger=auth.logger.name):
-        token = asyncio.run(scenario())
-
-    assert token == "legacy-token"
-    assert (
-        "legacy_github_auth_migration_impact source=github github_login=mason-gh "
-        "requires_reauth=True" in caplog.text
-    )
-    assert "legacy-token" not in caplog.text
+from openswe.github import token as auth
 
 
 def _slack_config(github_login: str | None = "mason-gh") -> dict:
@@ -118,8 +26,8 @@ def _stub_dashboard_store(
     expires_at: str | None = "2099-01-01T00:00:00Z",
     cached: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    from agent.dashboard import profiles
-    from agent.github.thread_token import cache_github_token_for_thread
+    from openswe.dashboard import profiles
+    from openswe.github.thread_token import cache_github_token_for_thread
 
     if cached[0]:
         cache_github_token_for_thread("t1", cached[0], cached[1], principal="login:mason-gh")

@@ -5,8 +5,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.dashboard import oauth, routes
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.dashboard import oauth, routes
+from openswe.database import postgres
+from openswe.users.models import User
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 _USER_SESSION = {"sub": "intern", "email": "intern@example.com"}
@@ -33,7 +35,11 @@ async def workspace(monkeypatch: pytest.MonkeyPatch, registry_db: None) -> Async
 
 @pytest.fixture
 async def admin_client(workspace: str) -> AsyncIterator[httpx.AsyncClient]:
-    async with _client_for(_ADMIN_SESSION) as client:
+    user = User(display_name="Admin Person", is_admin=True)
+    async with postgres.session() as session:
+        session.add(user)
+        await session.flush()
+    async with _client_for({**_ADMIN_SESSION, "user_id": str(user.id)}) as client:
         yield client
 
 
@@ -54,13 +60,20 @@ async def test_mint_returns_the_secret_once_and_never_again(
     secret = created["secret"]
     assert secret.startswith("osk_")
     assert created["key_suffix"] == secret[-6:]
-    assert created["created_by"] == "admin"
+    from uuid import UUID
+
+    creator = await User.get(UUID(created["created_by"]))
+    assert creator is not None
+    assert creator.display_name == "Admin Person"
+    assert created["created_by_name"] == "Admin Person"
 
     listing = await admin_client.get("/dashboard/api/admin/api-keys")
     assert listing.status_code == 200
     assert secret not in listing.text
     [key] = listing.json()
     assert key["id"] == created["id"]
+    assert key["created_by"] == created["created_by"]
+    assert key["created_by_name"] == "Admin Person"
     assert key["status"] == "active"
     assert key["last_used_at"] is None
     assert key["revoked_at"] is None
@@ -134,3 +147,17 @@ async def test_non_admin_sessions_cannot_reach_the_admin_routes(workspace: str) 
         )
         assert created.status_code == 403
         assert (await client.delete("/dashboard/api/admin/api-keys/whatever")).status_code == 403
+
+
+@pytest.mark.parametrize("user_id", [None, "not-a-uuid", "00000000-0000-0000-0000-000000000001"])
+async def test_creation_requires_an_existing_user(workspace: str, user_id: str | None) -> None:
+    session = dict(_ADMIN_SESSION)
+    if user_id is not None:
+        session["user_id"] = user_id
+    async with _client_for(session) as client:
+        response = await client.post(
+            "/dashboard/api/admin/api-keys",
+            json={"workspace": workspace, "name": "CI", "expires_at": _expiry(30)},
+        )
+        assert response.status_code == 403
+        assert (await client.get("/dashboard/api/admin/api-keys")).json() == []

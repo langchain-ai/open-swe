@@ -5,19 +5,21 @@ import hashlib
 import hmac
 import json
 import os
-from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from agent import store as agent_store
-from agent.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
-from agent.threads import access, diffs, handlers, listing, proxy, runs, summary
-from agent.utils import ttl_cache
-from agent.webhooks import common as webhook_common
+from openswe import store as agent_store
+from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
+from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
+from openswe.tools import access as tool_access
+from openswe.utils import ttl_cache
+from openswe.webhooks import common as webhook_common
 from tests.support.postgres import MigratedTemplate, isolated_database
 
 # What `langgraph dev` sets for its in-memory runtime; langgraph_api.config reads them on import.
@@ -55,7 +57,7 @@ class _FakeStoreNotFoundError(Exception):
 class FakeStore:
     """In-memory stand-in for the LangGraph Store, in the SDK's item shape.
 
-    Backs the real ``agent.store`` code path, so values round-trip through
+    Backs the real ``openswe.store`` code path, so values round-trip through
     ``model_dump``/``model_validate`` the way they do in production.
     """
 
@@ -103,15 +105,26 @@ class FakeStoreClient:
 
 @pytest.fixture
 def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
-    """Route every ``agent.store`` access to an in-memory store for this test."""
+    """Route every ``openswe.store`` access to an in-memory store for this test."""
     client = FakeStoreClient()
     monkeypatch.setattr(agent_store, "store_client", lambda: client)
     return client.store
 
 
+@pytest.fixture
+def grant_tool_access(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Resolve every gated tool call to ``Access(**fields)`` for this test."""
+
+    def grant(**fields: bool) -> None:
+        resolved = tool_access.Access(**fields)
+        monkeypatch.setattr(tool_access, "resolve_access", AsyncMock(return_value=resolved))
+
+    return grant
+
+
 def register_github_logins(monkeypatch: pytest.MonkeyPatch, *logins: str) -> None:
     """Treat ``logins`` as registered Open SWE users."""
-    from agent.users import User
+    from openswe.users import User
 
     registered = {login.lower() for login in logins}
 
@@ -135,7 +148,7 @@ async def post_signed_github_webhook(
     which is bound to the loop the test runs on, while ``TestClient`` drives the
     request from a worker thread with an event loop of its own.
     """
-    from agent.api.app import app
+    from openswe.api.app import app
 
     body = json.dumps(payload, separators=(",", ":")).encode()
     signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -187,8 +200,8 @@ async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIter
 @pytest.fixture
 def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     """Serve dashboard findings from thread metadata, as for threads not yet in PostgreSQL."""
-    from agent.review import reviews
-    from agent.review.findings import Finding, coerce_findings
+    from openswe.review import reviews
+    from openswe.review.findings import Finding, coerce_findings
 
     async def read(metadata_by_thread: Mapping[str, dict[str, Any]]) -> dict[str, list[Finding]]:
         return {
@@ -257,7 +270,7 @@ def _reset_sandbox_registries() -> Iterator[None]:
 def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
-    The dashboard's opt-in list (loaded by :func:`agent.review.enabled_repos.is_review_repo_enabled`)
+    The dashboard's opt-in list (loaded by :func:`openswe.review.enabled_repos.is_review_repo_enabled`)
     is empty in the test environment because there is no live LangGraph Store.
 
     Tests targeting the automatic-review gate should override this fixture or set
@@ -272,7 +285,7 @@ def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def slack_api(monkeypatch: pytest.MonkeyPatch):
-    from agent.slack import channels, client, code_channels, http
+    from openswe.slack import channels, client, code_channels, http
     from tests.support.slack_api import slack_api_server
 
     monkeypatch.setenv("SLACK_BOT_TOKEN", "test-slack-token")

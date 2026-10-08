@@ -2,27 +2,32 @@ import base64
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid7
 
 import pytest
 from fastapi import HTTPException
 
-from agent.dashboard import deps
-from agent.dashboard.workspace_settings import (
+from openswe.dashboard import deps
+from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
     WorkspaceSettingsUpdate,
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from agent.threads import diffs as thread_diffs
-from agent.threads import handlers
-from agent.threads import listing as thread_listing
-from agent.threads import proxy as thread_proxy
-from agent.threads import runs as thread_runs
-from agent.transcript.engine import AppendResult
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.message_queue import QueuedMessage
+from openswe.tasks.store import SidebarTaskMembership
+from openswe.threads import diffs as thread_diffs
+from openswe.threads import handlers
+from openswe.threads import listing as thread_listing
+from openswe.threads import proxy as thread_proxy
+from openswe.threads import runs as thread_runs
+from openswe.threads.summary import TRANSCRIPT_VERSION
+from openswe.transcript.engine import AppendResult
+from openswe.transcript.turns import OpenTurn
+from openswe.users import User, UserPreferences
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
@@ -230,6 +235,44 @@ async def test_private_threads_created_by_admins_get_admin_permissions(
     assert (configurable.get("admin_thread") is True) is expected_admin
 
 
+async def test_dashboard_run_stamps_sender_not_original_slack_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = uuid7()
+    second = uuid7()
+
+    async def by_login(provider: str, login: str) -> SimpleNamespace | None:
+        return SimpleNamespace(id=second) if (provider, login) == ("github", "second-gh") else None
+
+    async def canonical(person: dict[str, str]) -> dict[str, str]:
+        return person
+
+    monkeypatch.setattr(User, "for_login", by_login)
+    monkeypatch.setattr(User, "canonical_person", canonical)
+    created: dict[str, object] = {"metadata": {"source": "slack"}}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "follow up"}]},
+            "metadata": {"user_id": str(first)},
+            "config": {"metadata": {"user_id": str(first)}},
+        },
+    }
+    enriched = await thread_runs._enrich_run_start_command(
+        "existing-tid",
+        "second-gh",
+        command,
+        metadata={
+            "source": "slack",
+            "source_context": {"slack_thread": {"triggering_user_id": "U123"}},
+        },
+    )
+    assert enriched["params"]["metadata"]["user_id"] == str(second)
+    assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
+
+
 @pytest.mark.parametrize("selection_changed", [False, True])
 async def test_enrich_run_start_command_preserves_explicit_auto_intent(
     monkeypatch: pytest.MonkeyPatch, selection_changed: bool
@@ -341,7 +384,7 @@ async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
             )
 
     patch_thread_module(monkeypatch, "_authorized_thread", fake_authorized_thread)
-    patch_thread_module(monkeypatch, "create_sandbox", AsyncMock(return_value=FakeSandbox()))
+    patch_thread_module(monkeypatch, "connect_sandbox", AsyncMock(return_value=FakeSandbox()))
 
     with pytest.raises(HTTPException) as exc_info:
         await thread_diffs.get_dashboard_thread_recovery_patch("tid", "octocat")
@@ -584,6 +627,59 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
     ]
 
 
+@pytest.mark.parametrize("open_turn", [True, False])
+async def test_proxy_commands_steers_into_the_open_turn_or_waits_for_an_ending_run(
+    monkeypatch, open_turn: bool
+) -> None:
+    """A run that has closed its turn but not ended has nothing left to steer into."""
+
+    class BusyThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {
+                "thread_id": thread_id,
+                "status": "busy",
+                "metadata": {
+                    "source": "dashboard",
+                    "github_login": "owner",
+                    "transcript": TRANSCRIPT_VERSION,
+                    "latest_run_id": "run-0",
+                },
+            }
+
+    class BusyClient:
+        threads = BusyThreads()
+
+    turn = OpenTurn(turn_id=uuid7(), run_id="run-1") if open_turn else None
+    handled: list[tuple[str, OpenTurn | None]] = []
+
+    async def fake_steer_target(thread_id: str) -> OpenTurn | None:
+        return turn
+
+    async def fake_steer(*args: object, turn: OpenTurn | None, **kwargs: object) -> dict[str, str]:
+        handled.append(("steer", turn))
+        return {}
+
+    async def fake_queue(*args: object, **kwargs: object) -> dict[str, str]:
+        handled.append(("queue", None))
+        return {}
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: BusyClient())
+    monkeypatch.setattr(thread_proxy, "steer_target", fake_steer_target)
+    monkeypatch.setattr(thread_proxy, "steer_running_thread", fake_steer)
+    monkeypatch.setattr(thread_proxy, "queue_follow_up_run", fake_queue)
+
+    command = {
+        "method": "run.start",
+        "params": {"input": {"messages": [{"role": "user", "content": "and this", "id": "m1"}]}},
+    }
+    status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+        "tid", "owner", json.dumps(command).encode()
+    )
+
+    assert status_code == 200
+    assert handled == ([("steer", turn)] if open_turn else [("queue", None)])
+
+
 async def test_run_cancel_lets_only_the_sender_withdraw_a_queued_follow_up(monkeypatch) -> None:
     class FakeThreads:
         async def get(self, thread_id: str) -> dict[str, object]:
@@ -784,6 +880,180 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     assert run_list_calls == 0
 
 
+async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
+    threads = _make_threads(5, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    memberships = {
+        "t0": SidebarTaskMembership("t0", "task", "worker", "t3", "Thread 0"),
+        "t1": SidebarTaskMembership("t1", "task", "worker", "t3", "Thread 1"),
+        "t3": SidebarTaskMembership("t3", "task", "coordinator", "t3"),
+    }
+
+    async def membership_lookup(
+        ids: list[str], *, workers_of: bool = False
+    ) -> dict[str, SidebarTaskMembership]:
+        return {
+            key: member
+            for key, member in memberships.items()
+            if (
+                member.role == "worker" and member.coordinator_thread_id in ids
+                if workers_of
+                else key in ids
+            )
+        }
+
+    async def search(
+        *, ids: list[str] | None = None, offset: int = 0, limit: int = 50, **_: object
+    ) -> list[dict[str, object]]:
+        return (
+            [thread for thread in threads if thread["thread_id"] in ids]
+            if ids is not None
+            else threads[offset : offset + limit]
+        )
+
+    client = SimpleNamespace(
+        threads=SimpleNamespace(search=search),
+        runs=SimpleNamespace(list=AsyncMock(return_value=[])),
+    )
+    monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
+    preferences = AsyncMock(return_value=UserPreferences())
+    monkeypatch.setattr(User, "preferences_for_login", preferences)
+    disabled = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=2)
+    assert [item["id"] for item in disabled["items"]] == ["t0", "t1"]
+    assert all("taskWorkers" not in item for item in disabled["items"])
+    assert disabled["items"][0]["taskMembership"]["role"] == "worker"
+    flat_parent = {"id": "t3"}
+    await thread_listing.attach_task_workers(client, [flat_parent], "octocat", None)
+    assert "taskWorkers" not in flat_parent
+    monkeypatch.setattr(thread_listing, "task_coordination_enabled", AsyncMock(return_value=True))
+    first = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=1)
+    assert [item["id"] for item in first["items"]] == ["t3"]
+    parent = first["items"][0]
+    assert parent["status"] == "finished"
+    assert [worker["id"] for worker in parent["taskWorkers"]] == ["t0", "t1"]
+    cast(dict[str, object], threads[1]["metadata"]).update(
+        visibility="private", owner_login="someone-else"
+    )
+    threads[0]["status"] = "busy"
+    running = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True)
+    assert [worker["id"] for worker in running["items"][0]["taskWorkers"]] == ["t0"]
+    assert running["items"][0]["taskWorkers"][0]["status"] == "running"
+    assert running["items"][0]["status"] == "finished"
+    threads[0]["status"] = "idle"
+    memberships["t2"] = SidebarTaskMembership("t2", "task", "worker", "t3")
+    refreshed = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True)
+    assert [worker["id"] for worker in refreshed["items"][0]["taskWorkers"]] == ["t0", "t2"]
+    assert refreshed["items"][0]["taskWorkers"][0]["status"] == "finished"
+    cast(dict[str, object], threads[0]["metadata"])["resolved"] = True
+    archived = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, resolved=False
+    )
+    assert [worker["id"] for worker in archived["items"][0]["taskWorkers"]] == ["t2"]
+    cast(dict[str, object], threads[3]["metadata"])["resolved"] = True
+    unresolved = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, resolved=False, limit=1
+    )
+    assert [item["id"] for item in unresolved["items"]] == ["t2"]
+    assert unresolved["hasMore"] is True
+    resolved = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, resolved=True
+    )
+    assert [item["id"] for item in resolved["items"]] == ["t3"]
+    assert [worker["id"] for worker in resolved["items"][0]["taskWorkers"]] == ["t0"]
+    all_threads = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True)
+    assert [item["id"] for item in all_threads["items"]] == ["t3", "t4"]
+    assert [worker["id"] for worker in all_threads["items"][0]["taskWorkers"]] == ["t0", "t2"]
+    cast(dict[str, object], threads[3]["metadata"]).update(
+        visibility="private", owner_login="someone-else"
+    )
+    standalone = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, query="Thread 0"
+    )
+    assert [item["id"] for item in standalone["items"]] == ["t0"]
+    assert standalone["items"][0]["taskMembership"]["coordinatorThreadId"] is None
+
+
+async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(thread_listing, "task_coordination_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
+    threads = _make_threads(12, resolved_before=0)
+    for index, thread in enumerate(threads):
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = (
+            "error" if index == 4 else "success"
+        )
+    memberships = {
+        f"t{index}": SidebarTaskMembership(f"t{index}", "task", "worker", "t9")
+        for index in range(4)
+    }
+    memberships["t9"] = SidebarTaskMembership("t9", "task", "coordinator", "t9")
+    offsets: list[int] = []
+
+    async def membership_lookup(
+        ids: list[str], *, workers_of: bool = False
+    ) -> dict[str, SidebarTaskMembership]:
+        return {
+            key: member
+            for key, member in memberships.items()
+            if (
+                member.role == "worker" and member.coordinator_thread_id in ids
+                if workers_of
+                else key in ids
+            )
+        }
+
+    async def search(
+        *,
+        ids: list[str] | None = None,
+        offset: int = 0,
+        limit: int = 50,
+        **_: object,
+    ) -> list[dict[str, object]]:
+        if ids is not None:
+            return [thread for thread in threads if thread["thread_id"] in ids]
+        offsets.append(offset)
+        return threads[offset : offset + limit]
+
+    client = SimpleNamespace(
+        threads=SimpleNamespace(search=search),
+        runs=SimpleNamespace(list=AsyncMock(return_value=[])),
+    )
+    monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
+    first = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, limit=1, status="finished"
+    )
+    assert [item["id"] for item in first["items"]] == ["t9"]
+    assert first["hasMore"] is True
+    assert max(offsets) < len(threads)
+    assert [worker["id"] for worker in first["items"][0]["taskWorkers"]] == ["t0", "t1", "t2", "t3"]
+    second = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, limit=1, offset=1, status="finished"
+    )
+    assert [item["id"] for item in second["items"]] == ["t5"]
+    memberships["t8"] = SidebarTaskMembership("t8", "task", "worker", "t9")
+    for index in (0, 5, 8):
+        cast(dict[str, object], threads[index]["metadata"])["title"] = "Needle"
+    filtered = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, limit=1, query="Needle"
+    )
+    assert [worker["id"] for worker in filtered["items"][0]["taskWorkers"]] == ["t0", "t8"]
+
+    monkeypatch.setattr(thread_listing, "_THREADS_PAGE_SCAN_CAP", 4)
+    offsets.clear()
+    no_matches = await thread_listing.list_dashboard_threads_page(
+        "octocat", hierarchy=True, include_all=True, repo="langchain-ai/another-repo"
+    )
+    assert no_matches["items"] == []
+    assert max(offsets) < 4
+
+
 async def test_list_dashboard_threads_page_scopes_search_to_requested_participant(
     monkeypatch,
 ) -> None:
@@ -924,6 +1194,55 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     assert set(run_list_thread_ids) == {"t0", "t1"}
 
 
+@pytest.mark.parametrize("status", ["interrupted", "error"])
+async def test_flat_status_filter_applies_task_overrides_before_paging(
+    monkeypatch: pytest.MonkeyPatch, status: Literal["interrupted", "error"]
+) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    for thread in threads:
+        cast(dict[str, object], thread["metadata"])["latest_run_status"] = "success"
+    memberships = {
+        thread_id: SidebarTaskMembership(
+            thread_id,
+            "task",
+            "worker",
+            "coordinator",
+            cancelled=status == "interrupted",
+            launch_error=status == "error",
+        )
+        for thread_id in ("t0", "t1")
+    }
+
+    async def membership_lookup(ids: list[str]) -> dict[str, SidebarTaskMembership]:
+        return {key: member for key, member in memberships.items() if key in ids}
+
+    async def search(*, offset: int, limit: int, **_: object) -> list[dict[str, object]]:
+        return threads[offset : offset + limit]
+
+    client = SimpleNamespace(threads=SimpleNamespace(search=search))
+    monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
+    monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
+
+    finished = await thread_listing.list_dashboard_threads_page(
+        "octocat", status="finished", limit=1
+    )
+    assert [item["id"] for item in finished["items"]] == ["t2"]
+    assert finished["items"][0]["status"] == "finished"
+    assert finished["hasMore"] is False
+
+    first = await thread_listing.list_dashboard_threads_page("octocat", status=status, limit=1)
+    assert [item["id"] for item in first["items"]] == ["t0"]
+    assert first["items"][0]["status"] == status
+    assert first["hasMore"] is True
+
+    second = await thread_listing.list_dashboard_threads_page(
+        "octocat", status=status, limit=1, offset=1
+    )
+    assert [item["id"] for item in second["items"]] == ["t1"]
+    assert second["items"][0]["status"] == status
+    assert second["hasMore"] is False
+
+
 async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
     metadata = {
         "repo_owner": "langchain-ai",
@@ -943,9 +1262,12 @@ async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
     build_compare.assert_not_awaited()
 
 
-async def test_cancel_settles_its_runs_before_the_queued_follow_up(monkeypatch) -> None:
+async def test_cancel_settles_its_runs_before_the_queued_follow_up(
+    monkeypatch, registry_db: None
+) -> None:
     """The replacement run's own turn must not be settled as interrupted."""
     order: list[str] = []
+    await QueuedMessage.put("thread-1", {"text": "and also this"})
     thread = {
         "thread_id": "thread-1",
         "status": "busy",
@@ -966,14 +1288,9 @@ async def test_cancel_settles_its_runs_before_the_queued_follow_up(monkeypatch) 
         async def cancel_many(self, **kwargs: object) -> None:
             order.append("cancel")
 
-    class FakeStore:
-        async def get_item(self, namespace: tuple[str, str], key: str) -> dict[str, object]:
-            return {"value": {"messages": [{"text": "and also this"}]}}
-
     class FakeClient:
         threads = FakeThreads()
         runs = FakeRuns()
-        store = FakeStore()
 
     async def fake_settle(thread_id: str, run_id: str | None, **kwargs: object) -> None:
         order.append(f"settle:{run_id}")
@@ -1071,8 +1388,9 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     assert exc_info.value.status_code == 403
 
 
-async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypatch) -> None:
-    store = FakeStore()
+async def test_steer_running_thread_records_and_delivers_the_follow_up(
+    monkeypatch, registry_db: None
+) -> None:
     updates: list[dict[str, object]] = []
     turn = uuid7()
 
@@ -1092,8 +1410,6 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         threads = FakeThreads()
         runs = FakeRuns()
 
-    FakeClient.store = store  # type: ignore[attr-defined]
-
     appended: list[object] = []
 
     async def fake_append(thread_id: str, commands) -> AppendResult:
@@ -1101,14 +1417,9 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         appended.extend(commands)
         return AppendResult(versions=[1], events=[])
 
-    async def fake_open_turn_id(thread_id: str, run_id: str | None) -> UUID:
-        assert run_id == "run-1"
-        return turn
-
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "append", fake_append)
-    patch_thread_module(monkeypatch, "open_turn_id", fake_open_turn_id)
-    monkeypatch.setattr("agent.utils.thread_ops.langgraph_client", lambda: FakeClient())
+    monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: FakeClient())
 
     result = await thread_runs.steer_running_thread(
         "tid",
@@ -1125,9 +1436,11 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         metadata={
             "source": "dashboard",
             "transcript": "v2",
-            "latest_run_id": "run-1",
+            # Stale: the proxy has not yet recorded the run that owns the turn.
+            "latest_run_id": "run-0",
             "model": "openai:gpt-5",
         },
+        turn=OpenTurn(turn_id=turn, run_id="run-1"),
         email="teammate@example.com",
     )
 
@@ -1142,11 +1455,12 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(monkeypat
         },
     }
     # The running agent finds the message before its next model call.
-    [queued] = store.values(("queue", "tid"))["pending_messages"]["messages"]
-    assert queued["content"]["queue_id"] == "msg-1"
-    assert queued["content"]["text"] == "also check the tests"
-    assert queued["content"]["sender"]["github_login"] == "teammate"
-    assert "source" not in queued["content"]
+    [queued] = await QueuedMessage.for_thread("tid")
+    assert isinstance(queued.content, dict)
+    assert queued.content["queue_id"] == "msg-1"
+    assert queued.content["text"] == "also check the tests"
+    assert queued.content["sender"]["github_login"] == "teammate"
+    assert "source" not in queued.content
     # The transcript shows it on the live turn right away, under the id the
     # middleware will record it with, so the two writes deduplicate.
     [command] = appended

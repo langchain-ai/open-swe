@@ -10,7 +10,7 @@
 
 import type { Installation, ReposPayload, Repository } from "./api"
 
-const STORAGE_KEY = "open-swe.repos.cache.v1"
+const STORAGE_KEY = "open-swe.repos.cache.v2"
 
 export const REPOS_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
@@ -27,7 +27,11 @@ function sanitizeRepositories(value: unknown): Array<Repository> {
     if (!entry || typeof entry !== "object") continue
     const raw = entry as Record<string, unknown>
     if (typeof raw.full_name !== "string" || !raw.full_name) continue
-    out.push({ full_name: raw.full_name, private: raw.private === true })
+    out.push({
+      full_name: raw.full_name,
+      private: raw.private === true,
+      archived: raw.archived === true,
+    })
   }
   return out
 }

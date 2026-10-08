@@ -159,6 +159,28 @@ Piped input is attached below the prompt inside `<stdin>` tags, or is the whole
 prompt when no arguments are given. Stdin is only read when it is a pipe or a
 redirected file, so a CI runner's open stdin never blocks a run.
 
+## Tool subcommands
+
+Every MCP tool is accessible through `oswe tool NAME`, using the same session,
+validation, authorization and implementation as the MCP server. Use the tool's
+underscore name or its hyphenated spelling. Backend-provided tools appear
+without rebuilding the CLI.
+
+```sh
+oswe tools
+oswe tool list-threads --help
+oswe tool list-threads --json '{"limit":5,"include_archived":true}'
+printf '%s' '{"limit":5}' | oswe tool list_threads
+oswe tool request-human-review --json '{"pr_url":"https://github.com/org/repo/pull/1","inline_summary":"Fix retry handling."}'
+```
+
+`oswe tools` prints the complete catalog, descriptions and JSON input schemas.
+`oswe tool NAME --help` shows the selected tool's schema. Arguments are a JSON
+object passed with `--json` or on stdin; omitting both uses `{}`. Results are
+printed on stdout, errors on stderr, and tool failures exit 1. These commands
+require a person's session, just like MCP; machine credentials cannot act for
+someone. Tool discovery and help require access to the backend.
+
 ## MCP server
 
 `oswe mcp` serves a [Model Context Protocol](https://modelcontextprotocol.io)

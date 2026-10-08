@@ -117,6 +117,11 @@ export function useScopedSettings(
     queryKey: settingsQueryKey(scope),
     queryFn: () => load(scope),
   })
+  const instance = useQuery({
+    queryKey: settingsQueryKey(INSTANCE_SCOPE),
+    queryFn: () => load(INSTANCE_SCOPE),
+    enabled: scope.kind === "workspace",
+  })
   const mutationKey = saveMutationKey(scope)
   const mutation = useMutation({
     mutationKey,
@@ -150,7 +155,10 @@ export function useScopedSettings(
   })
 
   const confirmed = snapshot.data
-  const current = confirmed && pendingEdits.reduce(applyEdit, confirmed)
+  const current =
+    confirmed && (scope.kind === "instance" || instance.data)
+      ? pendingEdits.reduce(applyEdit, confirmed)
+      : undefined
   const write = (
     set: WorkspaceSettingsOverrides,
     clear: SettingsEdit["clear"]
@@ -160,14 +168,27 @@ export function useScopedSettings(
     scope,
     data: current?.effective,
     saved: confirmed?.effective,
-    isPending: snapshot.isPending,
+    isPending:
+      snapshot.isPending || (scope.kind === "workspace" && instance.isPending),
     inherits: (...fields) =>
       scope.kind === "workspace" &&
       current !== undefined &&
       fields.every((field) => !(field in current.overrides)),
     save: (patch) => {
       if (!current) return
-      write(patch, [])
+      const fields = Object.keys(patch) as Array<keyof WorkspaceSettings>
+      write(
+        patch,
+        scope.kind === "workspace" &&
+          fields.every((field) => {
+            const inherited = instance.data?.effective[field]
+            return field === "model_routing_enabled"
+              ? !!patch[field] === !!inherited
+              : (patch[field] ?? null) === (inherited ?? null)
+          })
+          ? fields
+          : []
+      )
     },
     reset: (...fields) => {
       if (!current || scope.kind !== "workspace") return
