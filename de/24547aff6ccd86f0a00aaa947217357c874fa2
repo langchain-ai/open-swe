@@ -1,0 +1,73 @@
+openswe/api/app.py
+  s_8c15db54e0c42b::t_7616fba46112d1 160
+tests/webhooks/test_rollout_webhook.py
+  s_8c15db54e0c42b::t_ab84f16ca7c291 2,3,6-7,9,11-12,14,19-20,45-48,56,58-61,64-66,74-75,90-93,138-140,142
+  s_8c15db54e0c42b::t_71fe63586ca9e1 1,4,8,10,15-16,18,21-37,39-44,62-63,67-73,87,89-93,97-102,111,141
+  s_8c15db54e0c42b::t_03716f90915048 112-114
+  s_8c15db54e0c42b::t_c2a6df8378f81f 116-120
+  s_8c15db54e0c42b::t_36ba9a73434b8d 115
+  s_8c15db54e0c42b::t_3b9a9bf9e29adc 17
+  s_8c15db54e0c42b::t_cb38bb46a1dee5 38
+  s_8c15db54e0c42b::t_3261d222038b47 104-105,107-109,111
+  s_8c15db54e0c42b::t_5d37da1a2f857d 5,54,57,76-81,82-83,121-137,143-145,148-149,153-159,161-163
+  s_8c15db54e0c42b::t_59df862e28eb75 146-147,150-152
+openswe/federation/github_oidc.py
+  s_8c15db54e0c42b::t_3ae6ee59683629 104
+  s_8c15db54e0c42b::t_cff8efd5ea7a20 97,100-102,104
+swagger.json
+  s_8c15db54e0c42b::t_88c023ac7a6fc3 5396-5419,20596-20597,20599-20614
+  s_8c15db54e0c42b::t_cbe0713b15b7dd 20598
+tests/webhooks/test_deployment_event.py
+  s_8c15db54e0c42b::t_1a63955da5df7b 1-5,8-26
+openswe/webhooks/event_log.py
+  s_8c15db54e0c42b::t_e9a9afa4dd604c 1,22,239-242,244,248,288,296
+openswe/webhooks/event_subscriptions.py
+  s_8c15db54e0c42b::t_1e6e187289e833 174-175,238-255
+openswe/input_messages.py
+  s_8c15db54e0c42b::t_61523179cb9ea5 16
+openswe/rollout_events.py
+  s_8c15db54e0c42b::t_02ffdddc119900 1-2,6-8,9-11,14-15,17,26-30,31,36,62-63,92-93,184-190,256,260,261-262,264,267
+  s_8c15db54e0c42b::t_f1c033350b4775 94-100,156-159,162-165,167,169,171,177-178,180-181
+  s_8c15db54e0c42b::t_4de13e5267e7b7 182
+  s_8c15db54e0c42b::t_800ed3e777a1f4 32-37
+  s_8c15db54e0c42b::t_1c313fd26d9314 168
+  s_8c15db54e0c42b::t_b888f37d9e4239 171,177
+  s_8c15db54e0c42b::t_ffeab6275984f2 257,263
+  s_8c15db54e0c42b::t_c8d50c45dee61b 31
+  s_8c15db54e0c42b::t_6e761fa81f8e1b 38
+  s_8c15db54e0c42b::t_a35dfb3ba3fb60 166
+  s_8c15db54e0c42b::t_03d34c09f62171 3
+  s_8c15db54e0c42b::t_541ed693e8da06 8,39,43,102-103,105-113,160,179,183,258-260,262,268-269,271,274,275-277
+  s_8c15db54e0c42b::t_62a9cedb896747 272
+  s_8c15db54e0c42b::t_c060c78fc581a1 101,104
+  s_8c15db54e0c42b::t_965dee9a1dde13 4-5,12,41-42,44,46-61,114-159,191-255
+openswe/github/pull_requests.py
+  s_8c15db54e0c42b::t_351ee9a5a33874 568
+openswe/webhooks/common.py
+  s_8c15db54e0c42b::t_dbe8cf6b0ded14 1454-1455,1485-1489,1539,1541-1550
+  s_8c15db54e0c42b::t_66e8e4c2970b84 1540
+tests/agent/test_agent_thread_pr_state.py
+  s_8c15db54e0c42b::t_07735600e3a4d9 33-41,43-45,422-441,446-466,471-479,483-487
+  s_8c15db54e0c42b::t_a34b87f4ebd0c0 445,470,482
+  s_8c15db54e0c42b::t_278f74501edede 442-444,467-469,480-481
+tests/agent/test_rollout_subscription.py
+  s_8c15db54e0c42b::t_862eee58455f9a 1-8,10-22,24,26-28,30-31,33-34,36-37,39-82
+  s_8c15db54e0c42b::t_bdabf31626e3e4 23,25,29,32,35,38
+  s_8c15db54e0c42b::t_bd8a7410f84e11 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "de24547aff6ccd86f0a00aaa947217357c874fa2",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

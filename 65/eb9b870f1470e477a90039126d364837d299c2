@@ -1,0 +1,19 @@
+tests/agent/test_agent_thread_pr_state.py
+  s_8c15db54e0c42b::t_d4806a097cd78a 445-447,472-474,486-488
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "65eb9b870f1470e477a90039126d364837d299c2",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
