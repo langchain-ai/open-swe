@@ -42,7 +42,7 @@ async def api_concierge(
     session: dict[str, str] = SESSION_DEP,
 ) -> dict[str, str | None]:
     user = await User.for_login("github", session["sub"])
-    if user is None or not user.typed_preferences.concierge_mode or not user.slack_user_id:
+    if user is None or not user.slack_user_id:
         return {"thread_id": None, "channel_id": None}
     channel_id = await open_dm(user.slack_user_id)
     thread_id = (

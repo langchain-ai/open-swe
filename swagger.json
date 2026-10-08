@@ -3745,17 +3745,6 @@
             ],
             "title": "Branch Prefix"
           },
-          "concierge_mode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Concierge Mode"
-          },
           "default_model": {
             "title": "Default Model",
             "type": "string"

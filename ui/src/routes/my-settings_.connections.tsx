@@ -24,11 +24,6 @@ function ConnectionsPage() {
           <ManagedToolsSection />
           <SettingsSection title="Slack">
             <ProfileSwitchRow
-              field="concierge_mode"
-              label="Concierge mode"
-              description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."
-            />
-            <ProfileSwitchRow
               field="pr_review_links"
               label="Open pull requests in Open SWE"
               description="Pull request links Open SWE posts for you open its review page instead of GitHub."

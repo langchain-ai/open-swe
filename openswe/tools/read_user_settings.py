@@ -49,7 +49,6 @@ async def _settings_for_login(login: str, *, own_settings: bool = False) -> dict
     profile_settings = _safe_profile_settings(profile, own_settings=own_settings)
     if own_settings:
         preferences = await User.preferences_for_login(login)
-        profile_settings["concierge_mode"] = preferences.concierge_mode
         profile_settings.update(
             {key: getattr(preferences, key) for key in feature_flag_names(UserPreferencesPatch)}
         )

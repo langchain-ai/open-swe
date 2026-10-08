@@ -63,7 +63,6 @@ from openswe.slack.thread_feedback import (
     handle_slack_feedback_interaction,
     is_slack_feedback_payload,
 )
-from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
 from openswe.webhooks import common
@@ -519,11 +518,7 @@ async def slack_webhook(
     in_dm_channel = not in_code_channel and (
         event.channel_type == "im" or is_dm_channel(channel_context)
     )
-    # Concierge mode, only for someone who turned it on: their DM is one private
-    # conversation for as long as it exists, so every message routes to the same
-    # agent thread rather than opening a Slack thread per request. Everyone else
-    # keeps a thread per message. Untagged messages count as requests in a DM either way.
-    in_concierge_mode = in_dm_channel and await User.concierge_mode_for_slack(user_id)
+    in_concierge_mode = in_dm_channel
     if in_concierge_mode:
         thread_ts = CONCIERGE_TS
 
@@ -954,9 +949,7 @@ async def slack_interactivity(
     # A concierge DM's buttons hang off unthreaded messages, so the clicked message's
     # own timestamp maps to nothing: the whole DM is one conversation. A button clicked
     # inside a Slack thread still has to be answered in that thread.
-    in_concierge_mode = is_dm_channel(channel_context) and await User.concierge_mode_for_slack(
-        user_id
-    )
+    in_concierge_mode = is_dm_channel(channel_context)
     thread_ts = CONCIERGE_TS if in_concierge_mode else interaction.thread_ts
     reply_thread_ts = (
         (interaction.message.thread_ts or interaction.container.thread_ts)

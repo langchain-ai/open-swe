@@ -17,7 +17,7 @@ async def save_user_settings(settings: dict[str, SettingValue]) -> dict[str, obj
     if not login:
         return {"ok": False, "error": "Could not resolve the requester's GitHub login"}
     if "concierge_mode" in settings:
-        return {"ok": False, "error": "Change concierge_mode in the dashboard settings instead"}
+        return {"ok": False, "error": "Concierge DMs are always enabled and cannot be toggled"}
     try:
         updated = await patch_personal_settings(login, settings)
     except ValueError as exc:

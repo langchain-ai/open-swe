@@ -11,6 +11,6 @@ Dashboard paths are relative to the active deployment's base URL shown in **Dash
 - **Settings → Agent** (`/my-settings/agent`): personal model, reasoning effort, adaptive routing, and sandbox defaults.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
-- **Settings → Connections** (`/my-settings/connections`): Slack and LangSmith accounts, Slack behavior such as concierge mode, and personal MCP servers.
+- **Settings → Connections** (`/my-settings/connections`): Slack and LangSmith accounts, Slack behavior and personal MCP servers.
 - **Code review** (`/review`): configure auto-review repositories. **Review styles** (`/review/styles`) and **Repository instructions** (`/agents/instructions`) manage per-repository review and agent guidance.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.

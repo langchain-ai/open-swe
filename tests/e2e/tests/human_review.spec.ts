@@ -354,7 +354,6 @@ test.describe("Human review in Slack", () => {
   test.afterEach(async ({ request }) => {
     await control(request, "/control/user-preferences", {
       login: BOB.login,
-      preferences: { concierge_mode: false },
     });
   });
 
@@ -627,7 +626,6 @@ test.describe("Human review in Slack", () => {
     // Bob keeps his bot DM as one concierge conversation, which already exists.
     await control(request, "/control/user-preferences", {
       login: BOB.login,
-      preferences: { concierge_mode: true },
     });
     const dm = (await control(request, "/mock/slack/send", {
       channel: "D_BOB",
