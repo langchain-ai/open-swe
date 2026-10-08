@@ -9,10 +9,11 @@ import { commentRangeLabel } from "@/features/reviews/lib/lineRange"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { useReviewPage } from "./store"
 
-/** Puts the selected lines, as fenced code, into the chat composer with an optional question. */
+/** Attaches the selected lines to the next chat message, with an optional question in the composer. */
 export function useAskAboutLines(pr: PullRequestRef) {
   const queryClient = useQueryClient()
   const askInChat = useReviewPage((state) => state.askInChat)
+  const attachToChat = useReviewPage((state) => state.attachToChat)
   return useCallback(
     async (path: string, range: SelectedLineRange, question = "") => {
       const file = queryClient
@@ -30,11 +31,7 @@ export function useAskAboutLines(pr: PullRequestRef) {
           pr.number,
           file
         )
-        const blocks = selectionExcerpts(path, contents, range).map(
-          (excerpt) =>
-            `\`${excerpt.path}:${excerpt.lineLabel}\`\n\`\`\`${excerpt.language}\n${excerpt.snippet}\n\`\`\``
-        )
-        askInChat(`${blocks.join("\n\n")}\n\n${question}`)
+        attachToChat(selectionExcerpts(path, contents, range), question)
       } catch (error) {
         console.warn("Could not load the lines for the chat", error)
         toast.error(
@@ -43,6 +40,6 @@ export function useAskAboutLines(pr: PullRequestRef) {
         askInChat(`${label}\n\n${question}`)
       }
     },
-    [askInChat, pr, queryClient]
+    [askInChat, attachToChat, pr, queryClient]
   )
 }

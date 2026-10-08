@@ -184,7 +184,7 @@ export function Header({
             >
               {detail.pr.base_ref}
             </a>
-            <span className="shrink-0 max-md:hidden">from</span>
+            <span className="shrink-0 max-xl:hidden">from</span>
             <button
               type="button"
               title={`Copy ${detail.pr.head_ref}`}
@@ -193,7 +193,7 @@ export function Header({
                   .writeText(detail.pr.head_ref)
                   .then(() => toast.success("Copied the branch name"))
               }
-              className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-1 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground max-md:hidden"
+              className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-1 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground max-xl:hidden"
             >
               <span className="truncate">{detail.pr.head_ref}</span>
               <CopyIcon className="size-3 shrink-0 opacity-0 group-hover/branch:opacity-100" />
@@ -204,7 +204,7 @@ export function Header({
               onClick={() =>
                 jumpTo({ kind: "entry", id: entryOrder[0]?.id ?? "" })
               }
-              className="hidden shrink-0 rounded px-0.5 font-mono tabular-nums hover:bg-accent sm:inline"
+              className="hidden shrink-0 rounded px-0.5 font-mono tabular-nums hover:bg-accent lg:inline"
             >
               <span className="text-success-foreground">
                 +{detail.pr.additions}

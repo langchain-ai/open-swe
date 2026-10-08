@@ -4,6 +4,7 @@ import type { SelectedLineRange } from "@pierre/diffs"
 
 import type { PullRequestReviewEvent } from "@/lib/api"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
+import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
 import type { PullRequestRef } from "./queries"
 
 export type RailTab = "chat" | "discussion"
@@ -52,6 +53,8 @@ interface ReviewPageState {
   composerText: string
   expandedFinding: string | null
   chatDraft: { key: number; text: string } | undefined
+  /** Code attached to the next chat message, shown as chips above the composer. */
+  chatExcerpts: ReadonlyArray<CodeExcerpt>
   /** Bumped to bring the discussion's open conversations into view. */
   openConversationsKey: number
   /** Bumped to open Open SWE's findings in the status panel and bring them into view. */
@@ -79,6 +82,9 @@ interface ReviewPageActions {
   setComposerText: (text: string) => void
   setExpandedFinding: (id: string | null) => void
   askInChat: (text: string) => void
+  attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>, question: string) => void
+  removeChatExcerpt: (index: number) => void
+  clearChatExcerpts: () => void
   showOpenConversations: () => void
   showFindings: () => void
   toggleCollapsed: (path: string) => void
@@ -160,6 +166,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     composerText: "",
     expandedFinding: null,
     chatDraft: undefined,
+    chatExcerpts: [],
     openConversationsKey: 0,
     findingsKey: 0,
     collapsed: new Set(),
@@ -185,6 +192,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
               composerText: "",
               expandedFinding: null,
               chatDraft: undefined,
+              chatExcerpts: [],
               collapsed: new Set(),
               // A walkthrough, when one exists, is the default reading order.
               order: storedOrder === "files" ? "files" : "guide",
@@ -291,6 +299,29 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
       set({ chatDraft: { key, text }, railTab: "chat", railOpen: true })
       focusChatComposer()
     },
+    attachToChat: (excerpts, question) => {
+      const known = new Set(
+        get().chatExcerpts.map((item) => `${item.path}:${item.lineLabel}`)
+      )
+      set({
+        chatExcerpts: [
+          ...get().chatExcerpts,
+          ...excerpts.filter(
+            (item) => !known.has(`${item.path}:${item.lineLabel}`)
+          ),
+        ],
+      })
+      if (question) get().askInChat(question)
+      else {
+        set({ railTab: "chat", railOpen: true })
+        focusChatComposer()
+      }
+    },
+    removeChatExcerpt: (index) =>
+      set({
+        chatExcerpts: get().chatExcerpts.filter((_, i) => i !== index),
+      }),
+    clearChatExcerpts: () => set({ chatExcerpts: [] }),
     setEntryOrder: (entryOrder) => set({ entryOrder }),
     markViewed: (id) => {
       const { entryOrder, activeEntry, toggleViewed, jumpTo } = get()

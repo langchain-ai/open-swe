@@ -1,4 +1,8 @@
-import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
+import {
+  ReviewChatActionsContext,
+  ReviewExcerptChips,
+} from "@/features/reviews/components/ReviewChatActions"
+import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
 import {
   Profiler,
   useCallback,
@@ -346,6 +350,24 @@ export function AgentThreadView({
       queryClient,
       sendMessage,
     ]
+  )
+
+  // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
+  const submitWithExcerpts = useCallback(
+    async (
+      content: string,
+      images: Array<ImageChunk>,
+      options?: SubmitOptions
+    ) => {
+      const excerpts = reviewChat?.excerpts ?? []
+      await submitMessage(
+        excerpts.length ? serializeExcerpts(content, excerpts) : content,
+        images,
+        options
+      )
+      if (excerpts.length) reviewChat?.clearExcerpts?.()
+    },
+    [reviewChat, submitMessage]
   )
 
   const commentOnDiff = useCallback(
@@ -954,6 +976,7 @@ export function AgentThreadView({
                   fixDisabled={!canPost || sendMessage.isPending}
                 />
               )}
+              {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
                 placeholder={
                   macOffline
@@ -972,7 +995,7 @@ export function AgentThreadView({
                 busy={isStreaming}
                 activeRun={activeRun}
                 onStop={stopRun}
-                onSubmit={submitMessage}
+                onSubmit={submitWithExcerpts}
                 onEmptySubmit={steerNextQueuedMessage}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}

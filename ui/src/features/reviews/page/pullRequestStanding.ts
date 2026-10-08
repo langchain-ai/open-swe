@@ -166,19 +166,27 @@ export function pullRequestStanding(
       details,
       next: { kind: "update-branch" },
     }
-  if (canAttemptMerge(status))
+  if (canAttemptMerge(status)) {
+    // GitHub would merge it, but someone still has something to say about it.
+    const outstanding =
+      bugs > 0
+        ? plural(bugs, "bug")
+        : flags > 0
+          ? plural(flags, "flag")
+          : conversations.current > 0
+            ? plural(conversations.current, "open conversation")
+            : null
+    const approved = status.reviewDecision === "approved"
     return {
-      tone: "ready",
-      headline:
-        conversations.current > 0
-          ? status.reviewDecision === "approved"
-            ? "Approved, with conversations still open."
-            : "Mergeable, with conversations still open."
-          : status.reviewDecision === "approved"
-            ? "Approved and ready to merge."
-            : "Ready to merge.",
+      tone: outstanding ? "waiting" : "ready",
+      headline: outstanding
+        ? `${approved ? "Approved" : "Mergeable"}, with ${outstanding} still open.`
+        : approved
+          ? "Approved and ready to merge."
+          : "Ready to merge.",
       details,
       next: { kind: "merge" },
     }
+  }
   return { tone: "unknown", headline: "Open.", details, next: null }
 }

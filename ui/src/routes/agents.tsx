@@ -7,10 +7,11 @@ import {
   useRouterState,
 } from "@tanstack/react-router"
 
-import { useQuery } from "@tanstack/react-query"
+import { skipToken, useQuery } from "@tanstack/react-query"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
+import { reviewDetailKey } from "@/features/reviews/lib/reviewKeys"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -59,14 +60,24 @@ function AgentsLayout() {
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
   const reviewNumber = Number(reviewMatch?.params.number)
+  const reviewRef = {
+    owner: reviewMatch?.params.owner ?? "",
+    repo: reviewMatch?.params.repo ?? "",
+    number: reviewNumber,
+  }
+  // Reading the chat creates its thread, so wait for the page to find the PR; this only watches its cache.
+  const reviewExists = useQuery({
+    queryKey: reviewDetailKey(reviewRef.owner, reviewRef.repo, reviewNumber),
+    queryFn: skipToken,
+  }).isSuccess
   // A review page's sidebar row is the user's review chat thread.
   const reviewChat = useQuery({
-    ...reviewChatQuery({
-      owner: reviewMatch?.params.owner ?? "",
-      repo: reviewMatch?.params.repo ?? "",
-      number: reviewNumber,
-    }),
-    enabled: Boolean(session.data) && Boolean(reviewMatch) && reviewNumber > 0,
+    ...reviewChatQuery(reviewRef),
+    enabled:
+      Boolean(session.data) &&
+      Boolean(reviewMatch) &&
+      reviewNumber > 0 &&
+      reviewExists,
   })
   const activeReviewThreadId = reviewMatch
     ? reviewChat.data?.thread_id

@@ -71,9 +71,8 @@ export function Composer({
             }
             if (event.key === "Escape") {
               event.stopPropagation()
-              // A typed comment survives Escape; Cancel is the way to drop it.
-              if (body.trim()) event.currentTarget.blur()
-              else close()
+              // A typed comment survives Escape (Cancel drops it), and focus stays so keys keep typing.
+              if (!body.trim()) close()
             }
           }}
           className="resize-y text-[13px]"

@@ -5,6 +5,7 @@ import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker"
 import { api } from "@/lib/api"
 import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
+import { reviewDetailKey } from "@/features/reviews/lib/reviewKeys"
 import {
   getReviewConversation,
   reviewConversationQueryKey,
@@ -36,7 +37,7 @@ function retryUnlessClientError(failures: number, error: Error): boolean {
 export const reviewQueries = {
   detail: ({ owner, repo, number }: PullRequestRef) =>
     queryOptions({
-      queryKey: ["review", owner, repo, number] as const,
+      queryKey: reviewDetailKey(owner, repo, number),
       queryFn: () => api.getReview(owner, repo, number),
       ...SHARED,
       retry: retryUnlessClientError,

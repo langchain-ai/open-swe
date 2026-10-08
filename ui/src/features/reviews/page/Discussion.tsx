@@ -30,6 +30,7 @@ import { Avatar, Byline, formatWhen } from "./notes/Byline"
 import { ThreadCard, ThreadSummary } from "./notes/ThreadNote"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { useReviewPage } from "./store"
+import { useResolveThreads } from "./useThreadActions"
 import { plainFirstLine } from "./text"
 
 type Said = ConversationComment | ConversationReview
@@ -277,9 +278,9 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
               behavior: "smooth",
             })
           }
-          className="absolute right-4 bottom-[132px] flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground shadow-sm hover:bg-accent"
+          className="flex shrink-0 items-center justify-center gap-1 border-t border-border py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          Latest
+          Jump to the latest
           <ArrowDownIcon className="size-3" />
         </button>
       )}
@@ -298,6 +299,17 @@ function OpenConversations({
 }) {
   const focusKey = useReviewPage((state) => state.openConversationsKey)
   const ref = useRef<HTMLDivElement>(null)
+  const author = useQuery(reviewQueries.detail(pr)).data?.pr.author?.login
+  const resolveThreads = useResolveThreads(pr)
+  // The code moved on and the author had the last word: almost always done.
+  const answered = threads.filter(
+    (thread) =>
+      thread.outdated &&
+      thread.node_id &&
+      !!author &&
+      thread.comments.at(-1)?.author?.login.toLowerCase() ===
+        author.toLowerCase()
+  )
   // Folding holds until something asks for the conversations again.
   const [foldedAt, setFoldedAt] = useState<number | null>(null)
   const folded = foldedAt === focusKey
@@ -307,20 +319,36 @@ function OpenConversations({
   }, [focusKey])
   return (
     <div ref={ref} className="mb-5 scroll-mt-2">
-      <button
-        type="button"
-        aria-expanded={!folded}
-        onClick={() => setFoldedAt(folded ? null : focusKey)}
-        className="mb-2 flex items-center gap-1.5 text-xs font-medium text-foreground"
-      >
-        <CaretRightIcon
-          className={cn("size-3 transition-transform", !folded && "rotate-90")}
-        />
-        Open conversations
-        <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums">
-          {threads.length}
-        </span>
-      </button>
+      <div className="mb-2 flex items-center gap-2">
+        <button
+          type="button"
+          aria-expanded={!folded}
+          onClick={() => setFoldedAt(folded ? null : focusKey)}
+          className="flex items-center gap-1.5 text-xs font-medium text-foreground"
+        >
+          <CaretRightIcon
+            className={cn(
+              "size-3 transition-transform",
+              !folded && "rotate-90"
+            )}
+          />
+          Open conversations
+          <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums">
+            {threads.length}
+          </span>
+        </button>
+        {answered.length > 0 && (
+          <button
+            type="button"
+            disabled={resolveThreads.isPending}
+            onClick={() => resolveThreads.mutate(answered)}
+            title="Outdated conversations where the author replied last"
+            className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+          >
+            Resolve {answered.length} answered
+          </button>
+        )}
+      </div>
       {!folded && (
         <ul className="flex flex-col gap-1.5">
           {threads.map((thread) => (
@@ -479,9 +507,12 @@ function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
       title={`${thread.path}${line ? `:${line}` : ""}`}
       className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-accent"
     >
-      <span className="max-w-[45%] shrink-0 truncate font-mono text-[11px] text-muted-foreground">
-        {name}
-        {line ? `:${line}` : ""}
+      {/* Truncates from the left so the line number, which tells rows apart, stays. */}
+      <span className="max-w-[45%] shrink-0 truncate text-left font-mono text-[11px] text-muted-foreground [direction:rtl]">
+        <bdi>
+          {name}
+          {line ? `:${line}` : ""}
+        </bdi>
       </span>
       <span className="min-w-0 flex-1 truncate text-foreground/90">
         {plainFirstLine(comment.body)}

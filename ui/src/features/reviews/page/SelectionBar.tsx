@@ -21,9 +21,11 @@ const GAP = 8
 function placement(
   selection: TextSelection
 ): { left: number; top: number } | null {
+  // A host scrolled out of the virtualized list is detached; the selection went with it.
   const pane = selection.host
     .closest(".review-code-view")
     ?.getBoundingClientRect()
+  if (!pane) return null
   const range = readDiffSelection(selection.host)
   const rect =
     range && range.rangeCount > 0
@@ -33,9 +35,9 @@ function placement(
     rect && rect.height > 0
       ? { x: rect.left, y: rect.bottom }
       : { x: selection.x, y: selection.y }
-  if (pane && (anchor.y < pane.top || anchor.y > pane.bottom - 36)) return null
-  const minLeft = (pane?.left ?? 0) + GAP
-  const maxLeft = (pane?.right ?? window.innerWidth) - BAR_WIDTH - GAP
+  if (anchor.y < pane.top || anchor.y > pane.bottom - 36) return null
+  const minLeft = pane.left + GAP
+  const maxLeft = pane.right - BAR_WIDTH - GAP
   return {
     left: Math.max(minLeft, Math.min(anchor.x, maxLeft)),
     top: anchor.y + GAP,

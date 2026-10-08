@@ -132,6 +132,8 @@ export function useDiffKeys({
           id: "review-stop",
           description: stop.label ?? "Open conversation",
           duration: 1500,
+          // Bottom right is where the chat composer lives.
+          position: "top-center",
         }
       )
     }

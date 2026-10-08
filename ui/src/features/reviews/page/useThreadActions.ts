@@ -104,3 +104,56 @@ export function useThreadActions(pr: PullRequestRef, thread: ReviewThread) {
 
   return { reply, resolve }
 }
+
+/** Resolve several threads at once, e.g. every outdated one the author has already answered. */
+export function useResolveThreads(pr: PullRequestRef) {
+  const queryClient = useQueryClient()
+  const key = reviewQueries.conversation(pr).queryKey
+  return useMutation({
+    mutationFn: async (threads: ReadonlyArray<ReviewThread>) => {
+      const results = await Promise.allSettled(
+        threads.flatMap((thread) =>
+          thread.node_id
+            ? [
+                setReviewThreadResolved(
+                  pr.owner,
+                  pr.repo,
+                  pr.number,
+                  thread.node_id,
+                  true
+                ),
+              ]
+            : []
+        )
+      )
+      const failed = results.filter((result) => result.status === "rejected")
+      if (failed.length)
+        throw new Error(
+          `${failed.length} of ${results.length} conversations stayed open`
+        )
+    },
+    meta: { errorTitle: "Couldn't resolve every conversation" },
+    onMutate: async (threads) => {
+      await queryClient.cancelQueries({ queryKey: key })
+      const previous = queryClient.getQueryData<Conversation>(key)
+      const ids = new Set(threads.map((thread) => thread.id))
+      queryClient.setQueryData<Conversation | undefined>(key, (old) =>
+        old
+          ? {
+              ...old,
+              threads: old.threads.map((thread) =>
+                ids.has(thread.id) ? { ...thread, resolved: true } : thread
+              ),
+            }
+          : old
+      )
+      return { previous }
+    },
+    onError: (_error, _threads, context) =>
+      queryClient.setQueryData(key, context?.previous),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: key })
+      void queryClient.invalidateQueries({ queryKey: ["review-page-pr"] })
+    },
+  })
+}

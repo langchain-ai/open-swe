@@ -16,6 +16,22 @@ import { StandingPanel } from "./Standing"
 
 const CLAMP_PX = 320
 
+/** `#123` in prose links to that pull request's review page here; code is left alone. */
+function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
+  return body
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part.replace(
+            /(^|[\s(])#(\d+)\b/g,
+            (_match, lead: string, number: string) =>
+              `${lead}[#${number}](/agents/reviews/${pr.owner}/${pr.repo}/${number})`
+          )
+    )
+    .join("")
+}
+
 /** The top of the centre scroll: where the PR stands, then what its author wrote. */
 export function Overview({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr)).data
@@ -147,7 +163,7 @@ function Description({
       >
         {body.trim() ? (
           <Markdown
-            content={body}
+            content={linkPullRequestRefs(body, pr)}
             transformImageUrl={proxyImage}
             enlargeImages
           />

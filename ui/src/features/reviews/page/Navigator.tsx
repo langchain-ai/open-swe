@@ -196,6 +196,7 @@ function StepList({
 }) {
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const activeEntry = useReviewPage((state) => state.activeEntry)
+  const viewed = useReviewPage((state) => state.viewed)
   const steps = useMemo(() => {
     const byStep = new Map<number, Array<DiffEntry>>()
     for (const entry of buildEntries(files, walkthrough, "guide")) {
@@ -240,8 +241,17 @@ function StepList({
                 )}
               >
                 <InlineCode text={step.title} />
-                <span className="block text-[11px] text-muted-foreground">
-                  {entries.length} file{entries.length === 1 ? "" : "s"}
+                <span className="block text-[11px] text-muted-foreground tabular-nums">
+                  {(() => {
+                    const read = entries.filter((entry) =>
+                      viewed.has(entry.file.path)
+                    ).length
+                    return read === entries.length
+                      ? `All ${entries.length} viewed`
+                      : read > 0
+                        ? `${read} of ${entries.length} viewed`
+                        : `${entries.length} file${entries.length === 1 ? "" : "s"}`
+                  })()}
                 </span>
               </span>
             </button>

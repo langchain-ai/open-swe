@@ -192,6 +192,9 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
   const meta = useReviewChat(pr)
   const chatDraft = useReviewPage((state) => state.chatDraft)
   const jumpTo = useReviewPage((state) => state.jumpTo)
+  const excerpts = useReviewPage((state) => state.chatExcerpts)
+  const removeExcerpt = useReviewPage((state) => state.removeChatExcerpt)
+  const clearExcerpts = useReviewPage((state) => state.clearChatExcerpts)
   const actions = useMemo(
     () => ({
       owner: pr.owner,
@@ -205,8 +208,11 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
           side: range.side,
         }),
       emptyState: <ChatStarters pr={pr} />,
+      excerpts,
+      removeExcerpt,
+      clearExcerpts,
     }),
-    [pr, jumpTo]
+    [pr, jumpTo, excerpts, removeExcerpt, clearExcerpts]
   )
   if (meta.isPending)
     return (

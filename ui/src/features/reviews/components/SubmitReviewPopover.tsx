@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
+import { cn } from "@/lib/utils"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
 import { reviewConversationQueryKey } from "@/features/reviews/lib/conversationApi"
@@ -135,7 +136,9 @@ export function SubmitReviewPopover({
             if (canSubmit) submit.mutate()
           }}
         >
-          <PopoverTitle className="text-xs">Finish your review</PopoverTitle>
+          <PopoverTitle className="text-xs">
+            {isAuthor ? "Comment on your pull request" : "Finish your review"}
+          </PopoverTitle>
           {pendingCount > 0 && (
             <p className="mt-1 text-xs text-muted-foreground">
               {pendingCount} pending comment{pendingCount === 1 ? "" : "s"} will
@@ -158,7 +161,9 @@ export function SubmitReviewPopover({
             disabled={submit.isPending}
             autoFocus
           />
-          <fieldset className="mt-3 flex flex-col gap-2">
+          <fieldset
+            className={cn("mt-3 flex flex-col gap-2", isAuthor && "hidden")}
+          >
             <legend className="sr-only">Review verdict</legend>
             {verdicts.map((verdict) => (
               <label
@@ -219,7 +224,11 @@ export function SubmitReviewPopover({
               Cancel
             </Button>
             <Button type="submit" size="sm" disabled={!canSubmit}>
-              {submit.isPending ? "Submitting…" : "Submit review"}
+              {submit.isPending
+                ? "Submitting…"
+                : isAuthor
+                  ? "Comment"
+                  : "Submit review"}
             </Button>
           </div>
         </form>
