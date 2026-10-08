@@ -9,6 +9,7 @@ dependencies = [
     "langchain[mcp]>=1.4.3",
     "langchain-anthropic>=1.7.4",
     "langchain-openai>=1.6.5,<2.0.0",
+    "langchain-quickjs>=0.3.8,<0.4.0",
     "langsmith>=0.14.0",
     "httpx2>=2.12.0,<3.0.0",
     "mcp>=2.2.0,<3",

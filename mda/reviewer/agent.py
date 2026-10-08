@@ -6,19 +6,30 @@ deployment reaches it with the run token Open SWE puts in each run's context.
 """
 
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
+from langchain_quickjs import CodeInterpreterMiddleware
 from managed_deepagents import (
     DeepAgentDefinition,
     ManagedServerRuntime,
     define_deep_agent,
     define_sandbox,
 )
-from open_swe_reviewer.backend import OpenSweBackend
+from open_swe_reviewer.backend import MCP_SERVER_NAME, OpenSweBackend
 from open_swe_reviewer.middleware import BackendRunMiddleware, SubagentRunMiddleware
 from open_swe_reviewer.tools import runtime_spec, sandbox_tools
 from pydantic import BaseModel
 
 # Matches the in-process reviewer's cap on model calls per run.
 _MODEL_CALL_LIMIT = 5_000
+# Callable from code mode, so large results can be filtered or written to files without
+# passing through the model.
+_PTC_TOOLS = [
+    "read_file",
+    "write_file",
+    f"{MCP_SERVER_NAME}_web_search",
+    f"{MCP_SERVER_NAME}_fetch_url",
+    f"{MCP_SERVER_NAME}_http_request",
+    f"{MCP_SERVER_NAME}_list_findings",
+]
 
 
 class ReviewerRunContext(BaseModel):
@@ -60,6 +71,7 @@ def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ],
         middleware=[
             BackendRunMiddleware(backend),
+            CodeInterpreterMiddleware(ptc=_PTC_TOOLS),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],
