@@ -98,6 +98,8 @@ _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
 # Picks per code owner area, or assignment windows for an accepted reviewer, before the author hears.
 _ROUNDS_BEFORE_AUTHOR = 2
+# The why of an overdue notice still owed to the author, by the still-assigned reviewers' ids.
+_OVERDUE_NOTICE = "overdue_notice:"
 SNOOZE_DURATIONS = {
     "30 minutes": timedelta(minutes=30),
     "1 hour": timedelta(hours=1),
@@ -1508,14 +1510,18 @@ async def _tell_author_overdue(
     cause: ReviewDecisionCause,
     area: Area | None = None,
 ) -> None:
-    """Log and DM the author, once per set of still-assigned reviewers, that a review is overdue."""
-    marker = f"review_overdue:{','.join(sorted(str(p.user_id) for p in assigned))}"
+    """Log, once per set of still-assigned reviewers, that a review is overdue, and tell the author.
+
+    The author hears during their own work hours; the notice waits for them until then.
+    """
+    ids = ",".join(sorted(str(p.user_id) for p in assigned))
+    marker = f"review_overdue:{ids}"
     if request.run_config.get(marker):
         return
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.run_config.get(marker):
             return
-        row.run_config = {**row.run_config, marker: True}
+        row.run_config = {**row.run_config, marker: True, f"{_OVERDUE_NOTICE}{ids}": why}
     await request.log_decision(
         "review_overdue",
         cause=cause,
@@ -1523,6 +1529,22 @@ async def _tell_author_overdue(
         code_owners=list(area.handles) if area is not None else [],
         reason=why,
     )
+    current = await HumanReviewRequest.get(request.id) or request
+    await _notify_author_overdue(current, ids)
+
+
+async def _notify_author_overdue(request: HumanReviewRequest, ids: str) -> str:
+    """DM the author the overdue notice waiting for ``ids`` once their work day has started."""
+    key = f"{_OVERDUE_NOTICE}{ids}"
+    why = request.run_config.get(key)
+    if not isinstance(why, str):
+        return "inactive"
+    assigned = [
+        p
+        for user_id in ids.split(",")
+        if (p := request.participant(UUID(user_id))) is not None
+        and p.decision in ("picked", "review")
+    ]
     pr = request.pull_request
     author = (
         await User.get(pr.author_user_id)
@@ -1531,21 +1553,39 @@ async def _tell_author_overdue(
         if pr.author
         else None
     )
-    if author is None or not author.slack_user_id:
-        logger.info(
-            "Cannot tell the author a review is overdue: no linked Slack account",
-            extra={"request_id": str(request.id)},
-        )
-        return
+    if not assigned or author is None or not author.slack_user_id:
+        if assigned:
+            logger.info(
+                "Cannot tell the author a review is overdue: no linked Slack account",
+                extra={"request_id": str(request.id)},
+            )
+        await _forget(request, key)
+        return "dropped"
+    now = datetime.now(UTC)
+    if (start := (await WorkHours.for_user(author)).next_start(now)) > now:
+        await _schedule(request, key, start - now)
+        return "waiting_for_work_hours"
     who = ", ".join(mention(p.user) for p in assigned)
     still = "is" if len(assigned) == 1 else "are"
-    waited = _duration(datetime.now(UTC) - (request.created_at or datetime.now(UTC)))
+    waited = _duration(now - (request.created_at or now))
     text = (
         f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> *{escape(pr.title)}* has waited {waited} "
         f"for a review since it was requested. {why} {who} {still} still assigned, and Open SWE "
         "is no longer asking anyone else for this code."
     )
-    await send_dm(author.slack_user_id, text, origin=request.notice_origin("review_overdue"))
+    if not await send_dm(
+        author.slack_user_id, text, origin=request.notice_origin("review_overdue")
+    ):
+        await _schedule(request, key, _DEADLINE_RETRY)
+        return "retrying"
+    await _forget(request, key)
+    return "sent"
+
+
+async def _forget(request: HumanReviewRequest, key: str) -> None:
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is not None:
+            row.run_config = {k: v for k, v in row.run_config.items() if k != key}
 
 
 async def _check_overdue(request: HumanReviewRequest, user_id: str) -> str:
@@ -1669,6 +1709,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
     if step.startswith("overdue:"):
         return {"status": await _check_overdue(request, step.removeprefix("overdue:"))}
+    if step.startswith(_OVERDUE_NOTICE):
+        return {"status": await _notify_author_overdue(request, step.removeprefix(_OVERDUE_NOTICE))}
 
     if (request.kind == "posted" or step in ("unclaimed", "pick_expiry")) and skip_on_preview(
         "run_deadline"
