@@ -71,10 +71,15 @@ openswe/github/pull_requests.py
   s_8c15db54e0c42b::t_351ee9a5a33874 568
 openswe/webhooks/common.py
   s_8c15db54e0c42b::t_dbe8cf6b0ded14 1454-1455,1485-1489,1539,1541-1550
+  s_8c15db54e0c42b::t_66e8e4c2970b84 1540
 tests/agent/test_agent_thread_pr_state.py
   s_8c15db54e0c42b::t_07735600e3a4d9 33-41,43-45,422-441,446-466,471-479,483-487
+  s_8c15db54e0c42b::t_a34b87f4ebd0c0 445,470,482
+  s_8c15db54e0c42b::t_278f74501edede 442-444,467-469,480-481
 tests/agent/test_rollout_subscription.py
   s_8c15db54e0c42b::t_862eee58455f9a 1-8,10-22,24,26-28,30-31,33-34,36-37,39-82
+  s_8c15db54e0c42b::t_bdabf31626e3e4 23,25,29,32,35,38
+  s_8c15db54e0c42b::t_bd8a7410f84e11 9
 ---
 {
   "schema_version": "authorship/3.0.0",
