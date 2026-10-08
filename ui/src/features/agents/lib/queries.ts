@@ -44,8 +44,11 @@ import { useProfile } from "@/lib/profile"
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
   pinned: ["agent-threads", "lists", "pinned"] as const,
-  repos: (params: { includeResolved: boolean; includeAutomations: boolean }) =>
-    ["agent-threads", "lists", "repos", params] as const,
+  repos: (params: {
+    includeResolved: boolean
+    includeAutomations: boolean
+    owned: boolean
+  }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
@@ -612,15 +615,18 @@ export const SIDEBAR_PAGE_SIZE = 10
 function sidebarPageParams({
   includeAutomations,
   includeResolved,
+  owned,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
+  owned: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
     hierarchy: false,
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
+    ...(owned ? { owned } : {}),
   }
 }
 
@@ -642,13 +648,15 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
 export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   enabled = true,
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   enabled?: boolean
 }) {
-  const params = { includeAutomations, includeResolved }
+  const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
     queryKey: agentThreadKeys.repos(params),
@@ -725,15 +733,17 @@ export function sidebarRecentsParams({
   repoMode,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
 }: {
   repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
-    ...sidebarPageParams({ includeAutomations, includeResolved }),
+    ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
   }
@@ -743,12 +753,14 @@ export function useSidebarRecents({
   repoMode,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
   enabled = true,
 }: {
   repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -757,6 +769,7 @@ export function useSidebarRecents({
       repoMode,
       includeAutomations,
       includeResolved,
+      owned,
       sort,
     }),
     enabled
@@ -767,18 +780,20 @@ export function useSidebarRepoThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
-      ...sidebarPageParams({ includeAutomations, includeResolved }),
+      ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
       ...(repoFullName ? { repo: repoFullName } : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
