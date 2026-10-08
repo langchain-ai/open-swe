@@ -10,8 +10,10 @@ end-of-run turns.
 import logging
 import shlex
 from collections.abc import Awaitable, Callable
+from importlib.resources import files
 from typing import Annotated, Final, NotRequired
 
+from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
@@ -34,6 +36,14 @@ logger = logging.getLogger(__name__)
 _PREPARE_TIMEOUT_SECONDS: Final = 1800.0
 _HOOK_TIMEOUT_SECONDS: Final = 120.0
 _CHECKOUT_TIMEOUT_SECONDS: Final = 600
+_CHECKOUT_SCRIPT: Final = files("open_swe_reviewer").joinpath("checkout.sh").read_bytes()
+_CHECKOUT_SCRIPT_PATH: Final = "/tmp/open-swe-checkout.sh"
+
+
+async def _upload(backend: BackendProtocol, path: str, content: bytes) -> None:
+    uploads = await backend.aupload_files([(path, content)])
+    if uploads and uploads[0].error:
+        raise RuntimeError(f"Writing {path} failed: {uploads[0].error}")
 
 
 class CheckoutSpec(BaseModel):
@@ -46,46 +56,36 @@ class CheckoutSpec(BaseModel):
     diff_path: str
     diff_text: str
 
-    def command(self) -> str:
-        """Clone or fetch the public repository and check out the pull request head."""
-        repo_dir = shlex.quote(self.repo_dir)
-        head = shlex.quote(self.head_sha)
-        url = shlex.quote(f"https://github.com/{self.repository}.git")
-        lines = [
-            "set -e",
-            f"if [ -d {repo_dir}/.git ]; then",
-            f"  cd {repo_dir} && {{ git fetch --all --quiet || true; }}",
-            "else",
-            # Blobs download on demand: a full clone of a large repository outlasts the timeout.
-            f"  git clone --quiet --filter=blob:none --no-checkout {url} {repo_dir}"
-            f" && cd {repo_dir}",
-            "fi",
-        ]
-        if self.base_sha:
-            lines.append(
-                f"git fetch origin {shlex.quote(self.base_sha)} --quiet 2>/dev/null || true"
-            )
-        lines.append(f"git fetch origin {head} --quiet 2>/dev/null || true")
+    def _environment(self) -> dict[str, str]:
+        environment = {
+            "REPO_URL": f"https://github.com/{self.repository}.git",
+            "REPO_DIR": self.repo_dir,
+            "HEAD_SHA": self.head_sha,
+            "BASE_SHA": self.base_sha,
+        }
         if self.pr_number is not None:
-            # Fork pull requests are only reachable through their pull ref.
-            pull_ref = shlex.quote(f"refs/pull/{self.pr_number}/head")
-            lines.append(f"git fetch origin {pull_ref} --quiet 2>/dev/null || true")
-        lines.append(f"git checkout --force {head} --quiet")
-        lines.append(f'[ "$(git rev-parse HEAD)" = {head} ]')
-        return "\n".join(lines)
+            environment["PULL_REF"] = f"refs/pull/{self.pr_number}/head"
+        return environment
 
     async def check_out(self, runtime: Runtime) -> None:
+        """Check the pull request head out in the sandbox and write the review diff beside it."""
         if not isinstance(runtime, ManagedRuntime) or runtime.backend is None:
             raise RuntimeError("The reviewer needs this deployment's sandbox")
-        result = await runtime.backend.aexecute(self.command(), timeout=_CHECKOUT_TIMEOUT_SECONDS)
+        await _upload(runtime.backend, _CHECKOUT_SCRIPT_PATH, _CHECKOUT_SCRIPT)
+        assignments = " ".join(
+            f"{name}={shlex.quote(value)}" for name, value in self._environment().items()
+        )
+        result = await runtime.backend.aexecute(
+            f"env {assignments} bash {_CHECKOUT_SCRIPT_PATH}",
+            timeout=_CHECKOUT_TIMEOUT_SECONDS,
+        )
         if result.exit_code != 0:
             raise RuntimeError(
                 f"Checking out {self.repository} failed with exit code {result.exit_code}: "
                 f"{result.output}"
             )
-        uploads = await runtime.backend.aupload_files([(self.diff_path, self.diff_text.encode())])
-        if uploads and uploads[0].error:
-            raise RuntimeError(f"Writing the review diff failed: {uploads[0].error}")
+        # The diff lives inside the checkout, so it is written only once the clone exists.
+        await _upload(runtime.backend, self.diff_path, self.diff_text.encode())
 
 
 class PreparedRun(BaseModel):
