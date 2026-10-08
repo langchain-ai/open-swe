@@ -118,6 +118,25 @@ class User(Base):
             return await cls._load(session, user_id)
 
     @classmethod
+    async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
+        """The person a dashboard session belongs to.
+
+        The session's ``user_id`` wins only while that person still holds its
+        GitHub login: identities move between rows, so an older claim can name a
+        row the rest of the app no longer resolves the login to.
+        """
+        if not postgres.configured():
+            return None
+        if user_id is not None:
+            user = await cls.get(user_id)
+            if user is not None and any(
+                identity.provider == "github" and identity.login.lower() == github_login.lower()
+                for identity in user.identities
+            ):
+                return user
+        return await cls.for_login("github", github_login)
+
+    @classmethod
     async def for_email(cls, email: str) -> Self | None:
         """The person one of whose identities carries ``email``; most recently seen wins."""
         if not postgres.configured():
