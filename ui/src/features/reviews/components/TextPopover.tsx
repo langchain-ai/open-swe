@@ -10,14 +10,16 @@ import {
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 
-/** A trigger that opens an anchored popover asking for optional text before acting. */
+/**
+ * A trigger that opens an anchored popover asking for optional text before acting.
+ * It closes on submit; a rejected `onSubmit` puts the text back for the next open.
+ */
 export function TextPopover({
   trigger,
   title,
   description,
   placeholder,
   submitLabel,
-  pending,
   onSubmit,
 }: {
   trigger: ReactElement
@@ -25,25 +27,20 @@ export function TextPopover({
   description?: string
   placeholder: string
   submitLabel: string
-  pending: boolean
-  onSubmit: (text: string, close: () => void) => void
+  onSubmit: (text: string) => Promise<unknown>
 }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
   const submit = () => {
-    if (pending) return
-    onSubmit(text.trim(), () => {
-      setOpen(false)
-      setText("")
+    const submitted = text.trim()
+    setOpen(false)
+    setText("")
+    onSubmit(submitted).catch(() => {
+      setText((current) => current || submitted)
     })
   }
   return (
-    <Popover
-      open={open}
-      onOpenChange={(value) => {
-        if (!pending) setOpen(value)
-      }}
-    >
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={trigger} />
       <PopoverPopup align="end" className="w-80 max-w-[calc(100vw-2rem)]">
         <PopoverTitle className="text-xs">{title}</PopoverTitle>
@@ -67,15 +64,10 @@ export function TextPopover({
           autoFocus
         />
         <div className="mt-2 flex items-center justify-end gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            onClick={() => setOpen(false)}
-          >
+          <Button size="sm" variant="outline" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button size="sm" disabled={pending} onClick={submit}>
+          <Button size="sm" onClick={submit}>
             {submitLabel}
           </Button>
         </div>

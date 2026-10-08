@@ -18,6 +18,8 @@ from agent.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from agent.threads.summary import (
     _SURFACED_SOURCES,
     DASHBOARD_SOURCE,
+    SLACK_BOT_TRIGGER_KIND,
+    TRIGGERING_BOT_KEY,
     _is_automation_thread,
     _is_thread_resolved,
     _metadata_repo,
@@ -29,6 +31,8 @@ from agent.threads.summary import (
     _thread_timestamp_ms,
     _ThreadSortBy,
     assert_thread_readable,
+    metadata_title,
+    thread_is_bot_triggered,
     thread_is_readable,
     thread_is_unlisted,
     thread_source,
@@ -53,6 +57,8 @@ _THREAD_LIST_SELECT: list[ThreadSelectField] = [
 _PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
+
+DashboardThreadScope = Literal["all", "interactive", "automation", "bot"]
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +88,7 @@ def _search_metadata_filter(
     resolved: bool | None = None,
     source: str | None = None,
     automation_id: str | None = None,
+    bot: str | None = None,
     admin_threads: bool | None = None,
 ) -> dict[str, Any]:
     metadata = dict(search_filter)
@@ -91,6 +98,8 @@ def _search_metadata_filter(
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
+    if bot:
+        metadata[TRIGGERING_BOT_KEY] = bot
     if admin_threads is True:
         metadata["admin_thread"] = True
     return metadata
@@ -126,8 +135,9 @@ def _metadata_matches_filters(
     resolved: bool | None,
     source: str | None,
     query: str | None,
-    scope: Literal["all", "interactive", "automation"] = "all",
+    scope: DashboardThreadScope = "all",
     automation_id: str | None = None,
+    bot: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
     admin_threads: bool | None = None,
@@ -149,6 +159,10 @@ def _metadata_matches_filters(
         return False
     if automation_id and _metadata_string(metadata, "schedule_id") != automation_id:
         return False
+    if scope == "bot" and not thread_is_bot_triggered(metadata):
+        return False
+    if bot and _metadata_string(metadata, TRIGGERING_BOT_KEY) != bot:
+        return False
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
     if source and thread_source(metadata) != source:
@@ -158,7 +172,7 @@ def _metadata_matches_filters(
         pull_requests = pull_requests if isinstance(pull_requests, list) else []
         if not _search_matches(
             [
-                metadata.get("title", "Untitled agent"),
+                metadata_title(metadata),
                 *_metadata_repo(metadata),
                 metadata.get("branch_name"),
                 metadata.get("base_branch"),
@@ -323,8 +337,9 @@ async def _collect_thread_candidates(
     resolved: bool | None = None,
     source: str | None = None,
     query: str | None = None,
-    scope: Literal["all", "interactive", "automation"] = "all",
+    scope: DashboardThreadScope = "all",
     automation_id: str | None = None,
+    bot: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
     admin_threads: bool | None = None,
@@ -344,6 +359,7 @@ async def _collect_thread_candidates(
             resolved=resolved,
             source=source,
             automation_id=automation_id,
+            bot=bot,
             admin_threads=admin_threads,
         )
         while offset < _THREADS_PAGE_SCAN_CAP:
@@ -377,6 +393,7 @@ async def _collect_thread_candidates(
                     query=query,
                     scope=scope,
                     automation_id=automation_id,
+                    bot=bot,
                     repo=repo,
                     ownerless=ownerless,
                     admin_threads=admin_threads,
@@ -541,8 +558,9 @@ async def list_dashboard_threads_page(
     source: str | None = None,
     status: str | None = None,
     query: str | None = None,
-    scope: Literal["all", "interactive", "automation"] = "all",
+    scope: DashboardThreadScope = "all",
     automation_id: str | None = None,
+    bot: str | None = None,
     repo: str | None = None,
     ownerless: bool = False,
     filter_participant_login: str | None = None,
@@ -554,11 +572,15 @@ async def list_dashboard_threads_page(
     client = langgraph_client()
     search_login = filter_participant_login or login
     search_email = email if search_login == login else None
-    searches = (
-        [{"thread_category": "automation"}, {"source": "schedule"}]
-        if scope == "automation" and filter_participant_login is None
-        else _participant_search_filters(search_login, email=search_email, include_all=include_all)
-    )
+    if scope == "automation" and filter_participant_login is None:
+        searches = [{"thread_category": "automation"}, {"source": "schedule"}]
+    elif scope == "bot" and filter_participant_login is None:
+        # Bot threads have no participants, and every signed-in user may read them.
+        searches = [{"trigger_kind": SLACK_BOT_TRIGGER_KIND}]
+    else:
+        searches = _participant_search_filters(
+            search_login, email=search_email, include_all=include_all
+        )
     safe_offset = max(offset, 0)
     safe_limit = min(max(limit, 1), 100)
     summary_filters = viewed is not None or status is not None
@@ -572,6 +594,7 @@ async def list_dashboard_threads_page(
         query=query,
         scope=scope,
         automation_id=automation_id,
+        bot=bot,
         repo=repo,
         ownerless=ownerless,
         admin_threads=admin_threads,

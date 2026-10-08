@@ -12,6 +12,7 @@ from agent.slack.client import (
     post_slack_thread_reply_with_ts,
     slack_thread_mutation_lock,
 )
+from agent.slack.http import SlackRequestError
 from agent.slack.thinking import sync_slack_background_status
 from agent.store import get_value, put_value
 
@@ -54,18 +55,19 @@ async def notify_slack_review(
                 if await get_value(namespace, key) is not None:
                     return
                 await put_value(namespace, key, {"review_url": review_url, "action": action})
-                message_ts, error = await post_slack_thread_reply_with_ts(
-                    location["channel_id"],
-                    location["thread_ts"],
-                    f"@{escape(reviewer, quote=False)} <{review_url}|{notice}>{suffix}",
-                    agent_thread_id=thread_id,
-                    unfurl_links=False,
-                    unfurl_media=False,
-                )
-                if message_ts is None:
+                try:
+                    await post_slack_thread_reply_with_ts(
+                        location["channel_id"],
+                        location["thread_ts"],
+                        f"@{escape(reviewer, quote=False)} <{review_url}|{notice}>{suffix}",
+                        agent_thread_id=thread_id,
+                        unfurl_links=False,
+                        unfurl_media=False,
+                    )
+                except SlackRequestError as exc:
                     logger.warning(
                         "Failed to post GitHub review notice to Slack",
-                        extra={"agent_thread_id": thread_id, "slack_error": error},
+                        extra={"agent_thread_id": thread_id, "slack_error": exc.code},
                     )
                 else:
                     await sync_slack_background_status(client, thread_id, resume=True)

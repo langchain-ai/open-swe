@@ -13,7 +13,7 @@ import { afterEach, expect, it, vi } from "vitest"
 
 import { reportError } from "@/lib/errorReporting"
 import { makeQueryClient } from "@/lib/query"
-import { RunningAgentsSection } from "./admin"
+import { RunningAgentsSection } from "@/features/settings/components/AdminSections"
 
 const cancelThread = vi.hoisted(() => vi.fn<(id: string) => Promise<void>>())
 

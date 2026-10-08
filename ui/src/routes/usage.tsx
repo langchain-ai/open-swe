@@ -1289,7 +1289,7 @@ function usageColumns(
       } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
-    { key: "feedback_given", label: "# Feedback Given", align: "right" },
+    { key: "prs_reviewed", label: "PRs reviewed", align: "right" },
   ]
 }
 
@@ -1487,7 +1487,7 @@ function UsageTable({
                 </Tooltip>
               </TableCell>
               <TableCell className="px-4 py-3 text-right tabular-nums">
-                {formatNumber(row.feedback_given)}
+                {formatNumber(row.prs_reviewed ?? 0)}
               </TableCell>
             </TableRow>
           ))}
@@ -1608,7 +1608,7 @@ function UserCell({
   row,
   isCurrentUser,
 }: {
-  row: UsageLeaderboardRow
+  row: Pick<UsageLeaderboardRow, "user">
   isCurrentUser: boolean
 }) {
   const initials = initialsFor(row.user.name)
@@ -1654,19 +1654,6 @@ function UserCell({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           {name}
-          {row.is_top_feedback_contributor && (
-            <Tooltip>
-              <TooltipTrigger
-                aria-label="Top feedback contributor"
-                className="shrink-0 cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                <span aria-hidden="true">🏆</span>
-              </TooltipTrigger>
-              <TooltipPopup>
-                Most feedback given in the selected date range.
-              </TooltipPopup>
-            </Tooltip>
-          )}
           {isCurrentUser ? (
             <Badge variant="secondary" aria-label="You">
               You

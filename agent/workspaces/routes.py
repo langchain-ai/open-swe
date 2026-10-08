@@ -4,10 +4,11 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from agent.audit_logs.context import bind_workspace
 from agent.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from agent.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
 from agent.slack.channels import SlackChannel
@@ -66,16 +67,6 @@ async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
             )
 
 
-async def _require_breakout_eligible(channel_id: str) -> None:
-    channel = await SlackChannel.load(channel_id, use_cache=False)
-    if channel is None or not channel.public or not channel.can_be_kitchen:
-        raise HTTPException(
-            400,
-            f"Slack channel {channel_id} cannot be a breakout destination: choose a public, "
-            "internal Slack channel that Open SWE has joined.",
-        )
-
-
 @router.get("/workspaces")
 async def api_list_workspaces(
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -89,16 +80,16 @@ async def api_list_workspaces(
 @router.post("/workspaces")
 async def api_create_workspace(
     body: WorkspaceCreate,
+    request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
     await _require_kitchen_eligible(body.kitchen_channel_ids)
-    if body.breakout_channel_id is not None:
-        await _require_breakout_eligible(body.breakout_channel_id)
     try:
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
         raise _save_conflict(e) from e
-    if record.setup_script:
+    await bind_workspace(request, record)
+    if record.setup_script and not record.inherit_default_sandbox:
         await ensure_refresh_cron(record.slug)
         run_id = await start_refresh_run(record.slug)
         if run_id is None:
@@ -150,10 +141,13 @@ async def api_get_workspace(
 async def api_update_workspace(
     slug: str,
     body: WorkspaceUpdate,
+    request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
     normalized = _normalized_slug(slug)
     previous = await WORKSPACES.get(normalized)
+    if previous is not None:
+        await bind_workspace(request, previous)
     repos_changed = (
         previous is not None
         and body.repos is not None
@@ -166,15 +160,12 @@ async def api_update_workspace(
         await _require_kitchen_eligible(
             [channel for channel in body.kitchen_channel_ids if channel not in already]
         )
-    if body.breakout_channel_id is not None and (
-        previous is None or body.breakout_channel_id != previous.breakout_channel_id
-    ):
-        await _require_breakout_eligible(body.breakout_channel_id)
     try:
         record = await WORKSPACES.apply_update(normalized, body)
     except ValueError as e:
         raise _save_conflict(e) from e
-    if record.setup_script:
+    await bind_workspace(request, record)
+    if record.setup_script and not record.inherit_default_sandbox:
         await ensure_refresh_cron(record.slug)
         if repos_changed:
             run_id = await start_refresh_run(record.slug)
@@ -211,10 +202,12 @@ async def api_configure_workspace_repository(
     owner: str,
     name: str,
     body: RepositoryConfiguration,
+    request: Request,
     admin: dict[str, Any] = ADMIN_DEP,
 ) -> RepositorySettings:
     """Change how one of a workspace's repositories is configured there."""
     normalized = _normalized_slug(slug)
+    await bind_workspace(request, normalized)
     try:
         settings = await WORKSPACES.configure_repository(
             normalized, f"{owner}/{name}", may_start_threads=body.may_start_threads
@@ -236,6 +229,7 @@ async def api_configure_workspace_repository(
 @router.post("/workspaces/{slug}/refresh")
 async def api_refresh_workspace(
     slug: str,
+    request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> dict[str, Any]:
     """Start a snapshot rebuild from the workspace's scripts.
@@ -247,6 +241,7 @@ async def api_refresh_workspace(
     record = await WORKSPACES.get(normalized)
     if not record:
         raise HTTPException(404, "workspace not found")
+    await bind_workspace(request, record)
     if not record.setup_script:
         raise HTTPException(400, "workspace has no setup script to run")
     if is_refresh_in_flight(record):
@@ -260,9 +255,11 @@ async def api_refresh_workspace(
 @router.delete("/workspaces/{slug}")
 async def api_delete_workspace(
     slug: str,
+    request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
     normalized = _normalized_slug(slug)
+    await bind_workspace(request, normalized)
     try:
         removed = await WORKSPACES.remove(normalized)
     except DefaultWorkspaceDeletionError as e:

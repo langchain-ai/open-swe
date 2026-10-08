@@ -1,3 +1,5 @@
+import { parseScrollAnchor } from "./lib/scrollAnchor"
+
 export type ReviewSort = "updatedAt" | "createdAt"
 export const reviewStatuses = [
   "Draft",
@@ -20,6 +22,10 @@ export interface ReviewsSearch {
   // The open pull request, as `owner/repo#number` — the same shape as
   // `pullRequestKey`, so a row can put its own key straight into the URL.
   pr?: string
+  /** Files expanded in the open pull request's preview. */
+  files?: string[]
+  /** The preview's scroll position, as `formatScrollAnchor` writes it. */
+  at?: string
 }
 
 const prSelectionPattern = /^[\w.-]+\/[\w.-]+#\d+$/
@@ -67,6 +73,12 @@ export function validateReviewsSearch(
       )
     ),
   ]
+  const expandedFiles = (Array.isArray(search.files) ? search.files : [])
+    .filter(
+      (value): value is string =>
+        typeof value === "string" && value.length > 0 && value.length <= 500
+    )
+    .slice(0, 100)
   return {
     tab: search.tab === "all" ? "all" : undefined,
     repo: repo.length ? repo : undefined,
@@ -83,6 +95,13 @@ export function validateReviewsSearch(
     pr:
       typeof search.pr === "string" && prSelectionPattern.test(search.pr)
         ? search.pr
+        : undefined,
+    files: expandedFiles.length ? expandedFiles : undefined,
+    at:
+      typeof search.at === "string" &&
+      search.at.length <= 520 &&
+      parseScrollAnchor(search.at)
+        ? search.at
         : undefined,
   }
 }
