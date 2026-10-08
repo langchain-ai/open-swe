@@ -1183,9 +1183,14 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
 
 
 @pytest.mark.parametrize("first_message", [True, False])
-@pytest.mark.parametrize("quoted", [True, False])
+@pytest.mark.parametrize("quoted,concierge", [(True, False), (False, False), (False, True)])
 async def test_performance_directive_switches_only_when_unquoted(
-    monkeypatch: pytest.MonkeyPatch, fake_store, registry_db, first_message: bool, quoted: bool
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store,
+    registry_db,
+    first_message: bool,
+    quoted: bool,
+    concierge: bool,
 ) -> None:
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -1218,11 +1223,12 @@ async def test_performance_directive_switches_only_when_unquoted(
             user_id="U123",
             text=f"<@UBOT> please {directive} continue",
             bot_user_id="UBOT",
+            concierge_mode=concierge,
         ),
         repo=None,
     )
     configurable = dispatch.call_args.args[3]
-    if quoted:
+    if quoted or concierge:
         assert "agent_model_id" not in configurable
         notice.assert_not_awaited()
         feedback.assert_not_awaited()

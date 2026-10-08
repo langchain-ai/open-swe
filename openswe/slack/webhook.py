@@ -972,7 +972,7 @@ async def _process_slack_mention_impl(
     )
     performance_command = (
         find_message_command(PERFORMANCE_COMMAND, clean_text)
-        if not message_update and allowed_bot is None
+        if not message_update and allowed_bot is None and not concierge_mode
         else None
     )
     if performance_command:

@@ -10,6 +10,7 @@ from langgraph.types import Command
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_ephemeral_message
+from openswe.slack.dm import is_concierge_thread
 from openswe.utils.langsmith import create_langsmith_feedback
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_settings import load_thread_settings, store_thread_settings
@@ -22,6 +23,12 @@ async def switch_to_performance_model(
     cfg = RunConfig.from_config(get_config())
     if not cfg.thread_id:
         raise ValueError("No current agent thread is available")
+    if cfg.slack_thread and is_concierge_thread(
+        cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts
+    ):
+        raise ValueError(
+            "Concierge DMs use your profile model; change it in agent settings instead"
+        )
     client = langgraph_client()
     settings = (await load_thread_settings(client, cfg.thread_id)).copy()
     performance = settings.get("routing_models", {}).get("performance")
