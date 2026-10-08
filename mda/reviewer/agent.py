@@ -26,10 +26,20 @@ _MODEL_CALL_LIMIT = 5_000
 _PTC_TOOLS: list[str | BaseTool] = [
     "read_file",
     "write_file",
-    f"{MCP_SERVER_NAME}_web_search",
-    f"{MCP_SERVER_NAME}_fetch_url",
-    f"{MCP_SERVER_NAME}_http_request",
-    f"{MCP_SERVER_NAME}_list_findings",
+    *(
+        f"{MCP_SERVER_NAME}_{tool}"
+        for tool in (
+            "web_search",
+            "fetch_url",
+            "http_request",
+            "list_findings",
+            "add_finding",
+            "update_finding",
+            "publish_review",
+            "resolve_finding_thread",
+            "reply_to_finding_thread",
+        )
+    ),
 ]
 
 
