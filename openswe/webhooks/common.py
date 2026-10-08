@@ -85,6 +85,7 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
 from openswe.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
+from openswe.rollout_events import ROLLOUT_CHECK_REQUESTED, subscribe_merged_thread
 from openswe.run_config import Repo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -1536,8 +1537,6 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from openswe.analytics.emitter import task_rework
 
             await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
-        from openswe.rollout_events import ROLLOUT_CHECK_REQUESTED, subscribe_merged_thread
-
         if (
             newly_merged
             and event.identity is not None
