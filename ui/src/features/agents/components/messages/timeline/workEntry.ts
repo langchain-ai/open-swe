@@ -239,7 +239,6 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
     case "slack":
     case "linear":
       return "Sending update"
-    case "service-connection":
     case "managed-tools":
       return "Offering connection"
     case "other":

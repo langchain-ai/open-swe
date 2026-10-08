@@ -46,18 +46,22 @@ export function ManagedToolsConnectionCard({
     (status) => status.gateway.id === offer.gateway.id
   )
   const missing = live ? live.missing : offer.missing
+  // Only consent links can be waited on; API keys are set in LangSmith.
+  const then = offer.missing.every((credential) => credential.kind === "oauth")
+    ? "This thread then continues on its own."
+    : "Then ask the agent to continue."
   return (
     <Card title={`${offer.gateway.name} managed tools`}>
       {live?.ready ? (
         <p className="flex items-center gap-1 text-primary">
-          <Check aria-hidden className="size-3.5" /> Every service is connected.
-          This thread continues on its own.
+          <Check aria-hidden className="size-3.5" /> Every service is connected.{" "}
+          {then}
         </p>
       ) : (
         <>
           <p className="text-muted-foreground">
             Connect these to your account. LangSmith offers the tools once all
-            of them are connected, and this thread then continues on its own.
+            of them are connected. {then}
           </p>
           <ul className="mt-3 divide-y divide-border rounded-md border">
             {missing.map((credential) => (
