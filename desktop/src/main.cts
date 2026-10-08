@@ -495,14 +495,17 @@ function sendLocalThreadsChanged() {
 async function handoffThreadToWorktree(threadId, params) {
   const thread = localThreadStore.get(threadId);
   if (!thread) throw new Error("This thread does not run on This Mac");
+  const repo = await repoRoot(thread.cwd);
+  if (!repo) throw new Error("Local projects must be git repositories");
+  const branch = await validBranchName(repo, params.branch);
+  if (!branch) throw new Error("A valid branch name is required");
+  const ref = (await localBranches(repo)).find((it) => it.name === branch);
+  if (ref?.current || ref?.worktreePath)
+    return followCheckedOutBranch(thread, repo, ref);
   if (thread.worktreePath)
     throw new Error(
       `This thread already works in its own worktree at ${thread.worktreePath}`,
     );
-  const repo = await repoRoot(thread.cwd);
-  if (!repo) throw new Error("Local projects must be git repositories");
-  const branch = await validBranchName(repo, params.branch);
-  if (!branch) throw new Error("A valid new branch name is required");
   const base =
     (await validBranchName(repo, params.base_ref)) ??
     (await defaultBranch(repo));
@@ -521,6 +524,19 @@ async function handoffThreadToWorktree(threadId, params) {
   );
   sendLocalThreadsChanged();
   return { worktree_path: worktree, branch, base: startPoint };
+}
+
+/** Moves the thread to wherever `ref` is already checked out, as the branch picker does. */
+async function followCheckedOutBranch(thread, repo, ref) {
+  const target = ref.worktreePath ? managedWorktree(ref.worktreePath) : null;
+  if (ref.worktreePath && !target)
+    throw new Error(
+      `“${ref.name}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+    );
+  await assertWorkspaceFree(target ?? repo, thread.id);
+  await moveThreadWorkspace(thread, target);
+  sendLocalThreadsChanged();
+  return { worktree_path: target ?? repo, branch: ref.name };
 }
 
 /** Prevent branch switches and worktree reuse from disrupting running agents. */
