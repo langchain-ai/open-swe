@@ -258,6 +258,8 @@ from openswe.tools import (
     trigger_automation,
     update_automation,
     web_search,
+    write_database_rows,
+    write_store_item,
 )
 from openswe.tools.access import permitted, resolve_access
 from openswe.tools.admin_gate import (
@@ -1777,6 +1779,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
         read_only_sql,
         read_store_item,
+        *(
+            (write_store_item, write_database_rows)
+            if ENV.OPENSWE_ENV.optional() in {"preview", "staging"}
+            else ()
+        ),
         manage_feature_flags,
         manage_review_approval_mode,
     ]
