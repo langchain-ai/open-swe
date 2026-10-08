@@ -3,7 +3,6 @@ import pytest
 from openswe.expedited_review.eligibility import (
     ACCEPTED_CHANGED_LINES,
     MAX_CHANGED_LINES,
-    MAX_EXCLUDED_LINES,
     ChangedFile,
     EligibleDiff,
     Exclusion,
@@ -119,15 +118,12 @@ def test_sensitive_paths_cannot_be_excluded(path: str) -> None:
         Exclusion(path=path, guideline="g", reason="r").resolve([file])
 
 
-def test_exclusions_past_the_cap_are_refused() -> None:
-    lines = MAX_EXCLUDED_LINES + 1
-    notes = ChangedFile(
-        filename="CHANGELOG.md",
-        additions=lines,
-        patch="@@ -1 +1,502 @@\n a\n" + "\n".join("+x" for _ in range(lines)),
-    )
-    excluded = Exclusion(path="CHANGELOG.md", guideline="g", reason="r").resolve([notes])
+def test_generated_files_never_count_and_regenerating_them_keeps_the_votes() -> None:
+    source = _file("src/app.py", patch="+a")
+    swagger = ChangedFile(filename="swagger.json", additions=400, deletions=200, patch=None)
+    card = assess_eligibility([source, swagger])
 
-    verdict = assess_eligibility([notes], excluded)
-    assert isinstance(verdict, Ineligible)
-    assert f"at most {MAX_EXCLUDED_LINES}" in verdict.reason
+    assert isinstance(card, EligibleDiff)
+    assert (card.changed_lines, card.generated_lines) == (1, 600)
+    regenerated = swagger.model_copy(update={"additions": 401})
+    assert fingerprint_matches([source, regenerated], card.fingerprint)

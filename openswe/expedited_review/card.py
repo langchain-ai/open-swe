@@ -56,7 +56,12 @@ def _diff_sections(
 ) -> list[Block]:
     diff = ExpeditedDiff(files, approval.excluded_hunks)
     shown = diff.shown
-    trailer = [*_overflow_note(shown), *_test_diffstat(diff.tests), *_excluded_summary(diff)]
+    trailer = [
+        *_overflow_note(shown),
+        *_diffstat("Tests", "test files", diff.tests),
+        *_diffstat("Generated", "generated files", diff.generated),
+        *_excluded_summary(diff),
+    ]
     if diff_image_id:
         names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
         return [image(diff_image_id, f"Diff of {names}"), *trailer]
@@ -82,21 +87,21 @@ def _overflow_note(files: list[ChangedFile]) -> list[Block]:
     return [context(f"{len(files) - _MAX_FILE_SECTIONS} more files on GitHub.")]
 
 
-def _test_diffstat(tests: list[ChangedFile]) -> list[Block]:
-    """Test files are never drawn; the card lists them with their line counts instead."""
-    if not tests:
+def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
+    """Test and generated files are never drawn; the card lists them with line counts instead."""
+    if not files:
         return []
-    heading = "*Tests (not shown)*\n"
+    heading = f"*{title} (not shown)*\n"
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
-    for file in tests[:_MAX_FILE_SECTIONS]:
+    for file in files[:_MAX_FILE_SECTIONS]:
         line = f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"
         budget -= len(line) + 1
         if budget < 0:
             break
         lines.append(line)
-    if len(lines) < len(tests):
-        lines.append(f"{len(tests) - len(lines)} more test files on GitHub.")
+    if len(lines) < len(files):
+        lines.append(f"{len(files) - len(lines)} more {noun} on GitHub.")
     return [context(heading + "\n".join(lines))]
 
 

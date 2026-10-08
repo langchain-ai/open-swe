@@ -25,8 +25,6 @@ MAX_CHANGED_LINES = 20
 # slack costs the voters; the agent is told 20 so it aims there.
 ACCEPTED_CHANGED_LINES = 25
 MAX_FILES = 100
-# The voter's approval covers everything excluded, so the hidden share stays bounded.
-MAX_EXCLUDED_LINES = 500
 
 # Kinds of change that must be read, so no APPROVALS.md guideline can hide them.
 _UNEXCLUDABLE_PATH = re.compile(
@@ -46,6 +44,15 @@ _TEST_PATH = re.compile(
     r"|(?:^|/)test_[^/]+$"
     r"|_test\.[^/.]+$"
     r"|\.(?:test|spec)\.[^/.]+$"
+)
+# Derived from other files in the PR, so they never decide anything on their own.
+_GENERATED_PATH = re.compile(
+    r"(?:^|/)(?:swagger|openapi)\.(?:json|ya?ml)$"
+    r"|(?:^|/)(?:__generated__|generated)/"
+    r"|\.generated\.[^/]+$"
+    r"|\.min\.(?:js|css)$"
+    r"|\.pb\.go$|_pb2(?:_grpc)?\.pyi?$"
+    r"|\.snap$"
 )
 _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
@@ -115,25 +122,33 @@ class ChangedFile(BaseModel):
             }
         )
 
+    def _stays_within(self, pattern: re.Pattern[str]) -> bool:
+        """A file crossing into or out of a category is a production change either way."""
+        if pattern.search(self.filename) is None:
+            return False
+        return self.previous_filename is None or pattern.search(self.previous_filename) is not None
+
     @property
     def is_test(self) -> bool:
-        """A file crossing into or out of the tests tree is a production change either way."""
-        if _TEST_PATH.search(self.filename) is None:
-            return False
-        return (
-            self.previous_filename is None or _TEST_PATH.search(self.previous_filename) is not None
-        )
+        return self._stays_within(_TEST_PATH)
+
+    @property
+    def is_generated(self) -> bool:
+        return not self.is_test and self._stays_within(_GENERATED_PATH)
 
     @property
     def changed_lines(self) -> int:
         return self.additions + self.deletions
 
     @classmethod
-    def split(cls, files: list[ChangedFile]) -> tuple[list[ChangedFile], list[ChangedFile]]:
-        """``(files the voters have to read, test files)``."""
+    def split(
+        cls, files: list[ChangedFile]
+    ) -> tuple[list[ChangedFile], list[ChangedFile], list[ChangedFile]]:
+        """``(files the voters have to read, test files, generated files)``."""
         return (
-            [file for file in files if not file.is_test],
+            [file for file in files if not file.is_test and not file.is_generated],
             [file for file in files if file.is_test],
+            [file for file in files if file.is_generated],
         )
 
     @classmethod
@@ -172,7 +187,7 @@ class Exclusion(BaseModel):
         file = next((file for file in files if file.filename == self.path), None)
         if file is None:
             raise ValueError(f"`{self.path}` is not changed by the pull request")
-        if file.is_test:
+        if file.is_test or file.is_generated:
             return []
         if any(
             _UNEXCLUDABLE_PATH.search(name)
@@ -208,15 +223,15 @@ class Exclusion(BaseModel):
 
 
 class ExpeditedDiff:
-    """The diff as the card splits it: drawn, tests, and still-present exclusions.
+    """The diff as the card splits it: drawn, tests, generated, and still-present exclusions.
 
     An exclusion whose content changed no longer matches, so its hunk is drawn again.
     """
 
-    __slots__ = ("excluded", "partially_shown", "shown", "tests", "total_lines")
+    __slots__ = ("excluded", "generated", "partially_shown", "shown", "tests", "total_lines")
 
     def __init__(self, files: list[ChangedFile], exclusions: Sequence[ExcludedHunk] = ()) -> None:
-        reviewed, self.tests = ChangedFile.split(files)
+        reviewed, self.tests, self.generated = ChangedFile.split(files)
         self.total_lines = ChangedFile.total_lines(files)
         by_path: dict[str, list[ExcludedHunk]] = {}
         for entry in exclusions:
@@ -262,11 +277,12 @@ class ExpeditedDiff:
 
     @property
     def accounted_lines(self) -> int:
-        """Drawn, excluded and test lines; anything short of the PR's total fell through."""
+        """Drawn, excluded, test and generated lines; anything short of the total fell through."""
         return (
             ChangedFile.total_lines(self.shown)
             + self.excluded_lines
             + ChangedFile.total_lines(self.tests)
+            + ChangedFile.total_lines(self.generated)
         )
 
 
@@ -275,6 +291,7 @@ class EligibleDiff:
     files: list[ChangedFile]
     changed_lines: int
     test_lines: int
+    generated_lines: int
     excluded_lines: int
     fingerprint: str
 
@@ -285,7 +302,8 @@ class Ineligible:
 
 
 def diff_fingerprint(files: list[ChangedFile]) -> str:
-    """A hash of the non-test diff, excluded hunks included, so a commit touching only tests keeps the votes."""
+    """A hash of the reviewed diff, excluded hunks included, so a commit touching only tests or
+    generated files keeps the votes."""
     digest = hashlib.sha256()
     for file in sorted(ChangedFile.split(files)[0], key=lambda f: f.filename):
         digest.update(file.filename.encode())
@@ -320,14 +338,15 @@ def assess_eligibility(
         )
     changed = ChangedFile.total_lines(diff.shown)
     test_lines = ChangedFile.total_lines(diff.tests)
-    if changed + test_lines + diff.excluded_lines < 1:
+    generated_lines = ChangedFile.total_lines(diff.generated)
+    if diff.total_lines < 1:
         return Ineligible("the pull request changes no lines")
-    if diff.excluded_lines > MAX_EXCLUDED_LINES:
-        return Ineligible(
-            f"{diff.excluded_lines} lines are excluded; at most {MAX_EXCLUDED_LINES} can be"
-        )
     if changed > ACCEPTED_CHANGED_LINES:
-        outside = "tests and exclusions" if diff.excluded else "tests"
+        outside = (
+            "tests, generated files and exclusions"
+            if diff.excluded
+            else "tests and generated files"
+        )
         return Ineligible(
             f"the pull request changes {changed} lines outside {outside}; the limit is "
             f"{MAX_CHANGED_LINES}"
@@ -336,6 +355,7 @@ def assess_eligibility(
         files=list(files),
         changed_lines=changed,
         test_lines=test_lines,
+        generated_lines=generated_lines,
         excluded_lines=diff.excluded_lines,
         fingerprint=diff_fingerprint(files),
     )

@@ -351,6 +351,7 @@ async def expedite_pr_approval(
         "head_sha": head_sha,
         "changed_lines": verdict.changed_lines,
         "test_lines": verdict.test_lines,
+        "generated_lines": verdict.generated_lines,
         "excluded_lines": verdict.excluded_lines,
         "slack_channel_id": channel_id,
         "next": readiness_warning

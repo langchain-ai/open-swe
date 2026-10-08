@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openswe.expedited_review.card import _test_diffstat, open_card
+from openswe.expedited_review.card import _diffstat, open_card
 from openswe.expedited_review.eligibility import ChangedFile, Exclusion
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
@@ -17,7 +17,7 @@ def test_long_test_paths_stay_under_the_slack_limit_and_count_the_rest() -> None
         for index in range(20)
     ]
 
-    [block] = _test_diffstat(tests)
+    [block] = _diffstat("Tests", "test files", tests)
     text = block["elements"][0]["text"]
 
     assert len(text) <= SECTION_TEXT_MAX_CHARS

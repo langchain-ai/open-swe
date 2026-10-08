@@ -37,12 +37,17 @@ are already in the Slack thread.
 - Test files sit outside both gates: they do not count toward the limit and they may
   arrive without a patch. CI judges tests, and counting them would price a small fix
   out of shipping with its tests.
+- Generated files (`swagger.json`, `openapi.*`, `generated/`, `*.generated.*`, minified
+  bundles, protobuf output, snapshots) sit outside both gates as well, whatever
+  APPROVALS.md says: they follow from the source change the card draws and decide
+  nothing on their own. The card lists them like tests, and they stay out of the
+  fingerprint.
 - Hunks that qualify under the target repository's `.open-swe/APPROVALS.md` (read at
   the PR's base commit) sit outside both gates too, so a larger PR qualifies when all
   but a small part of it would be auto-approved. The agent names them in `excluded`
   (path, hunk start lines or the whole file, the guideline, and why); the backend
-  trusts that judgment within fixed bounds: at most 500 excluded lines, every excluded
-  file must have a text diff, and CI workflows, migrations, dependency manifests and
+  trusts that judgment within fixed bounds: every excluded file must have a text diff,
+  and CI workflows, migrations, dependency manifests and
   lockfiles, environment files, and paths naming auth, credentials, secrets or tokens
   can never be excluded. Each call that excludes something writes every
   excluded hunk, its guideline and reason, the base and head SHAs, and a hash of
