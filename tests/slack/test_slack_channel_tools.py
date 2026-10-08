@@ -183,3 +183,81 @@ async def test_post_channel_message_reports_slack_failure_without_retry(
     result = await tools.slack_post_message("C123", "hello")
     assert result == {"success": False, "error": expected}
     assert len(slack_api.calls) == 2
+
+
+@pytest.mark.parametrize(
+    "rejection",
+    [
+        "unlinked",
+        "external",
+        "deleted",
+        "is_bot",
+        "is_restricted",
+        "is_ultra_restricted",
+        "is_app_user",
+    ],
+)
+async def test_dm_rejects_unauthorized_recipients_before_opening_conversation(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch, rejection: str
+) -> None:
+    from openswe.slack.tools import channels
+
+    monkeypatch.setattr(
+        User,
+        "login_for_slack",
+        AsyncMock(return_value=None if rejection == "unlinked" else "octocat"),
+    )
+    monkeypatch.setattr(channels, "slack_identity", AsyncMock(return_value={"team_id": "T123"}))
+    user = {
+        "id": "U123",
+        "team_id": "T123",
+        "deleted": False,
+        "is_bot": False,
+        "is_restricted": False,
+        "is_ultra_restricted": False,
+        "is_app_user": False,
+    }
+    if rejection == "external":
+        user["team_id"] = "T456"
+    elif rejection != "unlinked":
+        user[rejection] = True
+    slack_api.respond({"ok": True, "user": user})
+    result = await tools.slack_send_dm("U123", "hello")
+    assert result["success"] is False
+    assert not any(
+        method in ("conversations.open", "chat.postMessage") for method, _ in slack_api.calls
+    )
+
+
+async def test_dm_posts_to_authorized_recipient_and_records_concierge_context(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.slack import dm
+    from openswe.slack.tools import channels
+
+    monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value="octocat"))
+    monkeypatch.setattr(User, "concierge_mode_for_slack", AsyncMock(return_value=True))
+    monkeypatch.setattr(channels, "slack_identity", AsyncMock(return_value={"team_id": "T123"}))
+    record = AsyncMock()
+    monkeypatch.setattr(dm, "_record_in_concierge_thread", record)
+    slack_api.respond(
+        {
+            "ok": True,
+            "user": {
+                "id": "U123",
+                "team_id": "T123",
+                "deleted": False,
+                "is_bot": False,
+                "is_restricted": False,
+                "is_ultra_restricted": False,
+            },
+        }
+    )
+    slack_api.respond({"ok": True, "channel": {"id": "D123"}})
+    slack_api.respond({"ok": True, "ts": "1.0"})
+    assert await tools.slack_send_dm("U123", "hello") == {
+        "success": True,
+        "channel_id": "D123",
+        "message_ts": "1.0",
+    }
+    record.assert_awaited_once_with("D123", "hello")
