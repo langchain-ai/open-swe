@@ -14,10 +14,10 @@ import type { AppCommand } from "@/lib/appCommands"
 import type { PullRequestSearchResult } from "@/lib/api"
 import { usePullRequestSearch } from "@/features/reviews/lib/usePullRequestSearch"
 import type { AgentThread } from "@/features/agents/lib/types"
-import type { DesktopLocalThreadSummary } from "@/desktop"
+import type { DesktopLegacyLocalThread } from "@/desktop"
 import { Kbd } from "@/components/ui/kbd"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
-import { useDesktopLocalThreads } from "@/features/agents/lib/desktopLocal"
+import { useLegacyLocalThreads } from "@/features/agents/lib/legacyLocal"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
@@ -41,7 +41,7 @@ interface LocalThreadResult {
   id: string
   kind: "local-thread"
   label: string
-  thread: DesktopLocalThreadSummary
+  thread: DesktopLegacyLocalThread
 }
 
 interface PullRequestResult {
@@ -72,7 +72,7 @@ function commandMatches(command: AppCommand, query: string): boolean {
 export function buildPaletteResults(
   commands: ReadonlyArray<AppCommand>,
   cloudThreads: ReadonlyArray<AgentThread>,
-  localThreads: ReadonlyArray<DesktopLocalThreadSummary>,
+  localThreads: ReadonlyArray<DesktopLegacyLocalThread>,
   query: string
 ): Array<PaletteResult> {
   const normalizedQuery = query.trim().toLowerCase()
@@ -171,7 +171,7 @@ export function AppCommandPalette({
     },
     { enabled: open, staleWhileRevalidate: true }
   )
-  const localThreads = useDesktopLocalThreads({ enabled: open && isDesktop })
+  const localThreads = useLegacyLocalThreads({ enabled: open && isDesktop })
   const pullRequests = usePullRequestSearch(
     query,
     open && !query.trim().startsWith(">")
@@ -211,7 +211,7 @@ export function AppCommandPalette({
         result.kind === "command"
           ? result.command.group
           : result.kind === "cloud-thread"
-            ? "Cloud threads"
+            ? "Threads"
             : result.kind === "pull-request"
               ? "Pull requests"
               : "This Mac"

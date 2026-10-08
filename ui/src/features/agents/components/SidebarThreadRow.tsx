@@ -39,7 +39,8 @@ import type { SidebarThreadItem } from "@/features/agents/lib/sidebarThreads"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
-import { useMarkLocalThreadViewed } from "@/features/agents/lib/desktopLocal"
+import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
+import { useMarkLegacyLocalThreadViewed } from "@/features/agents/lib/legacyLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   markAgentThreadViewed,
@@ -204,7 +205,9 @@ function sidebarRowClassName({
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
     "text-foreground",
-    active ? "bg-accent" : "group-hover/row:bg-sidebar-row-hover"
+    active
+      ? "bg-zinc-200 dark:bg-accent"
+      : "group-hover/row:bg-sidebar-row-hover"
   )
 }
 
@@ -261,6 +264,7 @@ function PullRequestIcon({
 export function SidebarThreadRow({
   item,
   isActive,
+  activeThreadId,
   pinned,
   archived,
   live,
@@ -273,6 +277,7 @@ export function SidebarThreadRow({
 }: {
   item: SidebarThreadItem
   isActive: boolean
+  activeThreadId?: string
   pinned: boolean
   archived: boolean
   live?: PullRequestSnapshot
@@ -287,8 +292,10 @@ export function SidebarThreadRow({
   const navigate = useNavigate()
   const chat = useChatRoutes()
   const queryClient = useQueryClient()
-  const markLocalViewed = useMarkLocalThreadViewed()
+  const markLocalViewed = useMarkLegacyLocalThreadViewed()
   const deleteThread = useDeleteAgentThread()
+  const worktreeThread =
+    useLocalThread(item.id) ?? (item.location === "local" ? item.thread : null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletingLocal, setDeletingLocal] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
@@ -305,6 +312,16 @@ export function SidebarThreadRow({
   const subagents = (item.subagents ?? []).filter(
     (subagent) => subagent.status !== "completed"
   )
+  const workers = item.taskWorkers ?? []
+  const activeWorkerId = workers.find(
+    (worker) => worker.id === activeThreadId
+  )?.id
+  const [workersExpanded, setWorkersExpanded] = useState(
+    Boolean(activeWorkerId)
+  )
+  useEffect(() => {
+    if (activeWorkerId) setWorkersExpanded(true)
+  }, [activeWorkerId])
   const hasSubagents = subagents.length > 0
   const activeSubagent =
     isActive &&
@@ -315,7 +332,9 @@ export function SidebarThreadRow({
   const subagentsCollapsed =
     prefs.collapseSubagentsByDefault !==
     prefs.collapsedSubagentKeys.includes(item.key)
-  const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
+  const rowIsActive =
+    (isActive && (!activeSubagent || subagentsCollapsed)) ||
+    (Boolean(activeWorkerId) && !workersExpanded)
   const source =
     item.source && item.source !== "dashboard" ? SOURCE_META[item.source] : null
   const SourceIcon = source?.icon
@@ -353,7 +372,7 @@ export function SidebarThreadRow({
     setDeletingLocal(true)
     try {
       const deleted =
-        (await window.openSweDesktop?.deleteLocalThread(item.id)) ?? false
+        (await window.openSweDesktop?.deleteLegacyLocalThread(item.id)) ?? false
       if (!deleted) throw new Error("Local Open SWE thread not found")
       onDeleteLocal(item.id)
       setDeleteOpen(false)
@@ -412,6 +431,35 @@ export function SidebarThreadRow({
           className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
         >
           <SubagentCaret className="size-3" weight="bold" />
+        </span>
+      )}
+      {workers.length > 0 && (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-expanded={workersExpanded}
+          aria-label={
+            workersExpanded ? "Hide task workers" : "Show task workers"
+          }
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            setWorkersExpanded((expanded) => !expanded)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              event.stopPropagation()
+              setWorkersExpanded((expanded) => !expanded)
+            }
+          }}
+          className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
+        >
+          {workersExpanded ? (
+            <CaretDownIcon className="size-3" weight="bold" />
+          ) : (
+            <CaretRightIcon className="size-3" weight="bold" />
+          )}
         </span>
       )}
       <SidebarRowTitle marquee={marquee} title={item.title} />
@@ -484,13 +532,14 @@ export function SidebarThreadRow({
   const rowClassName = sidebarRowClassName({
     compact,
     active: rowIsActive,
-    paddingLeft: hasSubagents
-      ? indent
-        ? "pl-4"
-        : "pl-2"
-      : indent
-        ? "pl-6"
-        : "pl-2.5",
+    paddingLeft:
+      hasSubagents || workers.length > 0
+        ? indent
+          ? "pl-4"
+          : "pl-2"
+        : indent
+          ? "pl-6"
+          : "pl-2.5",
     archived,
   })
 
@@ -581,6 +630,21 @@ export function SidebarThreadRow({
           ))}
         </ul>
       )}
+      {workers.length > 0 && workersExpanded && (
+        <ul aria-label={`Task workers of ${item.title}`}>
+          {workers.map((worker) => (
+            <SidebarTaskWorkerRow
+              key={worker.id}
+              worker={worker}
+              activeSubagentId={activeSubagentId}
+              isActive={worker.id === activeThreadId}
+              compact={compact}
+              indent={indent}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </ul>
+      )}
       <DeleteThreadDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
@@ -588,9 +652,9 @@ export function SidebarThreadRow({
         isDeleting={isDeleting}
         onConfirm={() => void onConfirmDelete()}
         detail={
-          item.location !== "local"
+          !worktreeThread
             ? undefined
-            : item.thread.ownedWorktrees?.length
+            : worktreeThread.ownedWorktrees?.length
               ? "This deletes the worktree Open SWE created for it, including any uncommitted changes in it. Its branch and commits are kept."
               : "This removes its history but does not revert changes made to your repository."
         }
@@ -608,6 +672,7 @@ function SidebarSubagentRow({
   threadId,
   subagent,
   isActive,
+  nested = false,
   compact,
   indent,
   onNavigate,
@@ -615,6 +680,7 @@ function SidebarSubagentRow({
   threadId: string
   subagent: AgentSubagentSummary
   isActive: boolean
+  nested?: boolean
   compact: boolean
   indent: boolean
   onNavigate?: () => void
@@ -630,7 +696,13 @@ function SidebarSubagentRow({
       className={sidebarRowClassName({
         compact,
         active: isActive,
-        paddingLeft: indent ? "pl-13.5" : "pl-11.5",
+        paddingLeft: nested
+          ? indent
+            ? "pl-18"
+            : "pl-16"
+          : indent
+            ? "pl-13.5"
+            : "pl-11.5",
         archived: false,
       })}
     />
@@ -675,9 +747,9 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const LocationIcon =
-    item.location === "local" ? IoLaptopOutline : IoCloudOutline
-  const locationLabel = item.location === "local" ? "This Mac" : "Cloud"
+  const onAMac = item.location === "local" || runsOnAMac(item.thread)
+  const LocationIcon = onAMac ? IoLaptopOutline : IoCloudOutline
+  const locationLabel = onAMac ? "This Mac" : "Cloud"
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -753,5 +825,129 @@ function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
         </span>
       </div>
     </div>
+  )
+}
+
+function SidebarTaskWorkerRow({
+  worker,
+  activeSubagentId,
+  isActive,
+  compact,
+  indent,
+  onNavigate,
+}: {
+  worker: AgentThread
+  activeSubagentId: string | null
+  isActive: boolean
+  compact: boolean
+  indent: boolean
+  onNavigate?: () => void
+}) {
+  const queryClient = useQueryClient()
+  const marquee = useTitleMarquee()
+  const { prefs, toggleSubagentsCollapsed } = useSidebarPrefs()
+  const subagents = (worker.subagents ?? []).filter(
+    (subagent) => subagent.status !== "completed"
+  )
+  const activeSubagent =
+    isActive &&
+    subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
+  const subagentsCollapsed =
+    prefs.collapseSubagentsByDefault !==
+    prefs.collapsedSubagentKeys.includes(`cloud:${worker.id}`)
+  const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
+  const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
+  const status =
+    worker.status === "finished"
+      ? "Completed"
+      : worker.status === "error"
+        ? "Failed"
+        : worker.status === "interrupted"
+          ? "Interrupted"
+          : worker.status === "running"
+            ? "Running"
+            : "Idle"
+  return (
+    <li
+      className="group/row relative mb-0.5"
+      onMouseEnter={marquee.measure}
+      onMouseLeave={marquee.reset}
+    >
+      <Link
+        to="/agents/$threadId"
+        params={{ threadId: worker.id }}
+        search={{}}
+        aria-current={rowIsActive ? "page" : undefined}
+        title={`${worker.title} — ${status}`}
+        onClick={() => {
+          markAgentThreadViewed(queryClient, worker.id)
+          onNavigate?.()
+        }}
+        className={sidebarRowClassName({
+          compact,
+          active: rowIsActive,
+          paddingLeft: indent ? "pl-13.5" : "pl-11.5",
+          archived: worker.resolved === true,
+        })}
+      >
+        {subagents.length > 0 && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-expanded={!subagentsCollapsed}
+            aria-label={
+              subagentsCollapsed
+                ? "Show worker subagents"
+                : "Hide worker subagents"
+            }
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              toggleSubagentsCollapsed(`cloud:${worker.id}`)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                event.stopPropagation()
+                toggleSubagentsCollapsed(`cloud:${worker.id}`)
+              }
+            }}
+            className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
+          >
+            <SubagentCaret className="size-3" weight="bold" />
+          </span>
+        )}
+        <RobotIcon
+          className="size-3.5 shrink-0 text-muted-foreground"
+          aria-label="Asynchronous task worker"
+        />
+        <SidebarRowTitle marquee={marquee} title={worker.title} />
+        <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+          {worker.status === "running" && (
+            <RunningIndicator label="Worker running" />
+          )}
+          {worker.status === "error" && (
+            <ErrorIndicator label="Worker failed" />
+          )}
+          {status}
+        </span>
+      </Link>
+      {subagents.length > 0 && !subagentsCollapsed && (
+        <ul aria-label={`Subagents of ${worker.title}`}>
+          {subagents.map((subagent) => (
+            <SidebarSubagentRow
+              key={subagent.toolCallId}
+              threadId={worker.id}
+              subagent={subagent}
+              isActive={isActive && activeSubagentId === subagent.toolCallId}
+              compact={compact}
+              indent={indent}
+              nested
+              onNavigate={onNavigate}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
   )
 }
