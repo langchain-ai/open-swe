@@ -432,6 +432,9 @@ class RepoClient:
             raise ValueError("GitHub answered the repository without an object")
         return payload
 
+    async def labels(self) -> list[dict[str, Any]]:
+        return await self.pages("labels")
+
     async def branch(self, name: str) -> dict[str, Any]:
         payload = await self.get(f"branches/{quote(name, safe='')}")
         if not isinstance(payload, dict):

@@ -40,7 +40,7 @@ from openswe.review.eval_jobs import (
     resolve_eval_config,
     start_reviewer_eval,
 )
-from openswe.review.labels import LabelChange, PullRequestLabelClient, PullRequestLabels
+from openswe.review.labels import LabelChange, PullRequestLabels
 from openswe.review.reviews import (
     PendingReview,
     PendingReviewCommentInput,
@@ -262,14 +262,10 @@ async def api_get_pull_request_labels(
     owner: str,
     repo: str,
     pr_number: int,
-    session: dict[str, object] = SESSION_DEP,
+    session: dict[str, Any] = SESSION_DEP,
 ) -> PullRequestLabels:
-    user_id = str(session["sub"])
-    await require_repo_access_for_user(user_id, f"{owner}/{repo}")
-    token = await get_valid_access_token(user_id)
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await PullRequestLabelClient(owner, repo, pr_number, token).read()
+    async with _as_viewer(session, owner, repo) as repository:
+        return await PullRequestLabels.read(repository.pull_request(pr_number))
 
 
 @router.patch("/reviews/{owner}/{repo}/{pr_number}/labels", status_code=204)
@@ -278,14 +274,10 @@ async def api_change_pull_request_label(
     repo: str,
     pr_number: int,
     change: LabelChange,
-    session: dict[str, object] = SESSION_DEP,
+    session: dict[str, Any] = SESSION_DEP,
 ) -> None:
-    user_id = str(session["sub"])
-    await require_repo_access_for_user(user_id, f"{owner}/{repo}")
-    token = await get_valid_access_token(user_id)
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    await PullRequestLabelClient(owner, repo, pr_number, token).change(change)
+    async with _as_viewer(session, owner, repo) as repository:
+        await change.apply(repository.pull_request(pr_number))
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
