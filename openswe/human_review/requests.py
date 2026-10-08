@@ -243,7 +243,9 @@ class HumanReviewRequest(Base):
             )
 
     @classmethod
-    async def assigned_to(cls, user_id: UUID) -> list[Self]:
+    async def assigned_to(
+        cls, user_id: UUID, *, decision: Literal["review", "picked"] = "review"
+    ) -> list[Self]:
         """Open review requests for which Open SWE explicitly picked this person."""
         async with postgres.session() as session:
             rows = await session.scalars(
@@ -255,7 +257,7 @@ class HumanReviewRequest(Base):
                     cls.kind.in_(("standard", "posted")),
                     PullRequest.state == "open",
                     HumanReviewParticipant.user_id == user_id,
-                    HumanReviewParticipant.decision == "review",
+                    HumanReviewParticipant.decision == decision,
                     HumanReviewParticipant.assigned_by_agent.is_(True),
                 )
             )

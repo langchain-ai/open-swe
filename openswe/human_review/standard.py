@@ -548,27 +548,60 @@ async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
     )
 
 
+@dataclass
+class ReviewSnooze:
+    """A reviewer's pending picks share one snooze deadline."""
+
+    user: User
+    length: str
+    until: datetime = field(init=False)
+    failed: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        self.until = datetime.now(UTC) + SNOOZE_DURATIONS[self.length]
+
+    async def apply(self, request: HumanReviewRequest) -> bool:
+        assignment_minutes = await _assignment_minutes(request)
+        async with HumanReviewRequest.locked(request.id) as (_, row):
+            participant = row.participant(self.user.id) if row else None
+            if (
+                row is None
+                or row.state != "open"
+                or row.pull_request.state != "open"
+                or participant is None
+                or participant.decision != "picked"
+            ):
+                return False
+            participant.joined_at = self.until
+            row.run_config = {
+                **row.run_config,
+                f"review_snoozed:{self.user.id}": self.until.isoformat(),
+            }
+        duration = max(self.until - datetime.now(UTC), timedelta())
+        await _schedule(request, "pick_expiry", duration + timedelta(minutes=assignment_minutes))
+        await _schedule(request, f"snooze:{self.user.id}", duration)
+        return True
+
+    async def pending(self) -> list[HumanReviewRequest]:
+        affected: list[HumanReviewRequest] = []
+        for request in await HumanReviewRequest.assigned_to(self.user.id, decision="picked"):
+            try:
+                if await self.apply(request):
+                    affected.append(request)
+            except Exception:
+                logger.exception(
+                    "Could not snooze reviewer pick", extra={"request_id": str(request.id)}
+                )
+                self.failed += 1
+        return affected
+
+
 async def snooze(request: HumanReviewRequest, user: User | None, length: str) -> Outcome:
-    """Hold ``user``'s pending pick for ``length``, one of ``SNOOZE_DURATIONS``, then remind them."""
+    """Hold the reviewer's pending pick until the snooze ends."""
     if user is None:
         return Outcome("Link your Open SWE account before snoozing a review.")
-    duration = SNOOZE_DURATIONS[length]
-    until = datetime.now(UTC) + duration
-    async with HumanReviewRequest.locked(request.id) as (_, row):
-        participant = row.participant(user.id) if row else None
-        if (
-            row is None
-            or row.state != "open"
-            or participant is None
-            or participant.decision != "picked"
-        ):
-            return Outcome("This reviewer pick is no longer pending for you.")
-        participant.joined_at = until
-        row.run_config = {**row.run_config, f"review_snoozed:{user.id}": until.isoformat()}
-    await _schedule(
-        request, "pick_expiry", duration + timedelta(minutes=await _assignment_minutes(request))
-    )
-    await _schedule(request, f"snooze:{user.id}", duration)
+    if not await ReviewSnooze(user, length).apply(request):
+        return Outcome("This reviewer pick is no longer pending for you.")
     return Outcome(f"Review snoozed for {length}; your pick stays reserved until then.")
 
 
