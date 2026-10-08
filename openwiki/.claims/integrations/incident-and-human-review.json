@@ -1,0 +1,246 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:e6fab9d7a1605b581599806c82eb1bfd2f1c2b86d422784dda5c2755debea2a5",
+  "claims": [
+    {
+      "id": "claim_e33999b3e1c945dba14a34f3727f2d73",
+      "statement": "Incidents bind an enabled policy to a Slack workspace/app, validate the channel prefix, require a bounded 1–20 model-call limit, and verify Slack identity before enabling; a policy with registered incidents cannot be rebound to a different workspace/app.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/incidents/models.py#L14-L31",
+          "version": "repo-lines-v1:sha256:04b4be9c659c6d4e72e195529ac8f505cda77e0674605670d028627373bab402:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFlYWJjYjRkNzczNWNkNDAwMjgyOWJiZTg1NjFkNGE1Y2Q5YWJhYTAyYmM4MzMwOTZiYTRiNDExNTA4ZDQ2ZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFlM2NmY2ViMzNlMDExZjliNjk1MDg4ZTBiM2FhODNiMTYwM2Q2OWRiNGRjNjU4MDNhYTgzNjM1M2U4MWIwZDciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNhYWNkZDY0ZDVkMDY0OGI0MTg4MTcxZWE1NzYwYzdkYTU1ZTQzNTFjNTYzOGM0OWI0YTE2MGI3OWE3YTM4OWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImExODM2YTY3MDY5ODE4MTZiM2YzMjBlYTJlMmM1OWI1NGQwYjFlOTlhY2YyN2RiY2NiYjVmMjZmODM0OGRhNjkifQ"
+        },
+        {
+          "resource": "repo://openswe/incidents/service.py#L194-L289",
+          "version": "repo-lines-v1:sha256:debbc3a260a8a158fa7971a7f5d77356b497a0ad7f76dd0b3fb4230305b3821e:eyJzZWxlY3RlZExpbmVDb3VudCI6OTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYzN2FmNzNhNTUzYWMzZmZmY2E0YTg2ODk4MTQwNjMzMjk3MzEzMmE1M2I4MDg4NmVjM2NhY2UzYjA5MGE2NzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5ZTg3MWI1YjJkODExOTVjMDg1YzQyZjQ5MmFkYTMwZmM3NmMzZmUzZDc4NTk1MDE3OGZmYmNmZjk0M2Y0ZmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA0NzMxYjM3MWUzNGFkZjYzYWZmZTVkODdhNDNjZDE4Mzk0MGM4ZjE4MDE0MDI2ZGM1YzNhYTIyMzM0MTI3YTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjViNGYyNzhmOWIwNjJlNjA4YzcwOWY0ZTc4ZjM3YWI3NDQ2MzMzMzE1NTRjOTcwZDk1MTk3Yjk4NTk3NDgwMTYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_31d5a818e4084cbda09fa9876081c497",
+      "statement": "Incident enrollment is restricted to eligible public internal Slack channels and creates a public, system-owned incident agent thread; enrollment queues recent eligible history and schedules automatic investigation only when context exists, while setup failures are persisted as needs_attention records.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/incidents/channels.py#L150-L211",
+          "version": "repo-lines-v1:sha256:12f6977207e431cde6ae5cacc2981c3c928b191480f9a5044a1dfcefb5d6f2da:eyJzZWxlY3RlZExpbmVDb3VudCI6NjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjODZhZTI4MGQ3YzYyYTBiZTEyNjNlOGM2MTdlYTFmNTg5YTU5MmMzMDI4OTUxMTdlZTBlMDdiMjcyN2JlYzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4ZWNlNTQ2NGYxZDc3ZjJkYzFiNGYxNDQ1NDY0YmE2OTIxOGQwNjkyZjU0ZjY5ZjA4ZWQ1MTU1NTQ4ZDI3ZjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1ZTU2NDgzYmQwN2E5ZDYzOGQzMjM5YTdiM2I4N2M0NzMwMzMwNDU0YjJiOWQ0ZTRhYzg0ZmIzNTUyYTAwNDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyMDliMWZiZjI0ZTBkMjIxMjY4ODkzYjQzZGQyM2VkMjIwMDZhMTk3ZDAyMTJmMjZiMTI2N2JjNzQ0ODJiNGEifQ"
+        },
+        {
+          "resource": "repo://openswe/incidents/service.py#L127-L169",
+          "version": "repo-lines-v1:sha256:255f8fd94af56ca5fd83c88c601057bf8877afaa2382628817b164989d969d8b:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3NjNlM2VkNzllYTQxZmQ3MGM1ZjIyNGEwNzgzZDYyODlmZTVhNjkyZjBiODAzOWVhM2EyYmViMzZiZGE0ZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1NzBjYjdkN2Y2NjJhNTcxMmI3ZmI4ZTcyYThmNzE5NGNiZDYyNmM3MzdkNGY2ODBhNzcyZTdiNzgzZGExMDUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQ1Nzk2YzdjNWIwOGEwYmFkMjU4NWY3YTZjZmIwZmYxYWY4NjBiMjBhYzQ3NzExNzdiZjlkOTU0NWMyZTA4ZDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdiYWRkNzA2NWZmMTlmNTNlZTJiZmY2YWI3Y2FkNGEyOTczNTE1NTg0MDQ5MTkwOWZlYWEzYjQ4OWE4NjBjYjQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8e178509c9204c2488db6b4dcc74a80d",
+      "statement": "Incident Slack events verify the policy workspace/app and deduplicate the event before enrollment or control work; mentions dispatch controls or account-linked questions, while ordinary context is queued and can schedule automatic investigation.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/incidents/channels.py#L267-L358",
+          "version": "repo-lines-v1:sha256:1655a5ab50abc73107a9df89330ffdd92e78705e9fa4eb4a066b4dc1f834c7e9:eyJzZWxlY3RlZExpbmVDb3VudCI6OTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM0MmZhMDNiNzM3YjI5MDI1NTMyZjU2NzUzZDk0MDkzMDY0MzkyZmQ1MmI5NmQ3ZjU4ZWNkYzA0MGFlNmY4MTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyYzRiNDAwNzAzZGM4MDAzZTk3Zjg4OGQ0OTYxYTYzZTAxZDM5NmQ2ZDc1M2IyY2YxNDMyMTNkYTU2OThlOWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNiNzczOGI0NDI3ZGEyM2E5NzQ2MDIxOWFjOTE0ZTNmMTM5NWUzMjRlMDQ1NTAxMDUwYzI4MGJhMGI3MWE0ZDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7c759c1cc97f45ed8204c20d59e5d143",
+      "statement": "Automatic incident turns are debounced and race-safe, enqueue behind existing work, whereas explicit requests interrupt it; successful completion reschedules queued context and an error/timeout marks a watching incident needs_attention and posts one failure notice per run.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/incidents/turns.py#L227-L287",
+          "version": "repo-lines-v1:sha256:94e76536d461ad24e3633211748ff1168ff4dd5f9b38aff8714fc7f64a60d532:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxZTBkNzM2ZDI2ODkyNzdiNDllMTczMjE2ZDI2YWFmN2Y3NWU2ZWYzM2EzNDkwZGZmZjYyYzRjNjBiNzgxN2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwZTJhNDY1MDA5NWZhOTVkMGUyYmI0MWIyZGIyOTA5NGQzNDA0ZDI4Y2UxMjMzOWVjODhiYjRiNWM1YmU4ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkOWJjMDQxNmY4MTkyYTdlMmVkMGY1Y2IwYmJhM2Y5ZmQ3NGI1M2UyY2E3MzI3MjA1ODRmNzAyNDU0ODlhMWEifQ"
+        },
+        {
+          "resource": "repo://openswe/incidents/turns.py#L290-L321",
+          "version": "repo-lines-v1:sha256:4948b06d9e6a1ef1403a34403798f0cec3e5bf9c517943caa7539488225956df:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlY2Y5MjBkOWFlYzVkMDhjZmM5MTYwYWViNzdjZDg1MDA5NTY3OWJiNmE5ODhkZWFiZjk0OGMxMzcxOTkyY2YiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQyNGMxYjRmNDJkZWRiZWU0ZTAwMzZiODkwNjA2ZGEyMjg1ZWMzMjNiZTE1OWRmODFlYjNhYWYwNTAxMTBiZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRlNzU3NWMzYjc3NzZjZjJmOWMyYmZiY2E0NGYyMTQ4MTNhNzgyN2VhYTljMzg0NTRjNzAzYjY4OWE3NDQzODYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_071eff8abe7d4e5e939872dd620a8acd",
+      "statement": "An incident run is accepted only for its saved public system-owned incidents_agent thread and cannot carry personal execution identity; session checks stop work if the binding/policy changes, the channel is excluded, or automatic work continues after pause/completion.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/incidents/runtime.py#L207-L237",
+          "version": "repo-lines-v1:sha256:fa22c6b60e036ec2363460c20b3f417916435408f58318528de534598369830f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY3MDIzNTRmNzI0YzY5ODY0MGMwN2M3OGFlNWQ4OWFlYTUxZGMzNzAzYzM0NTM4NjNjYTEwNTVjNGQ3NTI1YTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiZjQzNzM0NDBiNzk5MGI4NmJhMjI0MzA0ODY4MjMxZGEyYTE2ZWY4MGJlNzMyYjdlZThmYmVhNWM5YWJkNDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJlNmJlYTVmOWI4NGRjNWVhZmRmZjE2NmY1ZDNhZjBmYWU1YTA5ODhjZTY4NWNiYjliYzNhMWJkYTA0NjJlYTAifQ"
+        },
+        {
+          "resource": "repo://openswe/incidents/runtime.py#L98-L114",
+          "version": "repo-lines-v1:sha256:1941d38becba12d9a20c822088e832ad569828d593207136b68f0fac4c5dbc84:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI2ZDczNjdmNDNmZTBjODExYWY2ZWY1ZGZjOTUxNDhkNjNhNDBhNGNhM2QxNzIxMGVlNDQ4YjczNzdlMWZiNmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExNzEwYjFjYmMzMzc0ZTBmZjFjZGIwN2MxODU5ZjQzODkxMTQ4YzcwZWYxZGM1YTJlNTFkMDBmYWI2NWEwMTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMwOGEwZWY1NGY4MWFmMjliYjgxMGQzZWYwM2Y4ZDk1YzRlYzkzMmU1MTg2NGRlNzA0MTc3NWU4OGVkOGI3MDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ5MTcwYmU0ZmZkMzRlZDEzNGVkMGZhZjFjYWY4ZGU0NTk1ZGU0NTRhM2EyZmNjNjIzZThkZWVjOTI4NjMxODUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_42735ad73ddf4ecdb9ddc72f40f8eac1",
+      "statement": "Incident report finalization retains only claims and hypotheses with known evidence citations, marks omitted claims as a gap, and uses bounded redaction; evidence collection redacts observations and restricts retained source links to credential-free HTTPS URLs.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/incidents/evidence_tools.py#L25-L70",
+          "version": "repo-lines-v1:sha256:56325a85411a3bc4527cdeac73ec56e67af1bac9d621e54947def3a9e3c9542e:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVmYmIwZWE4OTFhMDJkZDdiNzczNTZmMjc0ZTUyMGRiOWQwZDAzNzM4YjQwYmMwZjJlOTVmMGUyNTMwZjk2Y2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJjOTNhOGQ3YmEwMmY5MTYyY2VhZGJiNDRiODgzZTIxODFjMmZkOTQ4NjRmNDgyNGZmOGU2ZjY0MzZlOTdhMTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE5OGIwNjNkOWI0N2U2NTM3OTYyNTU3MmNjZTE5NzY2OWQ1NzY3ZTEyYzE4YmUwNzU2NTJiOGNkOTgxY2U4ZDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwYzY4MGEwZjI5ODU0NjEyMzRmMzhlNTE4ZjlmNzUzMDE1MzRmYWM0MDRjODEzOGQ2ZWU5NTdlYjNjZDE3ZWMifQ"
+        },
+        {
+          "resource": "repo://openswe/incidents/report.py#L98-L153",
+          "version": "repo-lines-v1:sha256:94c605f5cec99935e4afb24da99fda45efeaa1beed3eeb5aeb3bd50e56767a76:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2M2IzYTBhZjA3ZTQzM2I4YWZhMTU2NWZiNjUwNjAwNzkzYWQ4ZWMxN2YzNjc3ZWFlNjM0ZDFmYWEyMDRhN2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjIwM2JhMTFlMWJmZDQ2ZTY4N2YwOTRiYjdjMGI3YzVkMWZkYzUwZTYzMjk1YjMzYWQ3Zjk1MTM3MDUyMWZjYjIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_f25028906f8843fcb798b4176407b9ab",
+      "statement": "Recording an incident report updates the postmortem before saving the latest record, and automatic Slack delivery is limited to the first evidence-backed finding while explicit answers may post once per run; delivery suppression is recorded only after Slack confirms posting.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/incidents/documents.py#L110-L116",
+          "version": "repo-lines-v1:sha256:c2d92c37b9518f813b086cf4df8a4772a3f2d16466872c538443edeaaaff30d3:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTFiNDYyZDFhYjUzMDEzZTRiMjE4NTg4ZjJhMGQ4OGEyZjgxYjQyZTc3NTgyNjBiZDk4YzUzZDU0OWMzYTJjNSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMjlhYjI5NDcyOWQyMzYzNjVkOTNiM2YyYjZmOWEwNjYxYTczYjI5N2U0NGVkYmJmY2RlZjFlNWRiZjhmYjQ0NyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzExZDdiNDc4NDQ2MDZhMjQ4ZjM5YTVjYTA3ODhhMjM5NzI2YmEzNDVlMmUxYTVlNTFhMGFiOWU1ZmZiMzI0MSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjVhYTVjNGI1MDI5YjAxMTBjNTliZDkxZTNlMWI2ZDkwYTQ4ZmQyNDUxZDNhYzA4MjU0NmM3YTEzNTA5ZDM0NiJ9"
+        },
+        {
+          "resource": "repo://openswe/incidents/runtime.py#L116-L189",
+          "version": "repo-lines-v1:sha256:02683b9d10f7aa28a05c50175ab73e72ce823418e82c31980fc4bf8191070c68:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVhNmRjZTY0NTBjMTM1MWEwMzNkYjI2OWQ1ODJiZmU2MzA1NGNmNTU0MjEyZmYxZDRhODhlNWNlMDYxYzE4MzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2YjA0NDkxNDY5NzIyZTgzNjNhOTRlNDA0NDUzOGUwMTNhMmEyMTdlMzZiMWU1NjhiYTYwYWNiN2I0YzhmMmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBhOGE0ODdlMTI0Y2M5ZDY2MjJmOTcwODI1MzZlNmJkNGRhOTgwNWU0NjFiMGYwYzg5Nzg2MTBjZGYyMWRlOWIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM5YWE3NjYwMzU5YWJmNjRhMTcyZWMxNmVkZDk4YmNjMDVkN2MxYTAxMmU2YTBiYThkYzk3NmZjMjBlOTQwNWMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6b783f9e000b44f0ae27cad027bf4e7f",
+      "statement": "Incident dashboard settings are admin-only, readers must currently retain Slack channel access, and command receipts claim a request ID/content hash before side effects to make retries idempotent and reject altered request reuse.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/incidents/routes.py#L36-L84",
+          "version": "repo-lines-v1:sha256:46b342bf37393d0f466836a601bb634e8d4e08ea66e4345e78fe0677fb4e509c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMzNTM0Nzk0OTQwZmQxMWVlM2FhMmY0NWI5MTFlOWJiYzc1N2VmMDY0MWEzYTc3NGZkMjNmMzE0YmZhNmVjNzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJmYmFjNWU1NGMwMmZiZjJiNTNkYzk2ZjQzZTBmNzJiMGNkYjhhZTc1ZGFjYWE4NjZhM2ZjYzk5Y2EzYzg2YzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY2MGFiZTJhMDI4MTQwNTJlMDZiY2YwMmExMzU4MjQ4MTZiYThkNTQ0NDY3Yzc3YjE5MDUxZWZjYzU2N2UxNWEifQ"
+        },
+        {
+          "resource": "repo://openswe/incidents/service.py#L417-L455",
+          "version": "repo-lines-v1:sha256:5fdd30e819ef826576934ea3eebf76b1dba3ce4c128ab0128e5c3942ace839fd:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM1N2IwZmE0ZDY4MmMyOTYzMGJiZWE3NTE3ZjdiMDE0ODY0NzdmMmRhZTIxMGE2NzJkOTdlOGIyZjBmN2NkMTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4M2NmMWIxMmU2ZDY3NGQ1NjhiZTQ5MjRmOTY1Nzg4OGU0ZWI5YjA3MTgyYzdiYmFkODQyNjkyNGM3ZjA5MGYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc0MGJhMjFiNGVhMTZkZDU4NjAyMjMxZGJlZWU5NjY1ZTBjMmU4ODlhMGE3ZWM0YzkyNDdhZDlmMzI3NWRhZmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_38051adb85fd466ca02bbb5af4584ca0",
+      "statement": "HumanReviewRequest persists standard, expedited, and posted requests with participant decisions and enforces one open request per PR; expedited approval excludes the PR author, while standard reviewers and pending agent picks are distinct participant states.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/human_review/requests.py#L1-L15",
+          "version": "repo-lines-v1:sha256:5570366bb368bb2949d2a949bf1795810ce908de3117ec9a49081958c06f4447:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjkxMGU2ZDYzMTc4YzY0YzM5MGI2ZThiZmY0ZTAxNmM0MDlkNmQ5YWQ1NDgxNTQ2MDhiMDdhZWE1YTMwZmZiZWUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNhYzZjZTUxNTc1ZTU1NzY4NWVjN2JiNDhlYTE2MGY0NjYwY2Y1ZmM3ZmQ5MWVjOGVmMjhjY2Y4YjdmOTA2YzUifQ"
+        },
+        {
+          "resource": "repo://openswe/human_review/requests.py#L135-L167",
+          "version": "repo-lines-v1:sha256:1818164cb7aca1d268317118bcbcf2e23805314b47c934f1667d3034824ba193:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzZDAwY2YyNzA5NjRkNDRhMTNkZmFjODc1MmIwOWZjYzQzNWIwZjE5YjMxNmFiY2Y4MWE3YWE2NGJiMTIyZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyY2E2NjczMDFlYTUyMTBhN2ViNDUzNGM2ZjU1NjRmZTI2Yzg0NzJhMTNhNWVhODYyNDBiMjRmNTE4MTM4MzkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdkYjY4YmQ5MmY5MGQzMDk4YjBkOGYyY2MxZjczZjdmNDczZTJhZmUwYjk0OGRhMjIxZmMwYzZhM2VkMDM3OGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY4YmY2ZWE1NzMyYTQ2NmM0NjRhYzY2NjY3MTA1NzUyY2ZjZTA4YThmOTFjNTY4Y2QyZjM3OTgyZWQ0ZDBhMmYifQ"
+        },
+        {
+          "resource": "repo://openswe/human_review/requests.py#L39-L45",
+          "version": "repo-lines-v1:sha256:0785fb2ef7274787311938581a7e090e969d4dfc644d5ef00004cce00d72f2e4:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMWY1MDI2Y2Q4ZDYxMDRkZTM4OGJlYjE3NmU5ZDQ5MDgyMTk4MzlkM2EyZDcxZjU0YWE3NDg4MjNiM2ZhZTU3MSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiY2JlMmZkNDlmN2VjOWIxZGVkNTYwYTlhZjExMDYyMDg5YWZiNDNhMzg4ZmFjNDM3YjU4ZDE2Y2RlNzZhNzA4NiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGM5ODc0ZGQyOTBkZDA5MzliODAxNTY0Y2NkNDJmMjU0ZGIwOTc4ZDM4OGZjZmIyM2QzOGJhY2NiYTJhZTZjYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODRjMmQzYmQ5NTUzMzQ3ZmM5YTJiMzdhODAyY2I1NmU0OTExZDA3MzdmY2E3MTJiZjc4YTI3M2RiNDgxNjViMCJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_ff095c41bcb1400bb2040943acd8dfc5",
+      "statement": "Standard review creation rejects a PR that is closed, draft, conflicted, or failing required checks, posts a card only after its assignment and auto-merge deadlines are schedulable, and discards the new request if scheduling or Slack posting fails.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/human_review/standard.py#L181-L195",
+          "version": "repo-lines-v1:sha256:c665e322f538cfd5e580f82b4842522fc496c15d0626704799146a82e681b287:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI5YjRkZDgxNzM4OGE1MWU2ZWE2NDAwNDY5ZTAxN2QxMzgwZDZmMjZlZWEyYTMyMDg3MDZlODBhNjc5M2U3NTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiZTZiNzIyYzIzZDg2ZTE3MWFlNDMwZTExODFlYjJmYjhlYWZhMGJjZjJlM2Y5ODE1ZGJkN2VhZDZhZjUxOTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQzYzA0MTkyZTJlMGQ2ZmU3MjI3MTljMGYzZmYwNGVkMzY5MzNjNTk4ZjEzMGI5NDJkZDI1N2RmYWFkNGQwNjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRiZjViZjhiZWI0ODVkNjkzYzY1MTQxMmVlZjA0ZjFiNDkwODFlZjhiODQ1NDAyM2ExYWEzNTY0NzU3ZmFmNjcifQ"
+        },
+        {
+          "resource": "repo://openswe/human_review/standard.py#L348-L437",
+          "version": "repo-lines-v1:sha256:daae80f5618fbd041abaaf3461d22787ec2b35b236c8034b19f57d2d6f97bb91:eyJzZWxlY3RlZExpbmVDb3VudCI6OTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5ZTJmZTkyMWJjMWFiOTFhZjdkMmIzOTg2ZDg0ZmI3NmYzY2M2ODZiMDJkMmZkNzZlOTBmMTMxOTc3MTA1NzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjljNjljNzEzZmFhYjMzNGYxNzk4ZTg5ZmRjOWM0MjE3YjA5YmI1NTlmMzllY2FkYjJiY2QxZjk4ZDk1M2UwODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg2YjU5NDhlOGVlMDE5NDM0MTgwNTQwYzMyNjJlMjRmOTM1NGI0NDk0MmZjZjhhZjBiMDBjYjIyOTAyMzU4ZDEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_eddc9e7d8ea840639713bbf2ff675b5d",
+      "statement": "Standard reviewers must be linked repository writers and cannot be the author; after the assignment timeout, deterministic selection considers CODEOWNERS/recent-file authors, open-review load, repository write access, and weekday local work hours, and can defer until the next shift.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/human_review/picking.py#L1-L9",
+          "version": "repo-lines-v1:sha256:54b615a599153274306a0e1f3af5a93cb45841dc0872c9149d4569282176e350:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNDU3NGI4MDQ0YzlhOWJlNDEzOTQ3ZjZlYzFjZTdkNDdmZDcxNWU4YmNjMDdkZTBkMTczMWJiYjVmNWUzMGVmMyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWYwOTA2MGVhNzExZjBiN2RiNjEyMDM5YmQ4NGMxOTljOWRjMTMwOTY1ZGE3OThhM2ZhNjBlNWJiZWYyZDljOCJ9"
+        },
+        {
+          "resource": "repo://openswe/human_review/picking.py#L282-L437",
+          "version": "repo-lines-v1:sha256:6d78891943c13c19d85e8e9293f2eaa77baf1662a9fe84bfa5c342939be85fbe:eyJzZWxlY3RlZExpbmVDb3VudCI6MTU2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3ZDVmNWNhZTZhNDViMDVhOTE1Mzk4YWE4YWNlNWQ3YmI5YWExYWQ5MjllNTBiMjgxMTE3OTViNzQ4NTgxN2Q2IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwYzgxMzBjMDBlNjA3ZWNkYzRkMmRkMzczNjY0NDViYWZjNzQ1ODFhNzE0MzViZDY4YWIzMDUwYzZmZDc1NWI4IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiIzYjc2N2VjNGQ1ZDlmMzQ3MjgzOThiYTQwNTNmMTM4MThjZTMxMDJlYzM2YmRmOTFlNTdmN2MzY2M0N2NlZTI3IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MSwiZm9sbG93aW5nQ29udGV4dEhhc2giOiI0ODk2MDBhNzNkMmUwMmYzNTJiOTBmZWYxZDhkNjM4MTFiYTRhOGVlMGMxYmVhYTdhZTQ2NThmMzZhYTJlMTk4In0"
+        },
+        {
+          "resource": "repo://openswe/human_review/standard.py#L519-L548",
+          "version": "repo-lines-v1:sha256:235d0f74796f437a6a8c8de0cb519d5292626793e0244180090589d0fc56321d:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ0NGYxZjc4NzlmMTYxMWM4ZTkzYzEzZDRmZDg4NjNkZjAwMTgyNWFkNWQ3ZGE0MzA5NWIzYTdjMGI0YzllNmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFhZTcxNDc4MGM3MGIyMTI4MjdiYjgyNGJhNTI1NDFhYjgwNjNkM2VhNGVhNTMwNDBkY2QyYTgxNjkyMTQ2N2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU2NzJkNzczZDZhOTUxNGQ2ZDVkZjI1Yjc4MDZkMDcxMWZjODcxYjBiNjFiNDkwM2E3MGFjYmRjYTRhYmNlNTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_235941894bcc4562b59ae7fc2bafb406",
+      "statement": "Standard settlement re-reads GitHub and merges only after required reviewer approvals or, after two hours, at least one approval, and only while readiness blockers are absent; posted requests are observational and never merge.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/human_review/standard.py#L794-L810",
+          "version": "repo-lines-v1:sha256:950952597a6a199132f9aed6ad81aa01902f811c5270078097b88318064f1134:eyJzZWxlY3RlZExpbmVDb3VudCI6MTcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE0YjM2OGJjZGYwMzY4ZDhkOTdlMGRmMWNiOTJhMTFlYjRlMThkYzA5MmI2ZDEzZTRkOTE5ODg1NDBjNTI1MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNkOGE0ZTExMDhiN2YzMjA3MjAwMTJkNmQ1NDNkMDU1ZTZjZjQzYzY5M2QyYjFlMDIyYjVmNzMzODQ5ODNlNDUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA4YjNhMDY0ZDkyYTRmYmJkMzgzMWJmNWU4ZmEwYjRkMDViNDY0ZTVlYmY5ZjU4NWU2YjdjNTk5N2JiNzlkMDQifQ"
+        },
+        {
+          "resource": "repo://openswe/human_review/standard.py#L903-L982",
+          "version": "repo-lines-v1:sha256:d77387ca02fceea8620355cae9c6eaf95304b782959c17f10f535fcaec57ca7f:eyJzZWxlY3RlZExpbmVDb3VudCI6ODAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUyZWI4ODFjZmEzZWMwOGQ0Y2RkZDMxNjE0MDhiNDJmNjBhYTczYzMwYjE5NGRjM2M3OTVkZDg0Yzc4MTI2ZTgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwZTJhNDY1MDA5NWZhOTVkMGUyYmI0MWIyZGIyOTA5NGQzNDA0ZDI4Y2UxMjMzOWVjODhiYjRiNWM1YmU4ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBiZDc1MTY1OGZkYTY3MDE4ZDgzODIzNTM1YTkxNjIwM2UwMDUyNGQxM2ZlZGVlYWRiMTVjNzBiNjVlMjY4NDIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6b8f8627d14442e89a2846087fd358b4",
+      "statement": "Expedited review accepts only small fully visible diffs: fewer than 100 files, readable patches for all non-test files, and at most 25 changed non-test lines; its fingerprint excludes test diffs so test-only changes preserve votes.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/expedited_review/eligibility.py#L1-L8",
+          "version": "repo-lines-v1:sha256:dc40a36ba7c52e294faba14b3a06e4a1ccdb64ce89dc6ee001b07556b154db03:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiM2QwYzUyZGFjYmM1OTk4MDUyNGZhNjU5M2NjMzBlYzMyNTBmOTI5ZGQ5OGMxYTNhNTFiNjFiNmQ0MWI1OWE5YSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYTMwM2VjZGQ0YTRkMTBmMTljNzNmZDQyZmQxMjQzN2ZkMzM1NGE4MjY4MTYwNWRhNTI1NWE5N2EzOTA2OGRiYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjNmNWM5ODA3Y2IxNGE1NDQ5NmI2ZGIxYjVmNjcyYWYzM2U0YTJmODRhMjQwOGM4MWU2M2M2ZjQ0MzU0NDQ3YiJ9"
+        },
+        {
+          "resource": "repo://openswe/expedited_review/eligibility.py#L89-L129",
+          "version": "repo-lines-v1:sha256:4f4380dcd148cb8a3cd0934cd57012530be907fe49caed5aaaecb20ba79e056b:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkZmRlZDQ5NjJlMjg3ZGMyOTEwYjE5NmVlMjVlZWRiY2UzMzY0ZTQ0YWIyMDA5Y2IzN2NkNWViYTA5NTQ1MmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU1NzZhNzgzOTRhOTExYTA0NzE1NGEwMGU0MTdjNDI2Nzk4ZTRjZWM5NzM0MzJlY2U2ZGFhNGEyNDVjMzQ5YjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNhNWExYWM5M2RmMzdmMDhkNDI2MGRjZmYxOGM5N2Y2Yzg4ZWI4N2U4ZDdjMjgwMDM5MGJhYjczNmI2MTMyNzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1fa51c1d6cbd4ca5a45bfc9efa440546",
+      "statement": "An expedited draft can be marked ready only by its author, while approval requires a different linked repository writer; a recorded vote attempts immediate GitHub review submission but remains recorded for merge-time retry if GitHub is unavailable.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/expedited_review/voting.py#L110-L141",
+          "version": "repo-lines-v1:sha256:fb7e33b89368af6faccb4fef92ea22e65713eef8100b79e612eeef2e06cd9f4f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY5OTA0ZDhhMDcwNTIyOTM0YjdjMmM5Y2UyOTEyZDRiOGM3YTM1OTQzZTM3NmRlYTliNGRmNWVlNTU3NjZhZGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI5OTc1MWQ2NDkyMTgyNGUzYTI1N2YzZGMyOGQyM2I4MjlmZThmYzU1MGU5M2ZkNGY1MmU2Njg2YTgwN2U4NzAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjIyNGY1YzYxMWFlODc2Zjc4NmEzYjIxODk1YzcwYTUxMmM3MGQ0MDFkMGI4MWJiYzQwZWUwODUzNTAwMzIyYjAifQ"
+        },
+        {
+          "resource": "repo://openswe/expedited_review/voting.py#L49-L107",
+          "version": "repo-lines-v1:sha256:d14a52d1f87cc480ea8068c0cc1ae7a4304b3410018b75a20e45c363fe0bff02:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlOWY2ZTY3OTlmMmY2NjcxOGRiYmVlOWI5NzMzNTExMjJiMWVkZTAzNDhkZDc3MGFlNTlmMzQ1OGEzMDY2MmMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiNmFmZTc0NDg4MGI1Zjg4YWJiN2I3ZDM2NGNkMjExZDY1NThkM2ZkY2E1MmM3YzA2YTMyNGRkNDJhM2I2ODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjdiMjliMjI0NTgzMDdjMTM4ZWU5NzNjYjM4YjI3MDVjYzVjNDQzYjM5MzVmODZkMjc3NjM4ZjczZGVjZWNmM2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgyMzJjZDgyZjU2MWIxYWE1YzE5NDQ5YjUyZjU4M2FjNDU3ODliMWQyYzNjMjNlMzE4MGZlM2ExZmEwMzA4MTgifQ"
+        },
+        {
+          "resource": "repo://openswe/human_review/lifecycle.py#L201-L244",
+          "version": "repo-lines-v1:sha256:8ba5172ac352828fd8ef4b7450cceb225e2fd753da055bc0a993b6251f9e94a2:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4MzRiMzg4MGVmNGM5ZjlkMzU0ZDRhOTIyMjU0MGRiOWM3OTJkZDY3NmNiODQ0NzFmNmFjMWQ0YmY3ZTM5ZDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTYwMGE3M2QyZTAyZjM1MmI5MGZlZjFkOGQ2MzgxMWJhNGE4ZWUwYzFiZWFhN2FlNDY1OGYzNmFhMmUxOTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0Mzg3OGYyNmNkZjI5MmM5YmRmMzI1ZjVmMDI3MjFkYjIzZTgxODYxN2JjODg1MDZlMDFmZjIwM2QwZDJjMzUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9cdbccc0f2834a1ebf981a4b5e308ff8",
+      "statement": "Expedited merge performs fresh readiness checks and final head/thread checks, does not silently carry a changed non-test diff's vote without an explicit GitHub-commented reason, invalidates a newly ineligible diff, and uses GitHub App merge permissions without bypassing branch protection.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/expedited_review/merge.py#L59-L165",
+          "version": "repo-lines-v1:sha256:b9d14188c1bc9656aaec8e8583ac09ca11a4f4cebcb1001ca3542778d3291e14:eyJzZWxlY3RlZExpbmVDb3VudCI6MTA3LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4MmNkODVlMjk3MDQwYzc5OTYwZGNiOTI2MDM1ZmFiM2NkZTY4ODIxMjlhN2ZjZTk0MDIwZTcxOTE0ODk5YmE3IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIyYzYwNGZjZmVjNjE5MTNjMmU1N2E2YjNjODk1ODI2ODhlNjg5MjhmYjA1NmI2NjdiMTI1MDRlYzk3NTExMjIxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3ZTM4YTc5Y2ZiNTBmMWUyMjIwODY5N2JmZDZjOTM4ZmU0YTA5ZjAzNTU5NmRhOWJiZTg5OTBkYjNjNDkyZjExIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MSwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJmYTExYzA1NjdkMGE1ZjllOWIxMzVmNjVjZDI1MzcyZGZkNjI4Nzc1ZjdjMWVkMjUzZjhiYWQ0MmRkMmQ2NjY5In0"
+        },
+        {
+          "resource": "repo://openswe/human_review/merging.py#L40-L80",
+          "version": "repo-lines-v1:sha256:e34e3745d131a0a24b734ea3a9b22f8b808cf65725cb8a21a1ac8c29ad96b4dc:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4MDgxNGRlYjQ1MzhhNzFhOTBkN2U0OWRlZDIwZmE0OGJlYmUyMDVkNWNlMmEwZTZlOWZlNzVhNDdiNzY3YjciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmMjVmMmNhM2ZhMWI1ZWM2ZTJhZjNjMTMwMDg1MjRmZjAyMzNkYWMxYWViMTYxNjYyNmE0YTE0M2U4MzA4MzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY1ZTdkOTViZTk3MDY1M2JlOWM3YzIzOGQ2MWM0NGUwZmY4YzM2ZWU2MDYyMDU5Njg3NDM0NmVhZmFkOWJiMWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_979488ef2b334409b90c806323843299",
+      "statement": "The scheduler dispatches human_review only with request_id and step, and human-review deadline runs handle snoozes/reminders, assignment/pick expiry, and auto-merge settlement; the legacy expedited scheduler task only deletes old crons.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/human_review/lifecycle.py#L67-L91",
+          "version": "repo-lines-v1:sha256:d4ed222c7bb809bc5f21790135eccf8d5f04e11b02fb85c4e943005b28b07f90:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc3YThkMTQ1MDk1NzYyYWIyZjZkOWRiNjQ3MGEzZTY4OWJiMWVhNGU1OTgzOTZiNDU0ODEyOTNjMmU5ZDRhZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3MDQ2YTdmYjYwZTRiMDBhM2ViMTVhZmJmNDkzOGQ4NGE4MTQ5NzQyNmIwNjZhNmZhNWM5N2ZiMzczZTVhZjMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM4M2NkZmYxZjhkOTk0ZWI1ODdjZGE5ODlmMWFkYzk4ZGQ4MTdkZTVmODA0OGFkZWYwODU1Y2I4ZGYzZjA1MzUifQ"
+        },
+        {
+          "resource": "repo://openswe/human_review/standard.py#L1431-L1506",
+          "version": "repo-lines-v1:sha256:78fd89813b2ec069c62dcd8ae62e26e020a94014610ff6c86caf2c79ac064616:eyJzZWxlY3RlZExpbmVDb3VudCI6NzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxNDg1NzQ3YjYyYTA3YWFkNmQ5YzM1OTE0MGQ5MDEyZWZmMTMzNjU5MDNlZDRjNWUzMTZiMWMxYjkzOGZjZWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQzYjdlODUxMGIzNWRhYzU2NGEyYTQyZDE2YjlmNmE2N2E1ODViODhhMjdkZjA2ZjZiOGEwMGQyNDBiYTkzN2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk4MjUzYjBhOWFhMGU3NDVkN2RlOTVhMDU5NzIzZTdmNGNjOGEwNDYwOWFkNmFjNzY0NzM0NjRhZTY4MjUzZDMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/scheduler.py#L72-L100",
+          "version": "repo-lines-v1:sha256:aa66b5bc3ee02d2c55489ff12baace488c6458fd26bdb3684abce18e379d0f7a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY1M2JhMDc3ZTk4MzJhOTAwY2I1YjA3OWY5ZmQ0ZGM5NzE2NWEyMzFmNzNjN2Y4NGJjZTUwZjZhNWUwN2FkMTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiYWIxNjJkMGM5NmZmMWM0NmM0MDk5NWE2ZDFkNWQxZDg4M2YxMjgxMjAzOGYwMjU0YThkNDBiZTg1ZjY4NDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBiYjZjZWI2NjUwNTljYTViZWQ0MTY3ZmMwMzBhZmE2Y2EyMmFiODA2YjE2ZTY2N2UzODdlODYwNDcxZDQ4MmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhM2I3ZDNlZDZmMTMyMDIwNTgwNzQzMzk4NDY2YWMxMWVhYzNkMzAyOGZjMTcyZmI3ZGQ4ZGE3YWUxOTZjMDAifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-10-08T08:17:40.044Z"
+  }
+}

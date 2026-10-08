@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:1a83ec80cf9a343e2f0ef7097c4a9a6173244b76eea799781e62cb799ac2b55b",
+  "claims": [
+    {
+      "id": "claim_dca8dd1c55ff4abf87cb713d6a1ad3c4",
+      "statement": "Task coordination is feature-gated: `require_task_coordination` rejects unsupported one-shot CLI bridges and requires a user-owned thread whose owner has coordination enabled; the current `task_coordination_enabled` implementation always returns `False`.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/flags.py#L8-L31",
+          "version": "repo-lines-v1:sha256:0e9c1468287e76c39a9d7121c8081d82ad5d32ed4df91d522e43d3387ec2ad21:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5NjI4YmNkZDY2YTUwOTY1ZDJiODU2OWYyOTliMzY4YTc1MTFjY2FlZTc4OGE4ODAzZmQxOGQyYzc4M2U3NGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMwMTRhZWIwMTVlOGI4ZTcxMDdjNTQyNmZjODY2ZGZmOWRiYWMyNjBjNmYxMTZhYzM1ODYxYjcwOTk5OGM4ZmUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZmMTllM2M0ZDRiNWQxYWM0ODc5NDU4ZWY2MzVkM2IwZjYxNzRmODhkMTk2MjUzMWRiNTA0MWM4YmY3MDk2ZDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU5OTk0ZDdhMzk1NzAzMTkwZjQ1OWU5ZDJlNDE0YWRhMWViMzI2ZTcwYjk5ZDlmMWE2YjlkY2E5NmM2NjIyZWQifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L377-L405",
+          "version": "repo-lines-v1:sha256:e2412f9a465ccc97b873ae5a5a729b4c10d015ce45cef68841ab21c9738deea7:eyJzZWxlY3RlZExpbmVDb3VudCI6MjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVhMjI1MGM2NjJmMjFkODIwYTllOTVlODkwMzE0NjA0MzAwYTA1MjEzMTcyZTU3NjM0ZDBkZWJjZjVkNWQyMTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUxZjRiNzNjOTQyZWYxMDA0NmNiZGVhMzYxODBjZTdjMjI3YWNkZjU1NmFmN2UzZDQ2MGRlZGFhYjUyOTNhYTEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9e821674d81a48bf828dd4b5a8a23c01",
+      "statement": "Worker reservation is durable and serialized per coordinator: the first reservation creates the task and coordinator membership, each worker gets a worker membership and delegation record, and an existing deterministic worker identity is reused only for the same task and coordinator.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/service.py#L406-L417",
+          "version": "repo-lines-v1:sha256:da4269a443c0822b6eb27cd4eac59d5c5f844d5251cc849ad8a845afff64f47c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkNWY1MDI4MjBmMzI5NjU1ZGQwMjkyMzQ2NGViMTE3N2E0NzIyZDRlNDVhODkxZTcwNTZhMjU5MDI2YWYxNTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5NDdmZjRjNTViZDA4Y2E5ZjNjNjkwM2U5NTJmMjEzMDhkN2Y5Mjc3NjAwMDRjMzI3ZDMyNDNjYzZhY2FlNDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc4ODYxMTg1MWQxNTJkZjBiM2Q3ODM0OWJmY2Q2YzJhNjQ0MWYyZjU2NTRjMTI0Nzg3MTE0ZjA5Y2ExYjcyNWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3NjViYWEyOTM2MTNlNjM3YmFmYmI4NmVhZTNjNmU5NTQ3NTJlY2UxMGRkMTliYWYwMTBiZGQyOTJhZDAyNWMifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/store.py#L31-L99",
+          "version": "repo-lines-v1:sha256:9a1120084cab141485ee004e1bf9a6b7313fd205df46fc9f188cdea87e60d40d:eyJzZWxlY3RlZExpbmVDb3VudCI6NjksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMGI0NTNmNWUwYzkyZDVmNmMyNTFhNWVhMTk2MGQ3MmYzYmQwNzk1NmFlODU3ZGEyMGUzMWE4OGM1NTk2OWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5MDhhYzJmODA3NmQzZWYyNTE3NTUwZTY0ZGMxMzY4MjFiZTliNzQzNTc2MmU5M2U1ZGNmODU5NzBkYzY5MTciLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg5YTg5YWI4YjRmNTI2OTU1MmZjYjFiYWM2YTlhY2JiNWVlOWMyMzM2M2JlZmNhMjdlMzhlNDdjYzFiOGNjZGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM5NGU4Y2IyNmIzZTY2OWNhZTlhYWE5NjQwYzA5MjBkZTI2YjZmZmRmMzAzYjVjMGYzM2MyZDVmN2U5OWM1ZGYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_fdd5828a57a4496c8bc179256fd8d4d5",
+      "statement": "Only a task coordinator can delegate or control an owned worker; workers cannot spawn siblings and can only send task messages to their permanent coordinator.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/service.py#L110-L123",
+          "version": "repo-lines-v1:sha256:943eb3b1f7ef8b61d24ec3ee1aa52ecb88d6ef72530a9633bf5448837aaa9093:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjN2JlZTQ4NTEzZGFkYzhmYzNjYTQyOWUxNDFjZGE2YWFkYjkxMTFhMGY5NTFmOGY3YjgwY2QyZmEzYWYzODQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRkZmJiNDQ3MWIwNTI5ZmRiZDFlOWQ3ZGMzYTYyNDA3ZDVhN2M5YzBkNWFhNjhkZjA5OGNmZTlkMzJiN2Q4OTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjkxZmJhYjUxYzczN2ZmYTIwNzdjZmMzYmFjYjM2ZGFmODg5MmRjYzU5MWNhMWZmZGUxMWRlMTVmMDMyNDM0Y2MiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFhZDY5NDZmMDViZWU3NjQ2OWFkYzFkMzE4YTljNDQ2NjI2NjJiZTk2N2Q1YjM4YzE5ODcyMzQ5MDJkNWNkYjMifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L476-L523",
+          "version": "repo-lines-v1:sha256:300d6fd6e2166994cbb96e10e7e6cb69a4e849cfd01964de991a8a499bd8e839:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE1OTY4ZGU0NTcwZThjM2MyMjc2YTA5YjZmMzA3MmU5N2IyYmNjNzNmMzc0Zjk3YTQ3YmUxNDk4Nzg4ODA2NWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE3YjUzY2YyNWM1ZmY5YzI5ZmYzN2UxMDc2NWZlNGY3ZjNhYzdjMjg2ODdkMzIyYmJkYmUyYzNiNGM3Mzc2YmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjljYzQwOTBlNjkyNDcxYzEzNDVkNzNiYTc2YjlkZDI2Y2NjOTYzZTgxN2JiNDkwZDE5ZWEyZGVmM2NmNmNiMmYifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L541-L590",
+          "version": "repo-lines-v1:sha256:388a70ac4cccc3e31d23e347816e494955e63ec52fc9824d0fb5845388f7a1a6:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiZmM5YmJiZTViYTQzMTE4YzZhNjE4YmYwYWY0MTUxOTkyOGFjZmQxODQ5NzcwYzgzNDA5NTg0Y2EzNDI1NDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5ZTU0OWZjNjM0YTRlMGEwNTdhMTVhYmZhN2FlMWY3MGNhNzc3YTA1YzBlYWIyNzU3MmJiYjU2YzcwODcwYjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDMwYmJlMTNjMTM3MmI5MzA5ZTQ2NzE2MzY0NzAyZjcxODRkMmRkN2Y0MTc4ZWI0NDM5NmQ0OWY4N2Q2N2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFiYWMwN2VhM2E5YTVjYzdiM2QwZjc4ZDEwMWQ3Y2NmOWJlZWZlNTVlZjQyM2ZhOWY1YWE5Yjc5ZmFhYjRjZDMifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/store.py#L69-L86",
+          "version": "repo-lines-v1:sha256:6e6b45b5848202c931247616ed9ca95eaa605c8245c28adb60d5163e828054d8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE1N2QyYmZkYWI1ZjI1ZTc5ZTIzZWI0MjlhMjg1N2EwYTcxOTc3NTM3NDA0N2ZiNjViZGM1MDU0ODkzMzQyMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ0MDc3MjRkMjNkN2UwNmE0NGUxNDIzMzU0NWFhYjIwN2UzNTczZjI3OGNlMWNiZTM2NDY4NDVmMjYwZTBmMTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjAzNzMwYTEyNThiMDhlOGRjNmI5YjE3NGQ3MWQxYjg4NTc0YzUxYWQ0NDJiYzI0MmNiZjMwMTBhZmQ5NWVhYmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQwZGI2MmQ5ZDQ0OTVmOTQ2NTliOTM3ZDM3ZmVjMGI4NDY3ZWJjYzRmNGRhZjVkY2VhMjA3NDE2OTE2NTY1M2MifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_c53e187226384ae89676ff29da1c96e3",
+      "statement": "Delegation requires a stable tool-call ID, nonempty instructions, a configured completion webhook, an authorized coordinator with an attached sandbox, and a workspace-supported model/effort selection.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/service.py#L126-L153",
+          "version": "repo-lines-v1:sha256:d5538bf687cbf00d549905757f80141d396ca46a64d977d8e7d71484963d8aeb:eyJzZWxlY3RlZExpbmVDb3VudCI6MjgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRkYjI4YzJmYTU5ZWZmYTc3Y2ZjMzcxMmRiNmZhOTJhZWM5ZTBjNjMzOWU4N2E2ZTk1ZGI0NzAxNDdiODdhMjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2YTE4NmM3NjlkYTZlYzNiNGQ1NTczOTZiZTU2M2UxYmQxZTI4MjczZmE5NmE2MWY1NjI1NWMyOTM2YzUzOWYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUxMTU4OTc3MjcyMTNmNjE2NmU2MGRkYTMzNjFmMzBjNTljY2MwYjIyMWVjNjA1MjlhZjZmMWE0ODU0MzY3NmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNkNDNhMzQ0YWYxYzdhZWFkYWYxMjFiMzRiN2U2MjZmODlkOGIyZThhOWY3ZDQzNjNkMzIyNWM1N2IzNTNmYTUifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L377-L417",
+          "version": "repo-lines-v1:sha256:73030b697357f235c487f2143d6d2c327265b8dacba1bc016d1c2614e3e15abb:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVhMjI1MGM2NjJmMjFkODIwYTllOTVlODkwMzE0NjA0MzAwYTA1MjEzMTcyZTU3NjM0ZDBkZWJjZjVkNWQyMTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5NDdmZjRjNTViZDA4Y2E5ZjNjNjkwM2U5NTJmMjEzMDhkN2Y5Mjc3NjAwMDRjMzI3ZDMyNDNjYzZhY2FlNDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3NjViYWEyOTM2MTNlNjM3YmFmYmI4NmVhZTNjNmU5NTQ3NTJlY2UxMGRkMTliYWYwMTBiZGQyOTJhZDAyNWMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_e60d0c6404f24567b3752902dfce4493",
+      "statement": "Worker launch creates an idempotent worker thread with copied identity, access, sandbox, and repository-scope metadata plus task host/workspace/model bindings; it verifies persisted identity fields before recording and enqueuing the initial assignment.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/service.py#L267-L348",
+          "version": "repo-lines-v1:sha256:9996c4d690e16d8087d0fbb300aa0313ccf5179e0542eed728d447d4bd6e59ce:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwN2E4MTJiYTE3OGI2MDk3ODdhNjljYzNlNTA2OWEzYmFjMWJhM2JlZjA2MGI0ODAxYjM1MmRhYzdhM2Q1NzEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhjNWIyOWJjM2RlOWQ0NTI1Zjc4M2Y3NWI2MTY5MDcxMWI4ODc3MDU1NGRkOWE5Njk4MDUwODRmM2NmMTZkMTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc5YzlmMWM4YTUwMThhZTEwODUwMjgzN2FlYzY5M2NmYjQxZDJiYmIyYzQ1MmQ2OTcyYTFiZTQ0NGM2NjkyMTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI4NTgyNjdjNjMzNDI4Y2UzYTYxOGM0OTNhODgyNGNlZTU4NGQ2MzJlNmQ4MzZiNmM1YjRhN2QzMmYzNjUyOWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3e5089c119b8499c884e519ecc06c790",
+      "statement": "A failed worker launch stores its launch error; retryable failures can be retried through `control_worker(action=\"retry\")`, which resets attempts for the initial assignment, while permission and validation failures are marked non-retryable.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/service.py#L351-L374",
+          "version": "repo-lines-v1:sha256:55a3560e71357886cb5655b0fd3e4e08cbbc3340743d17b872e10e4bc90d312e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM4NmRjMTI4NmQxYmQ1YzE2ZTI5YzVlOTkwMGY2MGRkN2IwZDEwOTE5MTc3M2UxM2U0NTk2Y2I4MzA0ZjAzNDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYxOGE4YzE1ZjM0MDc1ZDBiMjEzOTdiYTAwNDIxMzQ1YTFkZGYwOThiY2UzZTZmZDY4NGM5M2U4ZGIwNjU0YjEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZiMTFiNzcxNDdjMDRiNmZlZDJjYmViYTNlN2RkNzJjZjI0OWQ0MDRiMzQzMjRkNzM4NjIxZTM2YWM0ZmQxZjYifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L48-L59",
+          "version": "repo-lines-v1:sha256:974f1696bcddb19655f48c354ded1804b2be9e774a7c7e63574c30ad7652bc5b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkYTJiM2VmMjc5MGJjY2JlNjY0OGUxYWEzN2JkNTVlOTI1Y2FiM2JkYjllMTJmYmFhZmZmNjZlM2U2ZmE3ZDkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwNjhjZTU5NGQ1YTlhYzg3NzU3NDFlM2RmODY4MGVjNzI5ZmE4YzA4ODFjMTdlODZjZDRiMzRjMTRlOGNkZTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM1ZTVkM2Q3N2VjYjVjNDI3ODIyY2M1Y2Q5MGExMjIyNzM2YjUyYTBjN2UyM2VhYWFkYTAyYWMwMGM1NThkZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjcwY2UzZjI0YWI0N2MyZjVhOWQzMzdmMzc3ZWQ4NTczZmE1NjU4NDA3NjQwMmYxYWYwNTRhM2RlZDYxOTQ2MmYifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L541-L561",
+          "version": "repo-lines-v1:sha256:6f127459656304c08c94a46279da1027436dea947e63b29baa6d8f6a7833bd56:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiZmM5YmJiZTViYTQzMTE4YzZhNjE4YmYwYWY0MTUxOTkyOGFjZmQxODQ5NzcwYzgzNDA5NTg0Y2EzNDI1NDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI0NjIzZWFkYjhiNTYzZjkwYWViZjFiYmJlY2Y5MDBkN2Q1OTE0MTQ1ODY5Yzg3ZGZhNTlkNGZhY2FkZTFiMmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUwMDMwYmJlMTNjMTM3MmI5MzA5ZTQ2NzE2MzY0NzAyZjcxODRkMmRkN2Y0MTc4ZWI0NDM5NmQ0OWY4N2Q2N2IiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRmNGU2ZWI5YWU1MzdlN2RiYTM1OThlM2VhM2RhZjhlZmJkMWJkMzYwZjI5Yjg2MDc4NDUyMzU4NzYyN2Q0OWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1b36b0c4ac804a0c84c0c9c19cd5401c",
+      "statement": "Task workers attach to, rather than create or replace, their coordinator's sandbox; attachment validates task roles, host identity, owner, workspace, admin and visibility settings, and repository scopes, and requires the coordinator's sandbox to already exist.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L352-L425",
+          "version": "repo-lines-v1:sha256:2270e336ec497cb28a2ae8d601cbf1558a499cb50a1e1a699f95eea8bfe6536f:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5MWZiMmIxN2UzMDc1OTNjMDM2YTRlYzNlNTA0NjM1MWYwODdiYTQ3MTg5NmQwZmFkZTg0MGQ1MzdhYzAxMWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3MmE4NjE1OThkOWFkZjVjOWYyYWU4NGUzOGRiNmZhNmMyYTM0MTFlMDRiNDA3YjljYmI1ZDc3MjAwZmY0MGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY3ODY2NWE0YmU4NTg4NWI3YmNlNmUzY2RhNmNiZGQ3OWJlY2ZjN2Q4ZjdjOTcwYWQ5NTdjMDk4ZWFkNDdiZjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI4MmNlNDQxOWE2NTllY2UwNDZmZTU3MzVhZDBjMzlmYmNmYmZjZjE3N2IxOWJjZjlkOTExZWQ5NGY3YWU3MzkifQ"
+        },
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L428-L486",
+          "version": "repo-lines-v1:sha256:d7b873bd73db1d8a121720e08c154139eaf8a09c0e9a257f1462d35de9951671:eyJzZWxlY3RlZExpbmVDb3VudCI6NTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmODdhYzZjOWY4NmZlNGE1ZDExOGQ3YjQ5NzNkZjU5NjVhN2ZkNzMzZTI3MmY5ZGVhYTkyYTdmMmM0YmUzY2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUxZjM1MTliMzc1Mzc0ZGM3NmZjMzAwYmIyMzU2MmU5YjI1OWUxYmY2ZjdmYmU3MTYxMTkyYTk4ZTQ1YzZhNWEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhN2JhNjY0OGM2OTc0YTA2ZjI0ZTE2Y2ZlNzVjMWJkNmJjZjM1NWMyMjcwNDZjZjE2ZDM2MDVhMWE0NmU3MTgifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8c0a8778b33348d083d83f707356a256",
+      "statement": "Only the coordinator can recover a shared task sandbox: explicit sandbox recreation rejects threads with task-worker metadata, and worker attachment reports that the coordinator must recover an unavailable host sandbox before workers attach.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L533-L539",
+          "version": "repo-lines-v1:sha256:2bbbad7c8d6b7bb9446a1891b4fd362fc1a676dc1a334c31b9ca7ae24fcea398:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjIwZWFlZGYyNzUxMTQwNmU3NjdhMmE4MWJlMGFhNGU4OGM1NzY3YWYxOGRjNWZiNWEyNjJhYTA1MzQ5MzgzZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzZlOWFiNDUyM2EyODE4M2EyZWExNzVlOGE4MTBhNjQwM2E4ZjQ2YTg2YzMxNjBiZWQyMzdjZTk3YzdmZTBkMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmE5NDU4YzA5ZGQ5YjAxM2NmMWMyZWYyNzQ5NzM0MjNlOTEwNGE4ZDdjM2Y3OTgxNWVkMmU4MGYxZWU1M2U1OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZjU4NzE2NTA0ODkyYTRmYzZmMTA1MGIyYzFlNGQzMjY4YmUzMGEwM2M5ZWQyMzExMjAwYzE4ZGRmYmM3M2E2YSJ9"
+        },
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L609-L621",
+          "version": "repo-lines-v1:sha256:f18404b89b1eb989576655944ddbd1bc51c3123a3aa3db7231340d98dd6d6f56:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5YTNkNjkwYTU5MzYxNDhlYzNiZWFjMjNlNDA3YmM2MWI3NzA1OTQ1YTkxM2FlNzQ5MzE3YmQ0M2UxNmRlN2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjNlMzFiZmNiZDFkMjdhZDFjOTA2MjcwZGYxNjNlYzBiZmI5NWE4MDFjMjNlMzM4ZWJkYzNkNzBmMDRhZTVmNmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjVhZWNkZGIyMjdmZGMyYzU3MmY0NDljYmE2MWVkNzhhMTg3ODI5ZDA4MjUxMWMzOTNiMGIzOGFiMDk5NGFhM2EifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d5b220818cc04449ad5a88361fa0bbc5",
+      "statement": "Task messages are durable and idempotent by recipient and delivery ID, remain owed until recipient checkpoint messages acknowledge their event-match IDs, are ordered for injection, and retain delivered records for seven days without pruning owed work by age.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/messages.py#L114-L144",
+          "version": "repo-lines-v1:sha256:267ba6b2b9900961942e14336bb49cc81b7ab785cb311026f78b5d982fc61004:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMGI0NTNmNWUwYzkyZDVmNmMyNTFhNWVhMTk2MGQ3MmYzYmQwNzk1NmFlODU3ZGEyMGUzMWE4OGM1NTk2OWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg4ZDA0ZGI2NDdmNGUzNTk0NzJjNjhjNjA1MDZkNTkwNzIwNGY5ZmE2YjBlODhlYzA1MTQ4OTRmNmNiN2UyYzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxNmE1ZjgyNjQ4MDFjZGQ5OTFkOTE0ZGY0NGM0ODViZGE0OGIzMTEzZjk4OTcwM2ZhMGZmODAwODA5NDA1NTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFmMmNmYzI2OWQ1MDAzNjY0MGJkZTI1MzZhMDg2YjJjZTIwYjBhNDMwNWMyN2JiNDExNDJjYTVjMzI3OGM4MTYifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/messages.py#L50-L112",
+          "version": "repo-lines-v1:sha256:8927c48e903fa5be470122a5231707eacfaa013519fc237eecf3c4a3c307bf7e:eyJzZWxlY3RlZExpbmVDb3VudCI6NjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkNjk0Yzc0ZGIwZjRmZTE3ZmQ1NGM2YTQxMDJiYWRlZTM0YWQ1NjU0ZmVjODcyNGRiNTBhYjI1ODAyOWFmODMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYxYjQ0OTVlMzE2YmY2YzQ3MTJkMDhmMGI3NmViMWU4YjQ2ZGY2NDg4ZjdlOWFjNDk4ZjE1OTU4NGM2NzQ1YjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjM5MmFhMTA1YTJjZDFjOTAzNzliZmE2MWVhMTczMTIyYzNkOWZjMTQxMTA4OWQ4MWQwYmI4MDUwNDFjODVmZTQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_1cd9d2cd211a4e1db26c9ad32522fa28",
+      "statement": "Task-message delivery uses a per-recipient advisory lock and an enqueued durable run, does not wake a busy thread, refuses cancelled workers, and caps delivery attempts at three; coordination middleware injects owed messages before model calls.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/middleware/task_coordination.py#L61-L78",
+          "version": "repo-lines-v1:sha256:1e52ec7bfce4f2ff746729c04cd6405c6bcf261666af691187ae9ee563f3dfb8:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlYTYwYmFkNDNlOTg3NDBmODJhYzFkNDBkOWIyNWQwZjA4OGFlZmQxYmRhMGQxOTVjNzYxMjBjZWE1NmQ5MzIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlN2M5NTdiY2I0NGZiNjczYzk4YjAwNTBhNzVkMzgwODJkYjgxZDkxOGRlMzEzYTNmMDdjMTIzNTMwNmQ3ZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFkNmEzNTdmZjJiOGEwNjE2MDRhZmM1Nzc5NWZlYjBhYTA4NTFkMzczYjEwNTQyZjA4M2M1Mzg4YWQxYmUwMTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMyMzc1NjhmMzcxYzY2NGZhNzM5ZmU2ZGYzNzAyZTc2MjUzZTA3NDMyOGQwMjU2YTRhYWQzZGVkOTlkN2Y4YTQifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/messages.py#L146-L209",
+          "version": "repo-lines-v1:sha256:37ae191370a3d00030077314861dcf53cc583f97f5323a448e0475c39f930d7d:eyJzZWxlY3RlZExpbmVDb3VudCI6NjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMGI0NTNmNWUwYzkyZDVmNmMyNTFhNWVhMTk2MGQ3MmYzYmQwNzk1NmFlODU3ZGEyMGUzMWE4OGM1NTk2OWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBhMjJkZDMxZjcxNWVmZGQ4YjAxZGYyYTY0Mzc3OGI1MDIxN2RhMmE1Nzc0ZTBlYzA2MDNlZjczNDhjYmE1MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3NDhlZDUwOTUzMzk1ZjY0OWY3YWE2MDBhZTc2MWViODgyMzBhZTlkZmJjNTBiYzRlOThiZmUzZTA4MTUwZWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJhMjQzNDRkODJlNjY4ZTVhYWI4NzdmZDBmNGY0MTJlMTg4OGM2MjAzYzYwZDlkNGI3ODY2NDdjZGQ2MTA5ZjAifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_3ffe3a5af3224578a2f453f903b8d628",
+      "statement": "A terminal worker completion is routed through the completion webhook to the coordinator as a durable completion event; result extraction uses the completed payload or invocation-scoped history, cancelled workers suppress non-interrupted outcomes, and non-cancelled workers then receive pending messages and subscriptions.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/completion.py#L504-L552",
+          "version": "repo-lines-v1:sha256:42fc9af5180e6e873e7d3cbb15f126020ee32cd9960a1fd3c48489d7e7e48b77:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRiNzYyMzBhYjI4NjRkNTU0NjljZDNiMjc1OGNlOWRmZWJiZjYxZThiYWI0YzgxNWVmZGQzOThhNTI0NWI3NWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBkZWNhNmFlODIxZWZkMzVlNWNlNzQzZmYyMTlhNTcxNzU3YzRjZjg0NWI1MzUzZGYwMzQxYWM3NzRkMTg4MTUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQzZmRmYmQ5MTAxZDgxMjM0MDdmMGZkMmYwNTc3OWEyM2NhYzA5M2U1MzAwNWM3MzY2NjcxZmNhNDg1ZGJhMzUifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/events.py#L22-L44",
+          "version": "repo-lines-v1:sha256:12613730de276b5540b989ddbe4371a1b7878a58b07282ce46875d9c2cc8911f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyNDg3OWYxYTJmN2IzMWIzNzY4ZjcxMzI5MDgwNDNmZTYzYTgwMGY5MTU5YTFkOTAxNGQ2OTc1MTJjNGFkZDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM4ZWIyN2E5MDU4ZmIzMDMxODE1NDk5NDRlZTNmYWZhZWU2Mzg4NmRiZjk5NDNmOTQwZWE1OGYxMGRhZDIwNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI1ZWIwM2M0NDU1NTMxMzY1MTU0ZWQzNWFjMDE0Zjc0NzY4NzkzOThhNDRmOGUwOTBkOGE3N2YzYWY3ZjllMjciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk3ZTYwZGZkOTNkODViMjNmZGUyNmE2MTZjYmNlNTI4ZTk5M2ZiNGIwYWQyNTJhM2NkNmI3MGMzYTc5Yzg5NmYifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/events.py#L47-L100",
+          "version": "repo-lines-v1:sha256:a1646d837bd5b9c98fb362d6bc241fe052f9c1836d6620f8f2d36f4671aec2a3:eyJzZWxlY3RlZExpbmVDb3VudCI6NTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxZTcyMDI2NGMyMTNkZTRhNzYzOGZkODczNDU4ZjYxNTViYjExYTdmOWI5MjBlMTU1ODA4OTgzYzBkNjkwMzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwZTJhNDY1MDA5NWZhOTVkMGUyYmI0MWIyZGIyOTA5NGQzNDA0ZDI4Y2UxMjMzOWVjODhiYjRiNWM1YmU4ZjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE2ZWE5NGVjMGM3ZWNlNjRkN2QxZGZjMGQwYjEwY2FlYTg0MmVhOTQzZDhhYmEyZWFjMmIwZWU0M2Q2MmJlNzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_153cd508f917462baee9fa8d145bc10a",
+      "statement": "Cancelling a worker durably marks its delegation cancelled, deletes subscriptions and task messages, interrupts live runs and transcript turns, cancels wakeups, and prevents retry of that worker.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/service.py#L526-L538",
+          "version": "repo-lines-v1:sha256:dd6ac54b2bd78b61bc1142d42f9739db980e404f28f91987c6cfcc68f47c8216:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1OTExOTdmZWQ4OTQwMmJlNDhjMGM2Zjk0ZjZiYjk5MzkxMzVjZDY1ZTczNjNlZTE0NTkxMjJkOThkNzgxOWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjdlOTlhMGFlNjBjMWMxNzVlYTA2MTliYmVhMzQ1NzQ1ZGQxODllY2FmNDFmMzBmZTc0MWY4ZGE4OGM4NzY0NGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlhNmI4OTlhMjY1YTY2MDVhYmE3NmRiYmFkZmRkM2M2YzljNmQyZDIxNzJjNjI1NzZhODRhNjYwMDYyNjg2ZWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI2ZmY5NGJkMTlmNjU5NjE0ZjAzMTc0YWIwY2VjZjNhYjA3Y2ZhZWQ2NDg5Y2ZlNmMzZjY0YzZjNzY0MjIxZTQifQ"
+        },
+        {
+          "resource": "repo://openswe/tasks/service.py#L548-L590",
+          "version": "repo-lines-v1:sha256:24b6fa350b2d350becc748c242d48cdfd9ab6f778760dc6c1de3a2181e1b0fef:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1Yzg4NmE1NjBjNThmYWM5YWYxMTNjZTgzMDZhZjJiZDE4MDUxMzUwZGRkMWY4NzI5MGVlOTM2ZGNjZDdhODUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5ZTU0OWZjNjM0YTRlMGEwNTdhMTVhYmZhN2FlMWY3MGNhNzc3YTA1YzBlYWIyNzU3MmJiYjU2YzcwODcwYjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFlZWNmNDRmNGUxNWIwZjA2YzMzYzg2YWNjNzY5NTQwZjY5ZDAzYjQ4ODQwODJjNzZkYmEwMDQzNTM4MmQ0YTkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFiYWMwN2VhM2E5YTVjYzdiM2QwZjc4ZDEwMWQ3Y2NmOWJlZWZlNTVlZjQyM2ZhOWY1YWE5Yjc5ZmFhYjRjZDMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8a1eb424618a47c9875a447250f43542",
+      "statement": "Task-event metadata distinguishes messages from completions and permits terminal status only on completions; task test suites cover launch/retry/control, messaging/completion, cancellation races, persistence, and checkpoint acknowledgement.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/tasks/presentation.py#L13-L32",
+          "version": "repo-lines-v1:sha256:eb979553a0d57566776b6c7d65cca654096860e96f7d63b10d8f9448f95afa4f:eyJzZWxlY3RlZExpbmVDb3VudCI6MjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0OTM4ZjM4ODc5MmQwNWM3OTlmNzU2ZGMwNzdiNzBlOTRkNjlmN2EzMTYwNzBjZjBiODBjZDMzNDE4MDVjZGIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyYWIwOTBiY2QxNjIwZmE2MmVhZWUxNTdhNzRmY2E2MzVhYTI5ZTEyY2JmZmQ2MThiNTc5MmQ4N2JjMDNhM2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU1YzFjNDYyZTJhMzlkNzQ3NTlmNWUxYjEyNmY3NjgzYTJiNzMwMTE4ZTE4ZjUxMjJiMDhjZWRlZWI2NTBlMjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZkOTY3MDYyZDI5ZDAxZjdjYTI5YTcxMDUxNTQ2N2U1MWQ5YmUxMGViMDk1OGMzZmZiYWNiMmE4MWY1NDYwNTgifQ"
+        },
+        {
+          "resource": "repo://tests/test_task_events.py#L128-L153",
+          "version": "repo-lines-v1:sha256:06c80ad1083f703a052ba20cacdbe5ff2665e4c523283291892c71220e732d66:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA4OTZmMTE4NjY2YjlhNmQ5MzE4MTkyMzA5ZWUwZGM1NjEwNzI1YjlmZTY3NzE0YjUxYTM1OTc2ZTQ1N2U1YjYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzN2IwNDYyYjE4MDk5YmFmOTI2YTdkYzcwODZiOGQwODlkZjNhMDAxMzhjOGQ5ZTczNjE4M2M2YTNmOWViMzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM1NzNiN2I3NjMwNjY1NWI3YWVhZjI0MGE4ZWM1N2Q1YzRmMGNkYzEwNTVmYjlhNDlkYmI2YjI3MDk1M2MyZjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU1YWQwYmY5ODU5NDdjMTMzMmQxMmEwZWI4NGE4NzQ5OTllODEyZjIzOWRmMWM4OWMzMTA1NDkwNWI1NWM1MjcifQ"
+        },
+        {
+          "resource": "repo://tests/test_task_events.py#L411-L451",
+          "version": "repo-lines-v1:sha256:9b008cdcbcaf43708633f0d1b989479a0ae09cb7879d56ff7ef61c90f7571e21:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUxZmZhZDc5ZmY3ZjliZmQ1MTU0NzA5MWU4ZWY0M2NjOWU4OTdiMGMxYTZmZGM3NTUzYmQyYzcyZTA3ZmE2MmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRiZTVkNDhjOGNjMWZkYmYyNjQ0NDg3ZjZmNmVlZmJmOTBkN2U4MWM1ZTRkZDU5NmMzYjMxZDYxYzFiOWM3NjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImYxZjA2Y2QxY2MyNGMxNGI0NTBhNTUyNWQ0NWYxMjFiOTU4YjliMWVhYjgxODIzNDE5MmYxODUyODhiOTVlMGIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImM5OThlNzlkODY4YmRjZWMxYmU4N2U2ZTdiOTg3NWQ4OTAyN2VhYTg2MzM0MTIwZDNkODlhNTRjNDRiM2JiMzAifQ"
+        },
+        {
+          "resource": "repo://tests/test_task_threads.py#L422-L612",
+          "version": "repo-lines-v1:sha256:f01c415b597fd8206e9a8d3729dd3dcaff21809768e4e96022d4a5ecdc70e42e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTkxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIyMDY2Mjc2NTQ3MGQwOTdiZDM5ZTE0MTE5OTRkNzQ3ZWJlODBjZGIwZDhlM2Q0YWViMWU4MmQzMDQxYTMwYzU2IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIxODMyMDAxNTYzZWNhNzM3ZGYzNWZiNDYxZDc5NDBiMjFhMzU0M2M3MzZiOWI5ZTY2MGMyNWVhN2EwYWI2NjY0IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3ZTJiM2VkNDlmNDM1ZTZhMDg0NDlmMDg3OGEwODJiZTNkMDgzZmVkODc2YWE5NjI1YTQ4OGVjODZhMzFlMTYyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIwNThlZTI3NzUxNTBkMTI4MDJmZWU1NmMwN2I0ODVkNjBhMTNhMDBlM2U4MzdlZTc5MzhlNmZlMDExZjVlMDE1In0"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-10-08T08:17:40.044Z"
+  }
+}

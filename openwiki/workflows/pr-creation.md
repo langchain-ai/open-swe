@@ -1,119 +1,131 @@
 ---
 type: workflow
-title: Pull Request Delivery and Approval
-description: How an agent delivers code through GitHub branches and pull requests, including attributed creation, workflow-change approval, status visibility, CI handling, and review handoff.
+title: Implementation, Push, and Pull Request Creation
+description: Trace agent implementation from its sandbox branch through guarded push, attributed pull request creation, CI and feedback handling, and human review or merge handoffs.
 tags: [pull-request, github, ci, workflow-approval, delivery]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-08T08:17:40.044Z
 sources:
-  - id: openwiki-source-d87936e6d54eab24f7479af1
-    resource: repo://agent/baby_sit.py
-  - id: openwiki-source-bd55a0c7231ffb3eb9e8ded0
-    resource: repo://agent/dashboard/agent_overrides.py
-  - id: openwiki-source-dc33a233b67bb1d08952543c
-    resource: repo://agent/dashboard/thread_api.py
-  - id: openwiki-source-ff7e225e6a77f19fd70076a8
-    resource: repo://agent/dashboard/workflow_approval_api.py
-  - id: openwiki-source-57243115e7bcd3ec2dd6e92e
-    resource: repo://agent/dashboard/workflow_approval.py
-  - id: openwiki-source-ebb5b62f813c3a42bf86c39b
-    resource: repo://agent/github/ci.py
-  - id: openwiki-source-6664f6fd05037c7c782f7b09
-    resource: repo://agent/github/comments.py
-  - id: openwiki-source-d21a577a855c4fdf68476b81
-    resource: repo://agent/github/pull_request_status.py
-  - id: openwiki-source-3d6d2704e3f7fa58a6207393
-    resource: repo://agent/middleware/pr_creation_guard.py
-  - id: openwiki-source-c53f5f816c45a89d9453ccd6
-    resource: repo://agent/middleware/workflow_push_guard.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-ed9809a543500e4a0b811342
-    resource: repo://agent/slack/tools/request_pr_review.py
-  - id: openwiki-source-d9f2a513cf28971a9676bf89
-    resource: repo://agent/tools/open_pull_request.py
-  - id: openwiki-source-25a50e8385de61204afe1bcf
-    resource: repo://agent/webhooks/common.py
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+  - id: openwiki-source-987be1dce6e9ba720855c2ed
+    resource: repo://openswe/baby_sit.py
+  - id: openwiki-source-987f8d3bed994c8f54eb4608
+    resource: repo://openswe/expedited_review/eligibility.py
+  - id: openwiki-source-d4346086482f927e48289830
+    resource: repo://openswe/expedited_review/readiness.py
+  - id: openwiki-source-1503630c5221793a02212f0a
+    resource: repo://openswe/expedited_review/voting.py
+  - id: openwiki-source-b19f99518378251c929520b2
+    resource: repo://openswe/github/ci.py
+  - id: openwiki-source-783616155a6663ff5d3b0dfa
+    resource: repo://openswe/github/comments.py
+  - id: openwiki-source-96d009a966b3901b8728eba9
+    resource: repo://openswe/human_review/merging.py
+  - id: openwiki-source-8028ebab3ac3beac1691bf84
+    resource: repo://openswe/middleware/pr_creation_guard.py
+  - id: openwiki-source-d618115330c9c5a6ad6a6eec
+    resource: repo://openswe/middleware/workflow_push_guard.py
+  - id: openwiki-source-919e16feae379651f2cbc1c9
+    resource: repo://openswe/server.py
+  - id: openwiki-source-d0f35aaf03e13e2fb9037d2b
+    resource: repo://openswe/slack/tools/request_pr_review.py
+  - id: openwiki-source-e67efdf2f809c51f0e5295bc
+    resource: repo://openswe/threads/workflow_approval_api.py
+  - id: openwiki-source-72d0aa1e1b6096510f34c65b
+    resource: repo://openswe/threads/workflow_approval.py
+  - id: openwiki-source-d0e9c3328773f849efaa3a49
+    resource: repo://openswe/tools/open_pull_request.py
+  - id: openwiki-source-3087256f0cd599176fba3c38
+    resource: repo://openswe/webhooks/common.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-08T08:17:40.044Z" }
 ---
 
-# Pull Request Delivery and Approval
+# Implementation, Push, and Pull Request Creation
 
-The delivery path is **commit → push → open or update PR → CI and review feedback**. New PR creation is deliberately centralized in `open_pull_request` to preserve the triggering user's GitHub attribution. Middleware protects two risk boundaries: substitutes for attributed creation and pushes that change GitHub Actions workflows. Thread PR records then connect delivery to Slack, dashboard status, lifecycle updates, and follow-up automation.
+An implementation run works in its sandbox checkout, commits its branch, pushes it, and then opens or updates a GitHub pull request. The boundaries are intentionally different: ordinary shell/API capabilities can push and maintain a PR, while **new PR creation** is centralized in `open_pull_request` for authorship, and only a detected push that modifies `.github/workflows/` requires a human decision. The resulting PR is recorded against the thread and can drive CI repair, review, lifecycle, and merge work.
 
 ```mermaid
 flowchart TD
-    Commit["Agent commits work"] --> Push["git push origin branch"]
-    Push --> Workflow{"Workflow file changed"}
-    Workflow -->|"no"| Open["open_pull_request"]
-    Workflow -->|"approved"| Open
-    Workflow -->|"not approved"| Pending["Store pending approval and notify Slack"]
-    Pending --> Retry["Retry identical push after approval"]
+    Work["Sandbox checkout and commits"] --> Push["git push origin branch"]
+    Push --> Detect{"Eligible push changes workflows"}
+    Detect -->|"no or not interpreted"| Remote["Branch reaches GitHub"]
+    Detect -->|"yes"| Decision{"Fingerprint approved"}
+    Decision -->|"no"| Pending["Store pending record and ask human"]
+    Pending --> Retry["Follow-up retries unchanged push"]
     Retry --> Push
-    Open --> GitHub["GitHub pull request API"]
-    GitHub --> Thread["Record PR on agent thread"]
-    Thread --> Status["Dashboard status and CI feedback"]
-    Thread --> Review["Optional reviewer handoff"]
+    Decision -->|"yes"| Remote
+    Remote --> Open["open_pull_request"]
+    Open --> PR["GitHub PR and thread record"]
 ```
-Caption: the normal code-delivery flow, with workflow approval applied before the branch can be pushed.
+Caption: workflow approval applies only to an eligible, detected workflow-file push; it is not a general restriction on shell or GitHub API use.
 
-## Create a PR through the attributed tool
+## From branch to attributed PR
 
-For a new PR, push the branch to `origin` first and call `open_pull_request(owner, repo, head, base, title, body, draft=True, resolves_thread=False)`—not `gh pr create`. The success result includes the URL, number, author, token kind, and `created`. Use `gh pr edit` for an existing PR, readiness, comments, and status. A 422 creation response triggers a lookup for an open PR on the head branch; finding one returns it with `created=False`, avoiding a duplicate.
+Use `open_pull_request(owner, repo, head, base, title, body, draft=True, resolves_thread=False)` to open a new PR **after the head branch is visible on `origin`**. It POSTs to GitHub's pulls endpoint and returns `success`, URL, number, author, token kind, and `created`. Do not replace a failed call with `gh pr create` or a direct API request. Once a PR already exists, ordinary PR maintenance such as `gh pr edit`, comments, readiness changes, and status reads remains separate from creation.
 
-For Slack, Linear, and dashboard runs, `_resolve_pr_author_token` looks up a current OAuth token by the triggering user's configured GitHub login, rather than using shared thread metadata. Thus the requester authors the PR. GitHub-triggered runs, unmapped or unauthorized users, and bot-only deployments fall back to the GitHub App installation token, so `open-swe[bot]` becomes the creator.
+The tool resolves a participant's current GitHub OAuth credential through `pr_author_login`; if there is no participant author, it uses the installation token as the bot. A requested author who did not participate is rejected, unavailable user authorization raises the user-auth path, and missing credentials return a structured failure. For user credentials outside a private credential scope, the target also has to belong to the workspace GitHub App installation. `require_consent` runs before the GitHub preflight and create request.
 
-Before posting, preflight reads the target repository, base branch, and a same-owner head branch. It distinguishes absent repository/App access (`github_app_access_missing_or_repo_not_found`), a branch GitHub cannot see (`github_pr_branch_not_visible`), and other preflight problems (`github_pr_preflight_failed`). The error reports GitHub's status, selected diagnostic headers, and a truncated response body instead of hiding the cause. No token is a separately reported `no_github_token` failure.
+Before creation, preflight reads the repository and base branch and, for a same-owner head, the head branch. It distinguishes missing App/repository access, an invisible branch, revoked user authorization, and generic preflight failures; failures include status, selected response headers, and a bounded response body to make the GitHub condition diagnosable. A `422` create response triggers an open-PR lookup by head branch. If found, the result is successful with `created=False`, and the agent should edit that PR rather than create a duplicate.
 
-### Drafts, references, and thread resolution
+The requested draft value is a default: `RunConfig.draft_prs`, when set, overrides it. The body receives the platform attribution footer and, unless it already has `## References`, may receive a plan link and source references. Source links from Linear or GitHub are added only when GitHub confirms a private target repository; Slack source links are permitted for Slack-originated work. Reference construction is best effort.
 
-The `draft` parameter is a request. A boolean `draft_prs` value in runtime configuration overrides it for a new PR; the profile default is `True`. An already-existing PR is returned unchanged.
+### Creation safety versus push approval
 
-Unless the body already has `## References`, the tool can append a dashboard plan link and source links. Slack, Linear, and GitHub issue source links are included only when GitHub positively confirms that the destination repository is private. Lookup failures or uncertain visibility fail closed, preventing private conversation links from being added to a public PR.
+`PullRequestCreationGuardMiddleware` wraps `execute` and `background_execute`, detecting `gh pr create`, a `gh api` create against `/pulls`, and a `curl` POST/body submission to GitHub's pulls endpoint. It examines supported nested shell `-c` commands up to a bounded depth and blocks suspected creation with the non-recoverable `pr_creation_fallback_blocked` result. The guard protects attribution; it does **not** generally block commands that view, edit, comment on, or otherwise operate on existing PRs.
 
-Set `resolves_thread=True` on a PR intended to finish the work. PR lifecycle webhooks locate agent threads by persisted PR URL and auto-resolve only when every tracked PR is closed or merged and at least one tracked PR has that flag. If all tracked PRs are closed but none has it, the thread is marked `attention_reason="prs_closed"` for a person to decide; reopening clears that mark.
+The server installs the creation guard for hosted main-agent and delegated tool calls, but omits it in a local run. `WorkflowPushGuardMiddleware` is a separate guard and is installed for both the main agent and subagents.
 
-## Recording delivery
+## Workflow-file push approval
 
-After either creation or duplicate discovery, `_record_pr_telemetry` fetches full PR details, records PR usage, and upserts a normalized record into the thread's `pull_requests` metadata (while maintaining legacy fields and `pr_urls`). The normalized state is `draft`, `open`, `closed`, or `merged`.
+The push guard deliberately handles only a conservative grammar: a standalone `git push origin <refspec>`, optionally with `git -C`, `cd ... &&`, or `--set-upstream`. Unsafe shell syntax and unsupported push shapes are not interpreted and proceed through normal execution. For an eligible current-branch push, the guard inspects the sandbox Git history against the remote branch, or against the merge base for a new branch. If no changed path is below `.github/workflows/`, it forwards the original request untouched.
 
-For an active Slack code-channel session, it also updates the repository context bar, registers the PR as an agent resource, and sets the diff view only if GitHub returns a nonempty diff. This entire telemetry sequence is best effort: exceptions are logged and do not turn a successful creation result into a failure. Because it is one protected sequence, an earlier telemetry exception can skip later bookkeeping; it is not transactional.
+For a workflow change, it builds a reviewable record from the binary diff: changed file list, additions/deletions, bounded preview, base and head SHA, normalized origin URL, and a SHA-256 fingerprint. The fingerprint includes the diff and push identity, so changing workflow content produces a new approval requirement. The guard also identifies workflow changes inherited through a merge for the approval message.
 
-## Mutation guards
+```mermaid
+flowchart TD
+    Candidate["Eligible git push"] --> Inspect["Inspect sandbox workflow diff"]
+    Inspect --> Changed{"Workflow files changed"}
+    Changed -->|"no"| Execute["Run original push"]
+    Changed -->|"yes"| Lookup{"Approval fingerprint is approved"}
+    Lookup -->|"yes"| Rewrite["Replace with explicit head SHA refspec"]
+    Rewrite --> Execute
+    Lookup -->|"no"| Record["Upsert pending approval"]
+    Record --> Notify["Post one Slack approval card if not notified"]
+    Notify --> Block["Return WorkflowPushApprovalRequired"]
+    Block --> Human{"Approve or reject"}
+    Human -->|"approve"| Followup["Dispatch retry without workflow edits"]
+    Human -->|"reject"| Stop["Keep push blocked"]
+```
+Caption: an approval authorizes exactly the inspected workflow change and retries it with a pinned commit SHA.
 
-### Stop unattributed creation fallbacks
+Approval records live in thread metadata under `workflow_push_approvals`, keyed by fingerprint. They retain the review data, notification state, timestamps, and decision actor; persistence keeps the 20 newest records. A pending record is reused, whereas an approved or rejected record is terminal. The Slack request is posted only if its record is not already notified, and the notification flag is written only after the Slack post succeeds.
 
-`PullRequestCreationGuardMiddleware` wraps `execute` and `background_execute`. It blocks shell attempts to open a PR outside `open_pull_request`: `gh pr create`, `gh api` POST/body submission to a `/pulls` endpoint, and `curl` POST/body submission to GitHub's pulls endpoint. It tokenizes commands and recursively expands supported `bash`, `dash`, `sh`, and `zsh` `-c` commands. Expansion is bounded and fail-closed at the depth limit.
+Approval causes the middleware to replace the command with a safe explicit `<head_sha>:refs/heads/<branch>` refspec. Otherwise it returns `WorkflowPushApprovalRequired`, including the approval URL and summary. The web API requires a session, same-origin mutation protection, and permission to prompt/read the thread. Approval stores the session subject and dispatches an agent follow-up that instructs it to retry without changing workflows; rejection only records the denial.
 
-The block is the non-recoverable `PullRequestCreationFallbackBlocked` error with code `pr_creation_fallback_blocked`, preserving the original attributed-tool failure rather than concealing it through an unattributed substitute. The main hosted agent installs this guard only outside local runs; the workflow push guard is always present, including subagents.
+## Record the delivery and follow its lifecycle
 
-### Require approval for workflow pushes
+After either a new or reused PR, telemetry fetches details, records usage and opening feedback, and upserts both thread metadata and the PostgreSQL `PullRequest` registry. Thread metadata maintains normalized `pull_requests` alongside legacy PR fields; the registry makes one PR linkable to its primary opening thread and later secondary repair/reviewer threads. Registry failure does not invalidate the GitHub PR, and the overall telemetry block is best effort. In a Slack code-channel session, it refreshes repository context, registers the PR resource, and shows a nonempty diff.
 
-`WorkflowPushGuardMiddleware` only interprets conservative, standalone `git push origin <refspec>` shapes (also supported with `git -C`, `cd ... &&`, and `--set-upstream`). Commands with unsafe shell syntax or other push forms are left to normal execution. For an eligible current-branch push, it computes the range against the remote branch or merge base and checks changed paths under `.github/workflows/`; a push without such changes proceeds untouched.
+`resolves_thread=True` is persisted for an agent-opened PR. Lifecycle webhooks update linked threads when GitHub reports a PR state change. A thread resolves only when every tracked PR is closed or merged and at least one tracked record has `resolves_thread=True`; otherwise it receives `attention_reason="prs_closed"`. Reopening a PR clears that attention marker and reverses an automatic resolution.
 
-For workflow changes, it captures the binary diff, bounded preview, file/addition/deletion statistics, base and head SHA, normalized remote, and a SHA-256 fingerprint of the change identity. The per-thread `workflow_push_approvals` store is keyed by that fingerprint. Pending entries retain the review data and notification state; approved and rejected entries are terminal, and storage keeps the 20 most recent records.
+## CI and GitHub feedback loop
 
-An approved fingerprint permits the push only after the middleware rewrites it to an explicit `<head_sha>:refs/heads/<branch>` refspec. Otherwise it returns `WorkflowPushApprovalRequired`, ensures a pending record, and sends a Slack interactive approval request only if that record has not already been notified. Notification is marked only after Slack returns a message timestamp without error. Any workflow change changes the fingerprint and therefore needs a new decision.
+CI reads paginate check runs and legacy commit statuses, returning `None` rather than breaking webhook handling when GitHub access fails. Auto-fix candidates are completed check runs concluded `failure`, `timed_out`, or `action_required`; Open SWE's own checks are excluded. Failures whose names already fail on the base SHA are excluded as inherited. The no-explicit-mention auto-fix path verifies that the requester has `write`, `maintain`, or `admin` access and fails closed otherwise.
 
-The web approval API requires a session, same-origin mutation protection, and readability of the thread. Approving records the session subject as the actor and dispatches a follow-up instructing the agent to retry the unchanged push; rejecting records the decision and leaves the push blocked.
+CI webhook helpers normalize branch and SHA across `check_run`, `check_suite`, `workflow_run`, and legacy `status` events. Baby-sit ignores non-completed events, finds active watches by SHA or branch, deduplicates delivery IDs under a watch lock, and dispatches a queued repair run only when its evaluation says one is needed. See [Scheduling and Baby-sit](scheduling-and-baby-sit.md).
 
-## CI, feedback, and review
+When invoked from a PR discussion, `fetch_pr_comments_since_last_tag` merges issue comments, inline review comments, and nonempty reviews in chronological order. The first matching Open SWE mention returns all context; later invocations start after the preceding mention. Configured mention handles reject prefix-only matches. Comment bodies are sanitized and authors outside registered users are fenced as untrusted before prompt inclusion.
 
-`request_pr_review` is a handoff, not a creation operation. It validates a GitHub PR URL, resolves the active Slack thread and triggering identity from run configuration, then delegates to `trigger_pr_review_from_ref`. Invoke it only for an explicit request to start the reviewer; see [PR Review](pr-review.md).
+## Human review and PR actions
 
-CI readers paginate GitHub check runs and legacy commit statuses, returning `None` on permission or HTTP failures so webhook handling remains best effort. The auto-fix path treats only completed `failure`, `timed_out`, and `action_required` check runs as fixable and excludes Open SWE's own checks. It removes failure names already present on the base SHA, and auto-fix without an explicit mention fails closed unless the requester has `write`, `maintain`, or `admin` repository permission.
+`request_pr_review` is a handoff rather than PR creation: it validates the GitHub PR URL, resolves the active Slack thread and triggering identity, delegates to the GitHub review trigger, and returns a dashboard review URL when available. See [PR Review](pr-review.md).
 
-Webhook helpers normalize branch, head SHA, and failure state across `check_run`, `check_suite`, `workflow_run`, and legacy `status` payloads. The baby-sit handler continues only for a completed failure that matches an active watch by SHA or branch. See [Scheduling and Baby-sit](scheduling-and-baby-sit.md).
+The human-review model has one open request per PR. An expedited request pins the head SHA and a fingerprint of the displayed non-test diff; test-only changes do not invalidate that fingerprint. It is eligible only for a small readable text diff—no binary/oversized reviewed file, fewer than 100 files, and at most 25 non-test changed lines—while test lines are excluded from the size gate. A non-author with repository write access may approve; the approval is submitted as that person's GitHub review when the same fingerprint still matches. A draft card first permits only its author to mark the PR ready.
 
-For GitHub feedback, `fetch_pr_comments_since_last_tag` merges issue comments, inline comments, and nonempty reviews chronologically. On a first Open SWE mention it returns the whole conversation so earlier drafted inline comments are available; on repeated mentions it returns items after the preceding mention. Mention matching uses configured deployment handles and rejects prefix-only matches. Raw comment bodies are sanitized and untrusted authors are wrapped before prompt use.
+Readiness is re-evaluated before merging: the PR must be open, non-draft, conflict-free, have successful completed checks and no unreported required checks, no unresolved review threads, and no outstanding changes request. Non-required failing checks do not block an expedited merge. The merge operation uses an installation token limited to contents and pull-request write permissions when available, sends the observed head SHA and an allowed merge method, and never bypasses GitHub branch protection.
 
-## Dashboard status contract
-
-The dashboard reads each tracked PR record independently. It fetches the live PR, unresolved GraphQL review threads, and check runs plus legacy statuses for the live head SHA. Its result covers open/closed/merged state, draft state, merge-conflict state, linked failing checks, pending and inconclusive counts, and unresolved review-thread details.
-
-This API degrades to partial availability rather than failing the whole view. `statusAvailable`, `checksAvailable`, and `commentsAvailable` identify usable portions; invalid metadata, missing permissions, malformed responses, and transient GitHub errors produce unavailable fields rather than falsely reporting a clean PR. Consumers must honor the flags.
+Dashboard/status readers degrade per field when GitHub cannot answer rather than claiming a clean PR; callers should distinguish unavailable review, check, and live-status data from a passing result. Existing-PR actions are performed with the signed-in user's token: merge and close confirm GitHub's response, marking ready uses GraphQL because REST cannot clear draft state, and update-branch supplies an expected head SHA to avoid acting on a stale view.
 
 ## Focused verification
 
-`tests/github/test_open_pull_request.py` covers author token choice, preflight diagnostics, duplicate handling, references, and metadata upsert. `tests/github/test_pr_creation_guard.py` exercises direct and nested shell fallback detection. Workflow push guard tests exercise safe parsing, workflow diff and fingerprint construction, pending notification, and approved-ref rewriting. `tests/github/test_github_ci.py`, `tests/github/test_baby_sit_webhook.py`, and feedback tests cover CI classification, dispatch, and GitHub feedback behavior.
+The GitHub-focused tests cover PR preflight, author/token selection, reference handling, duplicate discovery, telemetry, and fallback-guard command detection in `tests/github/test_open_pull_request.py` and `tests/github/test_pr_creation_guard.py`. `tests/github/test_github_ci.py`, `tests/github/test_baby_sit_webhook.py`, `tests/github/test_pull_request_actions.py`, and `tests/github/test_pull_requests.py` cover CI handling, watch dispatch, confirmed user actions, and PR record behavior. Workflow approval, expedited review, and human-review behavior are covered in their corresponding middleware and review test suites.

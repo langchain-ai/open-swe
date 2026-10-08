@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:75920d28bad5b192afd797dfb84208215370aa54fa04f783dbddc72b010939e9",
+  "pageVersion": "sha256:cc1c7366ae160b4191ee2fabf02bcd9be21054515d26ae7849cfa329b5a911c0",
   "claims": [
     {
       "id": "claim_9a77e9c5301a46b8bbd02832b9de5a90",
@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
+          "version": "repo-file-v1:sha256:9c51a3f86fe91619ae32bdad36793c80b7f61f9a15c4592db600de1c757989e2"
         }
       ]
     },
@@ -18,21 +18,7 @@
       "evidence": [
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
-        }
-      ]
-    },
-    {
-      "id": "claim_51ddbe6a89c1461d9c078e3e373030cf",
-      "statement": "Test tooling (pytest, pytest-asyncio, Ruff, ty, Pygments) is declared in the dev optional-dependency group and installed via `make install` which runs `uv sync --extra dev`.",
-      "evidence": [
-        {
-          "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
-        },
-        {
-          "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
+          "version": "repo-file-v1:sha256:9c51a3f86fe91619ae32bdad36793c80b7f61f9a15c4592db600de1c757989e2"
         }
       ]
     },
@@ -42,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:258a6bad7f43cc5ca36c96cf38646a139b1d1163caa297ff564b672cfb705659"
         }
       ]
     },
@@ -52,7 +38,7 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:258a6bad7f43cc5ca36c96cf38646a139b1d1163caa297ff564b672cfb705659"
         }
       ]
     },
@@ -62,21 +48,7 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
-        }
-      ]
-    },
-    {
-      "id": "claim_7e94c7f70e5e40e8aeb75ffaff2f38f7",
-      "statement": "Unit tests are run with `make test` (aliased `make tests`), which executes `uv run pytest -vvv $(TEST_FILE)` where TEST_FILE defaults to tests/; use TEST_FILE for an existing test path and invoke `uv run pytest` directly for a single `file.py::test_name` node id.",
-      "evidence": [
-        {
-          "resource": "repo://AGENTS.md",
-          "version": "repo-file-v1:sha256:1d76197da0a0227d4bf93caeff444a5075a90a63c87f5019fbf89c50f164f83d"
-        },
-        {
-          "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
+          "version": "repo-file-v1:sha256:258a6bad7f43cc5ca36c96cf38646a139b1d1163caa297ff564b672cfb705659"
         }
       ]
     },
@@ -86,21 +58,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
-        }
-      ]
-    },
-    {
-      "id": "claim_fe7eb017df4c4e74975555cce254dd5a",
-      "statement": "Lint, format, and type checks are separate gates from tests: `make lint` runs Ruff check plus a Ruff format diff, `make format` fixes in place, and `make typecheck` runs `ty check agent tests`.",
-      "evidence": [
-        {
-          "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
-        },
-        {
-          "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
+          "version": "repo-file-v1:sha256:d8a44fe4b4836a4a3aee09295337439f99475a155cc1d4d6bef142ad21d2086c"
         }
       ]
     },
@@ -110,15 +68,15 @@
       "evidence": [
         {
           "resource": "repo://package.json",
-          "version": "repo-file-v1:sha256:85ff550163c48dcb3e9d2ac1a9c2558cbd366fd833a1ea789c66ea62877be443"
+          "version": "repo-file-v1:sha256:448c10173e8cd0d561069c0a53fe7eadce7d9b8d42c9b1402a131764bba7dc26"
         },
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:bda0447d5464ebb2838d2d500c0cd70ee9d975c487da59da53b58f04ddb87227"
         },
         {
           "resource": "repo://tests/e2e/package.json",
-          "version": "repo-file-v1:sha256:981b65f11401a69f73d6a16aa41f841d66e909351724e7f8235c53c6e2443117"
+          "version": "repo-file-v1:sha256:b6fcf09e4a622ea718913233d4df125b3d90cb88da99ae83975e73d37234e6af"
         }
       ]
     },
@@ -128,11 +86,11 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:bda0447d5464ebb2838d2d500c0cd70ee9d975c487da59da53b58f04ddb87227"
         },
         {
           "resource": "repo://tests/e2e/tests/full_flow.spec.ts",
-          "version": "repo-file-v1:sha256:aa6448ee98680d23e193fcf8d705ceb07e8b43564f2f4372f67741b87a7f248f"
+          "version": "repo-file-v1:sha256:04768890138d2e8eabf72bff0887b33c7a2e308be331267ddc82328b0695ac5d"
         }
       ]
     },
@@ -142,19 +100,19 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:bda0447d5464ebb2838d2d500c0cd70ee9d975c487da59da53b58f04ddb87227"
         },
         {
           "resource": "repo://tests/e2e/fake_llm.py",
-          "version": "repo-file-v1:sha256:8a386531e01339f5eabebb20046d277fa65463800b4c86156ee627064b8a7bb5"
+          "version": "repo-file-v1:sha256:6d41238626df78145dc030e58081385e029853e6a5424ed84a0c89963d7434e1"
         },
         {
           "resource": "repo://tests/e2e/fakes.py",
-          "version": "repo-file-v1:sha256:c4b8854658a210e1bc99007fa635555ccec52327e36876782a9d2ea466ad1185"
+          "version": "repo-file-v1:sha256:0b9642193816381fd75acb62c8ce16a1029939c7d36c597a6cedcf7bb3e4999d"
         },
         {
           "resource": "repo://tests/e2e/patches.py",
-          "version": "repo-file-v1:sha256:4435a4f3db5704112880f22751e8b6db788a4816c3ca45d10626295e6e63eb72"
+          "version": "repo-file-v1:sha256:fdb66b9a618acbc19355318f528e0edede3e8277e83b8e613ac816d99e2f6572"
         }
       ]
     },
@@ -164,7 +122,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:bda0447d5464ebb2838d2d500c0cd70ee9d975c487da59da53b58f04ddb87227"
         }
       ]
     },
@@ -174,7 +132,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:bda0447d5464ebb2838d2d500c0cd70ee9d975c487da59da53b58f04ddb87227"
         },
         {
           "resource": "repo://tests/e2e/playwright.config.ts",
@@ -188,19 +146,19 @@
       "evidence": [
         {
           "resource": "repo://desktop/package.json",
-          "version": "repo-file-v1:sha256:9e32829ce8dbe938b0183b27f62da576f1a6103de152a69997ff1f87027a9c38"
+          "version": "repo-file-v1:sha256:9957cac9f111c282fe8c1852df20964d1d879f960c01ce4e66dd92c1bc0e9a8d"
         },
         {
           "resource": "repo://package.json",
-          "version": "repo-file-v1:sha256:85ff550163c48dcb3e9d2ac1a9c2558cbd366fd833a1ea789c66ea62877be443"
+          "version": "repo-file-v1:sha256:448c10173e8cd0d561069c0a53fe7eadce7d9b8d42c9b1402a131764bba7dc26"
         },
         {
           "resource": "repo://turbo.json",
-          "version": "repo-file-v1:sha256:2baddedda518d07ffac1f38d843cdb9bf2cb068b0cd2a241a571a718f8462878"
+          "version": "repo-file-v1:sha256:2f24f96b09df8df4352f90dbaa8726133d11c02a0e41357b38ed9f2a522986bc"
         },
         {
           "resource": "repo://ui/package.json",
-          "version": "repo-file-v1:sha256:255dd35a1c97c11cb6df943917f4253f40ebb564e1bd7158e71195b45676b082"
+          "version": "repo-file-v1:sha256:aacd6946e5bb983058f826d89de67443a67cf06a14686f772e4cac576b168323"
         }
       ]
     },
@@ -224,7 +182,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/tests/desktop.spec.ts",
-          "version": "repo-file-v1:sha256:b88e21c2a84ae15f268e2763f93ec98e4e5683e90ddc54c2e18f3106b95995e4"
+          "version": "repo-file-v1:sha256:ded093489f84b137146d16aa4391b8ba3e24ea40b0e41c0cdf51b46b696cb959"
         }
       ]
     },
@@ -239,22 +197,12 @@
       ]
     },
     {
-      "id": "claim_cc1f933447044386b147e2bee6f077d8",
-      "statement": "Sandbox-state tests require the backend proxy to remain BaseSandbox-compatible for capture offload, delegate or safely fall back from offload, share one concurrent reconnect, survive waiter cancellation, retry failed startup, and recover a sandbox ID from live thread metadata.",
-      "evidence": [
-        {
-          "resource": "repo://tests/sandbox/test_sandbox_state.py",
-          "version": "repo-file-v1:sha256:704700326ac575264e748a198dc1aef627d6cfc9fbe3e51d0728548a44e1e46e"
-        }
-      ]
-    },
-    {
       "id": "claim_d20a9582f71e4507a52c6b6067a58410",
       "statement": "The Electron e2e spec explicitly traces its Electron context, attaches screenshots for unified and completed local-agent views, and removes temporary desktop state unless E2E_KEEP_TMP is set.",
       "evidence": [
         {
           "resource": "repo://tests/e2e/tests/desktop.spec.ts",
-          "version": "repo-file-v1:sha256:b88e21c2a84ae15f268e2763f93ec98e4e5683e90ddc54c2e18f3106b95995e4"
+          "version": "repo-file-v1:sha256:ded093489f84b137146d16aa4391b8ba3e24ea40b0e41c0cdf51b46b696cb959"
         }
       ]
     },
@@ -264,11 +212,11 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:bda0447d5464ebb2838d2d500c0cd70ee9d975c487da59da53b58f04ddb87227"
         },
         {
           "resource": "repo://tests/e2e/harness.py",
-          "version": "repo-file-v1:sha256:32e58b95ad959129b17559790d370ed5903c54bd4fe2717df949ac1d113d2e05"
+          "version": "repo-file-v1:sha256:35ebfa797a96caec2ebbccca8016ffe4b41a3077c20efe8169d4bc1445acd86a"
         }
       ]
     },
@@ -278,7 +226,7 @@
       "evidence": [
         {
           "resource": "repo://tests/agent/test_agent_assembly_context.py",
-          "version": "repo-file-v1:sha256:a99b1f9f5092164c751fa8d1cf746f30dd34ef569416761073f724d74d87c4df"
+          "version": "repo-file-v1:sha256:527a1de9b52395088ae5a2bac4b0c8324427b485147496aa94fe6eca7182dff5"
         }
       ]
     },
@@ -288,17 +236,7 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
-        }
-      ]
-    },
-    {
-      "id": "claim_042824ee41904e208b9cfaf17c6bd077",
-      "statement": "Reviewer outcome tests map resolved and dismissed finding states and GitHub or Slack feedback to true- or false-positive outcomes; outcome storage is a no-op without the required credentials or repository configuration.",
-      "evidence": [
-        {
-          "resource": "repo://tests/reviewer/test_reviewer_outcomes.py",
-          "version": "repo-file-v1:sha256:31422a5720b56432896df04361eb9b2b47b879ac1fe48dd302ff31d54f85b1ca"
+          "version": "repo-file-v1:sha256:258a6bad7f43cc5ca36c96cf38646a139b1d1163caa297ff564b672cfb705659"
         }
       ]
     },
@@ -308,13 +246,121 @@
       "evidence": [
         {
           "resource": "repo://tests/webhooks/test_completion_webhook.py",
-          "version": "repo-file-v1:sha256:70779e22596916b0bfbd9b3415925b57bb2060c9825030ad46e3bb46d5c5bee4"
+          "version": "repo-file-v1:sha256:2705222270c472f1d8c6f64a724a09f41af582b4f6abae0682873c4842ae2187"
+        }
+      ]
+    },
+    {
+      "id": "claim_5f0faab3d895468a98f00306c37544db",
+      "statement": "Python development dependencies include ty, pytest, pytest-asyncio, pytest-xdist, and Ruff in the dev optional-dependency group; `make install` runs `uv sync --extra dev`, while Pygments is a runtime dependency.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L72-L74",
+          "version": "repo-lines-v1:sha256:2d260014ff4ec1708a65a4689455a6727c548ce8917cf1a0b795f445df74ee17:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYzZjNTgwMTljOTcwZTNiMTczMmFlNjZjOTAwODU2NDM4MjQ2OTUzZjEyY2JhMjlkNjE5YjAwNTcyZmZmMjQ1NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYjFmNzc1NjM2MTQ0YzU5YTlkMmMwOTM2Zjg3NzRkZWEzY2I5NTgxZmFiMzY5MjdhZjFlMTAyYzQyODgwZTY0NCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGFhNWJiNzAyMDNiZmE1ZTcyMWVhZDUxZGQ1YzQ3MDkyN2U0MWVjZDUzNTVmZjdkNWY0NWRlNTg3ZTQ2MWJhYiJ9"
+        },
+        {
+          "resource": "repo://pyproject.toml#L38-L53",
+          "version": "repo-lines-v1:sha256:c9bd91d5db701d5f5d3f5c879e5782d34e8e3fe7fabce668d41cf9b47687c7b4:eyJzZWxlY3RlZExpbmVDb3VudCI6MTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM3OTU1NmNiYjEzMjhmNWRjNmE0ZTg3MWI2YzFhMmMzNmZlNDE5NDZkNTMxNzQ3OGFjNWJhY2VlZTI0N2IwNDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY5NDE2ZTA5Zjc4YmEzMTZjMDMyNTY4MjEzYjg1NWVlNzU2ZTQxNTY1ZDkxOGYwOTUxOWM4MWZkNjIwZjQwNjAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRlZWU3ODlhYTFlNTBhN2NkOWRmZjYyN2RiMTRmZDMxMDQxMDMxY2NmZTI0MmM3MmJhMTg3OGRjYzZiYWNlNjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjUzNDQ5NWY5ZjJiMDMzNTQyYWFlNWU3NDdhNjUyNTRhNWQ1NjE4NWZiZTQ3MzNhYjkxMDIzYjQzZWEyZGNkMjYifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_cf7d87b92baa448db3861208a2e3d0e3",
+      "statement": "The opt-in `registry_db` fixture skips unless `TEST_ANALYTICS_POSTGRES_URI` is configured; with it, tests run against a fresh database cloned from a migrated template and drop it afterward.",
+      "evidence": [
+        {
+          "resource": "repo://tests/conftest.py#L168-L197",
+          "version": "repo-lines-v1:sha256:ef07e3047ea268e1cffc5bb14984d8efe3a5ea5e75047a5832facd6c28be63f3:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyNjVhZWFhY2Q1OWQ4MzEyZGM5NTJiYjg4NzM4ZGVhY2MyMDc5NWQ4MTg0MTA3NjI3OTJjZTA3ODQ2ZTc2MjIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxMWVmMjVlM2RlYjQ5ZDliZTEzZGUyYTVlMzk3OGY1MTA2M2FkYjViMDg2ZmE1MTdmZjU4YzJiYmYyYmY0MDQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBjZTQyNmM2MTBhZGQ2MzMzOTcyYzVlMzU1OTIyOGE0N2UxMTMwNmQyY2UwYzhjZjU3ZTAxNWI4ZWVjOTRkOWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxYzE0MjZiZWE3ZmFiYTA1YTEyYzFlMWM4NjBkYTY3YzYxNzM4ZmZjY2NjYTRmNjc2ZTRiOTI2ZGVhNjZlMDIifQ"
+        },
+        {
+          "resource": "repo://tests/support/postgres.py#L17-L91",
+          "version": "repo-lines-v1:sha256:e4985f59905d5be8e395d406f5d23ea6c1bdae9636b7d523e160617b9da57472:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhkZDdiMmZhNTg4NmUyYTA1ZTg4YTdjNGJjNGVjNjFkY2Q0MmRkZWEyNzYwY2RlMWExNmUzY2Q0OTg2YjcwY2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzMTY3NDc5NWExMTFhODYxOGNjNzgzNmY3NzE2YTE5OTAzNDAwNjg5ZDgwYzU0YjkyZDA4ZTM5ODNiY2MwYWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA4ODU0OWYxMzAzYTQyYzhlMGUxY2Q5Y2U4MTM1NDEwODRiMzM5M2FlMzM0ZjcxZDU3MmNmY2U1MzJjNWM0MzciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_97c87d3a2464470888f842db6d141f78",
+      "statement": "Unit tests are run with `make test` (aliased `make tests`), which executes `uv run pytest -vvv $(PYTEST_ARGS) $(TEST_FILE)` where TEST_FILE defaults to tests/; use TEST_FILE for an existing test path and invoke `uv run pytest` directly for a single `file.py::test_name` node id.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md#L30-L42",
+          "version": "repo-lines-v1:sha256:42c19e018305a593792e35e11f223e26cad709c011cbd01929b7fb018b503399:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk1ZTg2ZjY4N2VhMWVhMDRiYTk2Y2M4NzlmMmZmOTI5MjgwNDU4NWVmYTU4NmU3NjA3ODYwNzg4NWVjOTMwMjgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc1NTNhOWU1ODIxN2YyMjEyZTk5ZDRlNmMxNjkwZTY1ZjAzZDA5ZmNiMTkwZWZlZTgyMTY1NWFiMTVjYmMzNTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM4NGExNjA0NjhjYzJiZTA0ZDU1MzA0NjgwNGExZWM4MjJmZTU2MjBjM2ExOWM5NzlkMGVlNDk1NTY2OWRiOTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAxMGZiMmFlN2MxMTU2ODE1YTBmNDdkOTkwYTFjMzJlMjU4MDQ5NGVkMmE1MDIwNTNmNzFlMDJhMTgwYmUwNDQifQ"
+        },
+        {
+          "resource": "repo://Makefile#L93-L101",
+          "version": "repo-lines-v1:sha256:2c9e3d8ddb5733ab6a031cfc86ce88c18261b536db24c1ba7d43a9a705a2fdc3:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNmJlMDg2YmM3MTZlNDVmNWM3Y2QyMzAxMWRlODI2ODI1ZTZmMzk2Yjk0MGU5MzI0N2MzNjFmMmY5ZDlhY2M4ZCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYmVjYjM4MWFiNzkyZDgyM2YwMTNmODJjNzA2N2ZjZjA2MTQ1NmNjYjY4NTZlMmZhM2QzNmQ0MDY4NmJmOGViNiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiYmIwYTEwYmJjMDIxNjkzZWQ2OGE5OWMyZGYyMmIzNGU4N2YyMjVjM2EyOTVkZWEzOGQ2MTY1MDE3NjA3ZTljNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDQwYzM1NzkyYzI2NTFlYjQwZDI3OGFiNzcyZWIzYTQzMDU0YWY1YWM1MmJhYzVlYTM3MWFiM2E2M2E5MTY2MSJ9"
+        }
+      ]
+    },
+    {
+      "id": "claim_58a7b1e8757647f4b9f7fb6baac6d1a3",
+      "statement": "Lint, format, and type checks are separate gates from tests: `make lint` runs Ruff check plus a Ruff format diff, `make format` fixes in place, and `make typecheck` runs `ty check openswe tests`.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile#L114-L128",
+          "version": "repo-lines-v1:sha256:aca8b0be7056ae0742f5555b6e05434771952e7e995c2d61042905d3462e4770:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU3MTJiMTI2NTExOGFlNGQxNDRlMTQ3YWJmYTg4YzBiMjBiNDFlN2MxMWQ5ZTFmOGQ0YTA1NjhhNzhlNjM0MzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRlMjk1ZDUyZDhkNjZlYTA2N2MxZmRhZjEzNmEwZmYwMjg1OGNiZjI4Mjk1N2RiZjhkZDBlZmE2NzgxZGVhMmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk4ZjNmMzA2OWNiM2U5OGQ1ZjliYTBjNzgzZDU1NTQxM2NhZDgyN2MyZmIyODRjMGNlOGYyZTBhNWRjMzY3MDkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjJhYWI5YzQ3MzQ2NGI2ZGQ3YThmMzBlMTNlYzYzMzlkNzk5MWFmNDNkNjc5NTZlM2NiYmQ4NTE4NjA5ZjJhZWEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_6eee649c1f1d4f4c8da64e142570a812",
+      "statement": "Sandbox-state tests require the backend proxy to recover its sandbox ID from live thread metadata, share one concurrent reconnect, survive waiter cancellation, retry failed startup, and delegate operations after lazy startup.",
+      "evidence": [
+        {
+          "resource": "repo://tests/sandbox/test_sandbox_state.py#L34-L159",
+          "version": "repo-lines-v1:sha256:9d892eed5a91bad32b5923783502a59750906c3c8744bfacf08629abd1290649:eyJzZWxlY3RlZExpbmVDb3VudCI6MTI2LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiJiZDk5NDJkZWI3ZGJhYmMxMTRiMWM0OGQwMmRhNDYzODZlOWFjYTUxNWE1MmZiN2IzYzQxMmRjNjI3OTIxYjA4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiJiMDJlNDJiNmZlODg4Nzc1NWVkNGY1MzYwZTQ0MDUyNDEwMWM5NmI3MDU0MzU4ZDhmYjg4ZWYwMWI2ODc4MGVkIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI2NzAyY2QyNmEzYjI4Y2Q0MDQ0OTgxN2E2MjNiM2E1ZGMyMzYwZmI5OTZlNDU2YzFmNTNjYTI5YmVhYmY4MTNiIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MCwiZm9sbG93aW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1In0"
+        }
+      ]
+    },
+    {
+      "id": "claim_0938c6a93c024c969bafa8cf2b3c3de7",
+      "statement": "Task-thread tests require coordination to be opted in and prevent workers from spawning siblings or controlling another task; database-backed cases protect retryable lost launches, idempotent concurrent spawns, cancellation cleanup, and queued follow-up delivery.",
+      "evidence": [
+        {
+          "resource": "repo://tests/test_task_threads.py#L217-L255",
+          "version": "repo-lines-v1:sha256:3a663b4ea15fce7dea9291b5fb12ffa7c35cca67889f172fbe97186bca184efe:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNjYyNzY1NDcwZDA5N2JkMzllMTQxMTk5NGQ3NDdlYmU4MGNkYjBkOGUzZDRhZWIxZTgyZDMwNDFhMzBjNTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBhM2VkYzgyNjVlZmU0MWI3ZmMyMGVkYjE3N2E3YTg0NjQ0ZGQ3YzdhZTkyOGMzNjc4ZGY5MWJjNDgzOTEzYjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImFkYTNhNzAyYjhmOWUzMTE1MGU0MjY1OTc5NjBjNWEwMjJmYzc1NWNiOWFkMDlmMjhlMzlkNGJkNWNiOGUxMDQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk1MDA1ZmIwM2JkZDNlYzNiMDE0ZTAwYmJiYTEwZjQ3M2NiNjRhYjgxNWZlMjljY2FiZWE4YzExMjQyZWJkY2UifQ"
+        },
+        {
+          "resource": "repo://tests/test_task_threads.py#L372-L419",
+          "version": "repo-lines-v1:sha256:1c2f418fb68d9c9dcded19df8d96157ee5e9f7cb96821c9f63fbac79cba19269:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc5YjRiNTA4NzE5MzgwYzFmYzQyZjRmNjE3NGU1ZGM1YWEwNGNjYTk4NWQ0MjY1Mjk5ZDUyOTY1ODY1MzZlYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmYmU1OWExMjkxZTRhNGRkYmU0MzljYmJmNGE5MDU1MTc1NmJmNmE5OTA1ZDFlZjU5OTFkODY2MWEzMTIxMWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY0ZmI0ZmQ1MDhlNjVmOTA4YzQ1NzFhZTY5YjM3NThiMTY1ZDJhMjJjM2M0NGY1Yzc0ZGFlNTBjYjQyZTcyNDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA1OGVlMjc3NTE1MGQxMjgwMmZlZTU2YzA3YjQ4NWQ2MGExM2EwMGUzZTgzN2VlNzkzOGU2ZmUwMTFmNWUwMTUifQ"
+        },
+        {
+          "resource": "repo://tests/test_task_threads.py#L422-L612",
+          "version": "repo-lines-v1:sha256:f01c415b597fd8206e9a8d3729dd3dcaff21809768e4e96022d4a5ecdc70e42e:eyJzZWxlY3RlZExpbmVDb3VudCI6MTkxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIyMDY2Mjc2NTQ3MGQwOTdiZDM5ZTE0MTE5OTRkNzQ3ZWJlODBjZGIwZDhlM2Q0YWViMWU4MmQzMDQxYTMwYzU2IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIxODMyMDAxNTYzZWNhNzM3ZGYzNWZiNDYxZDc5NDBiMjFhMzU0M2M3MzZiOWI5ZTY2MGMyNWVhN2EwYWI2NjY0IiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI3ZTJiM2VkNDlmNDM1ZTZhMDg0NDlmMDg3OGEwODJiZTNkMDgzZmVkODc2YWE5NjI1YTQ4OGVjODZhMzFlMTYyIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiIwNThlZTI3NzUxNTBkMTI4MDJmZWU1NmMwN2I0ODVkNjBhMTNhMDBlM2U4MzdlZTc5MzhlNmZlMDExZjVlMDE1In0"
+        },
+        {
+          "resource": "repo://tests/test_task_threads.py#L615-L710",
+          "version": "repo-lines-v1:sha256:b2f627be8f6b96509c20589e73c19d0dd4961c90db77f2a685a178b63108f1e9:eyJzZWxlY3RlZExpbmVDb3VudCI6OTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwNjYyNzY1NDcwZDA5N2JkMzllMTQxMTk5NGQ3NDdlYmU4MGNkYjBkOGUzZDRhZWIxZTgyZDMwNDFhMzBjNTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijc2M2EzYTA5ZDNmNDI0ZjlkNDFiZjRjYzhjYWRjOTc2ZDA0MzJmNmY4NjZjMjZhNGM1MjAwZDNmMjg0NzM3YWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjM3ODE5MGYzNzEzYzY2NWEyYWY5NDc2ZmRmN2FkM2YyOTZlMDg3ZWZmMTIxYWI1N2Q5NDFjZjM4NTQ0MjYwMjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4eeafe390a8a4e1487d78e5eb658d652",
+      "statement": "Managed-MCP tests require gateway tools to use the private owner's token, block them for public threads or another user, resume a connect card only once after all services are ready, and preserve workspace tools when the managed gateway is unavailable.",
+      "evidence": [
+        {
+          "resource": "repo://tests/mcp/test_managed_mcps.py#L173-L205",
+          "version": "repo-lines-v1:sha256:d5dfeed3b13db0a7226f90a497ca259110f48842031c70aee5628431802e198c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY4NWY4NjEyY2RmY2RkNGM3YmM0ZmZjOGVkOGU1MTQ3ZWE0NzQ3NTM5NDgwMDhmMjgxYTgzMmJkNjgyMTEzMGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNmNjUzMzFiZDNjZjFmYmQxZTk3YmUzZTBmZDNjNzllYjNkMTI3ZGQ2MDkyNjIyOTNiZmQwNjQxMjYyNmE4ODMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjJkNGEwMDhlYWYwZjRjMjJlM2IyMTUyYWVkMTYwYzYxY2UyNDc1NjM4NjA4NzE3MjBmODAzNjRkZTYwZWU1ZGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU3ZDQ3MWQ4ZDg3NWY3MGYyZGE3MWZkYTI0N2Y0NjEzYTE3MDZkMzk1NDVjYmI1YmM3ZjY1Y2I0ZGViMDY1NWQifQ"
+        },
+        {
+          "resource": "repo://tests/mcp/test_managed_mcps.py#L59-L148",
+          "version": "repo-lines-v1:sha256:31ed825937edb37988be25b5eefd3710c36e54dd24d143026656d8239d9fa345:eyJzZWxlY3RlZExpbmVDb3VudCI6OTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNlOGQ1ODBjYWMwODU5MDk0NTk0NmY2NWE1ZDI4Mzc1ZWNiOTFiN2MxNmE4MzE0YzU0NzYwZTVjZDA0ZTVlOTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNkNDc5ZmNlNmU5Yjk3NzkwZDg1MzU5NDhiMjBiZmVjMDZjOWNmZmI0MDNhN2ZiNGZkOGI5MWJjMTc0YTQxMjIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8d509a570214484b8614d50d47c095ae",
+      "statement": "Reviewer-outcome tests require a finding outcome to be stored with finding, repository, run, and label metadata, and convert an already-existing create attempt into an update.",
+      "evidence": [
+        {
+          "resource": "repo://tests/reviewer/test_reviewer_outcomes.py#L75-L115",
+          "version": "repo-lines-v1:sha256:92376519dbf484497a8ca3710805ac0c479ff232948afffd1bc7b7e4079d54ca:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhlNDZlNWE4ZmU0NDEyYjE2NjMxMjM1NmMzMTM0NWZkZTI1MGMwMzIzMDM3YmZjMThkMzJmNDdhNzg2NTQ5MjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUwY2MyOWYyZDA3Y2ZhODAyNmE0MjAyM2I2ZjhlNjhhYTFmMGI5NDYxOTAzMmJjOTY1MTI4MzM2NGVmYTRiZmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-09-08T08:15:30.533Z"
+    "at": "2026-10-08T08:17:40.044Z"
   }
 }

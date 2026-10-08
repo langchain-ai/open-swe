@@ -1,265 +1,161 @@
 ---
 type: workflow
-title: Follow-ups, Interrupts, and Stop Control
-description: How Open SWE attaches new work to an existing thread, chooses durable run interruption or enqueueing, preserves checkpoint and sandbox context, and implements Slack and dashboard stop behavior.
-tags: [follow-up, interrupt, message-queue, durable-runs, slack, dashboard, sandbox]
+title: Follow-ups, Interrupts, and Completion Delivery
+description: How Open SWE accepts concurrent follow-ups, chooses durable interruption or enqueueing, routes replies to the active conversation surface, and recovers from cancellation or stale runs.
+tags: [follow-up, interrupt, message-queue, durable-runs, completion, slack, dashboard]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-08T08:17:40.044Z
 sources:
-  - id: openwiki-source-4817379f332cdbc419964b44
-    resource: repo://agent/api/health.py
-  - id: openwiki-source-d87936e6d54eab24f7479af1
-    resource: repo://agent/baby_sit.py
-  - id: openwiki-source-26c2c4725a171eaf524f2ad7
-    resource: repo://agent/background_tasks.py
-  - id: openwiki-source-068d65a84c760eb8d555055e
-    resource: repo://agent/completion.py
-  - id: openwiki-source-dc33a233b67bb1d08952543c
-    resource: repo://agent/dashboard/thread_api.py
-  - id: openwiki-source-c48b309c5ca416cf623f0866
-    resource: repo://agent/dispatch.py
-  - id: openwiki-source-cb4e403499865fd6b797127c
-    resource: repo://agent/input_messages.py
-  - id: openwiki-source-828b741451bbda4468382d9b
-    resource: repo://agent/middleware/check_message_queue.py
-  - id: openwiki-source-276ab38291eb5741b4c2141c
-    resource: repo://agent/reviewer.py
-  - id: openwiki-source-6fd11c8bb15f5eb94b765440
-    resource: repo://agent/sandboxes/lifecycle.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-e0785b4f2497c26e024d92fc
-    resource: repo://agent/slack/routes.py
-  - id: openwiki-source-a26c1e1c3e9e7df7de591923
-    resource: repo://agent/slack/stop.py
-  - id: openwiki-source-4ffd3d31ffb2d798faaaad59
-    resource: repo://agent/slack/webhook.py
-  - id: openwiki-source-79be4c606a697afbf6efb749
-    resource: repo://agent/utils/thread_ops.py
-  - id: openwiki-source-0d20d315a6a4ea1d7240eab4
-    resource: repo://tests/slack/test_slack_event_dedupe.py
+  - id: openwiki-source-035276d8c595782faca6e595
+    resource: repo://openswe/api/health.py
+  - id: openwiki-source-fdc3c445764dd84ca904d0bf
+    resource: repo://openswe/background_tasks.py
+  - id: openwiki-source-913527bc7b548b4bf81f6a35
+    resource: repo://openswe/completion.py
+  - id: openwiki-source-1685d34aae8025be9332f45a
+    resource: repo://openswe/dispatch.py
+  - id: openwiki-source-1772d9a59ed3ff28f22ae21a
+    resource: repo://openswe/middleware/check_message_queue.py
+  - id: openwiki-source-5dad68f13167104020180557
+    resource: repo://openswe/middleware/require_user_reply.py
+  - id: openwiki-source-34d496899c8a38f20f349e4f
+    resource: repo://openswe/reconcile.py
+  - id: openwiki-source-96bcad07b4fe7078402bc2b8
+    resource: repo://openswe/reviewer.py
+  - id: openwiki-source-685dc33e7199aa1f6e402f7a
+    resource: repo://openswe/scheduler.py
+  - id: openwiki-source-919e16feae379651f2cbc1c9
+    resource: repo://openswe/server.py
+  - id: openwiki-source-09f15fb673d6653b5f61bf55
+    resource: repo://openswe/slack/stop.py
+  - id: openwiki-source-72370931d61f0a7232adcf12
+    resource: repo://openswe/slack/webhook.py
+  - id: openwiki-source-1b56c0378ee7dbe5ac66ab32
+    resource: repo://openswe/threads/handlers.py
+  - id: openwiki-source-5c84530a3d0edb1fb15187f1
+    resource: repo://openswe/threads/runs.py
+  - id: openwiki-source-996097a4d0a674613168d766
+    resource: repo://openswe/utils/thread_ops.py
   - id: openwiki-source-cfcd1294e54b4445da98a9ce
     resource: repo://tests/slack/test_slack_stop.py
-  - id: openwiki-source-b5d2fb95f06f5e8c3f58555f
-    resource: repo://tests/slack/test_slack_untagged_flag.py
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-08T08:17:40.044Z" }
 ---
 
-# Follow-ups, Interrupts, and Stop Control
+# Follow-ups, Interrupts, and Completion Delivery
 
-A thread is the continuity boundary for both the LangGraph conversation and the
-sandbox bound to its metadata. A later request can therefore continue the same
-work without creating a second workspace. Open SWE has two complementary ways
-to deal with work that arrives while a thread is busy:
+A thread is the continuity and delivery boundary: its durable LangGraph state, metadata, and sandbox-backed work remain associated with one conversation. Open SWE does not start a second independent owner for a follow-up. Instead, it either creates another durable run on that same thread or steers a message into the current run. This preserves the **single-thread-owner posting invariant**: a reply is owed by the one thread that owns the conversation, and a handoff changes that thread's reply surface rather than creating competing Slack and web responders.
 
-- **Run-level multitasking** submits another durable run. The normal strategy is
-  `"interrupt"`, which supersedes active work; low-priority work can use
-  `"enqueue"`, which waits at the platform run queue.
-- **The store-backed message queue** puts a message into a live run's thread
-  state. Before its next model call, middleware consumes and appends that
-  message to the existing conversation.
+There are two deliberately different queues:
 
-The first approach is how ordinary webhook turns are scheduled. The second is
-principally the dashboard's in-flight handoff path. They should not be confused:
-an enqueued *run* starts after an active run ends, while a queued *message* is
-injected into the active run at its next model boundary. For general invocation
-and durable thread state, see [Invocation](invocation.md) and
-[Threads and state](../concepts/threads-and-state.md). For sandbox ownership and
-recovery details, see [Sandbox lifecycle](../architecture/sandbox-lifecycle.md).
+- A **durable run queue** is controlled by `multitask_strategy`. `interrupt` preempts the active run at its synced checkpoint; `enqueue` waits for it.
+- The **store message queue**, `("queue", thread_id) / "pending_messages"`, is for a message arriving while a run is already in flight. Before the next model call, graph middleware injects it into that run's state.
 
-## Durable follow-up dispatch
+Thus an enqueued run begins only after earlier work ends, while a queued message can change the active run at its next model boundary. See [Invocation](invocation.md), [Threads and state](../concepts/threads-and-state.md), and [Collaborative tasks](collaborative-tasks.md) for the surrounding lifecycle.
 
-`dispatch_agent_run` is the common agent/reviewer dispatch contract. It builds
-or accepts structured `RunInput`, then calls `create_durable_run`. The latter
-sets a fresh `prepare_run_id`, enables the event-streaming-v2 configurable
-marker, merges metadata, and calls `client.runs.create` with:
+## Dispatch policy: interrupt, enqueue, or inject
 
-- `multitask_strategy="interrupt"` unless the caller selects another strategy;
-- `durability="sync"`, so there is a checkpoint before each step;
-- resumable, subgraph-capable Protocol v2 stream modes, allowing a later
-  dashboard client to replay events from a run it did not create; and
-- an optional completion webhook, only when a non-loopback absolute completion
-  URL and `RUN_COMPLETE_WEBHOOK_SECRET` are configured.
+`dispatch_agent_run` is the common agent and reviewer dispatch boundary. Callers may provide an already attributed `RunInput`, or supply content and identities for it to build one; it then delegates to `create_durable_run`. That durable creation defaults to `multitask_strategy="interrupt"` and `durability="sync"`, creates/ensures a titled system-owned thread when requested, and enables resumable, subgraph-capable v3 stream modes. Consequently, a client that attaches after a Slack- or automation-triggered run can replay its stream rather than treating the thread as idle.
 
-Interrupting an active run retains the thread's checkpointed history rather
-than starting a separate conversation. A subsequent agent step also resolves
-the sandbox by thread: it reuses an in-memory backend or reconnects through the
-persisted `sandbox_id`. This serialization is why the sandbox lifecycle relies
-on interrupt dispatch rather than a separate cross-process provisioning lock.
-An unreachable existing sandbox is not silently replaced for a normal agent
-thread, because replacement would discard uncommitted work; a deleted sandbox
-can be recreated, and the read-only reviewer can explicitly allow replacement.
+The dispatch configuration also gives each run an invocation identity and start time, preserves source/workspace context for system follow-ups, and records Slack channel metadata when available. A completion webhook is attached only when `RUN_COMPLETE_WEBHOOK_SECRET` is set and `COMPLETION_WEBHOOK_URL` is absolute and not loopback. This avoids making run creation fail on platform-rejected local webhook URLs.
 
 ```mermaid
 sequenceDiagram
-    autonumber
     participant Sender
-    participant Trigger as Slack or webhook
-    participant Dispatch as dispatch_agent_run
-    participant Platform as LangGraph Platform
-    participant Agent as Agent graph
-    participant Sandbox
+    participant Intake as Slack intake
+    participant Dispatch as Durable dispatch
+    participant Platform as LangGraph platform
+    participant Graph as Agent graph
 
-    Sender->>Trigger: follow-up
-    Trigger->>Dispatch: input and multitask strategy
-    Dispatch->>Platform: runs.create with sync durability
-    alt interrupt on busy thread
-        Platform-->>Agent: interrupt at checkpoint
-        Platform->>Agent: continue thread history with new input
-    else enqueue
-        Platform-->>Agent: active run finishes first
-        Platform->>Agent: start queued run
+    Sender->>Intake: follow-up
+    Intake->>Dispatch: input and strategy
+    Dispatch->>Platform: create sync durable run
+    alt explicitly tagged request
+        Platform->>Graph: interrupt active run and continue thread
+    else untagged or automation work
+        Platform-->>Graph: current run finishes
+        Platform->>Graph: start enqueued run
     end
-    Agent->>Sandbox: reuse or reconnect by thread binding
 ```
-The durable run strategy controls whether new work preempts the active thread run or waits behind it.
+The durable strategy decides whether a new run preempts the thread or waits behind its current run.
 
-### Choosing interrupt or enqueue
+### Policy at important entrypoints
 
-Explicit Slack requests are urgent: `_dispatch_or_queue_slack_run` uses
-`"interrupt"` when the bot was explicitly tagged, and `"enqueue"` for an
-untagged Slack follow-up. This lets a participant add context without normally
-displacing the current turn, while an explicit request takes precedence. Slack
-message edits take a third route: the corrected content is placed in the store
-message queue; if the thread is idle, it remains there until a later run reaches
-a model call.
+- Slack uses `interrupt` for an explicitly tagged request and `enqueue` for an untagged follow-up. A Slack message edit is not a new run; its revised content is placed in the store queue.
+- Completion of a sandbox background task dispatches a notification follow-up with `enqueue`, so it does not displace interactive work. Its callback/polling reconciler claims terminal task notifications before delivery, preventing duplicate completion notices.
+- The dashboard continuation endpoint is intentionally only for a **busy** thread. After authorization it returns 409 for an idle thread and 502 when activity cannot be determined; it records a structured, attributed web payload in the store instead of dispatching a run.
 
-Automation deliberately avoids preemption. `/baby-sit` terminal/failure updates
-and notifications for finished sandbox background tasks dispatch with
-`multitask_strategy="enqueue"`. This preserves the interactive run's ordering
-and lets the notification run execute afterward. See
-[Scheduling and baby-sit](scheduling-and-baby-sit.md) for the watcher behavior.
-
-## Injecting a dashboard follow-up into a live run
-
-`send_dashboard_message` is a continuation endpoint, not an idle-thread start
-endpoint. It first authorizes that the caller may post to the thread, then
-requires its LangGraph status to be `busy`; it returns 409 for an idle thread
-and 502 if activity cannot be determined. It updates handoff metadata, including
-participant and selected-model information, then queues a structured payload:
-text, `source: "dashboard"`, `surface: "web"`, a `github:<login>` sender, and
-non-text image blocks when present. If the thread originated in Slack, it also
-best-effort updates the Slack trace reply to indicate the web handoff.
-
-`queue_message_for_thread` persists these records at
-`("queue", thread_id)`, key `pending_messages`, as `{"content": ...}` entries.
-It appends in FIFO order and retains the newest 100 entries, dropping the oldest
-on overflow. Store errors are logged and reported to the dashboard as a failed
-queue operation.
+`queue_message_for_thread` appends `{"content": ...}` records in FIFO order and keeps only the newest 100. A dashboard `queue_id` makes a retry idempotent. A dashboard payload contains the text and images, a web surface, a canonical GitHub sender identity, and a client or generated queue ID. If the conversation began in Slack, the dashboard also best-effort updates Slack's trace reply to show that the conversation moved to the web.
 
 ```mermaid
 sequenceDiagram
-    autonumber
     participant User
     participant Dashboard
-    participant Queue as LangGraph store
-    participant Middleware as Before-model middleware
+    participant Store as LangGraph store
+    participant QueueMW as Queue middleware
     participant Model
+    participant ReplyGuard as Reply surface guard
 
-    User->>Dashboard: send follow-up to busy thread
-    Dashboard->>Queue: append pending_messages payload
-    Note over Middleware: before next model call
-    Middleware->>Queue: read pending_messages
-    Middleware->>Queue: delete pending_messages
-    Middleware->>Middleware: build attributed input messages
-    Middleware-->>Model: append state messages
+    User->>Dashboard: web follow-up on busy thread
+    Dashboard->>Store: append pending messages
+    QueueMW->>Store: snapshot pending messages
+    QueueMW->>Model: inject attributed messages before model call
+    QueueMW->>Store: remove consumed snapshot and retain later arrivals
+    QueueMW->>ReplyGuard: set reply surface to web after handoff
+    ReplyGuard-->>User: only the current thread surface receives the reply
 ```
-The dashboard inserts a follow-up into the current run at the next before-model boundary rather than creating another run.
+A web handoff is injected into the existing owner run and moves its response obligation to web, avoiding competing Slack and web posting.
 
-### Queue drain and message attribution
+## Queue drain, attribution, and response ownership
 
-`check_message_queue_before_model` is installed in the agent graph and reviewer
-graph. It obtains `thread_id` and the LangGraph store from run context; absent
-context or store is a no-op. The middleware is deliberately excluded from the
-agent's `stop_summary` mode.
+`check_message_queue_before_model` is installed in both the agent and reviewer graphs; the agent omits it for a `stop_summary` run. It first consumes a batched autofix event from `("autofix", thread_id) / "pending_event"` and turns it into a system instruction. It then snapshots `pending_messages`, transforms messages into attributed input envelopes, and consumes only that snapshot. The consume helper rereads the record and retains entries appended while image retrieval or identity resolution was awaiting, so concurrent follow-ups are not dropped. If conversion fails, the snapshot remains for a later model call.
 
-At every model boundary it first consumes a batched
-`("autofix", thread_id) / "pending_event"` record. It deletes that record and
-adds a system instruction to re-check CI and review comments before finishing,
-rather than launching a separate run. It then reads `pending_messages` and
-deletes the record *before* conversion, preventing a subsequent middleware
-invocation from injecting the same batch twice. The resulting
-`{"messages": [...]}` state update appends the inputs in FIFO order for the
-model to see.
+Ordinary queued content is attributed to `system:thread-queue`. Dashboard content is rebuilt as a human web message from its supplied sender; when it moves a Slack conversation to the web, a dashboard-handoff system message is included once and the state’s `reply_surface` becomes `web`. Dynamic context hashes avoid repeating visible introductions while still respecting summarized-away context. For queued image URLs, middleware uses the selected run or thread model to decide whether vision is supported; unsupported fetched images are omitted with a warning, while supplied image blocks are retained.
 
-Queued content is reconstructed with `build_input_messages`, rather than
-inserted as unstructured text:
+`RequireUserReplyMiddleware` enforces delivery only when the current reply surface is Slack. It resets the surface for every run, recognizes successful final reply-tool calls, and nudges the model up to two times if it ends a human turn without one. If it still has final text after the retry budget, it posts that text on the model’s behalf. Once the queue middleware switches a live conversation to web, this Slack fallback no longer posts, preserving the single owner/surface rule.
 
-- Ordinary queued blocks become a system message attributed to
-  `system:thread-queue` on the automation surface.
-- A dashboard payload produces a dashboard-handoff system message followed by a
-  human message attributed to its supplied sender on the web surface.
-- Dynamic identity context is emitted only when its hash is not already visible
-  to the model. The visibility calculation honors a summarization cutoff, so
-  context retained only in historical state is introduced again.
-- Each structured envelope is its own message because the transcript parser
-  expects one `<input-message>` envelope per message. Plain text blocks may be
-  merged before serialization.
+## Stop and cancel semantics
 
-For payloads with image URLs, the middleware reads the thread model once. If it
-does not support vision, it omits those fetched images and adds a warning to the
-text; supplied image blocks are retained. Failures in the outer middleware are
-logged and allow the model call to proceed rather than aborting the run. A
-failed queue read still flushes any autofix instruction already assembled.
+Slack `:x:` reactions are accepted asynchronously. The stop handler resolves either a mapped agent reply or the root Slack timestamp, finds the corresponding thread, validates that its stored Slack context has the same channel and root timestamp, and only then claims the Slack event ID. Missing IDs, duplicate claims, unknown mappings, and metadata mismatches have no stop side effects.
 
-## Stopping work
+For a valid reaction, it enumerates every `pending` and `running` run, cancels them with `action="interrupt"`, deletes both pending message and autofix records, marks the thread interrupted with a stop timestamp, and starts a restricted `stop_summary` agent run. The summary run is mapped to the Slack thread so later reactions can resolve it. A cancellation or cleanup failure prevents the success-summary sequence from being dispatched. The code-channel `agent_session_stopped` event shares cancellation, cleanup, and interrupted status handling, then restores the session to `active`; it does not run a summary.
 
-Slack and dashboard stops share a core rule: enumerate both `pending` and
-`running` run IDs for the thread and cancel them with
-`runs.cancel_many(..., action="interrupt")`, rather than trusting a cached
-`latest_run_id`. Their post-stop continuation policies intentionally differ.
+The dashboard owner stop likewise lists live runs rather than trusting a potentially stale `latest_run_id`, but it has a different fairness policy: it leaves another person's queued run intact and only cancels queued work owned by the stopper or unowned work. It preserves the store queue. If no other queued run was kept, it starts an empty-input `follow_up_pickup` run, whose first model call drains the leftover messages. A failure to submit that pickup is returned as HTTP 502 after cancellation was requested. Machine-principal cancellation is a separate path that cancels queued work too.
 
-### Slack emergency stop
+## Completion delivery and recovery
 
-The Slack route accepts a `:x:` reaction and schedules stop processing in the
-background. The handler resolves a reaction on an agent reply through its
-Slack-run mapping (or uses the root timestamp), finds the mapped Open SWE
-thread, and verifies that thread metadata names the same Slack channel and
-thread timestamp. It claims the Slack event only after that validation; missing
-event IDs and duplicate claims have no side effects.
+The platform calls `POST /webhooks/run-complete` for eligible durable runs. The endpoint fail-closes with a constant-time check of the configured token, rejects invalid tokens with 401, and ignores malformed/non-object payloads rather than treating them as run completions.
 
-After successful cancellation, Slack stop deletes both deferred records:
-`("queue", thread_id) / "pending_messages"` and
-`("autofix", thread_id) / "pending_event"`. It writes
-`latest_run_status="interrupted"` and `stop_requested_at_ms`, then starts a
-special stop-summary run. Its prompt permits only read-only inspection and
-requires its first and only user-facing action to be a concise Slack thread
-summary; it prohibits continuing the task or mutating files, commands, commits,
-or PRs. The summary run is mapped back to the Slack thread for future reaction
-resolution. If cancellation or deferred-work cleanup fails, the handler does
-not claim a successful summary outcome.
+`handle_run_completion` finalizes terminal invocation telemetry and transcript turns, then routes terminal effects. `success`, `error`, and `timeout` can deliver task messages and event subscriptions; `interrupted` is terminal for telemetry but is not a failure reply because interruption is expected during normal follow-up replacement. On a successful eligible Slack agent run, completion settles status and schedules session-cost refresh with run-scoped deduplication. On `error` or `timeout`, it posts a best-effort failure notification to the source channel—Slack thread, Linear issue, or GitHub issue/PR—and records the run ID in bounded metadata to make webhook retries idempotent. Repeated event-woken failures are capped to avoid indefinitely spamming a channel.
 
-A code-channel `agent_session_stopped` event performs the cancellation and
-queue/autofix cleanup too, updates the status, and returns the Slack session to
-`active`; unlike a reaction, it does not create a summary run.
+A successful run can finish just after its final model call, leaving a newly queued store follow-up unseen. Completion detects this and, when no run is already pending, asks `dispatch_pending_follow_ups` to create a `reject`-strategy empty-input pickup. `reject` ensures it does not disturb a run started in the meantime; that newer run will drain the same queue itself.
 
-### Dashboard stop and continuation
+```mermaid
+sequenceDiagram
+    participant Platform as LangGraph platform
+    participant Completion as Completion webhook
+    participant Thread as Thread metadata
+    participant Channel as Origin channel
+    participant Store as Follow-up store
+    participant Pickup as Pickup run
 
-The dashboard stop endpoint authorizes the caller against thread metadata and
-cancels all currently live runs for the thread. This works for runs initiated by
-Slack, Linear, GitHub, or CI as well as runs begun by the browser. It marks the
-thread interrupted but **does not discard** `pending_messages`. If a dashboard
-follow-up is present, it dispatches an empty-input agent run after cancellation;
-the before-model middleware drains that preserved queue, and metadata is updated
-to the new pending run ID. Failure to launch this continuation is surfaced as
-HTTP 502 after the cancellation has already been requested. The administrator
-variant cancels and marks interrupted without this authorization or queued
-continuation behavior.
+    Platform->>Completion: terminal run payload
+    Completion->>Thread: finalize telemetry and transcript turn
+    alt success
+        Completion->>Thread: settle status and schedule Slack cost refresh
+        Completion->>Store: check leftovers after final model call
+        Completion->>Pickup: dispatch reject pickup when no run is pending
+    else error or timeout
+        Completion->>Channel: idempotent best effort failure reply
+        Completion->>Thread: record replied run id
+    else interrupted
+        Completion->>Thread: no failure reply
+    end
+```
+Completion routes effects through the originating thread and channel while a pickup run handles follow-ups that missed the completed run's final model boundary.
 
-## Completion and operational checks
+Completion callbacks are a safety mechanism, not the only recovery mechanism. The scheduler's `reconcile` task paginates busy threads, examines their pending runs, and cancels ones older than `max_age_seconds` (default 1,800 seconds) with `interrupt`. Per-thread failures are logged and isolated so one unreadable thread does not abort the sweep; the result reports checked threads, stale runs, and cancellations.
 
-Every durable dispatch is configured to request a completion callback only when
-completion webhook configuration is safe: the URL must be absolute and not
-loopback, and a secret must be present. The `/webhooks/run-complete` route
-rejects invalid tokens. Successful Slack agent runs schedule session-cost
-refresh; `error` and `timeout` runs receive a best-effort, run-idempotent reply
-on their originating Slack, Linear, or GitHub channel. `interrupted` is not a
-failure status because it is the expected result of an interrupting follow-up.
+## Focused tests and operational checks
 
-Focused regression coverage in `tests/slack/test_slack_stop.py` exercises mapped
-reply and root stops, all-live-run cancellation, deferred-work deletion,
-metadata/status changes, stop-summary dispatch, duplicate and missing-event
-protection, mapping/metadata mismatch rejection, and the no-summary
-code-channel session-stop path. Slack route tests additionally cover event
-deduplication and the distinction between mentioned and untagged messages.
+`tests/slack/test_slack_stop.py` covers mapped-reply stop resolution, cancellation of both pending and running runs, deferred-work cleanup, metadata changes, summary dispatch and remapping, duplicate-event safety, Slack-context mismatch rejection, and failures during cancellation or cleanup. Operators enabling failure delivery must configure both `RUN_COMPLETE_WEBHOOK_SECRET` and a deployment-reachable non-loopback `COMPLETION_WEBHOOK_URL`; otherwise dispatch intentionally runs without a completion callback and the webhook endpoint rejects calls.
