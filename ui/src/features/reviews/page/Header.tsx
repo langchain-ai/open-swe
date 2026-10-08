@@ -9,7 +9,7 @@ import {
   GitPullRequestIcon,
   KeyboardIcon,
   LinkIcon,
-  SidebarSimpleIcon,
+  TreeViewIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
@@ -88,7 +88,8 @@ export function Header({
     <header
       data-desktop-drag-region=""
       className={cn(
-        "flex shrink-0 items-center gap-3 border-b border-border bg-background py-2.5 pr-3",
+        // Top-aligned at 8px so the first row lines up with the app's floating sidebar button.
+        "flex shrink-0 items-start gap-3 border-b border-border bg-background pt-2 pr-3 pb-2.5",
         leftInset
       )}
     >
@@ -106,10 +107,10 @@ export function Header({
         onClick={toggleNavigator}
         className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
       >
-        <SidebarSimpleIcon className="size-4" />
+        <TreeViewIcon className="size-4" />
       </button>
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-h-7 min-w-0 items-center gap-2">
           {state ? (
             <span
               className={cn(
@@ -229,72 +230,74 @@ export function Header({
           <Skeleton className="mt-1 h-3.5 w-80 max-w-full max-sm:hidden" />
         )}
       </div>
-      {files.length > 0 && (
-        <button
-          type="button"
-          onClick={jumpToUnviewed}
-          title="Go to the next file you haven't viewed"
-          className="hidden shrink-0 items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground tabular-nums hover:bg-accent hover:text-foreground md:flex"
-        >
-          <ProgressRing value={viewedCount / files.length} />
-          {viewedCount}/{files.length} viewed
-        </button>
-      )}
-      {compactRail && (
-        <Button
-          variant="outline"
-          aria-label="Chat"
-          onClick={() => setRailTab("chat")}
-        >
-          <ChatsCircleIcon />
-          <span className="max-sm:hidden">Chat</span>
-        </Button>
-      )}
-      {detail?.pr.state === "open" && (
-        <SubmitReviewPopover
-          owner={pr.owner}
-          repo={pr.repo}
-          number={pr.number}
-          open={reviewOpen}
-          onOpenChange={setReviewOpen}
-          defaultVerdict={reviewVerdict}
-        />
-      )}
-      <Menu>
-        <MenuTrigger
-          aria-label="More"
-          render={
-            <button
-              type="button"
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-            />
-          }
-        >
-          <DotsThreeIcon weight="bold" className="size-4" />
-        </MenuTrigger>
-        <MenuPopup align="end" className="w-56 p-1">
-          <MenuItem
-            onClick={() =>
-              window.open(githubUrl, "_blank", "noopener,noreferrer")
+      <div className="flex h-7 shrink-0 items-center gap-3">
+        {files.length > 0 && (
+          <button
+            type="button"
+            onClick={jumpToUnviewed}
+            title="Go to the next file you haven't viewed"
+            className="hidden shrink-0 items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground tabular-nums hover:bg-accent hover:text-foreground md:flex"
+          >
+            <ProgressRing value={viewedCount / files.length} />
+            {viewedCount}/{files.length} viewed
+          </button>
+        )}
+        {compactRail && (
+          <Button
+            variant="outline"
+            aria-label="Chat"
+            onClick={() => setRailTab("chat")}
+          >
+            <ChatsCircleIcon />
+            <span className="max-sm:hidden">Chat</span>
+          </Button>
+        )}
+        {detail?.pr.state === "open" && (
+          <SubmitReviewPopover
+            owner={pr.owner}
+            repo={pr.repo}
+            number={pr.number}
+            open={reviewOpen}
+            onOpenChange={setReviewOpen}
+            defaultVerdict={reviewVerdict}
+          />
+        )}
+        <Menu>
+          <MenuTrigger
+            aria-label="More"
+            render={
+              <button
+                type="button"
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              />
             }
           >
-            <IoLogoGithub /> Open on GitHub
-          </MenuItem>
-          <MenuItem
-            onClick={() =>
-              void navigator.clipboard
-                .writeText(window.location.href)
-                .then(() => toast.success("Copied the link"))
-            }
-          >
-            <LinkIcon /> Copy link to this page
-          </MenuItem>
-          <MenuSeparator />
-          <MenuItem onClick={openShortcutReference}>
-            <KeyboardIcon /> Keyboard shortcuts
-          </MenuItem>
-        </MenuPopup>
-      </Menu>
+            <DotsThreeIcon weight="bold" className="size-4" />
+          </MenuTrigger>
+          <MenuPopup align="end" className="w-56 p-1">
+            <MenuItem
+              onClick={() =>
+                window.open(githubUrl, "_blank", "noopener,noreferrer")
+              }
+            >
+              <IoLogoGithub /> Open on GitHub
+            </MenuItem>
+            <MenuItem
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(window.location.href)
+                  .then(() => toast.success("Copied the link"))
+              }
+            >
+              <LinkIcon /> Copy link to this page
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem onClick={openShortcutReference}>
+              <KeyboardIcon /> Keyboard shortcuts
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
+      </div>
     </header>
   )
 }

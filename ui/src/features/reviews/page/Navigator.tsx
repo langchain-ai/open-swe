@@ -12,7 +12,13 @@ import type { ReviewDiffFile, ReviewFinding } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
-import { buildEntries, compareTreePaths, type DiffEntry } from "./diffEntries"
+import {
+  buildEntries,
+  compareTreePaths,
+  filterEntries,
+  matchesFileFilter,
+  type DiffEntry,
+} from "./diffEntries"
 import {
   findingGroupColor,
   isAnchored,
@@ -167,6 +173,7 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
             {viewedCount}/{files.length} viewed
           </div>
         )}
+        {files && <FileFilter />}
       </div>
       {!files ? (
         <div className="flex flex-col gap-2 px-3">
@@ -197,9 +204,14 @@ function StepList({
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const activeEntry = useReviewPage((state) => state.activeEntry)
   const viewed = useReviewPage((state) => state.viewed)
+  const fileFilter = useReviewPage((state) => state.fileFilter)
+  // A filter keeps only the steps that touch a matching file, each with just those files.
   const steps = useMemo(() => {
     const byStep = new Map<number, Array<DiffEntry>>()
-    for (const entry of buildEntries(files, walkthrough, "guide")) {
+    for (const entry of filterEntries(
+      buildEntries(files, walkthrough, "guide"),
+      fileFilter
+    )) {
       if (!entry.step) continue
       byStep.set(entry.step.index, [
         ...(byStep.get(entry.step.index) ?? []),
@@ -207,7 +219,13 @@ function StepList({
       ])
     }
     return [...byStep.values()]
-  }, [files, walkthrough])
+  }, [files, walkthrough, fileFilter])
+  if (steps.length === 0)
+    return (
+      <p className="px-4 py-2 text-xs text-muted-foreground">
+        No step touches a matching file.
+      </p>
+    )
   return (
     <ol className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
       {steps.map((entries) => {
@@ -262,6 +280,31 @@ function StepList({
   )
 }
 
+/** One filter for the tree, the walkthrough and the diff itself. */
+function FileFilter() {
+  const filter = useReviewPage((state) => state.fileFilter)
+  const setFilter = useReviewPage((state) => state.setFileFilter)
+  return (
+    <label className="flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs focus-within:border-ring">
+      <MagnifyingGlassIcon className="size-3.5 text-muted-foreground" />
+      <input
+        type="search"
+        aria-label="Filter files"
+        placeholder="Filter files"
+        value={filter}
+        onChange={(event) => setFilter(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && filter) {
+            event.stopPropagation()
+            setFilter("")
+          }
+        }}
+        className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+      />
+    </label>
+  )
+}
+
 function FileTree({
   files,
   markers,
@@ -269,28 +312,14 @@ function FileTree({
   files: ReadonlyArray<ReviewDiffFile>
   markers: Markers
 }) {
-  const [filter, setFilter] = useState("")
-  const tree = useMemo(() => {
-    const query = filter.trim().toLowerCase()
-    return buildTree(
-      query
-        ? files.filter((file) => file.path.toLowerCase().includes(query))
-        : files
-    )
-  }, [files, filter])
+  const filter = useReviewPage((state) => state.fileFilter)
+  const tree = useMemo(
+    () =>
+      buildTree(files.filter((file) => matchesFileFilter(file.path, filter))),
+    [files, filter]
+  )
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <label className="mx-3 mb-1.5 flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs focus-within:border-ring">
-        <MagnifyingGlassIcon className="size-3.5 text-muted-foreground" />
-        <input
-          type="search"
-          aria-label="Filter files"
-          placeholder="Filter files"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
-        />
-      </label>
       <ul
         aria-label="Changed files"
         className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-4"

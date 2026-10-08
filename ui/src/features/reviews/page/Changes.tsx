@@ -39,6 +39,7 @@ import {
   buildEntries,
   containsLine,
   entryNotes,
+  filterEntries,
   isRenderable,
   notesSignature,
   type DiffEntry,
@@ -140,9 +141,14 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const askAboutLines = useAskAboutLines(pr)
 
   const walkthrough = detail?.walkthrough ?? null
-  const entries = useMemo(
+  const fileFilter = useReviewPage((state) => state.fileFilter)
+  const allEntries = useMemo(
     () => (diff.data ? buildEntries(diff.data.files, walkthrough, order) : []),
     [diff.data, walkthrough, order]
+  )
+  const entries = useMemo(
+    () => filterEntries(allEntries, fileFilter),
+    [allEntries, fileFilter]
   )
   const entryMap = useMemo(
     () => new Map(entries.map((entry) => [entry.id, entry])),

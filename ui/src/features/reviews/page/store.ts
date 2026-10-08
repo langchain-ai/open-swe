@@ -63,6 +63,8 @@ interface ReviewPageState {
   collapsed: ReadonlySet<string>
   /** The diff's entries in reading order. */
   entryOrder: ReadonlyArray<{ id: string; path: string }>
+  /** Narrows the diff, the file tree and the walkthrough to matching paths. */
+  fileFilter: string
 }
 
 interface ReviewPageActions {
@@ -89,6 +91,7 @@ interface ReviewPageActions {
   showFindings: () => void
   toggleCollapsed: (path: string) => void
   setEntryOrder: (entries: ReadonlyArray<{ id: string; path: string }>) => void
+  setFileFilter: (filter: string) => void
   /** Marks an entry's file viewed (or not); from the file being read, moves on to the next unread one. */
   markViewed: (id: string) => void
   /** The next file not yet viewed, in reading order, after the one being read. */
@@ -171,6 +174,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     findingsKey: 0,
     collapsed: new Set(),
     entryOrder: [],
+    fileFilter: "",
 
     open: (pr, headSha) => {
       const samePr = samePullRequest(get().pr, pr)
@@ -193,6 +197,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
               expandedFinding: null,
               chatDraft: undefined,
               chatExcerpts: [],
+              fileFilter: "",
               collapsed: new Set(),
               // A walkthrough, when one exists, is the default reading order.
               order: storedOrder === "files" ? "files" : "guide",
@@ -323,6 +328,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
       }),
     clearChatExcerpts: () => set({ chatExcerpts: [] }),
     setEntryOrder: (entryOrder) => set({ entryOrder }),
+    setFileFilter: (fileFilter) => set({ fileFilter }),
     markViewed: (id) => {
       const { entryOrder, activeEntry, toggleViewed, jumpTo } = get()
       const index = entryOrder.findIndex((entry) => entry.id === id)

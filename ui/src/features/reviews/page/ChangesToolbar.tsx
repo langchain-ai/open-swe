@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
-import { ColumnsIcon, RowsIcon } from "@phosphor-icons/react"
+import { ColumnsIcon, RowsIcon, XIcon } from "@phosphor-icons/react"
 
 import { cn } from "@/lib/utils"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { matchesFileFilter } from "./diffEntries"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { useReviewPage } from "./store"
 import { WalkthroughCallout } from "./WalkthroughCallout"
@@ -61,6 +62,11 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
   const viewedCount = files.filter((file) => viewed.has(file.path)).length
   const hasWalkthrough = (detail?.walkthrough?.steps.length ?? 0) > 0
   const open = detail?.pr.state === "open"
+  const fileFilter = useReviewPage((state) => state.fileFilter)
+  const setFileFilter = useReviewPage((state) => state.setFileFilter)
+  const shownCount = files.filter((file) =>
+    matchesFileFilter(file.path, fileFilter)
+  ).length
 
   return (
     <div className="w-full px-4 pb-3">
@@ -91,6 +97,20 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
         ) : (
           <span className="text-xs text-muted-foreground">
             {diff.isError ? "Unavailable" : "Loading…"}
+          </span>
+        )}
+        {diff.data && fileFilter.trim() && (
+          <span className="flex items-center gap-1 rounded-md bg-primary/10 py-0.5 pr-0.5 pl-1.5 text-xs text-primary tabular-nums">
+            Showing {shownCount} of {files.length} matching “{fileFilter.trim()}
+            ”
+            <button
+              type="button"
+              aria-label="Clear the file filter"
+              onClick={() => setFileFilter("")}
+              className="flex size-4 items-center justify-center rounded hover:bg-primary/15"
+            >
+              <XIcon className="size-3" />
+            </button>
           </span>
         )}
         <span className="flex-1" />

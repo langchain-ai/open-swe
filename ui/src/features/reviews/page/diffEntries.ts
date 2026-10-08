@@ -273,3 +273,27 @@ export function notesSignature(notes: ReadonlyArray<NoteAnnotation>): string {
     })
     .join("|")
 }
+
+export function matchesFileFilter(path: string, filter: string): boolean {
+  const query = filter.trim().toLowerCase()
+  return !query || path.toLowerCase().includes(query)
+}
+
+/** Only entries whose file matches; each step keeps its intro on its first remaining entry. */
+export function filterEntries(
+  entries: ReadonlyArray<DiffEntry>,
+  filter: string
+): Array<DiffEntry> {
+  if (!filter.trim()) return [...entries]
+  const introduced = new Set<number>()
+  return entries
+    .filter((entry) => matchesFileFilter(entry.file.path, filter))
+    .map((entry) => {
+      if (!entry.step) return entry
+      const first = !introduced.has(entry.step.index)
+      introduced.add(entry.step.index)
+      return first === entry.step.first
+        ? entry
+        : { ...entry, step: { ...entry.step, first } }
+    })
+}
