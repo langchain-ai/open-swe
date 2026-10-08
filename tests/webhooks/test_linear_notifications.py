@@ -9,12 +9,12 @@ import pytest
 from langchain_core.tools import BaseTool
 from mcp.types import CallToolResult, TextContent, Tool
 
-from agent import completion
-from agent.linear import notifications
-from agent.mcp import MCPConnectionUpdate, runtime
-from agent.mcp import workspace as workspace_mcps
-from agent.middleware import sandbox_circuit_breaker
-from agent.run_config import RunConfig
+from openswe import completion
+from openswe.linear import notifications
+from openswe.mcp import MCPConnectionUpdate, runtime
+from openswe.mcp import workspace as workspace_mcps
+from openswe.middleware import sandbox_circuit_breaker
+from openswe.run_config import RunConfig
 
 
 @dataclass

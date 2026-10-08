@@ -4,14 +4,17 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.workspace_settings import (
+from openswe.audit_logs import tools as audit_tools
+from openswe.audit_logs.context import current_audit_log
+from openswe.audit_logs.models import AuditLog
+from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_workspace_settings,
     upsert_instance_settings,
 )
-from agent.tools import access as tool_access
-from agent.tools.manage_feature_flags import manage_feature_flags
-from agent.workspaces.store import WORKSPACES, Workspace
+from openswe.tools import access as tool_access
+from openswe.tools.manage_feature_flags import manage_feature_flags
+from openswe.workspaces.store import WORKSPACES, Workspace
 from tests.conftest import FakeStore
 
 real_resolve_access = tool_access.resolve_access
@@ -96,15 +99,21 @@ async def test_private_admin_gate_rejects_other_surfaces(
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
     monkeypatch.setattr(tool_access, "resolve_access", real_resolve_access)
-    with patch("agent.run_config.get_config", return_value={"configurable": config}):
+    with patch("openswe.run_config.get_config", return_value={"configurable": config}):
         result = await manage_feature_flags("set", {"gateway_enabled": True})
     assert "not available in this thread" in str(result["error"])
     assert not fake_store.items
 
 
 async def test_sole_writer_sets_flags_but_cannot_read_them(
-    fake_store: FakeStore, grant_tool_access: Callable[..., None]
+    fake_store: FakeStore, grant_tool_access: Callable[..., None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    entries: list[AuditLog] = []
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    monkeypatch.setattr(audit_tools, "append_safely", append)
     grant_tool_access(admin=True, sole=True)
     assert await manage_feature_flags("set", {"gateway_enabled": True}) == {
         "ok": True,
@@ -112,3 +121,11 @@ async def test_sole_writer_sets_flags_but_cannot_read_them(
     }
     assert (await get_workspace_settings())["gateway_enabled"] is True
     assert "not available in this thread" in str((await manage_feature_flags("read"))["error"])
+    (entry,) = entries
+    assert entry.operation_succeeded is True
+    assert entry.enrichments.source == "tool"
+    assert entry.enrichments.settings_scope == "instance"
+    assert entry.enrichments.settings_changes == {
+        "gateway_enabled": {"before": None, "after": True}
+    }
+    assert current_audit_log.get() is None

@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from agent.analytics import emitter
-from agent.database import analytics as database
+from openswe.analytics import emitter
+from openswe.database import analytics as database
 
 
 @pytest.mark.asyncio
@@ -14,8 +14,8 @@ async def test_pr_opened_without_invocation_preserves_action(monkeypatch) -> Non
     monkeypatch.setattr(database, "_WORKSPACE_ID", uuid4())
     enqueue = AsyncMock()
     monkeypatch.setattr(emitter, "enqueue", enqueue)
-    monkeypatch.setattr("agent.analytics.emitter.upsert_model", AsyncMock())
-    monkeypatch.setattr("agent.analytics.emitter.upsert_repository", AsyncMock())
+    monkeypatch.setattr("openswe.analytics.emitter.upsert_model", AsyncMock())
+    monkeypatch.setattr("openswe.analytics.emitter.upsert_repository", AsyncMock())
 
     await emitter.pr_opened(
         owner="langchain-ai",

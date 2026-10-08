@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import ANY, AsyncMock
 from urllib.parse import urlencode
@@ -6,8 +7,8 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import BackgroundTasks, Request
 
-from agent.slack import routes as slack_routes
-from agent.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
+from openswe.slack import routes as slack_routes
+from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 
 
 def _request(payload: dict[str, Any]) -> Request:
@@ -147,6 +148,52 @@ async def test_option_interaction_schedules_update_before_agent_processing(
         "Option B",
     )
     process.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reader", [True, False])
+async def test_looks_good_in_a_review_guide_counts_only_for_its_reader(
+    monkeypatch: pytest.MonkeyPatch, reader: bool
+) -> None:
+    payload = _option_payload()
+    payload["actions"][0]["value"] = json.dumps(
+        {"type": "open_swe_option", "response": "Looks good"}
+    )
+    update = AsyncMock()
+    advance = AsyncMock()
+    guide = SimpleNamespace(is_reader=AsyncMock(return_value=reader))
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(slack_routes, "get_langgraph_client", lambda: object())
+    monkeypatch.setattr(slack_routes.common, "is_code_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        slack_routes.common, "lookup_slack_thread_id", AsyncMock(return_value="thread-1")
+    )
+    monkeypatch.setattr(
+        slack_routes.common,
+        "resolve_slack_channel_context",
+        AsyncMock(
+            return_value=SlackChannelContext(
+                name="proj-open-swe", is_ext_shared=False, is_pending_ext_shared=False
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        slack_routes.ReviewGuideSession, "for_channel", AsyncMock(return_value=guide)
+    )
+    monkeypatch.setattr(slack_routes, "_update_selected_option_message", update)
+    monkeypatch.setattr(slack_routes, "advance", advance)
+    background_tasks = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(_request(payload), background_tasks)
+
+    guide.is_reader.assert_awaited_once_with("U1")
+    if not reader:
+        assert result["status"] == "ignored"
+        assert background_tasks.tasks == []
+        return
+    assert [task.func for task in background_tasks.tasks] == [update, advance]
+    await background_tasks()
+    advance.assert_awaited_once_with("C1", "2.0")
 
 
 @pytest.mark.asyncio

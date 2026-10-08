@@ -5,10 +5,10 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agent.api.app import app
-from agent.github import webhook as github
-from agent.schedules import store as schedules
-from agent.webhooks import common
+from openswe.api.app import app
+from openswe.github import webhook as github
+from openswe.schedules import store as schedules
+from openswe.webhooks import common
 from tests.conftest import post_signed_github_webhook
 
 _SECRET = "baby-sit-webhook-secret"

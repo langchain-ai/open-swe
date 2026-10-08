@@ -41,7 +41,7 @@ export function toolKind(name: string): ToolKind {
   if (lowered === "task") return "task"
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
-  if (lowered === "request_service_connection") return "service-connection"
+  if (lowered === "connect_managed_tools") return "managed-tools"
   if (lowered === "linear_comment") return "linear"
   if (
     EDIT_TOOLS.has(lowered) ||
@@ -332,11 +332,13 @@ export function streamMessagesToUi(
       // Our own replies reach the transcript twice: once forwarded as thread
       // context, once as the `slack_reply` call that sent them.
       if (entity?.senderType === "self") return
-      const text = parsed.content
+      const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
+      const text = taskEvent?.content ?? parsed.content
       if (text.trim()) chunks.push({ kind: "text", text })
-      if (!chunks.length) return
+      if (!chunks.length && !taskEvent) return
       uiMessages.push({
         id: msgId,
+        ...(taskEvent ? { taskEvent } : {}),
         author:
           parsed.type === "message" && parsed.senderKind === "system"
             ? "system"

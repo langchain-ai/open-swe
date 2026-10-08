@@ -1,7 +1,7 @@
 """Slack-started threads route through the shared workspace resolver.
 
 Resolution order is tag, repository, Slack channel, the triggering user's
-default, then the instance default -- see ``agent.workspaces.routing``. These
+default, then the instance default -- see ``openswe.workspaces.routing``. These
 tests cover the tag spelling change and one end-to-end dispatch through
 channel routing; ``tests/workspaces/test_routing.py`` covers the resolver
 itself.
@@ -11,16 +11,16 @@ from typing import Any
 
 import pytest
 
-from agent.dashboard.workspace_settings import (
+from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from agent.run_config import Repo
-from agent.slack import webhook as slack_webhooks
-from agent.slack.request import SlackRequest
-from agent.webhooks import common as webhook_common
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.run_config import Repo
+from openswe.slack import webhook as slack_webhooks
+from openswe.slack.request import SlackRequest
+from openswe.webhooks import common as webhook_common
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 

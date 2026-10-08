@@ -15,8 +15,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.store.memory import InMemoryStore
 
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.utils.model import make_model
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.utils.model import make_model
 from tests.agent.test_agent_assembly_context import (
     _MODEL_DEFAULTS,
     _base_config,
@@ -29,11 +29,11 @@ _GPT = "openai:gpt-6.1-sol"
 
 
 async def _search(query: str) -> str:
-    """Search the workspace's Notion pages."""
+    """Search the team's documentation."""
     return query
 
 
-_NOTION_SEARCH = StructuredTool.from_function(coroutine=_search, name="notion-search")
+_DOCS_SEARCH = StructuredTool.from_function(coroutine=_search, name="docs-search")
 
 
 @dataclass
@@ -75,7 +75,7 @@ class _Providers:
                     {
                         "id": "load-call",
                         "name": "load_integration_tools",
-                        "args": {"tool_names": ["notion-search"]},
+                        "args": {"tool_names": ["docs-search"]},
                     }
                 ],
             )
@@ -91,7 +91,7 @@ async def _run(
     model_route: str | None = None,
 ) -> None:
     config = _base_config()
-    with patch("agent.server._notion_tools_for", AsyncMock(return_value=[_NOTION_SEARCH])):
+    with patch("openswe.server._mcp_tools_for", AsyncMock(return_value=[_DOCS_SEARCH])):
         kwargs = await _capture_create_deep_agent_kwargs(
             config,
             thread_settings={"owner_login": "octocat", **thread_settings},
@@ -119,11 +119,13 @@ async def _run(
         return await providers.answer(model, messages, stop, **kwargs)
 
     with (
-        patch("agent.server.PrepareAgentRunMiddleware._prepare", AsyncMock(return_value=prepared)),
+        patch(
+            "openswe.server.PrepareAgentRunMiddleware._prepare", AsyncMock(return_value=prepared)
+        ),
         patch.object(ChatAnthropic, "_agenerate", generate),
         patch.object(ChatOpenAI, "_agenerate", generate),
     ):
-        await agent.ainvoke({"messages": [HumanMessage("Find the plan in Notion.")]}, config)
+        await agent.ainvoke({"messages": [HumanMessage("Find the plan in the docs.")]}, config)
 
 
 def _openai_offer(payload: Mapping[str, object]) -> tuple[list[str], list[str]]:
@@ -167,8 +169,8 @@ async def test_a_routed_call_receives_loaded_tools_in_the_routed_models_format()
 
     assert [sent.model_id for sent in providers.sent] == [_GPT, _GPT]
     in_tools, added = _openai_offer(providers.sent[-1].payload)
-    assert added == ["notion-search"]
-    assert "notion-search" not in in_tools
+    assert added == ["docs-search"]
+    assert "docs-search" not in in_tools
 
 
 async def test_a_fallback_attempt_receives_loaded_tools_in_the_fallback_models_format(
@@ -181,5 +183,5 @@ async def test_a_fallback_attempt_receives_loaded_tools_in_the_fallback_models_f
 
     assert [sent.model_id for sent in providers.sent] == [_OPUS, _OPUS, _GPT]
     in_tools, added = _openai_offer(providers.sent[-1].payload)
-    assert added == ["notion-search"]
-    assert "notion-search" not in in_tools
+    assert added == ["docs-search"]
+    assert "docs-search" not in in_tools

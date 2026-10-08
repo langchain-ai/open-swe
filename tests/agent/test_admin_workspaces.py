@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent import server
-from agent.sandboxes import lifecycle
-from agent.tools import workspaces as env_tools
-from agent.users import User
-from agent.utils.authorship import CollaboratorIdentity
-from agent.workspaces.store import Workspace
+from openswe import server
+from openswe.sandboxes import lifecycle
+from openswe.tools import workspaces as env_tools
+from openswe.users import User
+from openswe.utils.authorship import CollaboratorIdentity
+from openswe.workspaces.store import Workspace
 
 _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
 
@@ -30,7 +30,7 @@ def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         )
     )
-    monkeypatch.setattr("agent.tools.access.langgraph_sdk.get_client", lambda: client)
+    monkeypatch.setattr("openswe.tools.access.langgraph_sdk.get_client", lambda: client)
 
 
 # --- snapshot precedence ---
@@ -82,7 +82,7 @@ async def test_admin_thread_accepts_configured_admin_slack_dm(
 async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = _config(admin_thread=True, github_login="someone-else")
-    with patch("agent.run_config.get_config", return_value=config):
+    with patch("openswe.run_config.get_config", return_value=config):
         assert (await env_tools.list_workspaces())["ok"] is False
         result = await env_tools.publish_workspace("base", "prompt")
         assert result["ok"] is False
@@ -124,7 +124,7 @@ class _Publish:
         backend.id = "sb-thread"
         for target in (
             patch(
-                "agent.run_config.get_config",
+                "openswe.run_config.get_config",
                 return_value=_config(admin_thread=True, github_login="ramonn", thread_id="t-1"),
             ),
             patch.object(
@@ -134,11 +134,11 @@ class _Publish:
                 return_value=self.existing,
             ),
             patch(
-                "agent.sandboxes.state.get_sandbox_backend",
+                "openswe.sandboxes.state.get_sandbox_backend",
                 new_callable=AsyncMock,
                 return_value=backend,
             ),
-            patch("agent.sandboxes.state.unwrap_sandbox_backend", side_effect=lambda b: b),
+            patch("openswe.sandboxes.state.unwrap_sandbox_backend", side_effect=lambda b: b),
             patch.object(env_tools.store.WORKSPACES, "assert_publishable", self.validate),
             patch.object(env_tools.store, "capture_sandbox_snapshot", self.capture),
             patch.object(env_tools.store.WORKSPACES, "publish", self.publish),
@@ -254,7 +254,7 @@ async def test_refresh_start_refuses_while_one_is_running(
     start = AsyncMock()
     with (
         patch(
-            "agent.run_config.get_config",
+            "openswe.run_config.get_config",
             return_value=_config(admin_thread=True, github_login="ramonn"),
         ),
         patch.object(
@@ -274,7 +274,7 @@ async def test_refresh_start_refuses_while_one_is_running(
 
 async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.MonkeyPatch) -> None:
     """An admin requester must not make everyone else in the roster look like one."""
-    from agent import server
+    from openswe import server
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.setattr(server, "_user_for_login", AsyncMock(return_value=None))
