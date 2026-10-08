@@ -70,6 +70,7 @@ _DEFAULTS = {
     # Webhook signing + bot identity.
     "GITHUB_WEBHOOK_SECRET": "test-github-secret",
     "SLACK_SIGNING_SECRET": "test-slack-secret",
+    "RUN_COMPLETE_WEBHOOK_SECRET": "test-run-complete-secret",
     "SLACK_BOT_TOKEN": "xoxb-test-token",
     "SLACK_BOT_USER_ID": BOT_USER_ID,
     "SLACK_BOT_USERNAME": BOT_USERNAME,

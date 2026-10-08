@@ -136,14 +136,18 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
     monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        prs.PullRequestClient, "review_decision", AsyncMock(return_value="approved")
+        prs.PullRequestClient,
+        "reviewers",
+        AsyncMock(
+            return_value=[prs.PullRequestReviewer(user_id=10, login="reviewer", state="approved")]
+        ),
     )
     monkeypatch.setattr(
         prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
     rules = AsyncMock(return_value={RequiredCheck("unit"), RequiredCheck("lint")})
     monkeypatch.setattr(RequiredCheck, "for_branch", rules)
-    result = await _client(1).load_open()
+    result = await _client(1).load(wanted={"open"})
     assert result is not None
     assert result.missing_checks == missing
     assert rules.await_count == int(reads_rules)
@@ -155,8 +159,8 @@ async def test_mergeability_is_not_awaited_forever(monkeypatch):
         return_value={"state": "open", "mergeable": None, "mergeable_state": "unknown"}
     )
     monkeypatch.setattr(prs.PullRequestClient, "pull", fetches)
-    monkeypatch.setattr(prs.PullRequestClient, "review_decision", AsyncMock(return_value="none"))
-    result = await _client(1).load_open()
+    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
+    result = await _client(1).load(wanted={"open"})
     assert fetches.await_count == prs._MERGEABILITY_ATTEMPTS
     assert result is not None
     assert result.status_available is True and result.mergeable is None
@@ -184,6 +188,12 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     assert listing.await_count == 1
 
 
+async def _decision() -> prs.ReviewDecision:
+    reviewers = await _client(1).reviewers()
+    assert reviewers is not None
+    return prs.PullRequestReviewer.decision(reviewers)
+
+
 async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypatch):
     monkeypatch.setattr(
         github_http,
@@ -191,41 +201,48 @@ async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypa
         AsyncMock(
             return_value=response(
                 [
-                    {"id": 1, "user": {"login": "reviewer"}, "state": "CHANGES_REQUESTED"},
-                    {"id": 2, "user": {"login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 3, "user": {"login": "reviewer"}, "state": "COMMENTED"},
-                    {"id": 4, "user": {"login": "other"}, "state": "DISMISSED"},
+                    {
+                        "id": 1,
+                        "user": {"id": 10, "login": "reviewer"},
+                        "state": "CHANGES_REQUESTED",
+                    },
+                    {"id": 2, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
+                    {"id": 3, "user": {"id": 10, "login": "reviewer"}, "state": "COMMENTED"},
+                    {"id": 4, "user": {"id": 20, "login": "other"}, "state": "DISMISSED"},
                 ]
             )
         ),
     )
-    assert await _client(1).review_decision() == "approved"
+    assert [
+        (reviewer.login, reviewer.state) for reviewer in await _client(1).reviewers() or []
+    ] == [("reviewer", "approved"), ("other", "dismissed")]
+    assert await _decision() == "approved"
     monkeypatch.setattr(
         github_http,
         "github_request",
         AsyncMock(
             return_value=response(
                 [
-                    {"id": 1, "user": {"login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 2, "user": {"login": "reviewer"}, "state": "DISMISSED"},
+                    {"id": 1, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
+                    {"id": 2, "user": {"id": 10, "login": "reviewer"}, "state": "DISMISSED"},
                 ]
             )
         ),
     )
-    assert await _client(1).review_decision() == "none"
+    assert await _decision() == "none"
     monkeypatch.setattr(
         github_http,
         "github_request",
         AsyncMock(
             return_value=response(
                 [
-                    {"id": 1, "user": {"login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 2, "user": {"login": "other"}, "state": "CHANGES_REQUESTED"},
+                    {"id": 1, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
+                    {"id": 2, "user": {"id": 20, "login": "other"}, "state": "CHANGES_REQUESTED"},
                 ]
             )
         ),
     )
-    assert await _client(1).review_decision() == "changes_requested"
+    assert await _decision() == "changes_requested"
 
 
 async def test_review_indicators_require_repo_access_before_reading(monkeypatch):
@@ -268,7 +285,11 @@ def _patch_detail_fetchers(monkeypatch):
     monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=[]))
     monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(
-        prs.PullRequestClient, "review_decision", AsyncMock(return_value="approved")
+        prs.PullRequestClient,
+        "reviewers",
+        AsyncMock(
+            return_value=[prs.PullRequestReviewer(user_id=10, login="reviewer", state="approved")]
+        ),
     )
     monkeypatch.setattr(github_http, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
 
@@ -297,7 +318,7 @@ async def test_a_graphql_failure_leaves_the_unresolved_count_unknown(monkeypatch
         "github_request",
         AsyncMock(return_value=response({"errors": [{"message": "Bad credentials"}]})),
     )
-    result = await _client(7).load_open()
+    result = await _client(7).load(wanted={"open"})
     assert result is not None
     assert result.unresolved_threads is None
     assert result.review_decision == "approved"

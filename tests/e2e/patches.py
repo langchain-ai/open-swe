@@ -121,6 +121,18 @@ def apply() -> None:
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_http.SLACK_API_BASE_URL = FAKE_SLACK_API
 
+    # Production resolves no completion webhook for a loopback deployment, since
+    # the platform rejects those; langgraph.e2e.json opts this server back in, so
+    # the platform delivers every run's completion to the real route.
+    from openswe import dispatch
+
+    schedule_thread_wakeup = importlib.import_module("openswe.tools.schedule_thread_wakeup")
+    completion_webhook = (
+        f"{BASE_URL}/webhooks/run-complete?token={os.environ['RUN_COMPLETE_WEBHOOK_SECRET']}"
+    )
+    for module in (dispatch, schedule_thread_wakeup):
+        module.__dict__["COMPLETION_WEBHOOK_URL"] = completion_webhook
+
     # A PR URL identifies the repository a tool is allowed to act on, so the real
     # parser only accepts github.com. The fake GitHub serves its pull requests
     # from the harness origin instead, so teach the parser that one extra shape
