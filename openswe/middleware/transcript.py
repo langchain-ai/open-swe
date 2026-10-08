@@ -633,6 +633,25 @@ async def _has_transcript(thread_id: str) -> bool:
         return result.scalar_one_or_none() is not None
 
 
+async def _reusable_turn_id(ids: RunIds) -> UUID | None:
+    """The configured turn, unless it already ended.
+
+    A run that sets no turn id inherits the thread's last configurable, and with
+    it a closed turn whose ``turn.completed`` receipt would swallow this run's.
+    """
+    if ids.turn_id is None:
+        return None
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            sql(
+                "SELECT state FROM thread_turn WHERE thread_id = :thread_id AND turn_id = :turn_id"
+            ),
+            {"thread_id": ids.thread_id, "turn_id": ids.turn_id},
+        )
+        state = result.scalar_one_or_none()
+    return None if state in {"completed", "failed", "interrupted"} else ids.turn_id
+
+
 async def _thread_metadata(thread_id: str) -> dict[str, object]:
     """The LangGraph thread metadata a ``thread.created`` event is built from."""
     thread = await get_client().threads.get(thread_id)
@@ -709,7 +728,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             )
             await _stamp_transcript(ids.thread_id)
 
-        turn_id = ids.turn_id or uuid.uuid7()
+        configured_turn = await _reusable_turn_id(ids)
+        turn_id = configured_turn or uuid.uuid7()
         run_state = RunState(
             thread_id=ids.thread_id, run_id=ids.run_id, turn_id=turn_id, enabled=True
         )
@@ -726,7 +746,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         input_event_ids = {message.id for message in input_events}
         commands: list[Command] = []
         if (
-            (not transcribed or ids.turn_id is None)
+            (not transcribed or configured_turn is None)
             and human is not None
             and not delivered_event_match_ids([human])
         ):

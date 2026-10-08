@@ -19,8 +19,12 @@ async def answer_click(
     thread_ts: str,
     slack_user_id: str,
     handle: Callable[[HumanReviewRequest], Awaitable[Outcome]],
-) -> None:
-    """Load the card's request, run ``handle`` under the thread's lock, and answer ephemerally."""
+    ephemeral: bool = True,
+) -> Outcome:
+    """Load the card's request, run ``handle`` under the thread's lock, and answer.
+
+    The answer is ephemeral unless the caller shows it on the clicked message itself.
+    """
     try:
         request = await HumanReviewRequest.get(UUID(request_id))
     except ValueError:
@@ -30,10 +34,10 @@ async def answer_click(
             "Human review click names no request",
             extra={"request_id": request_id, "slack_user": slack_user_id},
         )
-        await post_slack_ephemeral_message(
-            channel_id, slack_user_id, "That review request no longer exists.", thread_ts
-        )
-        return
+        gone = Outcome("That review request no longer exists.")
+        if ephemeral:
+            await post_slack_ephemeral_message(channel_id, slack_user_id, gone.message, thread_ts)
+        return gone
     # A card's copy in another channel shares its thread's lock.
     lock_channel, lock_ts = request.slack_location or (channel_id, thread_ts)
     try:
@@ -63,10 +67,15 @@ async def answer_click(
             "outcome": outcome.message,
         },
     )
-    if outcome.message and not await post_slack_ephemeral_message(
-        channel_id, slack_user_id, outcome.message, thread_ts
+    if (
+        ephemeral
+        and outcome.message
+        and not await post_slack_ephemeral_message(
+            channel_id, slack_user_id, outcome.message, thread_ts
+        )
     ):
         logger.warning(
             "Could not answer a human review click",
             extra={"request_id": request_id, "slack_user": slack_user_id},
         )
+    return outcome
