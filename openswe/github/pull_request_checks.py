@@ -17,9 +17,7 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypedDict
 
-import httpx2
-
-from openswe.github.http import GITHUB_GRAPHQL, GitHubClient
+from openswe.github.http import GitHubClient, or_none
 
 CheckState = Literal["failing", "passing", "pending", "unknown"]
 PrState = Literal["open", "draft", "merged", "closed"]
@@ -155,16 +153,7 @@ async def get_pull_request_check_states(
         return results
 
     query, variables = _build_query(pending)
-    payload: Any = None
-    try:
-        response = await github.request(
-            "POST", GITHUB_GRAPHQL, json={"query": query, "variables": variables}
-        )
-        payload = response.json()
-    except httpx2.HTTPError, ValueError:
-        payload = None
-
-    data = payload.get("data") if isinstance(payload, Mapping) else None
+    data = await or_none(github.graphql(query, variables, partial=True))
     expires = time.monotonic() + _CACHE_TTL_SECONDS
     for index, (owner, repo, number) in enumerate(pending):
         full_name = f"{owner}/{repo}"

@@ -452,7 +452,7 @@ async def api_delete_pending_review_comment(
     session: dict[str, Any] = SESSION_DEP,
 ) -> PendingReview | None:
     async with _as_viewer(session, owner, repo) as repository:
-        await repository.delete(f"pulls/comments/{comment_id}")
+        await repository.delete_review_comment(comment_id)
         return await PendingReview.load(repository.pull_request(pr_number), login=session["sub"])
 
 

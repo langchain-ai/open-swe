@@ -29,11 +29,9 @@ async def repository_merge_methods(repo: RepoClient) -> RepositoryMergeMethods:
     if pull_request_identity({"repo_full_name": repo.full_name, "number": 1}) is None:
         raise HTTPException(422, "invalid repository")
     try:
-        payload = await repo.github.get(f"repos/{repo.full_name}")
+        payload = await repo.info()
     except (httpx2.HTTPError, ValueError) as exc:
         raise HTTPException(502, "Could not load merge settings from GitHub") from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(502, "Could not load merge settings from GitHub")
     return RepositoryMergeMethods(
         merge_methods=[
             method
