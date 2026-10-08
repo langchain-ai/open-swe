@@ -10,7 +10,7 @@ import {
 import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
 import { MergePullRequest } from "./MergePullRequest"
-import { PullRequestThreadAction } from "./PullRequestThreadAction"
+import { PullRequestFixActions } from "./PullRequestThreadAction"
 import { RequestHumanReview } from "./RequestHumanReview"
 import { UpdatePullRequestBranch } from "./UpdatePullRequestBranch"
 
@@ -56,23 +56,17 @@ export function PullRequestActions({
         hidden={Boolean(outcome)}
         className="flex flex-wrap items-center gap-x-2 gap-y-2"
       >
-        {isConflicted(pr) && (
-          <PullRequestThreadAction
-            pr={pr}
-            login={login}
-            action="fix-conflicts"
-          />
-        )}
-        {hasFailingChecks(pr) && (
-          <PullRequestThreadAction pr={pr} login={login} action="fix-checks" />
-        )}
-        {hasUnresolvedConversations(pr) && (
-          <PullRequestThreadAction
-            pr={pr}
-            login={login}
-            action="address-comments"
-          />
-        )}
+        <PullRequestFixActions
+          pr={pr}
+          login={login}
+          actions={[
+            ...(isConflicted(pr) ? (["fix-conflicts"] as const) : []),
+            ...(hasFailingChecks(pr) ? (["fix-checks"] as const) : []),
+            ...(hasUnresolvedConversations(pr)
+              ? (["address-comments"] as const)
+              : []),
+          ]}
+        />
         {pr.draft === true && (
           <MarkPullRequestReady pr={pr} onReady={onReady} />
         )}

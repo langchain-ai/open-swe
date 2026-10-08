@@ -373,13 +373,16 @@ test.describe("my pull requests", () => {
     );
     await expect(method).toBeHidden();
     await card(page, mine)
-      .getByRole("button", { name: "Merge", exact: true })
+      .getByRole("button", { name: "Rebase and merge", exact: true })
       .click();
 
     await expect(page.getByText(`Merged ${DEMO}#${mine.number}`)).toBeVisible();
     await expect(card(page, mine)).toContainText("Merged ·");
     await expect(
-      card(page, mine).getByRole("button", { name: "Merge", exact: true }),
+      card(page, mine).getByRole("button", {
+        name: "Rebase and merge",
+        exact: true,
+      }),
     ).toHaveCount(0);
 
     const merged = await readPullRequest(page, "fakeorg", "demo", mine.number);
@@ -407,19 +410,24 @@ test.describe("my pull requests", () => {
     const method = card(page, mine).getByLabel(
       `Merge method for PR #${mine.number}`,
     );
-    const merge = card(page, mine).getByRole("button", {
-      name: "Merge",
+    // With two methods allowed and none used before, the button asks rather than guesses.
+    const choose = card(page, mine).getByRole("button", {
+      name: "Choose how to merge",
       exact: true,
     });
-    // The select only settles once the allowed methods land, and the button is
-    // disabled until then for that reason rather than for want of a choice.
     await expect(method).toBeEnabled();
-    await expect(merge).toBeDisabled();
+    await expect(choose).toBeVisible();
+    await choose.click();
     await expect(
-      method.getByRole("option", { name: "Merge commit", exact: true }),
+      page.getByRole("menuitemradio", { name: /^Merge commit/ }),
     ).toHaveCount(0);
 
-    await method.selectOption("squash");
+    await page.getByRole("menuitemradio", { name: /^Squash merge/ }).click();
+    await page.keyboard.press("Escape");
+    const merge = card(page, mine).getByRole("button", {
+      name: "Squash and merge",
+      exact: true,
+    });
     await expect(merge).toBeEnabled();
     await merge.click();
 

@@ -18,6 +18,7 @@ import type {
 } from "@/features/agents/lib/types"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -474,47 +475,66 @@ function FixMenu({
   disabled: boolean
 }) {
   const [fixing, setFixing] = useState(false)
-  const [failed, setFailed] = useState(false)
+  const [failed, setFailed] = useState<ThreadFixScope | null>(null)
   const handleFix = async (scope: ThreadFixScope) => {
-    setFailed(false)
+    setFailed(null)
     setFixing(true)
     try {
       await onFix(pullRequest, scope)
     } catch (error) {
       console.error("Could not start a pull request fix", { scope, error })
-      setFailed(true)
+      setFailed(scope)
     } finally {
       setFixing(false)
     }
   }
+  // The first problem is the one to fix first; the caret offers the others.
+  const primary = failed ?? scopes[0]!
   return (
-    <Menu>
-      <MenuTrigger
+    <ButtonGroup>
+      <Button
+        variant="ghost"
         disabled={disabled || fixing}
-        render={
-          <Button
-            variant="ghost"
-            aria-label={`Fix PR #${pullRequest.number}`}
-            className="text-foreground"
-          />
-        }
+        aria-label={`${FIX_LABELS[primary]} on PR #${pullRequest.number}`}
+        className="text-foreground"
+        onClick={() => void handleFix(primary)}
       >
         <Wrench />
-        {fixing ? "Starting…" : failed ? "Retry fix" : "Fix"}
-        <ChevronDown />
-      </MenuTrigger>
-      <MenuPopup align="end" side="top" sideOffset={6}>
-        {scopes.map((scope) => (
-          <MenuItem
-            key={scope}
-            aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
-            onClick={() => void handleFix(scope)}
+        {fixing
+          ? "Starting…"
+          : failed
+            ? `Retry: ${FIX_LABELS[failed]}`
+            : FIX_LABELS[primary]}
+      </Button>
+      {scopes.length > 1 && <ButtonGroupSeparator />}
+      {scopes.length > 1 && (
+        <Menu>
+          <MenuTrigger
+            disabled={disabled || fixing}
+            render={
+              <Button
+                variant="ghost"
+                aria-label={`Fix PR #${pullRequest.number}`}
+                className="px-1.5 text-foreground"
+              />
+            }
           >
-            {FIX_LABELS[scope]}
-          </MenuItem>
-        ))}
-      </MenuPopup>
-    </Menu>
+            <ChevronDown />
+          </MenuTrigger>
+          <MenuPopup align="end" side="top" sideOffset={6}>
+            {scopes.map((scope) => (
+              <MenuItem
+                key={scope}
+                aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
+                onClick={() => void handleFix(scope)}
+              >
+                {FIX_LABELS[scope]}
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
+      )}
+    </ButtonGroup>
   )
 }
 

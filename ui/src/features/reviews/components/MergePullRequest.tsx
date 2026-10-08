@@ -51,12 +51,13 @@ export function MergePullRequest({
     : mergeMethods.filter((option) =>
         (allowed.data?.mergeMethods ?? []).includes(option)
       )
-  // The last method used here, else the repository's first allowed one, as GitHub does.
+  // Never guess between allowed methods: the only one, the last one used here, or the viewer's pick.
   const method: MergeMethod | null =
     (choice && options.includes(choice) ? choice : null) ??
+    (options.length === 1 ? options[0]! : null) ??
     options.find((option) => option === preferred) ??
-    options[0] ??
     null
+  const [menuOpen, setMenuOpen] = useState(false)
   const merge = usePullRequestAction({
     pr,
     action: "merge",
@@ -79,15 +80,15 @@ export function MergePullRequest({
         size="sm"
         variant="outline"
         aria-live="polite"
-        disabled={!method || !pr.headSha || busy || allowed.isPending}
-        onClick={() => merge.mutate()}
+        disabled={!pr.headSha || busy || allowed.isPending}
+        onClick={() => (method ? merge.mutate() : setMenuOpen(true))}
       >
-        {allowed.isPending ? "Merge" : label}
+        {allowed.isPending ? "Merge" : method ? label : "Choose how to merge"}
       </Button>
       {options.length > 1 && (
-        <Menu>
+        <Menu open={menuOpen} onOpenChange={setMenuOpen}>
           <MenuTrigger
-            aria-label="Choose how to merge"
+            aria-label={`Merge method for PR #${pr.number}`}
             disabled={busy}
             render={<Button size="sm" variant="outline" className="px-1.5" />}
           >

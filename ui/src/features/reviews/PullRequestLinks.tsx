@@ -6,6 +6,7 @@ import { ChevronDown } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { Menu, MenuTrigger, MenuPopup, MenuItem } from "@/components/ui/menu"
 import {
   Dialog,
@@ -74,20 +75,28 @@ export function PullRequestLinks({
   return (
     <div className="text-xs">
       <span className="flex flex-wrap items-center gap-0.5">
-        <span className="inline-flex items-center">
-          <button
-            type="button"
-            className={navLink}
+        <ButtonGroup aria-label={`Agent for ${repo}#${number}`}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-1.5 text-muted-foreground"
             disabled={thread.isPending || thread.isSuccess}
             aria-live="polite"
             onClick={() => thread.mutate()}
           >
             {thread.isPending ? "Opening thread…" : "Agent"}
-          </button>
+          </Button>
+          <ButtonGroupSeparator />
           <Menu>
             <MenuTrigger
-              className={cn(navLink, "border-l border-border px-1")}
               aria-label="Agent options"
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="px-1 text-muted-foreground"
+                />
+              }
             >
               <ChevronDown className="size-3" />
             </MenuTrigger>
@@ -97,7 +106,7 @@ export function PullRequestLinks({
               </MenuItem>
             </MenuPopup>
           </Menu>
-        </span>
+        </ButtonGroup>
         <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
           <DialogPopup className="gap-4 p-5">
             <DialogTitle>Send a message to the agent</DialogTitle>
