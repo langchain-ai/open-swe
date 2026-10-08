@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  expectTranscriptVisible,
   loginAs,
   openThreadViaSlackLink,
   SAME_USER,
@@ -11,6 +12,8 @@ test("Back to app returns to the thread that opened settings", async ({
 }) => {
   await loginAs(page, SAME_USER);
   await openThreadViaSlackLink(page);
+  // The link navigation resolves before hydration; wait for client content.
+  await expectTranscriptVisible(page);
   const threadUrl = page.url();
   const threadHref = new URL(threadUrl);
 
