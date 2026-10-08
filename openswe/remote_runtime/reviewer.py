@@ -59,6 +59,7 @@ _RUN_CONTEXT_NAMESPACE: Final = ("remote_runtime", "reviewer_runs")
 
 _json = TypeAdapter(JsonValue)
 _json_list = TypeAdapter(list[JsonValue])
+_diff_range = TypeAdapter(tuple[str, str, bool] | None)
 
 
 class ToolSpec(TypedDict):
@@ -203,11 +204,13 @@ async def run_models(cfg: RunConfig) -> RunModels:
     )
 
 
-def _checkout_spec(cfg: RunConfig, diff_text: str) -> CheckoutSpec | None:
+def _checkout_spec(
+    cfg: RunConfig, diff_text: str, diff_range: tuple[str, str, bool] | None
+) -> CheckoutSpec | None:
     if cfg.repo is None or not cfg.head_sha:
         return None
     repo_dir = f"{REMOTE_WORK_DIR}/{cfg.repo.name}"
-    base_ref, head_ref, merge_base = review_diff_range(
+    base_ref, head_ref, merge_base = diff_range or review_diff_range(
         base_sha=cfg.base_sha or "",
         head_sha=cfg.head_sha,
         last_reviewed_sha=cfg.last_reviewed_sha or "",
@@ -250,7 +253,9 @@ async def prepare_run(run: RemoteRun) -> PreparedRun:
         system_prompt=f"{system_prompt}\n\n"
         + prompt("reviewer/remote-tool-names", prefix=f"{MCP_SERVER_NAME}_"),
         work_dir=REMOTE_WORK_DIR,
-        checkout=_checkout_spec(cfg, context.diff_text),
+        checkout=_checkout_spec(
+            cfg, context.diff_text, _diff_range.validate_python(prepared.get("diff_range"))
+        ),
     )
 
 

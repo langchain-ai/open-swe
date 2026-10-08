@@ -515,6 +515,7 @@ async def _cached_api_standards_skill() -> str | None:
 class PrepareReviewerRunState(PrepareRunState):
     diff_text: NotRequired[str]
     diff_line_set: NotRequired[dict[str, dict[str, set[int]]] | None]
+    diff_range: NotRequired[tuple[str, str, bool]]
     review_approval_policy: NotRequired[str | None]
 
 
@@ -660,7 +661,10 @@ async def prepare_reviewer_run(
         pr_number is not None and bool(repo_owner) and bool(repo_name) and bool(github_token)
     )
 
+    remote_diff_range: tuple[str, str, bool] | None = None
+
     async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
+        nonlocal remote_diff_range
         if not can_fetch_pr or github_token is None or not isinstance(pr_number, int):
             return "", None
         fetched_diff: str | None = None
@@ -675,12 +679,27 @@ async def prepare_reviewer_run(
                 return "", None
         if sandbox_backend is None:
             diff_text = fetched_diff
+            remote_diff_range = review_diff_range(
+                base_sha=base_sha,
+                head_sha=head_sha,
+                last_reviewed_sha=last_reviewed_sha,
+                re_review=is_re_review,
+            )
             if diff_text is None:
                 diff_text = await fetch_compare_diff(
                     owner=repo_owner,
                     repo=repo_name,
                     base_ref=last_reviewed_sha,
                     head_ref=head_sha,
+                    token=github_token,
+                )
+            if diff_text is None:
+                # GitHub has no two-dot diff once the last reviewed commit left the branch.
+                remote_diff_range = review_diff_range(base_sha=base_sha, head_sha=head_sha)
+                diff_text = await fetch_pr_diff(
+                    owner=repo_owner,
+                    repo=repo_name,
+                    pr_number=pr_number,
                     token=github_token,
                 )
             if diff_text is None:
@@ -937,13 +956,16 @@ async def prepare_reviewer_run(
                 skills_list=skills_list,
             )
 
-    return {
+    prepared: dict[str, Any] = {
         "work_dir": work_dir,
         "rendered_system_prompt": system_prompt,
         "review_approval_policy": approval_policy,
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
     }
+    if remote_diff_range is not None:
+        prepared["diff_range"] = remote_diff_range
+    return prepared
 
 
 class ReviewerModelChoice(NamedTuple):

@@ -28,6 +28,10 @@ from openswe.input_messages import (
     system_introduction,
 )
 from openswe.prompts import prompt
+from openswe.remote_runtime.client import (
+    RemoteRuntimeConfigurationError,
+    remote_runtime_client,
+)
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
@@ -286,6 +290,18 @@ async def trigger_pr_review_from_ref(
         }
 
     repo_private = common.repo_private_from_pr_metadata(pr_metadata)
+    if use_mda and repo_private is not False:
+        return {
+            "success": False,
+            "error": "Managed Deep Agents reviews support only public repositories",
+        }
+    if use_mda:
+        try:
+            mda_client = remote_runtime_client("reviewer")
+        except RemoteRuntimeConfigurationError as exc:
+            return {"success": False, "error": str(exc)}
+        if mda_client is None:
+            return {"success": False, "error": "No Managed Deep Agents reviewer is configured"}
     repo_id = common.repo_id_from_pr_metadata(pr_metadata)
     app_token, app_token_expires_at = await common.reviewer_token_for_repo(
         repo_config,

@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from pydantic import BaseModel
+
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
 
@@ -245,6 +247,10 @@ async def fetch_pr_diff(
     return response.text
 
 
+class _Comparison(BaseModel):
+    status: Literal["ahead", "behind", "diverged", "identical"]
+
+
 async def fetch_compare_diff(
     *,
     owner: str,
@@ -254,10 +260,10 @@ async def fetch_compare_diff(
     token: str,
     timeout: float = 30.0,
 ) -> str | None:
-    """Fetch the unified diff between two commits from the GitHub REST API.
+    """Fetch the two-dot diff ``base_ref..head_ref`` from the GitHub REST API.
 
-    GitHub compares from the merge base (``base...head``), which matches the
-    two-dot range whenever ``base_ref`` is an ancestor of ``head_ref``.
+    GitHub only compares from the merge base, which is ``base_ref`` only when it is an
+    ancestor of ``head_ref``; otherwise, as after a force-push, this returns None.
     """
     import httpx2
 
@@ -266,6 +272,10 @@ async def fetch_compare_diff(
     url = f"https://api.github.com/repos/{owner}/{repo}/compare/{base_ref}...{head_ref}"
     try:
         async with github_client(token=token) as client:
+            comparison = await github_request(client, "GET", url, timeout=timeout)
+            comparison.raise_for_status()
+            if _Comparison.model_validate(comparison.json()).status not in ("ahead", "identical"):
+                return None
             response = await github_request(
                 client,
                 "GET",
