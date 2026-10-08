@@ -11,12 +11,13 @@ import re
 from typing import Literal, TypedDict
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
-from openswe.config import ENV
 from openswe.database import configured
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -36,27 +37,34 @@ _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 
 
-def parse_rollout_event(payload: object) -> tuple[str, list[str]] | None:
-    """Return ``(target, commits)`` or None when the body is not a rollout event."""
-    if not isinstance(payload, dict):
-        return None
-    target = payload.get("target")
-    commits = payload.get("commits")
-    if not isinstance(target, str) or not _TARGET_RE.fullmatch(target.strip().lower()):
-        return None
-    if not isinstance(commits, list):
-        return None
-    kept: list[str] = []
-    for commit in commits:
-        if len(kept) >= _MAX_COMMITS:
-            break
-        if isinstance(commit, str) and _SHA_RE.fullmatch(commit.strip()):
-            sha = commit.strip().lower()
-            if sha not in kept:
-                kept.append(sha)
-    if not kept:
-        return None
-    return target.strip().lower(), kept
+class RolloutEvent(BaseModel):
+    """A deploy notice reduced to the target and the commits subscriptions match."""
+
+    target: str
+    commits: list[str]
+
+    @classmethod
+    def parse(cls, payload: object) -> RolloutEvent | None:
+        """Return the event, or None when the body is not a rollout event."""
+        if not isinstance(payload, dict):
+            return None
+        target = payload.get("target")
+        commits = payload.get("commits")
+        if not isinstance(target, str) or not _TARGET_RE.fullmatch(target.strip().lower()):
+            return None
+        if not isinstance(commits, list):
+            return None
+        kept: list[str] = []
+        for commit in commits:
+            if len(kept) >= _MAX_COMMITS:
+                break
+            if isinstance(commit, str) and _SHA_RE.fullmatch(commit.strip()):
+                sha = commit.strip().lower()
+                if sha not in kept:
+                    kept.append(sha)
+        if not kept:
+            return None
+        return cls(target=target.strip().lower(), commits=kept)
 
 
 def _bearer(header: str) -> str:
@@ -64,15 +72,6 @@ def _bearer(header: str) -> str:
     if scheme.lower() != "bearer" or not token.strip():
         return ""
     return token.strip()
-
-
-def _workflow_allowed(workflow_ref: str, allowed: list[str]) -> bool:
-    path = workflow_ref.split("@", 1)[0]
-    return any(path == workflow.strip().lstrip("/") for workflow in allowed)
-
-
-def _owner(repository: str) -> str:
-    return repository.split("/", 1)[0].strip().lower()
 
 
 def _stored_body(target: str, commits: list[str]) -> bytes:
@@ -89,10 +88,7 @@ def _delivery_id(target: str, commits: list[str]) -> str:
 
 
 async def _authorize(header: str) -> GitHubActionsClaims:
-    orgs = {org.lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()}
-    if not orgs:
-        logger.warning("ALLOWED_GITHUB_ORGS is not configured — rejecting rollout event")
-        raise HTTPException(status_code=401, detail="Invalid token")
+    """A verified workflow whose repository may already start threads."""
     token = _bearer(header)
     if not token:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -101,20 +97,13 @@ async def _authorize(header: str) -> GitHubActionsClaims:
     except InvalidFederatedToken as exc:
         logger.warning("Rejected rollout OIDC token", extra={"rollout_error": str(exc)})
         raise HTTPException(status_code=401, detail="Invalid token") from None
-    if _owner(claims.repository) not in orgs:
+    if await WORKSPACES.thread_starter_of_repo(claims.repository) is None:
         logger.warning(
-            "Rejected rollout event from an unlisted repository",
-            extra={"rollout_repository": claims.repository},
-        )
-        raise HTTPException(status_code=401, detail="Invalid token")
-    workflows = ENV.ROLLOUT_OIDC_WORKFLOWS.get_list()
-    if not workflows:
-        logger.warning("ROLLOUT_OIDC_WORKFLOWS is not configured — rejecting rollout event")
-        raise HTTPException(status_code=401, detail="Invalid token")
-    if not _workflow_allowed(claims.workflow_ref, workflows):
-        logger.warning(
-            "Rejected rollout event from an unlisted workflow",
-            extra={"rollout_workflow": claims.workflow_ref},
+            "Rejected rollout event from a repository that may not start threads",
+            extra={
+                "rollout_repository": claims.repository,
+                "rollout_workflow": claims.workflow_ref,
+            },
         )
         raise HTTPException(status_code=401, detail="Invalid token")
     return claims
@@ -138,18 +127,17 @@ async def rollout_webhook(request: Request) -> RolloutAccepted:
         payload = json.loads(body)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid JSON") from None
-    parsed = parse_rollout_event(payload)
-    if parsed is None:
+    event = RolloutEvent.parse(payload)
+    if event is None:
         raise HTTPException(status_code=400, detail="Invalid rollout event")
-    target, commits = parsed
     stored = await EventLog.record(
         request,
-        _stored_body(target, commits),
+        _stored_body(event.target, event.commits),
         "deployment",
         event_type=_DEPLOYED,
-        delivery_id=_delivery_id(target, commits),
+        delivery_id=_delivery_id(event.target, event.commits),
         refs=EventRefs(github_repository=claims.repository),
     )
     if configured() and not stored:
         raise HTTPException(status_code=503, detail="Deployment event was not recorded")
-    return await accept_rollout_deploy(target, commits)
+    return await accept_rollout_deploy(event.target, event.commits)

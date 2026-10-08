@@ -15,8 +15,6 @@ from openswe.rollout_events import router
 _PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _REPO = "langchain-ai/langchainplus"
 _DEV = f"{_REPO}/.github/workflows/deploy_build_push_migrate_dev.yaml"
-_PROD = f"{_REPO}/.github/workflows/deploy_tag_migrate_prod.yaml"
-_WORKFLOWS = f"{_DEV},{_PROD}"
 _AUDIENCE = "openswe-rollout"
 
 
@@ -48,9 +46,11 @@ def _token(**overrides: object) -> str:
 
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
-    monkeypatch.setenv("ROLLOUT_OIDC_WORKFLOWS", _WORKFLOWS)
+    async def allowed(full_name: str) -> str | None:
+        return "default" if full_name == _REPO else None
+
     monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
+    monkeypatch.setattr("openswe.rollout_events.WORKSPACES.thread_starter_of_repo", allowed)
     record = AsyncMock(return_value=True)
     monkeypatch.setattr("openswe.rollout_events.EventLog.record", record)
     api = FastAPI()
@@ -91,69 +91,25 @@ async def test_rollout_webhook_rejects_a_token_for_another_audience(app: FastAPI
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_rejects_a_repository_that_is_not_allowed(app: FastAPI) -> None:
+async def test_rollout_webhook_rejects_a_repository_that_may_not_start_threads(
+    app: FastAPI,
+) -> None:
     body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
     response = await _post(app, body, _token(repository="other/repo"))
     assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_rejects_a_different_workflow(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
+async def test_rollout_webhook_accepts_another_workflow_in_a_granted_repository(
+    app: FastAPI,
+) -> None:
+    body = json.dumps({"target": "gcp-us-prod", "commits": ["c" * 40]}).encode()
     response = await _post(
         app,
         body,
         _token(workflow_ref=f"{_REPO}/.github/workflows/other.yaml@refs/heads/main"),
     )
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_rollout_webhook_rejects_the_same_filename_in_another_repository(
-    app: FastAPI,
-) -> None:
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
-    other = "langchain-ai/scratch/.github/workflows/deploy_build_push_migrate_dev.yaml"
-    response = await _post(
-        app,
-        body,
-        _token(repository="langchain-ai/scratch", workflow_ref=f"{other}@refs/heads/main"),
-    )
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_rollout_webhook_accepts_each_listed_workflow(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-us-prod", "commits": ["c" * 40]}).encode()
-    response = await _post(app, body, _token(workflow_ref=f"{_PROD}@refs/heads/main"))
     assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_rollout_webhook_rejects_when_no_workflow_is_allowed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
-    monkeypatch.delenv("ROLLOUT_OIDC_WORKFLOWS", raising=False)
-    monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
-    api = FastAPI()
-    api.include_router(router)
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
-    response = await _post(api, body, _token())
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_rollout_webhook_rejects_when_no_organization_is_allowed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
-    monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
-    api = FastAPI()
-    api.include_router(router)
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
-    response = await _post(api, body, _token())
-    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
