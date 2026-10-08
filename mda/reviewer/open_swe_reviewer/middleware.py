@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Preparation waits on the review scout's walkthrough for up to ten minutes.
 _PREPARE_TIMEOUT_SECONDS: Final = 1800.0
 _HOOK_TIMEOUT_SECONDS: Final = 120.0
-_CHECKOUT_TIMEOUT_SECONDS: Final = 240
+_CHECKOUT_TIMEOUT_SECONDS: Final = 600
 
 
 class CheckoutSpec(BaseModel):
@@ -56,7 +56,9 @@ class CheckoutSpec(BaseModel):
             f"if [ -d {repo_dir}/.git ]; then",
             f"  cd {repo_dir} && {{ git fetch --all --quiet || true; }}",
             "else",
-            f"  git clone --quiet {url} {repo_dir} && cd {repo_dir}",
+            # Blobs download on demand: a full clone of a large repository outlasts the timeout.
+            f"  git clone --quiet --filter=blob:none --no-checkout {url} {repo_dir}"
+            f" && cd {repo_dir}",
             "fi",
         ]
         if self.base_sha:
@@ -77,7 +79,10 @@ class CheckoutSpec(BaseModel):
             raise RuntimeError("The reviewer needs this deployment's sandbox")
         result = await runtime.backend.aexecute(self.command(), timeout=_CHECKOUT_TIMEOUT_SECONDS)
         if result.exit_code != 0:
-            raise RuntimeError(f"Checking out {self.repository} failed: {result.output}")
+            raise RuntimeError(
+                f"Checking out {self.repository} failed with exit code {result.exit_code}: "
+                f"{result.output}"
+            )
         uploads = await runtime.backend.aupload_files([(self.diff_path, self.diff_text.encode())])
         if uploads and uploads[0].error:
             raise RuntimeError(f"Writing the review diff failed: {uploads[0].error}")
