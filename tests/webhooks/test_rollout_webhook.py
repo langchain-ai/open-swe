@@ -50,9 +50,9 @@ def _token(**overrides: object) -> str:
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
     monkeypatch.setenv("ROLLOUT_OIDC_WORKFLOWS", _WORKFLOWS)
-    monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
+    monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
     record = AsyncMock(return_value=True)
-    monkeypatch.setattr("agent.rollout_events.EventLog.record", record)
+    monkeypatch.setattr("openswe.rollout_events.EventLog.record", record)
     api = FastAPI()
     api.state.record = record
     api.include_router(router)
@@ -159,7 +159,7 @@ async def test_rollout_webhook_rejects_when_no_workflow_is_allowed(
 ) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "langchain-ai")
     monkeypatch.delenv("ROLLOUT_OIDC_WORKFLOWS", raising=False)
-    monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
+    monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
     api = FastAPI()
     api.include_router(router)
     body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
@@ -172,7 +172,7 @@ async def test_rollout_webhook_rejects_when_no_organization_is_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
-    monkeypatch.setattr("agent.federation.github_oidc._keys", lambda: _Keys())
+    monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
     api = FastAPI()
     api.include_router(router)
     body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
@@ -225,7 +225,7 @@ async def test_rollout_webhook_asks_for_a_retry_when_the_event_is_not_stored(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app.state.record.return_value = False
-    monkeypatch.setattr("agent.rollout_events.configured", lambda: True)
+    monkeypatch.setattr("openswe.rollout_events.configured", lambda: True)
     body = json.dumps({"target": "gcp-staging", "commits": ["a" * 40]}).encode()
     response = await _post(app, body, _token())
     assert response.status_code == 503

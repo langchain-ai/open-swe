@@ -3,8 +3,8 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from agent.webhooks.event_log import LoggedEvent
-from agent.webhooks.event_subscriptions import EventSummary
+from openswe.webhooks.event_log import LoggedEvent
+from openswe.webhooks.event_subscriptions import EventSummary
 
 
 def test_a_deployment_event_can_wake_a_subscription() -> None:
