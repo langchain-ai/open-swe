@@ -32,6 +32,16 @@ The backend:
 | `REVIEWER_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 
+## Run locally
+
+Run the backend and this project side by side, then point the reviewer eval at them. The eval follows the same routing as dispatch: with `REVIEWER_RUNTIME_URL` set, it creates the thread on the backend and runs the review on this deployment.
+
+1. In the repository root `.env`, add `REMOTE_RUNTIME_TOKEN_SECRET` (any random string), `REVIEWER_RUNTIME_URL=http://localhost:2025` and `REVIEWER_RUNTIME_API_KEY` (your LangSmith API key), then start the backend with `make dev`.
+2. In `mda/reviewer/.env`, set `OPEN_SWE_BACKEND_URL=http://localhost:2024`, `LANGSMITH_API_KEY`, and the model keys from the table above, then run `mda dev --port 2025 --no-browser` from `mda/reviewer`.
+3. From the repository root, run `uv run python -m evals.reviewer.run_eval --limit 3`.
+
+The eval scores the findings `publish_review` surfaces (`score_mode = "surfaced_findings"`, the default). Findings added from code mode are not tool-call messages, so the `all_findings` mode undercounts them.
+
 ## Build and deploy
 
 ```bash
