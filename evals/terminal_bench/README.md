@@ -20,6 +20,6 @@ PYTHONPATH=. uvx --from harbor==0.24.0 harbor run \
   -l 10 -n 4
 ```
 
-- `-m` is an Open SWE model id with `/` in place of `:`. Without `-m`, the workspace default model is used.
+- `-m` is an Open SWE model id with `/` in place of `:` and only takes effect with `--ak effort=...`. Without it, the workspace default model is used.
 - `-l` caps the number of tasks and `-n` sets concurrency. Use `-i <glob>` to pick tasks.
 - Each trial is a `system` thread on the deployment. Follow it on the dashboard.
