@@ -1,3 +1,6 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Kbd } from "@langchain/macaw-components/Kbd"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
 
@@ -9,7 +12,6 @@ import {
   submitPlanComments,
 } from "@/lib/plan"
 import { reportError } from "@/lib/errorReporting"
-import { Button } from "@/components/ui/button"
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 
@@ -163,9 +165,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
         <header className="flex flex-col gap-3 border-b border-default pb-3 @3xl:flex-row @3xl:items-center @3xl:justify-between">
           <div data-testid="plan-summary" className="min-w-0">
             <h1 className="text-lg font-semibold text-primary">Artifact</h1>
-            <p className="text-xs text-tertiary">
-              Viewing as {plan.user.name}
-            </p>
+            <p className="text-xs text-tertiary">Viewing as {plan.user.name}</p>
           </div>
           <div
             data-testid="plan-actions"
@@ -173,7 +173,8 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           >
             <Button
               data-testid="copy-plan"
-              variant="secondary"
+              color="secondary"
+              variant="outlined"
               disabled={!content.trim()}
               onClick={() => void copyPlan()}
             >
@@ -220,20 +221,24 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                       <blockquote className="line-clamp-3 border-l-2 border-brand pl-2 text-xs text-secondary">
                         {anchor.exact}
                       </blockquote>
-                      <textarea
+                      <Textarea
                         data-testid="comment-input"
+                        size="md"
                         value={draft}
-                        onChange={(event) => setDraft(event.target.value)}
+                        onChange={setDraft}
                         onKeyDown={handleCommentKeyDown}
                         placeholder="Leave a comment"
                         rows={3}
+                        resize="none"
                         autoFocus
-                        className="mt-3 w-full resize-none rounded-md border border-default bg-surface-level-1 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                        className="mt-space-3"
+                        inputClassName="text-sm"
                       />
-                      <div className="mt-2 flex justify-end gap-2">
+                      <div className="mt-space-2 flex justify-end gap-space-2">
                         <Button
-                          variant="ghost"
-                          size="sm"
+                          color="secondary"
+                          variant="plain"
+                          size="xs"
                           disabled={posting}
                           onClick={() => {
                             setAnchor(null)
@@ -245,18 +250,20 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                         <Button
                           data-testid="comment-submit"
                           aria-keyshortcuts="Meta+Enter Control+Enter"
-                          size="sm"
+                          aria-label={posting ? "Posting…" : "Comment"}
+                          size="xs"
                           disabled={posting || !draft.trim()}
                           onClick={() => void submitComment()}
                         >
                           {posting ? "Posting…" : "Comment"}
                           {!posting && (
-                            <kbd
+                            <Kbd
+                              variant="inherit"
                               aria-hidden="true"
-                              className="ml-1 font-sans text-[0.625rem] opacity-80"
+                              className="opacity-80"
                             >
                               ⌘ ↵
-                            </kbd>
+                            </Kbd>
                           )}
                         </Button>
                       </div>
@@ -264,9 +271,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                   )}
                   <div className="min-h-0 flex-1 overflow-y-auto p-3">
                     {comments.length === 0 ? (
-                      <p className="text-xs text-secondary">
-                        No comments yet.
-                      </p>
+                      <p className="text-xs text-secondary">No comments yet.</p>
                     ) : (
                       <div className="space-y-2">
                         {comments.map((comment, index) => (
@@ -289,7 +294,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
                                 {index + 1}. {comment.author}
                               </span>
                               {comment.anchor && (
-                                <blockquote className="mt-2 line-clamp-2 border-l-2 border-yellow-400 pl-2 text-xs text-secondary">
+                                <blockquote className="mt-2 line-clamp-2 border-l-2 border-warning pl-2 text-xs text-secondary">
                                   {comment.anchor.exact}
                                 </blockquote>
                               )}

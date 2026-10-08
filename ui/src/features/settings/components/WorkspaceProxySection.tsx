@@ -1,12 +1,13 @@
 import { useState } from "react"
-import { InfoIcon } from "@phosphor-icons/react"
 import { useMutation } from "@tanstack/react-query"
+import { Button } from "@langchain/macaw-components/Button"
+import { Input } from "@langchain/macaw-components/Input"
+import { Select } from "@langchain/macaw-components/Select"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
 
 import { SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, type JsonValue, type WorkspaceRecord } from "@/lib/api"
 
 function FieldHelp({
@@ -17,19 +18,40 @@ function FieldHelp({
   description: string
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={<span role="button" tabIndex={0} />}
+    <Tooltip title={description} tooltipClassName="max-w-80">
+      {/* A span, not a button: it sits inside the field's <label>. */}
+      <span
+        role="button"
+        tabIndex={0}
         aria-label={`About ${label.toLowerCase()}`}
-        className="ml-1 inline-flex align-middle text-secondary hover:text-primary"
+        className="ml-space-1 inline-flex align-middle text-icon-secondary hover:text-icon-primary"
         onClick={(event) => event.preventDefault()}
       >
-        <InfoIcon aria-hidden="true" className="size-3.5" />
-      </TooltipTrigger>
-      <TooltipPopup className="max-w-80">{description}</TooltipPopup>
+        <InfoIcon aria-hidden="true" size={14} weight="regular" />
+      </span>
     </Tooltip>
   )
 }
+
+function FieldLabel({
+  label,
+  description,
+}: {
+  label: string
+  description: string
+}) {
+  return (
+    <span className="text-xs">
+      {label}
+      <FieldHelp label={label} description={description} />
+    </span>
+  )
+}
+
+const HEADER_TYPES = [
+  { value: "plaintext", label: "Plaintext" },
+  { value: "opaque", label: "Opaque" },
+]
 
 export function WorkspaceProxySection({
   record,
@@ -91,11 +113,11 @@ export function WorkspaceProxySection({
       title="Sandbox proxy"
       description="Configure host-matched headers and sandbox environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged."
     >
-      <div className="space-y-3 px-4 py-3.5">
+      <div className="space-y-3 px-space-4 py-3.5 text-primary">
         <div
           role="tablist"
           aria-label="Proxy editor view"
-          className="flex gap-2"
+          className="flex gap-space-2"
         >
           {(["form", "json"] as const).map((tab) => (
             <Button
@@ -104,8 +126,9 @@ export function WorkspaceProxySection({
               aria-selected={view === tab}
               aria-controls={`proxy-${tab}`}
               id={`proxy-tab-${tab}`}
-              variant={view === tab ? "secondary" : "ghost"}
-              size="sm"
+              color="secondary"
+              variant={view === tab ? "outlined" : "plain"}
+              size="xs"
               onClick={() => setView(tab)}
             >
               {tab === "form" ? "Rules" : "JSON"}
@@ -129,9 +152,11 @@ export function WorkspaceProxySection({
               <Textarea
                 id="workspace-proxy-config"
                 aria-label="Proxy configuration (JSON)"
-                className="min-h-64 font-mono text-xs"
+                size="md"
+                className="mt-space-1"
+                inputClassName="min-h-64 font-mono text-xs"
                 value={draft}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={setDraft}
                 disabled={!canEdit || save.isPending}
                 spellCheck={false}
                 aria-describedby="workspace-proxy-help"
@@ -175,64 +200,60 @@ export function WorkspaceProxySection({
                 return (
                   <div
                     key={index}
-                    className="space-y-3 rounded-md border border-default p-3"
+                    className="space-y-3 rounded-md border border-default p-space-3"
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">
                         Rule {index + 1}
                       </span>
                       <Button
-                        size="sm"
-                        variant="ghost"
+                        size="xs"
+                        color="secondary"
+                        variant="plain"
                         onClick={() =>
                           changeRules(
                             rules.filter((_, position) => position !== index)
                           )
                         }
                       >
-                        Remove rule {index + 1}
+                        {`Remove rule ${index + 1}`}
                       </Button>
                     </div>
-                    <label className="block space-y-1 text-xs">
-                      Rule name
-                      <FieldHelp
-                        label="Rule name"
-                        description="Required name identifying this proxy rule. Use a descriptive name such as custom-service; avoid Open SWE’s built-in rule names such as github and github-api."
-                      />
-                      <Input
-                        value={typeof rule.name === "string" ? rule.name : ""}
-                        placeholder="custom-service"
-                        onChange={(event) =>
-                          changeRule(index, {
-                            ...rule,
-                            name: event.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="block space-y-1 text-xs">
-                      Matching hosts
-                      <FieldHelp
-                        label="Matching hosts"
-                        description="Comma-separated bare hostnames, without a scheme, port, or path. Use api.example.com for an exact host or *.example.com for subdomains. The wildcard does not match example.com itself. Bare * and public-suffix wildcards such as *.com are rejected."
-                      />
-                      <Input
-                        value={
-                          Array.isArray(rule.match_hosts)
-                            ? rule.match_hosts.join(", ")
-                            : ""
-                        }
-                        placeholder="api.example.com, *.example.com"
-                        onChange={(event) =>
-                          changeRule(index, {
-                            ...rule,
-                            match_hosts: event.target.value
-                              .split(",")
-                              .map((host) => host.trim()),
-                          })
-                        }
-                      />
-                    </label>
+                    <Input
+                      size="sm"
+                      label={
+                        <FieldLabel
+                          label="Rule name"
+                          description="Required name identifying this proxy rule. Use a descriptive name such as custom-service; avoid Open SWE’s built-in rule names such as github and github-api."
+                        />
+                      }
+                      value={typeof rule.name === "string" ? rule.name : ""}
+                      placeholder="custom-service"
+                      onChange={(name) => changeRule(index, { ...rule, name })}
+                    />
+                    <Input
+                      size="sm"
+                      label={
+                        <FieldLabel
+                          label="Matching hosts"
+                          description="Comma-separated bare hostnames, without a scheme, port, or path. Use api.example.com for an exact host or *.example.com for subdomains. The wildcard does not match example.com itself. Bare * and public-suffix wildcards such as *.com are rejected."
+                        />
+                      }
+                      value={
+                        Array.isArray(rule.match_hosts)
+                          ? rule.match_hosts.join(", ")
+                          : ""
+                      }
+                      placeholder="api.example.com, *.example.com"
+                      onChange={(hosts) =>
+                        changeRule(index, {
+                          ...rule,
+                          match_hosts: hosts
+                            .split(",")
+                            .map((host) => host.trim()),
+                        })
+                      }
+                    />
                     <div className="text-xs font-medium">Headers</div>
                     {headers.map((header, position) => {
                       if (
@@ -255,67 +276,63 @@ export function WorkspaceProxySection({
                       return (
                         <div
                           key={position}
-                          className="flex flex-wrap items-end gap-2"
+                          className="flex flex-wrap items-end gap-space-2"
                         >
-                          <label className="min-w-32 flex-1 space-y-1 text-xs">
-                            Header name
-                            <FieldHelp
-                              label="Header name"
-                              description="HTTP header injected into outbound requests matching this rule’s hosts, for example X-Custom-Header. Open SWE workspace settings reject authentication headers such as Authorization and X-Api-Key."
-                            />
-                            <Input
-                              value={
-                                typeof header.name === "string"
-                                  ? header.name
-                                  : ""
-                              }
-                              placeholder="X-Custom-Header"
-                              onChange={(event) =>
-                                update({ ...header, name: event.target.value })
-                              }
-                            />
-                          </label>
-                          <label className="min-w-32 flex-1 space-y-1 text-xs">
-                            Header value
-                            <FieldHelp
-                              label="Header value"
-                              description="Value the proxy injects for this header on matching outbound requests. Only non-secret values may be saved in Open SWE workspace settings."
-                            />
-                            <Input
-                              value={
-                                typeof header.value === "string"
-                                  ? header.value
-                                  : ""
-                              }
-                              onChange={(event) =>
-                                update({ ...header, value: event.target.value })
-                              }
-                            />
-                          </label>
-                          <label className="space-y-1 text-xs">
-                            Type
-                            <FieldHelp
+                          <Input
+                            size="sm"
+                            className="min-w-32 flex-1"
+                            label={
+                              <FieldLabel
+                                label="Header name"
+                                description="HTTP header injected into outbound requests matching this rule’s hosts, for example X-Custom-Header. Open SWE workspace settings reject authentication headers such as Authorization and X-Api-Key."
+                              />
+                            }
+                            value={
+                              typeof header.name === "string" ? header.name : ""
+                            }
+                            placeholder="X-Custom-Header"
+                            onChange={(name) => update({ ...header, name })}
+                          />
+                          <Input
+                            size="sm"
+                            className="min-w-32 flex-1"
+                            label={
+                              <FieldLabel
+                                label="Header value"
+                                description="Value the proxy injects for this header on matching outbound requests. Only non-secret values may be saved in Open SWE workspace settings."
+                              />
+                            }
+                            value={
+                              typeof header.value === "string"
+                                ? header.value
+                                : ""
+                            }
+                            onChange={(value) => update({ ...header, value })}
+                          />
+                          <div className="space-y-1">
+                            <FieldLabel
                               label="Type"
                               description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Open SWE still persists this workspace configuration: opaque is not a way to store secrets here."
                             />
-                            <select
-                              className="block h-9 rounded-md border border-default bg-surface-level-1 px-2"
+                            <Select
+                              aria-label="Type"
+                              options={HEADER_TYPES}
                               value={
                                 typeof header.type === "string"
                                   ? header.type
                                   : "plaintext"
                               }
-                              onChange={(event) =>
-                                update({ ...header, type: event.target.value })
+                              onChange={(type) =>
+                                type && update({ ...header, type })
                               }
-                            >
-                              <option value="plaintext">Plaintext</option>
-                              <option value="opaque">Opaque</option>
-                            </select>
-                          </label>
+                              disabled={!canEdit || save.isPending}
+                              triggerClassName="w-32"
+                            />
+                          </div>
                           <Button
                             size="sm"
-                            variant="ghost"
+                            color="secondary"
+                            variant="plain"
                             aria-label={`Remove header ${position + 1} from rule ${index + 1}`}
                             onClick={() =>
                               changeRule(index, {
@@ -332,8 +349,9 @@ export function WorkspaceProxySection({
                       )
                     })}
                     <Button
-                      size="sm"
-                      variant="outline"
+                      size="xs"
+                      color="secondary"
+                      variant="outlined"
                       onClick={() =>
                         changeRule(index, {
                           ...rule,
@@ -350,51 +368,52 @@ export function WorkspaceProxySection({
                       Environment variables
                     </div>
                     {Object.entries(env).map(([name, value], position) => (
-                      <div key={position} className="flex items-end gap-2">
-                        <label className="flex-1 space-y-1 text-xs">
-                          Variable name
-                          <FieldHelp
-                            label="Variable name"
-                            description="Name of an environment variable set for every sandbox command while this rule is enabled, not just requests to matching hosts. Token-like names are rejected by Open SWE workspace settings."
-                          />
-                          <Input
-                            value={name}
-                            onChange={(event) =>
-                              changeRule(index, {
-                                ...rule,
-                                env_vars: Object.fromEntries(
-                                  Object.entries(env).map(([key, val]) =>
-                                    key === name
-                                      ? [event.target.value, val]
-                                      : [key, val]
-                                  )
-                                ),
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="flex-1 space-y-1 text-xs">
-                          Variable value
-                          <FieldHelp
-                            label="Variable value"
-                            description="Plaintext value available inside the sandbox. A dummy value can satisfy tools that require an environment variable while the proxy injects a header on the wire. Explicit sandbox environment variables override rule variables; provider-managed AWS/GCP variables take precedence. Never enter credentials."
-                          />
-                          <Input
-                            value={typeof value === "string" ? value : ""}
-                            onChange={(event) =>
-                              changeRule(index, {
-                                ...rule,
-                                env_vars: {
-                                  ...env,
-                                  [name]: event.target.value,
-                                },
-                              })
-                            }
-                          />
-                        </label>
+                      <div
+                        key={position}
+                        className="flex items-end gap-space-2"
+                      >
+                        <Input
+                          size="sm"
+                          className="flex-1"
+                          label={
+                            <FieldLabel
+                              label="Variable name"
+                              description="Name of an environment variable set for every sandbox command while this rule is enabled, not just requests to matching hosts. Token-like names are rejected by Open SWE workspace settings."
+                            />
+                          }
+                          value={name}
+                          onChange={(renamed) =>
+                            changeRule(index, {
+                              ...rule,
+                              env_vars: Object.fromEntries(
+                                Object.entries(env).map(([key, val]) =>
+                                  key === name ? [renamed, val] : [key, val]
+                                )
+                              ),
+                            })
+                          }
+                        />
+                        <Input
+                          size="sm"
+                          className="flex-1"
+                          label={
+                            <FieldLabel
+                              label="Variable value"
+                              description="Plaintext value available inside the sandbox. A dummy value can satisfy tools that require an environment variable while the proxy injects a header on the wire. Explicit sandbox environment variables override rule variables; provider-managed AWS/GCP variables take precedence. Never enter credentials."
+                            />
+                          }
+                          value={typeof value === "string" ? value : ""}
+                          onChange={(next) =>
+                            changeRule(index, {
+                              ...rule,
+                              env_vars: { ...env, [name]: next },
+                            })
+                          }
+                        />
                         <Button
                           size="sm"
-                          variant="ghost"
+                          color="secondary"
+                          variant="plain"
                           aria-label={`Remove variable ${position + 1} from rule ${index + 1}`}
                           onClick={() =>
                             changeRule(index, {
@@ -412,8 +431,9 @@ export function WorkspaceProxySection({
                       </div>
                     ))}
                     <Button
-                      size="sm"
-                      variant="outline"
+                      size="xs"
+                      color="secondary"
+                      variant="outlined"
                       onClick={() => {
                         let name = "NEW_VARIABLE"
                         while (name in env) name += "_"
@@ -429,8 +449,9 @@ export function WorkspaceProxySection({
                 )
               })}
               <Button
-                size="sm"
-                variant="outline"
+                size="xs"
+                color="secondary"
+                variant="outlined"
                 onClick={() =>
                   changeRules([
                     ...rules,
@@ -453,7 +474,7 @@ export function WorkspaceProxySection({
         </p>
         <details className="text-xs text-secondary">
           <summary className="cursor-pointer">Example configuration</summary>
-          <pre className="mt-2 overflow-auto rounded-md bg-surface-level-2 p-3">
+          <pre className="mt-space-2 overflow-auto rounded-md bg-surface-level-2 p-space-3">
             {JSON.stringify(
               {
                 rules: [
@@ -482,11 +503,12 @@ export function WorkspaceProxySection({
           </p>
         )}
         {canEdit && (
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-space-2">
             {dirty && (
               <Button
-                size="sm"
-                variant="ghost"
+                size="xs"
+                color="secondary"
+                variant="plain"
                 disabled={save.isPending}
                 onClick={() => setDraft(original)}
               >
@@ -494,7 +516,8 @@ export function WorkspaceProxySection({
               </Button>
             )}
             <Button
-              size="sm"
+              size="xs"
+              color="primary"
               disabled={!dirty || save.isPending}
               onClick={() => save.mutate()}
             >

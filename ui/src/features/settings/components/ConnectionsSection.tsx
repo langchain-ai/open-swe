@@ -1,26 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { IoLogoSlack } from "react-icons/io5"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Button } from "@langchain/macaw-components/Button"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
 import type { LangSmithConnectionStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
 import { api, connectService } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { cn } from "@/lib/utils"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[10px] font-medium",
-        connected
-          ? "bg-brand/10 text-brand-primary"
-          : "bg-surface-level-2 text-secondary"
-      )}
-    >
+    <Badge color={connected ? "primary" : "secondary"} size="xs">
       {connected ? "Connected" : "Not connected"}
-    </span>
+    </Badge>
   )
 }
 
@@ -51,16 +44,17 @@ function SlackRow({ user }: { user: SessionUser }) {
           : "Sign in with Slack so Open SWE resolves your GitHub account when you tag it — the verified email also resolves Linear mentions."
       }
       control={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-space-2">
           <StatusPill connected={connected} />
           {user.slack_oauth_enabled ? (
             <Button
-              size="sm"
-              variant={connected ? "outline" : "default"}
+              size="xs"
+              color={connected ? "secondary" : "primary"}
+              variant={connected ? "outlined" : "normal"}
+              leftDecorator={SlackLogoIcon}
               onClick={connect}
               disabled={connecting}
             >
-              <IoLogoSlack className="size-4" />
               {connecting
                 ? "Redirecting…"
                 : connected
@@ -68,7 +62,7 @@ function SlackRow({ user }: { user: SessionUser }) {
                   : "Connect"}
             </Button>
           ) : (
-            <span className="text-[10px] text-secondary">
+            <span className="text-xxs text-secondary">
               Sign in with Slack unavailable
             </span>
           )}
@@ -89,9 +83,9 @@ export function useLangSmithConnection() {
 }
 
 export function ConnectLangSmithButton({
-  size = "sm",
+  size = "xs",
 }: {
-  size?: "sm" | "default"
+  size?: "xs" | "sm"
 }) {
   const qc = useQueryClient()
   const status = useLangSmithConnection()
@@ -99,6 +93,7 @@ export function ConnectLangSmithButton({
   return (
     <Button
       size={size}
+      color="primary"
       onClick={() => {
         setConnecting(true)
         void connectService("langsmith", window.location.href)?.finally(() => {
@@ -143,12 +138,13 @@ function LangSmithRow() {
           : "Sign in with LangSmith so Open SWE can call LangSmith as you in your private threads."
       }
       control={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-space-2">
           <StatusPill connected={connected} />
           {connected ? (
             <Button
-              variant="outline"
-              size="sm"
+              color="secondary"
+              variant="outlined"
+              size="xs"
               onClick={() => disconnect.mutate()}
               disabled={disconnect.isPending}
             >

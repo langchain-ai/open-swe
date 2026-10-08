@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Switch } from "@langchain/macaw-components/Switch"
 
 import { SettingsSection } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import type { RepositorySettings } from "@/lib/api"
 import { optimisticUpdate, usePendingVariables } from "@/lib/optimistic"
@@ -69,21 +69,19 @@ export function WorkspaceRepositoriesSection({
             : "Bind a repository to this workspace first."}
         </p>
       ) : (
-        <ul className="divide-y">
+        <ul className="divide-y divide-default">
           {rows.map((row) => (
             <li
               key={row.repo}
               className="flex items-center justify-between gap-4 px-4 py-3"
             >
-              <span className="font-mono text-xs text-primary">
-                {row.repo}
-              </span>
-              <label className="flex items-center gap-2 text-xs text-secondary">
+              <span className="font-mono text-xs text-primary">{row.repo}</span>
+              <label className="flex items-center gap-space-2 text-xs text-secondary">
                 Can start threads
                 <Switch
                   aria-label={`Let ${row.repo} start threads`}
                   checked={row.may_start_threads}
-                  onCheckedChange={(on) =>
+                  onChange={(on) =>
                     configure.mutate({ repo: row.repo, mayStartThreads: on })
                   }
                   disabled={

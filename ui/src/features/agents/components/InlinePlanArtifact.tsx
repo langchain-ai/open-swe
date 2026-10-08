@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { ArrowUpRight, X } from "lucide-react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
 import { PlanArtifactFrame } from "@/features/agents/components/PlanArtifactFrame"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -55,21 +57,22 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
           data-testid="inline-plan-fade"
           className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-surface-level-1/75 to-surface-level-1 p-3"
         >
-          <span className="inline-flex items-center gap-1 rounded-md bg-[color:var(--text-primary)] px-2.5 py-1.5 text-xs font-medium text-background shadow-sm">
+          <span className="inline-flex items-center gap-space-1 rounded-md bg-brand px-2.5 py-1.5 text-xs font-medium text-brand-on-fill shadow-sm">
             Open artifact
-            <ArrowUpRight className="size-3.5" />
+            <ArrowUpRightIcon size={14} weight="regular" />
           </span>
         </span>
       </button>
-      <button
-        type="button"
-        aria-label="Dismiss artifact"
+      <IconButton
+        icon={XIcon}
+        label="Dismiss artifact"
+        round
+        color="secondary"
+        variant="outlined"
         disabled={dismiss.isPending}
         onClick={() => dismiss.mutate()}
-        className="absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-full border border-default bg-surface-level-1/90 text-secondary shadow-sm backdrop-blur-sm transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-focus"
-      >
-        <X className="size-3.5" />
-      </button>
+        className="absolute top-2 right-2 z-10"
+      />
     </div>
   )
 }

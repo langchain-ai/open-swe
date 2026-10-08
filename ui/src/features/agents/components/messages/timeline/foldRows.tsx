@@ -1,4 +1,5 @@
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 
 import { cn } from "@/lib/utils"
 
@@ -17,18 +18,23 @@ export function TurnFoldRow({
   expanded: boolean
   onToggle: () => void
 }) {
-  const Icon = expanded ? ChevronDown : ChevronRight
+  const Caret = expanded ? CaretDownIcon : CaretRightIcon
 
   return (
-    <div className={cn("pt-1 pb-2", !active && "border-b border-subtle")}>
+    <div
+      className={cn(
+        "pt-space-1 pb-space-2",
+        !active && "border-b border-subtle"
+      )}
+    >
       <button
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
-        className="flex cursor-pointer items-center gap-1 rounded-md px-1 text-[13px] text-secondary tabular-nums transition-colors select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
+        className="flex cursor-pointer items-center gap-space-1 rounded-md px-space-1 text-xs text-secondary tabular-nums transition-colors duration-normal select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       >
         <span className={active ? "shimmer-text" : undefined}>{label}</span>
-        <Icon className="size-3.5" />
+        <Caret size={12} weight="bold" aria-hidden />
       </button>
     </div>
   )
@@ -54,12 +60,14 @@ export function WorkGroupToggleRow({
       type="button"
       aria-expanded={expanded}
       onClick={onToggle}
-      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-surface-level-1-hover/20 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
+      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-xxs leading-5 transition-colors duration-normal hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
     >
-      <span className="flex size-5 shrink-0 items-center justify-center text-tertiary">
-        <ChevronDown
+      <span className="flex size-5 shrink-0 items-center justify-center text-icon-tertiary">
+        <CaretDownIcon
+          size={14}
+          weight="regular"
           className={cn(
-            "size-3.5 shrink-0 opacity-70 transition-transform duration-200",
+            "shrink-0 transition-transform duration-normal",
             expanded && "rotate-180"
           )}
           aria-hidden

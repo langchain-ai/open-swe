@@ -1,12 +1,12 @@
 import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { ArrowLeft } from "lucide-react"
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
 import { useIsHydrated } from "@/lib/hydration"
 
 import { PlanReview } from "@/features/agents/components/PlanReview"
-import { buttonVariants } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { loginUrl } from "@/lib/api"
 import { currentAuthRedirectPath } from "@/lib/auth-redirect"
 import { PlanApiError, getPlan } from "@/lib/plan"
@@ -86,7 +86,7 @@ function BackLink({ threadId }: { threadId: string }) {
       params={{ threadId }}
       className="inline-flex items-center gap-1 text-xs text-tertiary hover:text-primary"
     >
-      <ArrowLeft className="size-3.5" />
+      <ArrowLeftIcon size={14} weight="regular" />
       Back to conversation
     </Link>
   )
@@ -98,9 +98,9 @@ export function planSignInHref(): string {
 
 export function PlanSignInButton() {
   return (
-    <a href={planSignInHref()} className={buttonVariants({ size: "sm" })}>
+    <Button as={<a href={planSignInHref()} />}>
       Sign in to view this artifact
-    </a>
+    </Button>
   )
 }
 

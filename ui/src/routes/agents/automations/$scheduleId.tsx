@@ -1,7 +1,10 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 
 import { AutomationEditor } from "@/features/automations/components/AutomationEditor"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@langchain/macaw-components/Button"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { CalendarXIcon } from "@phosphor-icons/react/dist/ssr/CalendarX"
 import { useAgentSchedules } from "@/features/agents/lib/queries"
 import { pageTitle } from "@/lib/pageTitle"
 
@@ -29,16 +32,20 @@ function EditAutomationPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
-      <p className="text-xs text-secondary">
-        This automation could not be found.
-      </p>
-      <Link
-        to="/agents/automations"
-        className="mt-3 inline-block text-xs text-brand-primary hover:underline"
-      >
-        Back to Automations
-      </Link>
-    </div>
+    <EmptyState
+      className="mx-auto w-full max-w-3xl px-space-5 py-space-9"
+      icon={CalendarXIcon}
+      title="Automation not found"
+      description="This automation could not be found."
+      action={
+        <Button
+          as={<Link to="/agents/automations" />}
+          color="secondary"
+          variant="outlined"
+        >
+          Back to Automations
+        </Button>
+      }
+    />
   )
 }

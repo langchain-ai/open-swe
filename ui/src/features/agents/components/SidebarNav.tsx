@@ -1,25 +1,23 @@
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { SirenIcon } from "@phosphor-icons/react/dist/ssr/Siren"
+import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { Link, useRouterState } from "@tanstack/react-router"
-import {
-  CaretRightIcon,
-  GitPullRequestIcon,
-  LightningIcon,
-  PencilSimpleIcon,
-  RobotIcon,
-  SparkleIcon,
-} from "@phosphor-icons/react"
-import { Radar } from "lucide-react"
 
-import {
-  Menu,
-  MenuCheckboxItem,
-  MenuItem,
-  MenuPopup,
-  MenuSeparator,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
-  MenuTrigger,
-} from "@/components/ui/menu"
+import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import {
   getLastSectionLocation,
@@ -33,11 +31,12 @@ const NAV = [
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
-  { to: "/incidents", label: "Incidents", icon: Radar },
+  { to: "/incidents", label: "Incidents", icon: SirenIcon },
 ] as const
 
 const ROW =
   "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
+const SELECTED_ROW = "bg-selected font-medium hover:bg-selected-hover"
 
 export function SidebarNav({
   className,
@@ -62,57 +61,61 @@ export function SidebarNav({
           key={item.to}
           {...target(item.to)}
           onClick={onNavigate}
-          className={cn(
-            ROW,
-            activeSection === item.to && "bg-surface-level-2-hover font-medium"
-          )}
+          className={cn(ROW, activeSection === item.to && SELECTED_ROW)}
         >
-          <item.icon className="size-4" />
+          <item.icon size={16} weight="regular" className="shrink-0" />
           {item.label}
         </Link>
       ))}
-      <Menu>
-        <MenuTrigger
-          className={cn(
-            ROW,
-            "text-secondary data-popup-open:bg-surface-level-2-hover",
-            hidden.some((item) => item.to === activeSection) &&
-              "bg-surface-level-2-hover font-medium text-primary"
-          )}
-        >
-          <CaretRightIcon className="size-4" />
-          More
-        </MenuTrigger>
-        <MenuPopup side="right" align="start" className="w-48">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              ROW,
+              "text-secondary data-[state=open]:bg-surface-level-2-hover",
+              hidden.some((item) => item.to === activeSection) &&
+                cn(SELECTED_ROW, "text-primary")
+            )}
+          >
+            <CaretRightIcon size={16} weight="regular" className="shrink-0" />
+            More
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="start" className="w-48">
           {hidden.map((item) => (
-            <MenuItem
-              key={item.to}
-              render={<Link {...target(item.to)} onClick={onNavigate} />}
-            >
-              <item.icon />
-              {item.label}
-            </MenuItem>
+            <DropdownMenuItem key={item.to} asChild className="gap-space-2">
+              <Link {...target(item.to)} onClick={onNavigate}>
+                <item.icon size={14} weight="regular" className="shrink-0" />
+                {item.label}
+              </Link>
+            </DropdownMenuItem>
           ))}
-          {hidden.length > 0 && <MenuSeparator />}
-          <MenuSub>
-            <MenuSubTrigger>
-              <PencilSimpleIcon />
+          {hidden.length > 0 && <DropdownMenuSeparator />}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="gap-space-2">
+              <PencilSimpleIcon size={14} weight="regular" />
               Edit sidebar
-            </MenuSubTrigger>
-            <MenuSubPopup className="w-48">
+              <CaretRightIcon
+                size={12}
+                weight="regular"
+                className="ml-auto text-icon-secondary"
+              />
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-48">
               {NAV.map((item) => (
-                <MenuCheckboxItem
+                <MenuCheckItem
                   key={item.to}
                   checked={!hidden.includes(item)}
                   onCheckedChange={() => toggleNavItemHidden(item.to)}
                 >
                   {item.label}
-                </MenuCheckboxItem>
+                </MenuCheckItem>
               ))}
-            </MenuSubPopup>
-          </MenuSub>
-        </MenuPopup>
-      </Menu>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </nav>
   )
 }

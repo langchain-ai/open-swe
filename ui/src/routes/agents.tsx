@@ -11,7 +11,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"

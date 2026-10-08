@@ -8,7 +8,9 @@ import {
 } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useSubmissionQueue } from "@langchain/react"
-import { CircleAlert, X } from "lucide-react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { Link } from "@tanstack/react-router"
 
 import type {
@@ -21,7 +23,6 @@ import type {
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
@@ -492,12 +493,9 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
         />
         {(shownError || activity === "error") && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
-            <Alert variant="error">
-              <CircleAlert />
-              <AlertDescription>
-                {shownError || "The local Open SWE agent stopped unexpectedly."}
-              </AlertDescription>
-            </Alert>
+            <Banner intent="error">
+              {shownError || "The local Open SWE agent stopped unexpectedly."}
+            </Banner>
           </div>
         )}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -528,17 +526,18 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
                     <span className="max-w-64 truncate">
                       Terminal selection
                     </span>
-                    <button
-                      type="button"
-                      aria-label="Remove terminal selection"
+                    <IconButton
+                      icon={XIcon}
+                      label="Remove terminal selection"
+                      size="xxs"
+                      color="secondary"
+                      variant="plain"
                       onClick={() =>
                         setTerminalContexts((current) =>
                           current.filter((_, itemIndex) => itemIndex !== index)
                         )
                       }
-                    >
-                      <X className="size-3" />
-                    </button>
+                    />
                   </span>
                 ))}
               </div>

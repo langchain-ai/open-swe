@@ -1,5 +1,5 @@
-import { Bot } from "lucide-react"
-import { IoLogoSlack } from "react-icons/io5"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -11,6 +11,7 @@ import { ExpandableMessageChip } from "./ExpandableMessageChip"
 import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
+import { cn } from "@/lib/utils"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
 
@@ -58,9 +59,12 @@ function StandardUserMessage({ message }: { message: Message }) {
     <>
       {hasBody && (
         <div
-          className={`relative overflow-hidden rounded-2xl p-3 ${
-            isSystem ? "mt-1 border border-default bg-surface-level-2/50" : "bg-surface-level-1-hover"
-          }`}
+          className={cn(
+            "relative overflow-hidden rounded-xl p-space-3",
+            isSystem
+              ? "mt-space-1 border border-default bg-surface-level-2"
+              : "bg-surface-level-2"
+          )}
         >
           {excerpts.map((excerpt, i) => (
             <CodeBlock
@@ -71,11 +75,11 @@ function StandardUserMessage({ message }: { message: Message }) {
             />
           ))}
           {images.length > 0 && (
-            <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+            <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">
               {images.map((img, i) => (
                 <div
                   key={i}
-                  className="overflow-hidden rounded-lg border border-default bg-surface-level-1/70"
+                  className="overflow-hidden rounded-lg border border-default bg-surface-level-1"
                 >
                   <MessageImage
                     chunk={img}
@@ -88,9 +92,10 @@ function StandardUserMessage({ message }: { message: Message }) {
           {text && (
             <div
               ref={textRef}
-              className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-primary ${
-                !isSystem && !expanded ? "overflow-hidden" : ""
-              }`}
+              className={cn(
+                "text-sm leading-[1.6] break-words whitespace-pre-wrap text-primary",
+                !isSystem && !expanded && "overflow-hidden"
+              )}
               style={
                 !isSystem && !expanded
                   ? { maxHeight: COLLAPSED_MAX_HEIGHT_PX }
@@ -110,7 +115,7 @@ function StandardUserMessage({ message }: { message: Message }) {
               onClick={() => setExpanded((value) => !value)}
               aria-expanded={expanded}
               data-testid="user-message-show-more"
-              className="mt-1 text-[13px] text-secondary transition-colors hover:text-primary"
+              className="mt-space-1 rounded-sm text-xs text-secondary transition-colors duration-normal hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             >
               {expanded ? "Show less" : "Show more"}
             </button>
@@ -121,7 +126,7 @@ function StandardUserMessage({ message }: { message: Message }) {
         <MessageTimestamp
           timestamp={message.timestamp}
           align={isSystem ? "left" : "right"}
-          className="mt-1 pr-1"
+          className="mt-space-1 pr-space-1"
         />
       )}
     </>
@@ -129,7 +134,10 @@ function StandardUserMessage({ message }: { message: Message }) {
 
   return (
     <div
-      className={`group/turn my-4 flex flex-col gap-1 ${isSystem ? "items-start" : "items-end"}`}
+      className={cn(
+        "group/turn my-4 flex flex-col gap-space-1",
+        isSystem ? "items-start" : "items-end"
+      )}
       data-testid="user-message"
       data-message-id={message.id}
       data-message-delivery-status={message.deliveryStatus}
@@ -141,13 +149,19 @@ function StandardUserMessage({ message }: { message: Message }) {
           (message.structuredSenderName ||
             isSlack ||
             message.structuredSenderIsBot) && (
-            <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-secondary">
+            <div className="mb-space-1 flex items-center gap-space-1 px-space-1 text-xxs font-medium text-secondary">
               {isSlack && (
-                <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
+                <SlackLogoIcon
+                  size={12}
+                  weight="fill"
+                  role="img"
+                  aria-label="Slack"
+                />
               )}
               {message.structuredSenderIsBot && (
-                <Bot
-                  className="size-3"
+                <RobotIcon
+                  size={12}
+                  weight="regular"
                   role="img"
                   aria-label="Bot"
                   data-testid="user-message-bot-icon"
@@ -185,11 +199,12 @@ function StandardUserMessage({ message }: { message: Message }) {
         )}
         {message.deliveryStatus && (
           <div
-            className={`mt-1 pr-1 text-right text-[11px] ${
+            className={cn(
+              "mt-space-1 pr-space-1 text-right text-xxs",
               message.deliveryStatus === "failed"
                 ? "text-error-secondary"
                 : "text-secondary"
-            }`}
+            )}
           >
             {message.deliveryStatus !== "failed" ? (
               "Sending"

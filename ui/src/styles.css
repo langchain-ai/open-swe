@@ -2,12 +2,16 @@
  * Macaw owns colour, type, radius, shadow and motion. Its package stylesheet
  * uses `langchain-ds-*` layers; slotting them between Tailwind's lets Macaw
  * component rules beat preflight while app utilities still beat Macaw.
+ *
+ * Macaw also ships precompiled Tailwind utilities in the shared `utilities`
+ * layer. Importing it before Tailwind puts those first, so the app's own
+ * utilities (e.g. `sm:flex-row` over Macaw's `flex-col`) win on source order.
  */
 @layer theme, base, langchain-ds-base, components, langchain-ds-components, utilities, langchain-ds-utilities;
 
+@import "@langchain/macaw-components/styles.css";
 @import "tailwindcss";
 @config "../tailwind.config.cjs";
-@import "@langchain/macaw-components/styles.css";
 @import "./styles/agents.css";
 @import "./styles/markdown.css";
 @source "../node_modules/streamdown/dist/*.js";

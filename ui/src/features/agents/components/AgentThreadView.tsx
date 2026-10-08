@@ -9,14 +9,14 @@ import {
   useRef,
   useState,
 } from "react"
-import {
-  ArrowUpRight,
-  CircleAlert as CircleAlertIcon,
-  GitMerge as GitMergeIcon,
-  Laptop as LaptopIcon,
-  TriangleAlert as TriangleAlertIcon,
-} from "lucide-react"
-import { IoLogoSlack } from "react-icons/io5"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Icon } from "@langchain/macaw-components/Icon"
+import { Link } from "@langchain/macaw-components/Link"
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
+import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
+import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { formatRelativeTime } from "@/lib/utils"
 
@@ -28,7 +28,6 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
-import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import {
@@ -114,16 +113,16 @@ function editedPaths(messages: Array<Message>): Array<string> {
 function CodeChannelLink({ url }: { url?: string | null }) {
   if (!url) return null
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="mb-2 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
+    <Button
+      as={<a href={url} target="_blank" rel="noreferrer" />}
+      color="secondary"
+      variant="plain"
+      leftDecorator={SlackLogoIcon}
+      rightDecorator={ArrowUpRightIcon}
+      className="mb-space-2 w-fit"
     >
-      <IoLogoSlack className="size-3.5" />
       Open in Slack
-      <ArrowUpRight className="size-3" />
-    </a>
+    </Button>
   )
 }
 
@@ -727,44 +726,44 @@ export function AgentThreadView({
         />
         {(macOffline || bridgeError) && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
-            <Alert
-              variant={bridgeError ? "error" : "info"}
-              controlAlignment="first-line"
+            <Banner
+              intent={bridgeError ? "error" : "info"}
+              icon={
+                <Icon
+                  icon={LaptopIcon}
+                  size="md"
+                  className={
+                    bridgeError ? "text-icon-error" : "text-icon-brand"
+                  }
+                />
+              }
             >
-              <LaptopIcon />
-              <AlertDescription>
-                <span>
-                  {bridgeError
-                    ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                    : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
-                </span>
-              </AlertDescription>
-            </Alert>
+              {bridgeError
+                ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
+                : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Open SWE app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
+            </Banner>
           </div>
         )}
         {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
-            <Alert variant="error" controlAlignment="first-line">
-              <CircleAlertIcon />
-              <AlertDescription>
-                <span>
-                  The last run hit an error before it could finish. Send another
-                  message to retry.
-                </span>
-              </AlertDescription>
-              {thread.traceUrl && (
-                <AlertAction>
-                  <a
+            <Banner
+              intent="error"
+              action={
+                thread.traceUrl ? (
+                  <Link
                     href={thread.traceUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-md px-2 py-1 text-xs font-medium text-error-secondary underline underline-offset-2 hover:bg-error"
+                    variant="sm"
                   >
                     Open trace
-                  </a>
-                </AlertAction>
-              )}
-            </Alert>
+                  </Link>
+                ) : undefined
+              }
+            >
+              The last run hit an error before it could finish. Send another
+              message to retry.
+            </Banner>
           </div>
         )}
         {source.kind === "transcript" && source.workspaceStale && (
@@ -772,43 +771,35 @@ export function AgentThreadView({
             hidden={dismissedWarning === workspaceWarningKey}
             className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3"
           >
-            <Alert variant="warning">
-              <TriangleAlertIcon />
-              <AlertDescription>
-                <span>
-                  The {source.workspaceStale.workspaceName} workspace image this
-                  sandbox started from{" "}
-                  {source.workspaceStale.capturedAt
-                    ? `was captured ${formatRelativeTime(Date.parse(source.workspaceStale.capturedAt))}`
-                    : "has never been refreshed"}
-                  , so its repositories may be out of date. Open SWE continued
-                  anyway and is refreshing the image in the background.
-                </span>
-              </AlertDescription>
-              <AlertAction>
-                <button
-                  type="button"
-                  onClick={() => setDismissedWarning(workspaceWarningKey)}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
-                >
-                  Dismiss
-                </button>
-              </AlertAction>
-            </Alert>
+            <Banner
+              key={workspaceWarningKey}
+              intent="warning"
+              dismissible
+              onDismiss={() => setDismissedWarning(workspaceWarningKey)}
+            >
+              {`The ${source.workspaceStale.workspaceName} workspace image this sandbox started from ${
+                source.workspaceStale.capturedAt
+                  ? `was captured ${formatRelativeTime(Date.parse(source.workspaceStale.capturedAt))}`
+                  : "has never been refreshed"
+              }, so its repositories may be out of date. Open SWE continued anyway and is refreshing the image in the background.`}
+            </Banner>
           </div>
         )}
         {thread.attentionReason === "prs_closed" && !thread.resolved && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
-            <Alert variant="info">
-              <GitMergeIcon />
-              <AlertDescription>
-                <span>
-                  Every pull request from this thread is merged or closed.
-                  Resolve the thread if the work is done, or send a follow-up to
-                  keep going.
-                </span>
-              </AlertDescription>
-            </Alert>
+            <Banner
+              intent="info"
+              icon={
+                <Icon
+                  icon={GitMergeIcon}
+                  size="md"
+                  className="text-icon-brand"
+                />
+              }
+            >
+              Every pull request from this thread is merged or closed. Resolve
+              the thread if the work is done, or send a follow-up to keep going.
+            </Banner>
           </div>
         )}
         <div
@@ -876,15 +867,10 @@ export function AgentThreadView({
                   emptyState={
                     <div className="flex min-h-60 items-center justify-center">
                       {hydrationFailed ? (
-                        <Alert variant="error" className="max-w-3xl">
-                          <CircleAlertIcon />
-                          <AlertDescription>
-                            <span>
-                              This thread&apos;s messages could not be loaded.
-                              Reload to try again.
-                            </span>
-                          </AlertDescription>
-                        </Alert>
+                        <Banner intent="error" className="max-w-3xl">
+                          This thread&apos;s messages could not be loaded.
+                          Reload to try again.
+                        </Banner>
                       ) : (
                         <p className="text-xs text-tertiary">
                           This thread has no messages yet.

@@ -1,5 +1,6 @@
+import { Switch } from "@langchain/macaw-components/Switch"
+
 import { SettingsRow } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
 import {
   useExperimentalAssistantUi,
   useOptions,
@@ -30,8 +31,9 @@ export function AssistantUiPreference() {
         control={
           <Switch
             id="sdk-use-stream"
+            aria-label="SDK useStream (experimental)"
             checked={preferStream}
-            onCheckedChange={setUseStreamPreference}
+            onChange={setUseStreamPreference}
           />
         }
       />
@@ -42,9 +44,10 @@ export function AssistantUiPreference() {
         control={
           <Switch
             id="experimental-assistant-ui"
+            aria-label="Assistant UI (experimental)"
             checked={enabled}
             disabled={disabled}
-            onCheckedChange={(value) => {
+            onChange={(value) => {
               if (!defaults) return
               save.patch(
                 { experimental_assistant_ui: value },

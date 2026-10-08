@@ -1,13 +1,11 @@
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
-import {
-  ArrowLeftIcon,
-  CheckCircleIcon,
-  CircleNotchIcon,
-  WarningCircleIcon,
-} from "@phosphor-icons/react"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 
-import { Badge } from "@/components/ui/badge"
 import { LoadError } from "@/components/LoadError"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Messages } from "@/features/agents/components/messages"
@@ -61,9 +59,9 @@ export function SubagentThreadView({
       params={{ threadId: thread.id }}
       search={{}}
       data-no-drag=""
-      className="flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-secondary transition-colors hover:bg-surface-level-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+      className="flex h-7 shrink-0 items-center gap-space-1 rounded-md px-1.5 text-secondary transition-colors duration-normal hover:bg-surface-level-1-hover hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
     >
-      <ArrowLeftIcon className="size-3.5" aria-hidden />
+      <ArrowLeftIcon size={14} weight="regular" aria-hidden />
       <span className="max-w-48 truncate text-xs" title={thread.title}>
         {thread.title}
       </span>
@@ -107,7 +105,7 @@ export function SubagentThreadView({
         contentWidthClass="max-w-3xl"
         footer={
           !isRunning && (
-            <p className="px-1 pt-2 pb-6 text-center text-xs text-tertiary">
+            <p className="px-space-1 pt-space-2 pb-space-6 text-center text-xs text-tertiary">
               Subagents cannot be replied to. Follow up in the parent thread.
             </p>
           )
@@ -124,7 +122,7 @@ export function SubagentThreadView({
       >
         <div
           className={cn(
-            "flex h-full w-full items-center gap-2 px-4",
+            "flex h-full w-full items-center gap-space-2 px-space-4",
             sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14")
           )}
         >
@@ -132,28 +130,33 @@ export function SubagentThreadView({
           <span className="text-quaternary" aria-hidden>
             /
           </span>
-          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <div className="flex min-w-0 items-center gap-space-2 text-sm font-medium text-primary">
             <span className="min-w-0 truncate" title={description || title}>
               {title}
             </span>
             {subagentType && (
-              <Badge variant="outline" className="shrink-0">
+              <Badge color="secondary" size="xs" className="shrink-0">
                 {subagentType}
               </Badge>
             )}
             {task?.status === "in_progress" ? (
-              <CircleNotchIcon
-                className="size-3.5 shrink-0 animate-spin text-secondary"
-                aria-label="Subagent running"
-              />
+              <span role="img" aria-label="Subagent running" className="flex">
+                <Spinner size="xs" className="shrink-0 text-icon-secondary" />
+              </span>
             ) : task?.status === "error" ? (
               <WarningCircleIcon
-                className="size-3.5 shrink-0 text-error-secondary"
+                size={14}
+                weight="regular"
+                className="shrink-0 text-icon-error"
+                role="img"
                 aria-label="Subagent failed"
               />
             ) : task ? (
               <CheckCircleIcon
-                className="size-3.5 shrink-0 text-tertiary"
+                size={14}
+                weight="regular"
+                className="shrink-0 text-icon-tertiary"
+                role="img"
                 aria-label="Subagent finished"
               />
             ) : null}

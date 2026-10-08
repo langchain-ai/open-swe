@@ -1,10 +1,11 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { useQuery } from "@tanstack/react-query"
-import { CaretRightIcon } from "@phosphor-icons/react"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useMemo } from "react"
-import { IoLogoGithub } from "react-icons/io5"
+
 import { SettingsPage, SettingsSection } from "@/components/AppShell"
-import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
@@ -80,10 +81,13 @@ function RepositoriesSection() {
               key={owner}
               to="/review/repositories/$owner"
               params={{ owner }}
-              className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-surface-level-2/40"
+              className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-surface-level-1-hover"
             >
               <div className="flex items-center gap-3">
-                <IoLogoGithub className="size-5 shrink-0 text-secondary" />
+                <GithubLogoIcon
+                  weight="regular"
+                  className="size-5 shrink-0 text-icon-secondary"
+                />
                 <div className="flex flex-col gap-0.5">
                   <div className="flex items-center gap-2 text-xs">
                     <span className="font-medium text-primary">{owner}</span>
@@ -95,7 +99,7 @@ function RepositoriesSection() {
                 <span>
                   {autoReviewCount}/{list.length} Run Automatically
                 </span>
-                <CaretRightIcon className="size-3.5" />
+                <CaretRightIcon weight="regular" className="size-3.5" />
               </div>
             </Link>
           )

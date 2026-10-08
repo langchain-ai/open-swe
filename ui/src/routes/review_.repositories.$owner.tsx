@@ -1,12 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { Button } from "@langchain/macaw-components/Button"
+import { Input } from "@langchain/macaw-components/Input"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Switch } from "@langchain/macaw-components/Switch"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 
 import { AppShell } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
@@ -139,11 +140,10 @@ function RepositoriesOwnerPage() {
           </span>
         </div>
         <Input
-          type="search"
+          size="md"
+          leftIcon={MagnifyingGlassIcon}
           value={search}
-          onChange={(event) =>
-            setSearchPosition({ owner, search: event.target.value })
-          }
+          onChange={(next) => setSearchPosition({ owner, search: next })}
           placeholder="Search repositories…"
           aria-label="Search repositories"
         />
@@ -176,9 +176,7 @@ function RepositoriesOwnerPage() {
                       </span>
                     </span>
                     {r.private && (
-                      <span className="text-[10px] text-secondary">
-                        private
-                      </span>
+                      <span className="text-xxs text-tertiary">private</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
@@ -197,7 +195,7 @@ function RepositoriesOwnerPage() {
                         aria-label={`Run reviews automatically for ${r.full_name}`}
                         checked={runsAutomatically}
                         disabled={!canEdit || toggling.has(r.full_name)}
-                        onCheckedChange={(v) =>
+                        onChange={(v) =>
                           toggleAutoReview.mutate({
                             full_name: r.full_name,
                             on: v,
@@ -217,8 +215,9 @@ function RepositoriesOwnerPage() {
               </span>
               <div className="flex items-center gap-2">
                 <Button
-                  size="sm"
-                  variant="outline"
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
                   disabled={safePage === 0}
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                 >
@@ -228,8 +227,9 @@ function RepositoriesOwnerPage() {
                   {safePage + 1} / {totalPages}
                 </span>
                 <Button
-                  size="sm"
-                  variant="outline"
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
                   disabled={safePage >= totalPages - 1}
                   onClick={() =>
                     setPage((p) => Math.min(totalPages - 1, p + 1))

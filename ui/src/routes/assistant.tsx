@@ -6,7 +6,7 @@ import {
   useMatch,
   useRouterState,
 } from "@tanstack/react-router"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"

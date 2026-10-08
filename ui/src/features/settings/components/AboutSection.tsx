@@ -26,9 +26,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
         <SettingsRow
           label="Open SWE Desktop"
           control={
-            <span className="text-xs text-secondary">
-              Version {version}
-            </span>
+            <span className="text-xs text-secondary">Version {version}</span>
           }
         />
       ) : null}
@@ -135,7 +133,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
               {new Date(bundle.built_at).toLocaleString()}
             </time>
             {differs ? (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-warning-secondary">
                 {" "}
                 — different from the bundle the backend reports serving.
               </span>

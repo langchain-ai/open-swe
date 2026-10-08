@@ -1,6 +1,7 @@
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Switch } from "@langchain/macaw-components/Switch"
+
 import { SettingsSection } from "@/components/AppShell"
-import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
 import {
   useScopedSettings,
   type SettingsScope,
@@ -12,9 +13,11 @@ export function ExpeditedReviewSection({ scope }: { scope: SettingsScope }) {
   return (
     <SettingsSection
       title={
-        <span className="inline-flex items-center gap-2">
+        <span className="inline-flex items-center gap-space-2">
           Expedited Slack review
-          <Badge variant="outline">Experimental</Badge>
+          <Badge color="secondary" size="xs">
+            Experimental
+          </Badge>
         </span>
       }
       description="Lets the agent ask for a pull request of at most 20 changed lines outside tests to be approved and merged from its Slack thread. The card appears only once every check GitHub requires is green and every review is clean; two people with write access approve, and their clicks become real GitHub reviews. Off by default."
@@ -27,8 +30,9 @@ export function ExpeditedReviewSection({ scope }: { scope: SettingsScope }) {
           description="When on, the agent gets the expedite_pr_approval tool in Slack threads. When off, open approval cards are withdrawn and no new ones are posted."
           control={
             <Switch
+              aria-label="Allow expedited Slack review"
               checked={!!settings.data?.expedited_review_enabled}
-              onCheckedChange={(next) =>
+              onChange={(next) =>
                 settings.save({ expedited_review_enabled: next })
               }
               disabled={!settings.data}

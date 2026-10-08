@@ -1,14 +1,15 @@
+import { Button } from "@langchain/macaw-components/Button"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Spinner } from "@langchain/macaw-components/Spinner"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
+import { SquareSplitHorizontalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitHorizontal"
+import { SquareSplitVerticalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitVertical"
+import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useEffect, useRef, useState } from "react"
-import {
-  Copy,
-  LoaderCircle,
-  Plus,
-  RefreshCw,
-  SquareSplitHorizontal,
-  SquareSplitVertical,
-  Trash2,
-  X,
-} from "lucide-react"
 
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
@@ -210,38 +211,37 @@ function TerminalViewport({
     >
       <div ref={mountRef} className="h-full w-full overflow-hidden" />
       {selection && (
-        <div className="absolute right-2 bottom-2 z-10 flex overflow-hidden rounded-md border border-default bg-surface-level-1 shadow-sm">
+        <div className="absolute right-2 bottom-2 z-10 flex items-center gap-0.5 rounded-md border border-default bg-elevated p-0.5 shadow-sm">
           {onAddToChat && (
-            <button
-              type="button"
-              className="flex items-center gap-1 px-2 py-1 text-[11px] hover:bg-surface-level-1-hover"
+            <Button
+              size="xs"
+              color="secondary"
+              variant="plain"
+              leftDecorator={PlusIcon}
               onClick={() => {
                 onAddToChat(selection)
                 surfaceRef.current?.clearSelection()
               }}
             >
-              <Plus className="size-3" /> Add to chat
-            </button>
+              Add to chat
+            </Button>
           )}
-          <button
-            type="button"
-            aria-label="Copy selection"
-            className={cn(
-              "p-1.5 hover:bg-surface-level-1-hover",
-              onAddToChat && "border-l border-default"
-            )}
+          <IconButton
+            icon={CopyIcon}
+            label="Copy selection"
+            size="xs"
+            color="secondary"
+            variant="plain"
             onClick={() => {
               void navigator.clipboard.writeText(selection)
               surfaceRef.current?.clearSelection()
             }}
-          >
-            <Copy className="size-3" />
-          </button>
+          />
         </div>
       )}
       {target.kind === "cloud" && state.status === "starting" && (
         <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-md border border-default bg-surface-level-1/95 px-2 py-1 text-xs text-secondary shadow-sm">
-          <LoaderCircle className="size-3 animate-spin" />
+          <Spinner size="xxs" />
           {state.buffer ? "Reconnecting…" : "Connecting…"}
         </div>
       )}
@@ -256,26 +256,25 @@ function TerminalViewport({
 
 function ActionButton({
   label,
+  icon,
   disabled,
   onClick,
-  children,
 }: {
   label: string
+  icon: IconComponent
   disabled?: boolean
   onClick: () => void
-  children: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
+    <IconButton
+      icon={icon}
+      label={label}
+      size="sm"
+      color="secondary"
+      variant="plain"
       disabled={disabled}
       onClick={onClick}
-      className="rounded p-1.5 text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      {children}
-    </button>
+    />
   )
 }
 
@@ -307,36 +306,31 @@ export function TerminalActions({
       <ActionButton
         label={`Split horizontally${atSplitLimit ? " (maximum 4)" : ""}`}
         disabled={atSplitLimit}
+        icon={SquareSplitHorizontalIcon}
         onClick={() => split("horizontal")}
-      >
-        <SquareSplitHorizontal className="size-3.5" />
-      </ActionButton>
+      />
       <ActionButton
         label={`Split vertically${atSplitLimit ? " (maximum 4)" : ""}`}
         disabled={atSplitLimit}
+        icon={SquareSplitVerticalIcon}
         onClick={() => split("vertical")}
-      >
-        <SquareSplitVertical className="size-3.5" />
-      </ActionButton>
+      />
       <ActionButton
         label="Clear terminal"
+        icon={TrashIcon}
         onClick={() => terminals.clear(activeTerminalId)}
-      >
-        <Trash2 className="size-3.5" />
-      </ActionButton>
+      />
       <ActionButton
         label="Restart terminal"
+        icon={ArrowClockwiseIcon}
         onClick={() => terminals.restart(activeTerminalId)}
-      >
-        <RefreshCw className="size-3.5" />
-      </ActionButton>
+      />
       {terminalIds.length > 1 ? (
         <ActionButton
           label="Close terminal"
+          icon={XIcon}
           onClick={() => terminals.closeTerminal(activeTerminalId)}
-        >
-          <X className="size-3.5" />
-        </ActionButton>
+        />
       ) : null}
     </div>
   )

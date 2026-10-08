@@ -1,9 +1,13 @@
 import { Link } from "@tanstack/react-router"
-import { ArrowSquareOutIcon, CircleNotchIcon } from "@phosphor-icons/react"
-import { IoLogoSlack } from "react-icons/io5"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
+import { Spinner } from "@langchain/macaw-components/Spinner"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ClockCounterClockwise"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
 import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
-import { Button } from "@/components/ui/button"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 import { cn, formatRelativeTime } from "@/lib/utils"
 
@@ -33,35 +37,41 @@ export function AutomationRuns({
 
   if (runsQuery.isLoading) {
     return (
-      <div className="rounded-xl border border-dashed border-default px-6 py-12 text-center text-xs text-secondary">
+      <div
+        role="status"
+        className="flex items-center justify-center gap-space-2 rounded-xl border border-dashed border-default px-6 py-12 text-xs text-secondary"
+      >
+        <Spinner size="xs" />
         Loading automation runs…
       </div>
     )
   }
   if (runsQuery.isError) {
     return (
-      <div className="flex flex-col items-center rounded-xl border border-error bg-error px-6 py-12 text-center">
-        <p className="text-xs text-error-secondary">
-          Automation runs could not be loaded.
-        </p>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="mt-3"
-          onClick={() => void runsQuery.refetch()}
-          disabled={runsQuery.isFetching}
-        >
-          {runsQuery.isFetching ? "Retrying…" : "Retry"}
-        </Button>
-      </div>
+      <Banner
+        intent="error"
+        action={
+          <Button
+            color="secondary"
+            variant="outlined"
+            onClick={() => void runsQuery.refetch()}
+            disabled={runsQuery.isFetching}
+          >
+            {runsQuery.isFetching ? "Retrying…" : "Retry"}
+          </Button>
+        }
+      >
+        Automation runs could not be loaded.
+      </Banner>
     )
   }
   if (runs.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-default px-6 py-12 text-center text-xs text-secondary">
-        No automation runs yet.
-      </div>
+      <EmptyState
+        icon={ClockCounterClockwiseIcon}
+        title="No automation runs yet."
+        className="rounded-xl border border-dashed border-default"
+      />
     )
   }
 
@@ -71,10 +81,8 @@ export function AutomationRuns({
         <section key={group.id}>
           {!automationId && (
             <div className="mb-2 flex items-center gap-2 px-1">
-              <h2 className="text-xs font-medium text-primary">
-                {group.name}
-              </h2>
-              <span className="text-[10px] text-secondary">
+              <h2 className="text-xs font-medium text-primary">{group.name}</h2>
+              <span className="text-xxs text-secondary">
                 {group.runs.length}
               </span>
             </div>
@@ -125,7 +133,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
       className="flex items-center gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:border-strong"
     >
       {run.status === "running" ? (
-        <CircleNotchIcon className="size-4 shrink-0 animate-spin text-brand-primary" />
+        <Spinner size="xs" className="shrink-0 text-icon-brand" />
       ) : (
         <span
           className={cn(
@@ -134,14 +142,12 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
               ? "bg-error-strong"
               : run.status === "finished"
                 ? "bg-success-strong"
-                : "bg-[color:var(--border-default)]"
+                : "bg-surface-level-4"
           )}
         />
       )}
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-primary">
-          {run.title}
-        </p>
+        <p className="truncate text-sm font-medium text-primary">{run.title}</p>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-tertiary">
           <span>{STATUS_LABELS[run.status]}</span>
           <span>{isTest ? "Test run" : "Scheduled run"}</span>
@@ -150,7 +156,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
               className="flex items-center gap-1 text-success-secondary"
               aria-label="Action posted to Slack"
             >
-              <IoLogoSlack className="size-3.5" />
+              <SlackLogoIcon size={14} weight="regular" />
               Posted to Slack
             </span>
           )}
@@ -158,7 +164,11 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
           <span>{formatRelativeTime(run.updatedAt)}</span>
         </div>
       </div>
-      <ArrowSquareOutIcon className="size-4 shrink-0 text-tertiary" />
+      <ArrowSquareOutIcon
+        size={16}
+        weight="regular"
+        className="shrink-0 text-icon-tertiary"
+      />
     </Link>
   )
 }

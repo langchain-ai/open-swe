@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react"
-import { ArrowClockwiseIcon } from "@phosphor-icons/react"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react"
 import type { FileTreeBatchOperation } from "@pierre/trees"
 
@@ -188,21 +189,19 @@ export function FileBrowserPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-surface-level-1">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-default px-2">
-        <button
-          type="button"
-          aria-label="Refresh files"
-          title="Refresh files"
+      <div className="flex h-9 shrink-0 items-center gap-space-1 border-b border-default px-space-2">
+        <IconButton
+          icon={ArrowClockwiseIcon}
+          label="Refresh files"
+          size="sm"
+          color="secondary"
+          variant="plain"
+          iconClassName={cn(isPending && "animate-spin")}
           onClick={() => {
             refresh()
             onRefreshSelectedFile?.()
           }}
-          className="flex size-6 shrink-0 items-center justify-center rounded text-tertiary transition-colors hover:text-primary"
-        >
-          <ArrowClockwiseIcon
-            className={cn("size-3.5", isPending && "animate-spin")}
-          />
-        </button>
+        />
         <input
           type="search"
           value={search.value}
@@ -215,14 +214,14 @@ export function FileBrowserPanel({
             search.close()
             event.currentTarget.blur()
           }}
-          className="h-7 min-w-0 flex-1 bg-transparent px-1 text-xs outline-none placeholder:text-tertiary"
+          className="h-7 min-w-0 flex-1 bg-transparent px-space-1 text-xs text-primary outline-none placeholder:text-placeholder"
         />
       </div>
       {error ? (
         <button
           type="button"
           onClick={refresh}
-          className="p-4 text-left text-xs leading-relaxed text-error-secondary"
+          className="p-space-4 text-left text-xs leading-relaxed text-error-secondary"
         >
           {error} Click to retry.
         </button>

@@ -1,28 +1,34 @@
-import { Tabs } from "@base-ui/react/tabs"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import {
-  ArrowLeft,
-  ArrowUp,
-  Check,
-  CheckCheck,
-  CircleHelp,
-  Clock3,
-  FileSearch,
-  Hash,
-  LoaderCircle,
-  Pause,
-  Play,
-  RefreshCw,
-  RotateCcw,
-} from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
+import {
+  TabGroup,
+  TabLabel,
+  TabList,
+  TabPanel,
+  TabPanels,
+} from "@langchain/macaw-components/Tabs"
+import { Text } from "@langchain/macaw-components/Text"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
+import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { ChecksIcon } from "@phosphor-icons/react/dist/ssr/Checks"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
+import { FileMagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/FileMagnifyingGlass"
+import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
+import { PauseIcon } from "@phosphor-icons/react/dist/ssr/Pause"
+import { PlayIcon } from "@phosphor-icons/react/dist/ssr/Play"
+import { QuestionIcon } from "@phosphor-icons/react/dist/ssr/Question"
 import { invalidationTopic } from "@/lib/invalidations/topics"
-import { cn } from "@/lib/utils"
 import { pageTitle } from "@/lib/pageTitle"
 import { incidentsApi } from "./api"
 import { IncidentDocuments } from "./IncidentDocuments"
@@ -41,11 +47,15 @@ import {
 } from "./shared"
 
 const actions = [
-  { action: "investigate_again", label: "Investigate again", icon: RefreshCw },
-  { action: "pause", label: "Pause", icon: Pause },
-  { action: "resume", label: "Resume", icon: Play },
-  { action: "complete", label: "Stop watching", icon: CheckCheck },
-  { action: "reopen", label: "Watch again", icon: RotateCcw },
+  {
+    action: "investigate_again",
+    label: "Investigate again",
+    icon: ArrowsClockwiseIcon,
+  },
+  { action: "pause", label: "Pause", icon: PauseIcon },
+  { action: "resume", label: "Resume", icon: PlayIcon },
+  { action: "complete", label: "Stop watching", icon: ChecksIcon },
+  { action: "reopen", label: "Watch again", icon: ArrowCounterClockwiseIcon },
 ] as const
 
 const notices: Record<IncidentAction, string> = {
@@ -57,6 +67,14 @@ const notices: Record<IncidentAction, string> = {
     "Completion requested. Watching stops when the request is processed.",
   reopen: "Reopen requested. Watching resumes after eligibility is verified.",
 }
+
+const tabs = ["overview", "postmortem", "timeline"] as const
+
+const assessmentColors = {
+  supported: "success",
+  plausible: "warning",
+  rejected: "secondary",
+} as const
 
 const appliedStates: Partial<Record<IncidentAction, string[]>> = {
   pause: ["paused"],
@@ -77,7 +95,7 @@ function Section({
   return (
     <section className="rounded-xl border border-default bg-surface-level-1">
       <div className="flex items-center justify-between gap-3 border-b border-default px-5 py-4">
-        <h2 className="text-sm font-medium">{title}</h2>
+        <h2 className="text-sm font-medium text-primary">{title}</h2>
         {aside}
       </div>
       <div className="p-5">{children}</div>
@@ -157,12 +175,12 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         to="/incidents"
         className="mb-6 inline-flex items-center gap-1.5 text-xs text-secondary hover:text-primary"
       >
-        <ArrowLeft className="size-3.5" />
+        <ArrowLeftIcon size={14} weight="regular" />
         All incidents
       </Link>
       <header className="mb-6">
         <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-secondary">
-          <Hash className="size-3.5" />
+          <HashIcon size={14} weight="regular" />
           {incident.channel_name}
           <span>·</span>
           <span>
@@ -170,7 +188,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
           </span>
         </div>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <h1 className="max-w-3xl text-2xl font-semibold tracking-tight">
+          <h1 className="max-w-3xl text-2xl font-semibold tracking-tight text-primary">
             {incident.title || incident.channel_name}
           </h1>
           <div className="flex items-center gap-2">
@@ -189,18 +207,18 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         <div className="mt-6 flex flex-wrap items-center gap-2">
           {actions
             .filter(({ action }) => allowed_actions.includes(action))
-            .map(({ action, label, icon: Icon }) => (
+            .map(({ action, label, icon }) => (
               <Button
                 key={action}
-                size="sm"
-                variant="outline"
+                color="secondary"
+                variant="outlined"
+                leftDecorator={icon}
                 disabled={
                   command.isPending ||
                   Boolean(pendingTransition && notice === action)
                 }
                 onClick={() => command.mutate({ action })}
               >
-                <Icon className="size-3.5" />
                 {label}
               </Button>
             ))}
@@ -221,350 +239,335 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         </div>
       </header>
       {detail.error && (
-        <p role="alert" className="mb-5 text-sm text-warning-secondary">
-          {detail.error.message}
-        </p>
-      )}
-      {notice && (
-        <div
-          role="status"
-          className="mb-5 rounded-lg border border-brand bg-brand-subtle p-3 text-sm text-brand-primary"
-        >
-          {pendingTransition || !appliedStates[notice]
-            ? notices[notice]
-            : `Agent activity updated: ${humanize(incident.status).toLowerCase()}.`}
+        <div role="alert" className="mb-5">
+          <Banner intent="warning">{detail.error.message}</Banner>
         </div>
       )}
-      <Tabs.Root defaultValue="overview">
-        <Tabs.List
-          aria-label="Incident details"
-          className="mb-6 flex gap-6 border-b border-default"
-        >
-          {(["overview", "postmortem", "timeline"] as const).map((tab) => (
-            <Tabs.Tab
-              key={tab}
-              value={tab}
-              className="-mb-px border-b-2 border-transparent px-1 py-3 text-sm text-secondary outline-none focus-visible:ring-2 focus-visible:ring-focus data-[active]:border-strong data-[active]:font-medium data-[active]:text-primary"
-            >
-              {humanize(tab)}
-            </Tabs.Tab>
+      {notice && (
+        <div role="status" className="mb-5">
+          <Banner intent="info">
+            {pendingTransition || !appliedStates[notice]
+              ? notices[notice]
+              : `Agent activity updated: ${humanize(incident.status).toLowerCase()}.`}
+          </Banner>
+        </div>
+      )}
+      <TabGroup>
+        <TabList className="mb-space-5 border-default">
+          {tabs.map((tab) => (
+            <TabLabel key={tab} label={humanize(tab)} className="pb-space-3" />
           ))}
-        </Tabs.List>
-        <Tabs.Panel
-          value="overview"
-          keepMounted
-          className="data-[hidden]:hidden"
-        >
-          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-            <div className="min-w-0 space-y-5">
-              <Section
-                title="Latest finding"
-                aside={
-                  report && (
-                    <span className="text-[11px] text-secondary">
-                      {report.outcome === "inconclusive"
-                        ? "Inconclusive"
-                        : "Findings available"}
-                    </span>
-                  )
-                }
-              >
-                {report ? (
-                  <>
-                    <p className="text-base leading-7 whitespace-pre-wrap">
+        </TabList>
+        <TabPanels>
+          <TabPanel unmount={false}>
+            <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+              <div className="min-w-0 space-y-5">
+                <Section
+                  title="Latest finding"
+                  aside={
+                    report && (
+                      <span className="text-xxs text-secondary">
+                        {report.outcome === "inconclusive"
+                          ? "Inconclusive"
+                          : "Findings available"}
+                      </span>
+                    )
+                  }
+                >
+                  {report ? (
+                    <>
+                      <p className="text-base leading-7 whitespace-pre-wrap">
+                        <CitedText
+                          text={report.summary}
+                          evidence={report.evidence}
+                        />
+                      </p>
+                      {(
+                        [
+                          ["Problem", report.problem],
+                          ["Previous occurrence", report.previous_occurrence],
+                          ["Cause", report.cause],
+                        ] as const
+                      ).map(
+                        ([label, value]) =>
+                          value && (
+                            <div key={label} className="mt-4">
+                              <h3 className="mb-1 text-xs font-medium text-secondary">
+                                {label}
+                              </h3>
+                              <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                                <CitedText
+                                  text={value}
+                                  evidence={report.evidence}
+                                />
+                              </p>
+                            </div>
+                          )
+                      )}
+                      {Boolean(report.next_steps?.length) && (
+                        <div className="mt-5 rounded-lg border border-brand bg-brand-subtle p-4">
+                          <h3 className="mb-2 text-xs font-medium">
+                            Steps to solve
+                          </h3>
+                          <ul className="space-y-2 text-sm leading-relaxed">
+                            {report.next_steps!.map((step, index) => (
+                              <li key={index}>
+                                <CitedText
+                                  text={step}
+                                  evidence={report.evidence}
+                                />
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="mt-3 text-xxs text-secondary">
+                            Recommendations for the responder
+                          </p>
+                        </div>
+                      )}
+                      <p className="mt-4 text-xxs text-secondary">
+                        Report updated {formatTime(report.created_at)}
+                      </p>
+                    </>
+                  ) : (
+                    <EmptyState
+                      size="sm"
+                      icon={FileMagnifyingGlassIcon}
+                      title="No findings yet"
+                      description="Findings appear here after the first pass."
+                    />
+                  )}
+                </Section>
+                {report && (
+                  <Section
+                    title="Sources"
+                    aside={
+                      <span className="text-xs text-secondary">
+                        {report.evidence.length} sources
+                      </span>
+                    }
+                  >
+                    {report.evidence.length === 0 ? (
+                      <p className="text-sm text-secondary">
+                        No linked evidence has been collected.
+                      </p>
+                    ) : (
+                      <ol className="space-y-3">
+                        {report.evidence.map((evidence, index) => (
+                          <li
+                            key={evidence.id}
+                            id={`evidence-${encodeURIComponent(evidence.id)}`}
+                            className="scroll-mt-6 rounded-lg border border-default p-3"
+                          >
+                            <div className="mb-2 flex items-center gap-2 text-xxs text-secondary">
+                              <span className="flex size-5 items-center justify-center rounded border border-default">
+                                {index + 1}
+                              </span>
+                              <span className="font-medium">
+                                {humanize(evidence.source)}
+                              </span>
+                              <span>·</span>
+                              <span>
+                                {slackMessageTime(evidence.url)
+                                  ? formatTime(slackMessageTime(evidence.url))
+                                  : `Retrieved ${formatTime(evidence.retrieved_at)}`}
+                              </span>
+                            </div>
+                            <ExternalLink
+                              href={evidence.url}
+                              className="text-sm leading-relaxed"
+                            >
+                              {sourceLabel(
+                                evidence.summary,
+                                incident.channel_name
+                              )}
+                            </ExternalLink>
+                            {evidence.query && (
+                              <details className="mt-2 text-xs text-secondary">
+                                <summary className="cursor-pointer">
+                                  View query
+                                </summary>
+                                <pre className="mt-2 overflow-x-auto rounded-md bg-surface-level-2 p-3 font-mono break-all whitespace-pre-wrap">
+                                  {evidence.query}
+                                </pre>
+                              </details>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </Section>
+                )}
+                {report && report.hypotheses.length > 0 && (
+                  <Section title="Working hypotheses">
+                    <div className="space-y-5">
+                      {report.hypotheses.map((hypothesis, index) => (
+                        <div key={`${index}-${hypothesis.title}`}>
+                          <div className="flex items-start justify-between gap-3">
+                            <h3 className="text-sm font-medium">
+                              {hypothesis.title}
+                            </h3>
+                            <Badge
+                              size="xs"
+                              rounded="xs"
+                              color={assessmentColors[hypothesis.assessment]}
+                            >
+                              {humanize(hypothesis.assessment)}
+                            </Badge>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {hypothesis.evidence_ids.map((id) => {
+                              const evidenceIndex = report.evidence.findIndex(
+                                (evidence) => evidence.id === id
+                              )
+                              return evidenceIndex >= 0 ? (
+                                <a
+                                  key={id}
+                                  href={`#evidence-${encodeURIComponent(id)}`}
+                                  className="text-xs text-brand-primary hover:underline"
+                                >
+                                  Evidence {evidenceIndex + 1}
+                                </a>
+                              ) : (
+                                <span
+                                  key={id}
+                                  className="text-xs text-secondary"
+                                >
+                                  Evidence unavailable
+                                </span>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Section>
+                )}
+              </div>
+              <aside className="min-w-0 space-y-5">
+                {report?.impact && (
+                  <Section title="Observed impact">
+                    <p className="text-sm leading-relaxed text-secondary">
                       <CitedText
-                        text={report.summary}
+                        text={report.impact}
                         evidence={report.evidence}
                       />
                     </p>
-                    {(
-                      [
-                        ["Problem", report.problem],
-                        ["Previous occurrence", report.previous_occurrence],
-                        ["Cause", report.cause],
-                      ] as const
-                    ).map(
-                      ([label, value]) =>
-                        value && (
-                          <div key={label} className="mt-4">
-                            <h3 className="mb-1 text-xs font-medium text-secondary">
-                              {label}
-                            </h3>
-                            <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                              <CitedText
-                                text={value}
-                                evidence={report.evidence}
-                              />
-                            </p>
-                          </div>
-                        )
-                    )}
-                    {Boolean(report.next_steps?.length) && (
-                      <div className="mt-5 rounded-lg border border-brand bg-brand-subtle p-4">
-                        <h3 className="mb-2 text-xs font-medium">
-                          Steps to solve
-                        </h3>
-                        <ul className="space-y-2 text-sm leading-relaxed">
-                          {report.next_steps!.map((step, index) => (
-                            <li key={index}>
-                              <CitedText
-                                text={step}
-                                evidence={report.evidence}
-                              />
-                            </li>
-                          ))}
-                        </ul>
-                        <p className="mt-3 text-[11px] text-secondary">
-                          Recommendations for the responder
-                        </p>
-                      </div>
-                    )}
-                    <p className="mt-4 text-[11px] text-secondary">
-                      Report updated {formatTime(report.created_at)}
-                    </p>
-                  </>
-                ) : (
-                  <div className="py-7 text-center">
-                    <FileSearch className="mx-auto mb-3 size-6 text-secondary" />
-                    <h3 className="text-sm font-medium">No findings yet</h3>
-                    <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-secondary">
-                      Findings appear here after the first pass.
-                    </p>
-                  </div>
+                  </Section>
                 )}
-              </Section>
-              {report && (
-                <Section
-                  title="Sources"
-                  aside={
-                    <span className="text-xs text-secondary">
-                      {report.evidence.length} sources
-                    </span>
-                  }
-                >
-                  {report.evidence.length === 0 ? (
-                    <p className="text-sm text-secondary">
-                      No linked evidence has been collected.
-                    </p>
-                  ) : (
-                    <ol className="space-y-3">
-                      {report.evidence.map((evidence, index) => (
+                <Section title="Coverage & access">
+                  {gaps.length > 0 ? (
+                    <ul className="space-y-3">
+                      {gaps.map((gap) => (
                         <li
-                          key={evidence.id}
-                          id={`evidence-${encodeURIComponent(evidence.id)}`}
-                          className="scroll-mt-6 rounded-lg border border-default p-3"
+                          key={gap}
+                          className="flex min-w-0 gap-2 text-xs leading-relaxed [overflow-wrap:anywhere] text-warning-secondary"
                         >
-                          <div className="mb-2 flex items-center gap-2 text-[11px] text-secondary">
-                            <span className="flex size-5 items-center justify-center rounded border border-default">
-                              {index + 1}
-                            </span>
-                            <span className="font-medium">
-                              {humanize(evidence.source)}
-                            </span>
-                            <span>·</span>
-                            <span>
-                              {slackMessageTime(evidence.url)
-                                ? formatTime(slackMessageTime(evidence.url))
-                                : `Retrieved ${formatTime(evidence.retrieved_at)}`}
-                            </span>
-                          </div>
-                          <ExternalLink
-                            href={evidence.url}
-                            className="text-sm leading-relaxed"
-                          >
-                            {sourceLabel(
-                              evidence.summary,
-                              incident.channel_name
-                            )}
-                          </ExternalLink>
-                          {evidence.query && (
-                            <details className="mt-2 text-xs text-secondary">
-                              <summary className="cursor-pointer">
-                                View query
-                              </summary>
-                              <pre className="mt-2 overflow-x-auto rounded-md bg-surface-level-2 p-3 font-mono break-all whitespace-pre-wrap">
-                                {evidence.query}
-                              </pre>
-                            </details>
-                          )}
+                          <QuestionIcon
+                            size={14}
+                            weight="regular"
+                            className="mt-0.5 shrink-0"
+                          />
+                          {gap}
                         </li>
                       ))}
-                    </ol>
+                    </ul>
+                  ) : (
+                    <p className="text-xs leading-relaxed text-secondary">
+                      {report
+                        ? "No coverage gaps reported in this pass."
+                        : "No coverage assessment yet."}
+                    </p>
                   )}
                 </Section>
-              )}
-              {report && report.hypotheses.length > 0 && (
-                <Section title="Working hypotheses">
-                  <div className="space-y-5">
-                    {report.hypotheses.map((hypothesis, index) => (
-                      <div key={`${index}-${hypothesis.title}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <h3 className="text-sm font-medium">
-                            {hypothesis.title}
-                          </h3>
-                          <span
-                            className={cn(
-                              "rounded px-2 py-0.5 text-[11px]",
-                              hypothesis.assessment === "supported"
-                                ? "bg-success text-success-secondary"
-                                : hypothesis.assessment === "rejected"
-                                  ? "bg-surface-level-2 text-secondary"
-                                  : "bg-warning text-warning-secondary"
-                            )}
-                          >
-                            {humanize(hypothesis.assessment)}
-                          </span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {hypothesis.evidence_ids.map((id) => {
-                            const evidenceIndex = report.evidence.findIndex(
-                              (evidence) => evidence.id === id
-                            )
-                            return evidenceIndex >= 0 ? (
-                              <a
-                                key={id}
-                                href={`#evidence-${encodeURIComponent(id)}`}
-                                className="text-xs text-brand-primary hover:underline"
-                              >
-                                Evidence {evidenceIndex + 1}
-                              </a>
-                            ) : (
-                              <span
-                                key={id}
-                                className="text-xs text-secondary"
-                              >
-                                Evidence unavailable
-                              </span>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </Section>
-              )}
-            </div>
-            <aside className="min-w-0 space-y-5">
-              {report?.impact && (
-                <Section title="Observed impact">
-                  <p className="text-sm leading-relaxed text-secondary">
-                    <CitedText
-                      text={report.impact}
-                      evidence={report.evidence}
-                    />
-                  </p>
-                </Section>
-              )}
-              <Section title="Coverage & access">
-                {gaps.length > 0 ? (
-                  <ul className="space-y-3">
-                    {gaps.map((gap) => (
-                      <li
-                        key={gap}
-                        className="flex min-w-0 gap-2 text-xs leading-relaxed [overflow-wrap:anywhere] text-warning-secondary"
-                      >
-                        <CircleHelp className="mt-0.5 size-3.5 shrink-0" />
-                        {gap}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-xs leading-relaxed text-secondary">
-                    {report
-                      ? "No coverage gaps reported in this pass."
-                      : "No coverage assessment yet."}
-                  </p>
-                )}
-              </Section>
-              {report && report.checked.length > 0 && (
-                <Section title="Checks performed">
-                  <ul className="space-y-3">
-                    {report.checked.map((check) => (
-                      <li
-                        key={check}
-                        className="flex gap-2 text-xs leading-relaxed text-secondary"
-                      >
-                        <Check className="mt-0.5 size-3.5 shrink-0 text-success-secondary" />
-                        {check}
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              )}
-              {report && report.questions.length > 0 && (
-                <Section title="Open questions">
-                  <ul className="list-disc space-y-3 pl-3 text-xs leading-relaxed text-secondary">
-                    {report.questions.map((openQuestion) => (
-                      <li key={openQuestion}>{openQuestion}</li>
-                    ))}
-                  </ul>
-                </Section>
-              )}
-            </aside>
-          </div>
-        </Tabs.Panel>
-        <Tabs.Panel
-          value="postmortem"
-          keepMounted
-          className="space-y-5 data-[hidden]:hidden"
-        >
-          <IncidentDocuments incidentId={incidentId} />
-        </Tabs.Panel>
-
-        <Tabs.Panel
-          value="timeline"
-          keepMounted
-          className="data-[hidden]:hidden"
-        >
-          <Section
-            title="Timeline"
-            aside={
-              <span className="text-xs text-secondary">
-                {activity.length} events
-              </span>
-            }
-          >
-            {activity.length === 0 ? (
-              <p className="text-sm text-secondary">
-                No activity recorded yet.
-              </p>
-            ) : (
-              <ol className="space-y-0">
-                {[...activity]
-                  .sort((a, b) => {
-                    const timestamp = (value: typeof a.at) =>
-                      new Date(
-                        typeof value === "number" ? value * 1000 : value
-                      ).getTime()
-                    return timestamp(a.at) - timestamp(b.at)
-                  })
-                  .map((item) => (
-                    <li
-                      key={item.id}
-                      className="relative grid gap-2 border-b border-default py-5 last:border-0 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-6"
-                    >
-                      <time className="text-xs text-secondary">
-                        {formatTime(item.at)}
-                      </time>
-                      <div className="min-w-0">
-                        <h3 className="mb-2 flex items-center gap-2 text-xs font-medium">
-                          <Clock3 className="size-3.5 text-secondary" />
-                          {humanize(item.type)}
-                        </h3>
-                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                          <CitedText
-                            text={item.summary || humanize(item.type)}
-                            evidence={report?.evidence ?? []}
+                {report && report.checked.length > 0 && (
+                  <Section title="Checks performed">
+                    <ul className="space-y-3">
+                      {report.checked.map((check) => (
+                        <li
+                          key={check}
+                          className="flex gap-2 text-xs leading-relaxed text-secondary"
+                        >
+                          <CheckIcon
+                            size={14}
+                            weight="regular"
+                            className="mt-0.5 shrink-0 text-icon-success"
                           />
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-              </ol>
-            )}
-          </Section>
-        </Tabs.Panel>
-      </Tabs.Root>
+                          {check}
+                        </li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+                {report && report.questions.length > 0 && (
+                  <Section title="Open questions">
+                    <ul className="list-disc space-y-3 pl-3 text-xs leading-relaxed text-secondary">
+                      {report.questions.map((openQuestion) => (
+                        <li key={openQuestion}>{openQuestion}</li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+              </aside>
+            </div>
+          </TabPanel>
+          <TabPanel unmount={false} className="space-y-5">
+            <IncidentDocuments incidentId={incidentId} />
+          </TabPanel>
+          <TabPanel unmount={false}>
+            <Section
+              title="Timeline"
+              aside={
+                <span className="text-xs text-secondary">
+                  {activity.length} events
+                </span>
+              }
+            >
+              {activity.length === 0 ? (
+                <p className="text-sm text-secondary">
+                  No activity recorded yet.
+                </p>
+              ) : (
+                <ol className="space-y-0">
+                  {[...activity]
+                    .sort((a, b) => {
+                      const timestamp = (value: typeof a.at) =>
+                        new Date(
+                          typeof value === "number" ? value * 1000 : value
+                        ).getTime()
+                      return timestamp(a.at) - timestamp(b.at)
+                    })
+                    .map((item) => (
+                      <li
+                        key={item.id}
+                        className="relative grid gap-2 border-b border-default py-5 last:border-0 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-6"
+                      >
+                        <time className="text-xs text-secondary">
+                          {formatTime(item.at)}
+                        </time>
+                        <div className="min-w-0">
+                          <h3 className="mb-2 flex items-center gap-2 text-xs font-medium">
+                            <ClockIcon
+                              size={14}
+                              weight="regular"
+                              className="text-icon-secondary"
+                            />
+                            {humanize(item.type)}
+                          </h3>
+                          <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                            <CitedText
+                              text={item.summary || humanize(item.type)}
+                              evidence={report?.evidence ?? []}
+                            />
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                </ol>
+              )}
+            </Section>
+          </TabPanel>
+        </TabPanels>
+      </TabGroup>
       {allowed_actions.includes("ask") && (
         <form
           onSubmit={(event) => {
@@ -574,21 +577,26 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
           }}
           className="mt-6 rounded-xl border border-default bg-surface-level-1 p-4"
         >
-          <label
+          <Text
+            as="label"
             htmlFor="incidents-question"
-            className="mb-3 block text-sm font-medium"
+            variant="sm"
+            weight="medium"
+            className="mb-space-3 block"
           >
             Ask Open SWE
-          </label>
+          </Text>
           <Textarea
             id="incidents-question"
             aria-label="Ask Open SWE"
+            variant="plain"
+            size="md"
+            rows={4}
             value={question}
-            onChange={(event) => setQuestion(event.target.value)}
+            onChange={setQuestion}
             disabled={command.isPending}
             maxLength={8000}
             placeholder="Ask about a hypothesis, share context, or request a next step…"
-            className="min-h-24 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
           />
           <div className="mt-3 flex items-center justify-between gap-4">
             <span className="text-xs text-secondary">
@@ -596,14 +604,10 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             </span>
             <Button
               type="submit"
-              size="sm"
+              leftDecorator={ArrowUpIcon}
+              loading={command.isPending && command.variables.action === "ask"}
               disabled={!question.trim() || command.isPending}
             >
-              {command.isPending && command.variables.action === "ask" ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : (
-                <ArrowUp className="size-4" />
-              )}
               Send question
             </Button>
           </div>

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { ClockIcon } from "@phosphor-icons/react"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 
 import { AUTOMATION_TEMPLATES } from "@/features/automations/lib/automation-templates"
 import { describeCron } from "@/features/automations/lib/cron"
@@ -24,7 +24,11 @@ export function AutomationTemplates() {
               className="flex flex-col rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:border-strong"
             >
               <div className="flex items-center gap-2">
-                <Icon className="size-4 shrink-0 text-secondary" />
+                <Icon
+                  size={16}
+                  weight="regular"
+                  className="shrink-0 text-icon-secondary"
+                />
                 <span className="truncate text-sm font-medium text-primary">
                   {template.name}
                 </span>
@@ -33,7 +37,7 @@ export function AutomationTemplates() {
                 {template.description}
               </p>
               <span className="mt-2 flex items-center gap-1 text-xs text-tertiary">
-                <ClockIcon className="size-3.5 shrink-0" />
+                <ClockIcon size={14} weight="regular" className="shrink-0" />
                 {describeCron(template.schedule)}
               </span>
             </Link>

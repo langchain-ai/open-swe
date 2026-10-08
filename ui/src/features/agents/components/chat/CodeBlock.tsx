@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
-import { Check, Copy, WrapText } from "lucide-react"
+import { TextAlignLeftIcon } from "@phosphor-icons/react/dist/ssr/TextAlignLeft"
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { getSingletonHighlighter } from "shiki"
-import type { ThemedToken } from "shiki"
+import type { BundledLanguage, ThemedToken } from "shiki"
 import { useResolvedTheme } from "@/lib/theme"
+import { cn } from "@/lib/utils"
 
 interface CodeBlockProps {
   text: string
@@ -55,7 +58,6 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
   // part of the fence, and this value is what Copy writes to the clipboard.
   const code = useMemo(() => text.replace(/\n$/, ""), [text])
   const [tokens, setTokens] = useState<Array<Array<ThemedToken>> | null>(null)
-  const [copied, setCopied] = useState(false)
   const [wrapped, setWrapped] = useState(false)
   const resolvedTheme = useResolvedTheme()
   const shikiTheme = SHIKI_THEME[resolvedTheme]
@@ -84,12 +86,12 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
 
     getSingletonHighlighter({
       themes: [shikiTheme],
-      langs: [normalizedLanguage as any],
+      langs: [normalizedLanguage as BundledLanguage],
     })
       .then((highlighter) => {
         if (cancelled) return
         const result = highlighter.codeToTokens(code, {
-          lang: normalizedLanguage as any,
+          lang: normalizedLanguage as BundledLanguage,
           theme: shikiTheme,
         })
         if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear()
@@ -108,25 +110,15 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
     }
   }, [code, normalizedLanguage, shikiTheme])
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
-    } catch {
-      setCopied(false)
-    }
-  }
-
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines"
   const lineClassName = wrapped
     ? "[overflow-wrap:anywhere] break-words whitespace-pre-wrap"
     : "whitespace-pre"
 
   return (
-    <div className="my-[0.65rem] max-w-full overflow-hidden rounded-lg border border-subtle bg-surface-level-2/50">
-      <div className="flex items-center justify-between gap-2 pt-1 pr-1 pl-2.5 select-none">
-        <span className="truncate font-mono text-[11px] text-secondary">
+    <div className="my-[0.65rem] max-w-full overflow-hidden rounded-lg border border-subtle bg-surface-level-2">
+      <div className="flex items-center justify-between gap-space-2 pt-space-1 pr-space-1 pl-2.5 select-none">
+        <span className="truncate font-mono text-xxs text-secondary">
           {title || displayLanguage}
         </span>
         <span
@@ -134,38 +126,29 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
           role="toolbar"
           aria-label="Code block actions"
         >
-          <button
-            type="button"
+          <IconButton
+            icon={TextAlignLeftIcon}
+            label={wrapLabel}
+            size="xs"
+            color="secondary"
+            variant="plain"
             onClick={() => setWrapped((value) => !value)}
             aria-pressed={wrapped}
-            aria-label={wrapLabel}
-            title={wrapLabel}
-            className="rounded p-1 text-secondary transition-colors hover:text-primary aria-pressed:text-primary"
-          >
-            <WrapText className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={handleCopy}
-            aria-label={copied ? "Copied" : "Copy code"}
-            title={copied ? "Copied" : "Copy code"}
-            className="rounded p-1 text-secondary transition-colors hover:text-primary"
-          >
-            {copied ? (
-              <Check className="size-3.5" />
-            ) : (
-              <Copy className="size-3.5" />
-            )}
-          </button>
+            className={cn(wrapped && "bg-selected text-primary")}
+          />
+          <CopyIconButton copy={code} label="Copy code" size="xs" />
         </span>
       </div>
       <pre
-        className={`max-w-full overflow-x-auto px-2.5 pt-0.5 pb-2.5 text-[12.5px] leading-[1.55] ${wrapped ? "whitespace-pre-wrap" : ""}`}
+        className={cn(
+          "max-w-full overflow-x-auto px-2.5 pt-0.5 pb-2.5 font-mono text-xxs leading-[1.55]",
+          wrapped && "whitespace-pre-wrap"
+        )}
       >
         {tokens ? (
           <code className="block max-w-full">
             {tokens.map((lineTokens, lineIndex) => (
-              <div key={lineIndex} className={`max-w-full ${lineClassName}`}>
+              <div key={lineIndex} className={cn("max-w-full", lineClassName)}>
                 {lineTokens.map((token, tokenIndex) => (
                   <span key={tokenIndex} style={{ color: token.color }}>
                     {token.content}
@@ -176,7 +159,7 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
             ))}
           </code>
         ) : (
-          <code className={`block max-w-full text-primary ${lineClassName}`}>
+          <code className={cn("block max-w-full text-primary", lineClassName)}>
             {code}
           </code>
         )}

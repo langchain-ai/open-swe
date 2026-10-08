@@ -1,13 +1,10 @@
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Button } from "@langchain/macaw-components/Button"
+import { Select } from "@langchain/macaw-components/Select"
 
-const PAGE_SIZES = [10, 25, 50, 100] as const
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100].map((size) => ({
+  value: String(size),
+  label: String(size),
+}))
 
 export function TablePagination({
   page,
@@ -36,27 +33,23 @@ export function TablePagination({
         {start.toLocaleString("en-US")}–{end.toLocaleString("en-US")} of{" "}
         {total.toLocaleString("en-US")}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-space-2">
         <span>Rows per page</span>
         <Select
+          aria-label="Rows per page"
           disabled={disabled}
+          hideSearch
+          options={PAGE_SIZE_OPTIONS}
+          size="sm"
+          triggerClassName="w-20"
           value={String(pageSize)}
-          onValueChange={(value) => onPageSizeChange(Number(value))}
-        >
-          <SelectTrigger aria-label="Rows per page" className="w-20">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PAGE_SIZES.map((size) => (
-              <SelectItem key={size} value={String(size)}>
-                {size}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          onChange={(value) => {
+            if (value) onPageSizeChange(Number(value))
+          }}
+        />
         <Button
-          type="button"
-          variant="outline"
+          color="secondary"
+          variant="outlined"
           disabled={disabled || page === 1}
           onClick={() => onPageChange(page - 1)}
         >
@@ -66,8 +59,8 @@ export function TablePagination({
           Page {page} of {pageCount}
         </span>
         <Button
-          type="button"
-          variant="outline"
+          color="secondary"
+          variant="outlined"
           disabled={disabled || page >= pageCount}
           onClick={() => onPageChange(page + 1)}
         >

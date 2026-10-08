@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react"
 import { ThreadPrimitive, useAui, useAuiState } from "@assistant-ui/react"
 import { useLangChainError } from "@assistant-ui/react-langchain"
-import { ArrowDown } from "lucide-react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Link } from "@langchain/macaw-components/Link"
+import { ArrowDownIcon } from "@phosphor-icons/react/dist/ssr/ArrowDown"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
@@ -57,16 +61,18 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
         <header className="flex items-center gap-3 border-b border-default px-5 py-3">
-          <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
+          <h1 className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
             {thread?.title ?? "New conversation"}
           </h1>
           {thread && (
-            <button
-              className="text-xs"
+            <Button
+              color="secondary"
+              variant="plain"
+              aria-expanded={!panelCollapsed}
               onClick={() => setPanelCollapsed(!panelCollapsed)}
             >
               Files and terminal
-            </button>
+            </Button>
           )}
         </header>
         <ThreadPrimitive.Viewport
@@ -85,7 +91,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
             ) : (
               empty &&
               !running && (
-                <h2 className="py-16 text-center text-2xl">
+                <h2 className="py-16 text-center text-2xl text-primary">
                   What are we working on?
                 </h2>
               )
@@ -107,16 +113,21 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
           </div>
         </ThreadPrimitive.Viewport>
         <div className="relative mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
-          <ThreadPrimitive.ScrollToBottom
-            aria-label="Scroll to bottom"
-            className="absolute -top-10 left-1/2 rounded-full border border-default bg-surface-level-1 p-2 shadow-sm disabled:invisible"
-          >
-            <ArrowDown className="size-4" />
+          <ThreadPrimitive.ScrollToBottom asChild>
+            <IconButton
+              icon={ArrowDownIcon}
+              label="Scroll to bottom"
+              color="secondary"
+              variant="outlined"
+              size="md"
+              round
+              className="absolute -top-10 left-1/2 shadow-sm disabled:invisible"
+            />
           </ThreadPrimitive.ScrollToBottom>
           {error && (
-            <p role="alert" className="mb-3 text-sm text-error-secondary">
-              {error}
-            </p>
+            <div role="alert" className="mb-space-3">
+              <Banner intent="error">{error}</Banner>
+            </div>
           )}
           {thread && (
             <>
@@ -127,14 +138,15 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
                 />
               )}
               {thread.codeChannelUrl && (
-                <a
+                <Link
                   href={thread.codeChannelUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="mb-2 block text-xs underline"
+                  variant="xs"
+                  className="mb-space-2 block"
                 >
                   Open code channel
-                </a>
+                </Link>
               )}
               <ThreadPullRequests
                 pullRequests={thread.pullRequests ?? []}

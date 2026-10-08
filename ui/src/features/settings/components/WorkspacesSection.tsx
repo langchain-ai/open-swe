@@ -1,10 +1,14 @@
 import { useState, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
+
 import { SettingsSection } from "@/components/AppShell"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   slackChannelHref,
   slackChannelLabel,
@@ -24,7 +28,7 @@ import {
   type WorkspaceRefreshStatus,
   type WorkspaceRefreshStep,
 } from "@/lib/api"
-import { formatRelativeTime } from "@/lib/utils"
+import { cn, formatRelativeTime } from "@/lib/utils"
 
 export const WORKSPACE_OPTIONS_KEY = ["workspace-options"]
 
@@ -63,10 +67,16 @@ function refreshedAt(timestamp: string | null | undefined): string | null {
   return Number.isNaN(parsed) ? null : formatRelativeTime(parsed)
 }
 
-const STEP_MARK: Record<WorkspaceRefreshStep["status"], string> = {
-  running: "…",
-  success: "✓",
-  failed: "✕",
+function StepMark({ status }: { status: WorkspaceRefreshStep["status"] }) {
+  if (status === "running") return <span aria-hidden="true">…</span>
+  const Glyph = status === "success" ? CheckIcon : XIcon
+  return (
+    <Glyph
+      size={10}
+      weight="bold"
+      aria-label={status === "success" ? "Succeeded" : "Failed"}
+    />
+  )
 }
 
 const STEP_CLASS: Record<WorkspaceRefreshStep["status"], string> = {
@@ -83,9 +93,12 @@ function RefreshSteps({ steps }: { steps: Array<WorkspaceRefreshStep> }) {
       {steps.map((step) => (
         <span
           key={step.label}
-          className={`rounded-full border px-2 py-0.5 text-[11px] ${STEP_CLASS[step.status]}`}
+          className={cn(
+            "inline-flex items-center gap-space-1 rounded-full border px-space-2 py-0.5 text-xxs",
+            STEP_CLASS[step.status]
+          )}
         >
-          {STEP_MARK[step.status]} {step.label}
+          <StepMark status={step.status} /> {step.label}
           {step.exit_code ? ` (exit ${step.exit_code})` : ""}
         </span>
       ))}
@@ -113,20 +126,25 @@ function WorkspaceRow({
   const detail = workspace.has_snapshot ? "Snapshot ready" : "No snapshot"
 
   return (
-    <div data-workspace-row className="flex flex-col gap-2 px-4 py-3.5">
+    <div
+      data-workspace-row
+      className="flex flex-col gap-space-2 px-space-4 py-3.5"
+    >
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
         <div className="flex flex-col gap-1">
-          <span className="flex items-center gap-2 text-sm/none font-medium text-primary">
+          <span className="flex items-center gap-space-2 text-sm/none font-medium text-primary">
             {workspace.name}
-            {isDefault && <Badge variant="secondary">Default</Badge>}
+            {isDefault && (
+              <Badge color="secondary" size="xs">
+                Default
+              </Badge>
+            )}
           </span>
-          <span className="text-xs/relaxed text-secondary">
-            {detail}
-          </span>
+          <span className="text-xs/relaxed text-secondary">{detail}</span>
         </div>
         <div className="flex items-center gap-3 sm:shrink-0">
           <span
-            className={`text-xs ${REFRESH_CLASS[status]}`}
+            className={cn("text-xs", REFRESH_CLASS[status])}
             title={
               status !== "refreshing" && when && workspace.refresh_finished_at
                 ? new Date(workspace.refresh_finished_at).toLocaleString(
@@ -163,7 +181,7 @@ function WorkspaceRow({
       {isAdmin && log && (
         <details className="text-xs text-secondary">
           <summary className="cursor-pointer select-none">Refresh log</summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-default bg-surface-level-2/40 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
+          <pre className="mt-space-2 max-h-64 overflow-auto rounded-md border border-default bg-surface-level-2 p-space-3 text-xxs leading-relaxed whitespace-pre-wrap">
             {log}
           </pre>
         </details>
@@ -232,15 +250,15 @@ export function WorkspacesSection({
       }
     >
       {workspaces.isLoading ? (
-        <div className="px-4 py-3.5">
+        <div className="px-space-4 py-3.5">
           <Skeleton className="h-8 w-full" />
         </div>
       ) : workspaces.isError ? (
-        <p className="px-4 py-3.5 text-xs text-error-secondary">
-          Could not load workspaces.
-        </p>
+        <div className="px-space-4 py-3.5">
+          <Banner intent="error" title="Could not load workspaces." />
+        </div>
       ) : !options || options.workspaces.length === 0 ? (
-        <p className="px-4 py-3.5 text-xs text-secondary">
+        <p className="px-space-4 py-3.5 text-xs text-secondary">
           No workspaces are configured.
         </p>
       ) : (
@@ -266,16 +284,17 @@ export function WorkspacesSection({
               workspaces={options?.workspaces ?? []}
               channelLabel={channelLabel}
             />
-            <div className="flex flex-wrap items-center gap-2 border-t border-default px-4 py-3.5">
+            <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-3.5">
               {createError && (
                 <p role="alert" className="text-xs text-error-secondary">
                   {createError}
                 </p>
               )}
-              <div className="ml-auto flex gap-2">
+              <div className="ml-auto flex gap-space-2">
                 <Button
-                  size="sm"
-                  variant="ghost"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
                   disabled={creating}
                   onClick={() => {
                     setAdding(false)
@@ -288,7 +307,8 @@ export function WorkspacesSection({
                     : "Close"}
                 </Button>
                 <Button
-                  size="sm"
+                  size="xs"
+                  color="primary"
                   disabled={creating || !createDraft.name.trim()}
                   onClick={() => void create()}
                 >
@@ -298,8 +318,8 @@ export function WorkspacesSection({
             </div>
           </div>
         ) : (
-          <div className="px-4 py-3.5">
-            <Button size="sm" onClick={() => setAdding(true)}>
+          <div className="px-space-4 py-3.5">
+            <Button size="xs" color="primary" onClick={() => setAdding(true)}>
               Add workspace
             </Button>
           </div>

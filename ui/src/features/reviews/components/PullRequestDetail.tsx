@@ -1,7 +1,10 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { XIcon } from "@phosphor-icons/react"
 import { useCallback, useRef, useState, type ReactNode } from "react"
-import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 
 import type {
@@ -12,9 +15,6 @@ import type {
 } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { HumanInputText } from "./HumanInputCard"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { navLink } from "../PullRequestLinks"
 import { TextPopover } from "./TextPopover"
 import { PullRequestFiles } from "./PullRequestFiles"
 import { api } from "@/lib/api"
@@ -37,10 +37,10 @@ const skippedConclusions = new Set(["neutral", "skipped"])
 
 function checkTone(check: PreviewCheck): string {
   const rank = checkRank(check)
-  if (rank === 1) return "text-amber-700 dark:text-amber-400"
-  if (rank === 2) return "text-emerald-700 dark:text-emerald-400"
+  if (rank === 1) return "text-status-yellow"
+  if (rank === 2) return "text-status-green"
   if (rank === 3) return "text-secondary"
-  return "text-error-secondary"
+  return "text-status-red"
 }
 
 function checkRank(check: PreviewCheck): number {
@@ -68,9 +68,7 @@ function Section({
       <div className="mb-2.5 flex items-baseline gap-2">
         <h3 className="text-xs font-medium text-primary">{heading}</h3>
         {count && (
-          <span className="text-xs text-secondary tabular-nums">
-            {count}
-          </span>
+          <span className="text-xs text-secondary tabular-nums">{count}</span>
         )}
         {action && <div className="ml-auto">{action}</div>}
       </div>
@@ -122,7 +120,7 @@ const checkGroups = [
 function Checks({ checks }: { checks: Array<PreviewCheck> | null }) {
   if (checks === null) {
     return (
-      <p className="text-xs text-amber-700 dark:text-amber-400">
+      <p className="text-xs text-warning-secondary">
         GitHub did not return the checks for this commit.
       </p>
     )
@@ -227,26 +225,27 @@ function AddToAgentBatch({
   const remove = useAgentBatchStore((state) => state.remove)
   if (entry?.state === "sent")
     return (
-      <Button size="sm" variant="outline" disabled>
+      <Button size="xs" color="secondary" variant="outlined" disabled>
         Sent to agent
       </Button>
     )
   if (entry)
     return (
       <Button
-        size="sm"
-        variant="outline"
+        size="xs"
+        color="secondary"
+        variant="outlined"
         title="Remove from the agent batch"
+        rightDecorator={XIcon}
         onClick={() => remove(key, entry.item.id)}
       >
         Queued for agent
-        <XIcon className="size-3" />
       </Button>
     )
   return (
     <TextPopover
       trigger={
-        <Button size="sm" variant="outline">
+        <Button size="xs" color="secondary" variant="outlined">
           Add to agent batch
         </Button>
       }
@@ -279,15 +278,16 @@ function AgentBatchBar({ target }: { target: PullRequestRef }) {
         agent
       </span>
       <Button
-        size="sm"
-        variant="outline"
+        size="xs"
+        color="secondary"
+        variant="outlined"
         className="ml-auto"
         onClick={() => discard(key)}
       >
         Discard
       </Button>
       <Button
-        size="sm"
+        size="xs"
         onClick={() => submit.mutate(queued.map(({ item }) => item))}
       >
         Send to agent
@@ -313,7 +313,7 @@ function Conversation({
   }, [])
 
   return (
-    <li className="border-l-2 border-amber-600/40 pl-3">
+    <li className="border-l-2 border-warning pl-3">
       <div className="flex items-center gap-2 text-xs text-secondary">
         <span className="font-medium text-primary">
           {thread.author ?? "Someone"}
@@ -328,23 +328,24 @@ function Conversation({
           )}
           {thread.thread_id && (
             <Button
-              size="sm"
-              variant="outline"
+              size="xs"
+              color="secondary"
+              variant="outlined"
               onClick={() => resolve.mutate([thread.thread_id!])}
             >
               Resolve
             </Button>
           )}
           {thread.url && (
-            <a
-              className={navLink}
-              href={thread.url}
-              target="_blank"
-              rel="noreferrer"
+            <Button
+              size="xs"
+              color="secondary"
+              variant="plain"
+              leftDecorator={GithubLogoIcon}
+              as={<a href={thread.url} target="_blank" rel="noreferrer" />}
             >
-              <IoLogoGithub className="size-3.5" />
               Reply
-            </a>
+            </Button>
           )}
         </div>
       </div>
@@ -400,7 +401,7 @@ function Conversations({
 }) {
   if (preview.unresolved === null) {
     return (
-      <p className="text-xs text-amber-700 dark:text-amber-400">
+      <p className="text-xs text-warning-secondary">
         GitHub did not return the review threads, so unresolved comments cannot
         be counted here. Open the PR to check.
       </p>
@@ -482,7 +483,7 @@ export function PullRequestDetail({
             <span className="font-mono tabular-nums">#{pr.number}</span>
             {data && (
               <span className="tabular-nums">
-                <span className="text-emerald-700 dark:text-emerald-400">
+                <span className="text-success-secondary">
                   +{data.additions}
                 </span>{" "}
                 <span className="text-error-secondary">−{data.deletions}</span>
@@ -501,14 +502,14 @@ export function PullRequestDetail({
             </p>
           )}
         </div>
-        <button
-          type="button"
-          aria-label="Close pull request preview"
+        <IconButton
+          icon={XIcon}
+          label="Close pull request preview"
+          color="secondary"
+          variant="plain"
+          className="-mt-1 -mr-1.5"
           onClick={onClose}
-          className="-mt-1 -mr-1.5 rounded-md p-1.5 text-secondary transition-colors hover:bg-surface-level-2-hover hover:text-primary"
-        >
-          <XIcon className="size-4" />
-        </button>
+        />
       </header>
 
       <div className="border-b border-default px-5 py-3">
@@ -564,8 +565,9 @@ export function PullRequestDetail({
               action={
                 resolvableIds.length > 1 && (
                   <Button
-                    size="sm"
-                    variant="outline"
+                    size="xs"
+                    color="secondary"
+                    variant="outlined"
                     onClick={() => resolve.mutate(resolvableIds)}
                   >
                     Resolve all
@@ -585,9 +587,7 @@ export function PullRequestDetail({
               }
             >
               {data.files.length === 0 ? (
-                <p className="text-xs text-secondary">
-                  No files changed.
-                </p>
+                <p className="text-xs text-secondary">No files changed.</p>
               ) : (
                 <PullRequestFiles
                   pr={pr}

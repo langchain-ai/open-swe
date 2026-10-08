@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
+import { Banner } from "@langchain/macaw-components/Banner"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
 import type { AgentThread, ImageChunk } from "@/features/agents/lib/types"
@@ -597,9 +598,9 @@ export function AgentsHome({
         )}
         <AgentComposerDock>
           {localError && (
-            <div className="mb-3 w-full rounded-xl border border-error bg-error px-3 py-2 text-xs text-error-secondary">
+            <Banner intent="error" className="mb-space-3 w-full">
               {localError}
-            </div>
+            </Banner>
           )}
           <AgentPromptBar
             activeRun={

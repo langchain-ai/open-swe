@@ -1,14 +1,14 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import {
   keepPreviousData,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { GitPullRequestIcon } from "@phosphor-icons/react"
 
 import { api, type ReviewSummary } from "@/lib/api"
 import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { PullRequestLinks } from "./PullRequestLinks"
 import { ReviewCounts } from "./components/ReviewCounts"
@@ -17,7 +17,7 @@ function statusBadge(review: ReviewSummary) {
   if (review.status === "running") {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-secondary">
-        <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+        <span className="size-1.5 animate-pulse rounded-full bg-warning-strong" />
         Reviewing
       </span>
     )
@@ -57,8 +57,9 @@ export function ReviewedPullRequests({
     <>
       <div className="mt-4 flex justify-end">
         <Button
-          size="sm"
-          variant="outline"
+          size="xs"
+          color="secondary"
+          variant="outlined"
           disabled={reviews.isFetching}
           onClick={() => void reviews.refetch()}
         >
@@ -105,7 +106,10 @@ export function ReviewedPullRequests({
               className="flex items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-surface-level-2-hover"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <GitPullRequestIcon className="size-4 shrink-0 text-secondary" />
+                <GitPullRequestIcon
+                  weight="regular"
+                  className="size-4 shrink-0 text-icon-secondary"
+                />
                 <div className="min-w-0">
                   <div className="truncate text-xs font-medium text-primary">
                     {review.title}
@@ -135,8 +139,9 @@ export function ReviewedPullRequests({
             <span className="text-secondary">Page {page + 1}</span>
             <div className="flex items-center gap-2">
               <Button
-                size="sm"
-                variant="outline"
+                size="xs"
+                color="secondary"
+                variant="outlined"
                 disabled={page === 0 || reviews.isFetching}
                 onPointerEnter={() => prefetch(page - 1)}
                 onClick={() => onPageChange(Math.max(0, page - 1))}
@@ -144,8 +149,9 @@ export function ReviewedPullRequests({
                 Prev
               </Button>
               <Button
-                size="sm"
-                variant="outline"
+                size="xs"
+                color="secondary"
+                variant="outlined"
                 disabled={!reviews.data?.has_more || reviews.isFetching}
                 onPointerEnter={() => prefetch(page + 1)}
                 onClick={() => onPageChange(page + 1)}

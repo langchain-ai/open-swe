@@ -2,6 +2,11 @@ import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import { Input } from "@langchain/macaw-components/Input"
+import { Select } from "@langchain/macaw-components/Select"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 
 import type {
   ReviewerEvalConfig,
@@ -9,16 +14,6 @@ import type {
   ReviewerEvalStatus,
 } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
 import { ModelPairControl } from "@/features/settings/components/WorkspaceSettingsSections"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
@@ -36,7 +31,7 @@ function ReviewerEvalPage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
+      <main className="p-space-6">
         <Skeleton className="h-64 w-full" />
       </main>
     )
@@ -112,7 +107,8 @@ function ReviewerEvalRunConfigSection() {
       description="Defaults to the previous run's config. Each run boots a sandbox at the deployed commit."
       action={
         <Button
-          size="sm"
+          size="xs"
+          color="primary"
           disabled={disabled}
           onClick={() => value && start.mutate(value)}
         >
@@ -124,9 +120,11 @@ function ReviewerEvalRunConfigSection() {
         label="Dataset"
         control={
           <Input
+            aria-label="Dataset"
+            size="md"
             className="w-64"
             value={value?.dataset_name ?? ""}
-            onChange={(e) => update({ dataset_name: e.target.value })}
+            onChange={(dataset_name) => update({ dataset_name })}
           />
         }
       />
@@ -135,9 +133,11 @@ function ReviewerEvalRunConfigSection() {
         description="LangSmith experiment prefix."
         control={
           <Input
+            aria-label="Run name"
+            size="md"
             className="w-64"
             value={value?.experiment_prefix ?? ""}
-            onChange={(e) => update({ experiment_prefix: e.target.value })}
+            onChange={(experiment_prefix) => update({ experiment_prefix })}
           />
         }
       />
@@ -145,6 +145,7 @@ function ReviewerEvalRunConfigSection() {
         label="Reviewer model"
         control={
           <ModelPairControl
+            label="Reviewer"
             models={models}
             model={value?.model_id ?? null}
             effort={value?.reasoning_effort ?? null}
@@ -160,13 +161,13 @@ function ReviewerEvalRunConfigSection() {
         description="PRs reviewed at once on the deployment."
         control={
           <Input
+            aria-label="Max concurrency"
+            size="md"
             className="w-24"
             type="number"
             min={1}
-            value={value?.max_concurrency ?? ""}
-            onChange={(e) =>
-              update({ max_concurrency: Number(e.target.value) })
-            }
+            value={value ? String(value.max_concurrency) : ""}
+            onChange={(next) => update({ max_concurrency: Number(next) })}
           />
         }
       />
@@ -175,14 +176,14 @@ function ReviewerEvalRunConfigSection() {
         description="Run only the first N PRs. Blank runs the full dataset."
         control={
           <Input
+            aria-label="Limit"
+            size="md"
             className="w-24"
             type="number"
             min={1}
             placeholder="all"
-            value={value?.limit ?? ""}
-            onChange={(e) =>
-              update({ limit: e.target.value ? Number(e.target.value) : null })
-            }
+            value={value?.limit != null ? String(value.limit) : ""}
+            onChange={(next) => update({ limit: next ? Number(next) : null })}
           />
         }
       />
@@ -190,6 +191,7 @@ function ReviewerEvalRunConfigSection() {
         label="Score mode"
         control={
           <ChoiceSelect
+            label="Score mode"
             value={value?.score_mode}
             options={["surfaced_findings", "all_findings"] as const}
             onChange={(score_mode) => update({ score_mode })}
@@ -200,6 +202,7 @@ function ReviewerEvalRunConfigSection() {
         label="Severity threshold"
         control={
           <ChoiceSelect
+            label="Severity threshold"
             value={value?.severity_threshold}
             options={["low", "medium", "high", "critical"] as const}
             onChange={(severity_threshold) => update({ severity_threshold })}
@@ -211,30 +214,24 @@ function ReviewerEvalRunConfigSection() {
 }
 
 function ChoiceSelect<T extends string>({
+  label,
   value,
   options,
   onChange,
 }: {
+  label: string
   value: T | undefined
   options: ReadonlyArray<T>
   onChange: (value: T) => void
 }) {
   return (
     <Select
-      value={value ?? null}
-      onValueChange={(next) => next && onChange(next)}
-    >
-      <SelectTrigger className="w-40">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((option) => (
-          <SelectItem key={option} value={option}>
-            {option}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      aria-label={label}
+      options={options.map((option) => ({ value: option, label: option }))}
+      value={value}
+      onChange={(next) => next && onChange(next)}
+      triggerClassName="w-40"
+    />
   )
 }
 
@@ -359,27 +356,26 @@ function ReviewerEvalLogs() {
       title="Output"
       description="Live tail of the eval output. Each PR logs start and finish lines while the run is active."
       action={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-space-2">
           <Button
-            size="sm"
-            variant="outline"
+            size="xs"
+            color="secondary"
+            variant="outlined"
             onClick={() => void copyLogs()}
             disabled={!logTail}
           >
             {copied ? "Copied" : "Copy logs"}
           </Button>
-          <label className="flex items-center gap-1.5 text-xs text-secondary">
-            <input
-              type="checkbox"
-              checked={follow}
-              onChange={(e) => setFollow(e.target.checked)}
-            />
-            Follow
-          </label>
+          <Checkbox
+            label="Follow"
+            labelClassName="text-xs text-secondary"
+            checked={follow}
+            onCheckedChange={(checked) => setFollow(checked === true)}
+          />
         </div>
       }
     >
-      <div className="p-4">
+      <div className="p-space-4">
         {logTail ? (
           <pre
             ref={scrollRef}
@@ -389,7 +385,7 @@ function ReviewerEvalLogs() {
                 el.scrollHeight - el.scrollTop - el.clientHeight < 24
               setFollow(atBottom)
             }}
-            className="max-h-[28rem] overflow-auto rounded-md bg-surface-level-2/50 p-3 font-mono text-xs break-words whitespace-pre-wrap text-primary"
+            className="max-h-[28rem] overflow-auto rounded-md bg-surface-level-2 p-space-3 font-mono text-xs break-words whitespace-pre-wrap text-primary"
           >
             {logTail}
           </pre>

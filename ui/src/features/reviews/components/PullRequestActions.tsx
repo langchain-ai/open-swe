@@ -88,7 +88,7 @@ export function PullRequestActions({
           />
         )}
         {pr.missingChecks.length > 0 && (
-          <span className="text-xs text-amber-700 dark:text-amber-400">
+          <span className="text-xs text-warning-secondary">
             Merge blocked: {pr.missingChecks.join(", ")} never reported
           </span>
         )}

@@ -1,23 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { CircleNotchIcon } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 
 import { SettingsSection } from "@/components/AppShell"
+import { ConfirmDialog } from "./ConfirmDialog"
 import { WorkspaceRepositoriesSection } from "./WorkspaceRepositoriesSection"
 import { WorkspaceApiKeysSection } from "./WorkspaceApiKeysSection"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   useWorkspaceOptions,
   workspaceOptionKeys,
@@ -108,18 +99,19 @@ function GeneralSection({
         workspaces={workspaces}
         channelLabel={channelLabel}
       />
-      <div className="flex flex-wrap items-center gap-2 border-t border-default px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-3.5">
         {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-error-secondary">
             {error}
           </p>
         )}
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex gap-space-2">
           {dirty && (
             <Button
-              size="sm"
-              variant="ghost"
+              size="xs"
+              color="secondary"
+              variant="plain"
               disabled={saving}
               onClick={() => setDraft(draftFromWorkspace(record))}
             >
@@ -127,7 +119,8 @@ function GeneralSection({
             </Button>
           )}
           <Button
-            size="sm"
+            size="xs"
+            color="primary"
             disabled={!dirty || saving || !draft.name.trim()}
             onClick={() => void save()}
           >
@@ -194,11 +187,11 @@ export function WorkspaceSettingsPanel({
   if (record.isLoading) return <Skeleton className="h-64 w-full" />
   if (record.isError || !record.data) {
     return (
-      <p role="alert" className="text-sm text-error-secondary">
-        {record.error instanceof Error
-          ? record.error.message
-          : "Could not load this workspace."}
-      </p>
+      <div role="alert">
+        <Banner intent="error" title="Could not load this workspace.">
+          {record.error instanceof Error ? record.error.message : null}
+        </Banner>
+      </div>
     )
   }
 
@@ -250,12 +243,9 @@ export function WorkspaceSettingsPanel({
           record.data.refresh_status === "refreshing" ? (
             <p
               role="status"
-              className="flex min-w-48 flex-1 items-center gap-2 text-xs text-secondary"
+              className="flex min-w-48 flex-1 items-center gap-space-2 text-xs text-secondary"
             >
-              <CircleNotchIcon
-                aria-hidden="true"
-                className="size-4 shrink-0 animate-spin"
-              />
+              <Spinner size="xs" className="shrink-0" />
               {record.data.refresh_status === "refreshing"
                 ? `${buildAction}ing sandbox image…`
                 : `Repositories saved. Sandbox image ${buildAction.toLowerCase()} queued…`}{" "}
@@ -321,8 +311,8 @@ export function WorkspaceSettingsPanel({
           description="Permanently delete this workspace, its settings, and sandbox snapshot. This cannot be undone."
           action={
             <Button
-              size="sm"
-              variant="destructive"
+              size="xs"
+              color="error"
               aria-label={`Delete ${record.data.name}`}
               onClick={() => setDeleting(true)}
             >
@@ -331,36 +321,18 @@ export function WorkspaceSettingsPanel({
           }
         />
       )}
-      {canEdit && deleting && (
-        <AlertDialog
-          open
-          onOpenChange={(open) => {
-            if (!open && !deleteWorkspace.isPending) setDeleting(false)
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete {record.data.name}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This deletes the workspace, its settings and sandbox snapshot,
-                and releases its repository and Slack channel bindings. This
-                cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={deleteWorkspace.isPending}>
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                disabled={deleteWorkspace.isPending}
-                onClick={() => deleteWorkspace.mutate(slug)}
-              >
-                {deleteWorkspace.isPending ? "Deleting…" : "Delete workspace"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+      {canEdit && (
+        <ConfirmDialog
+          open={deleting}
+          onOpenChange={setDeleting}
+          title={`Delete ${record.data.name}?`}
+          description="This deletes the workspace, its settings and sandbox snapshot, and releases its repository and Slack channel bindings. This cannot be undone."
+          confirmLabel="Delete workspace"
+          pendingLabel="Deleting…"
+          pending={deleteWorkspace.isPending}
+          destructive
+          onConfirm={() => deleteWorkspace.mutate(slug)}
+        />
       )}
     </>
   )

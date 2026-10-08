@@ -1,5 +1,8 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
+import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
+import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
 import { useMemo } from "react"
-import { GitMerge, ShieldCheck, TriangleAlert } from "lucide-react"
 
 import type { WorkflowPushApproval } from "@/features/agents/lib/types"
 import {
@@ -7,7 +10,6 @@ import {
   useWorkflowApprovalDecision,
   useWorkflowApprovals,
 } from "@/features/agents/lib/queries"
-import { Button } from "@/components/ui/button"
 import { usePendingVariables } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
 
@@ -64,7 +66,11 @@ export function WorkflowApprovalCard({
             className="rounded-xl border border-default bg-surface-level-1 p-4 shadow-sm"
           >
             <div className="flex items-start gap-3">
-              <ShieldCheck className="mt-0.5 size-5 shrink-0 text-brand-primary" />
+              <ShieldCheckIcon
+                size={20}
+                weight="regular"
+                className="mt-0.5 shrink-0 text-icon-brand"
+              />
               <div className="min-w-0">
                 <p className="text-[0.68rem] font-semibold tracking-wider text-brand-primary uppercase">
                   Push paused for review
@@ -83,8 +89,12 @@ export function WorkflowApprovalCard({
             </div>
 
             {inherited && (
-              <div className="mt-4 flex gap-3 rounded-md border border-brand-subtle bg-brand/5 p-3">
-                <GitMerge className="mt-0.5 size-4 shrink-0 text-brand-primary" />
+              <div className="mt-4 flex gap-3 rounded-md border border-brand-subtle bg-brand-muted p-3">
+                <GitMergeIcon
+                  size={16}
+                  weight="regular"
+                  className="mt-0.5 shrink-0 text-icon-brand"
+                />
                 <div>
                   <p className="text-xs font-medium text-primary">
                     Where these changes came from
@@ -98,7 +108,11 @@ export function WorkflowApprovalCard({
             )}
 
             <div className="mt-3 flex gap-3 border-l-2 border-warning bg-warning p-3">
-              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-secondary" />
+              <WarningIcon
+                size={16}
+                weight="regular"
+                className="mt-0.5 shrink-0 text-icon-warning"
+              />
               <div>
                 <p className="text-xs font-medium text-primary">
                   Why you need to confirm
@@ -112,13 +126,16 @@ export function WorkflowApprovalCard({
 
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
+                size="md"
                 disabled={busy}
                 onClick={() => decide(approval, "approve")}
               >
                 Approve &amp; continue push
               </Button>
               <Button
-                variant="secondary"
+                size="md"
+                color="secondary"
+                variant="outlined"
                 disabled={busy}
                 onClick={() => decide(approval, "reject")}
               >

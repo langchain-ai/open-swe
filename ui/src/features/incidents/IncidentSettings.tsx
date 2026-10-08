@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  Check,
-  CircleAlert,
-  LoaderCircle,
-  Radio,
-  RefreshCw,
-} from "lucide-react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Input } from "@langchain/macaw-components/Input"
+import { Switch } from "@langchain/macaw-components/Switch"
+import { Text } from "@langchain/macaw-components/Text"
+import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
+import { BroadcastIcon } from "@phosphor-icons/react/dist/ssr/Broadcast"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { useState } from "react"
 import type { ReactNode } from "react"
 
@@ -14,101 +16,16 @@ import {
   SettingsRow,
   SettingsSection,
 } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
 import { SlackChannelMultiCombobox } from "@/components/SlackChannelCombobox"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { incidentsApi } from "./api"
 import type { IncidentPolicy, IncidentSettingsPayload } from "./api"
 import { ErrorState, formatTime, LoadingState } from "./shared"
 
-function Field({
-  name,
-  label,
-  description,
-  value,
-  multiline,
-  placeholder,
-}: {
-  name: string
-  label: string
-  description?: string
-  value: string
-  multiline?: boolean
-  placeholder?: string
-}) {
-  const describedBy = description ? `policy-${name}-description` : undefined
-  return (
-    <div className="space-y-2">
-      <label
-        id={`policy-${name}-label`}
-        htmlFor={`policy-${name}`}
-        className="block text-xs font-medium"
-      >
-        {label}
-      </label>
-      {multiline ? (
-        <Textarea
-          id={`policy-${name}`}
-          name={name}
-          aria-describedby={describedBy}
-          defaultValue={value}
-          placeholder={placeholder}
-          className="min-h-20 bg-surface-level-1"
-        />
-      ) : (
-        <Input
-          id={`policy-${name}`}
-          name={name}
-          aria-describedby={describedBy}
-          defaultValue={value}
-          placeholder={placeholder}
-          required={name === "channel_prefix"}
-          maxLength={name === "channel_prefix" ? 60 : undefined}
-          pattern={name === "channel_prefix" ? "[a-z0-9_-]+" : undefined}
-          className="h-9 bg-surface-level-1"
-        />
-      )}
-      {description && (
-        <p
-          id={`policy-${name}-description`}
-          className="text-xs leading-relaxed text-secondary"
-        >
-          {description}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function Toggle({
-  name,
-  label,
-  checked,
-}: {
-  name: string
-  label: string
-  checked: boolean
-}) {
-  return (
-    <Switch
-      id={`policy-${name}`}
-      name={name}
-      aria-label={label}
-      defaultChecked={checked}
-    />
-  )
-}
-
 function Notice({ children, error }: { children: ReactNode; error?: boolean }) {
   return (
-    <div
-      role={error ? "alert" : "status"}
-      className={`rounded-lg border p-3 text-sm ${error ? "border-error bg-error text-error-secondary" : "border-brand bg-brand-subtle text-brand-primary"}`}
-    >
-      {children}
+    <div role={error ? "alert" : "status"}>
+      <Banner intent={error ? "error" : "info"}>{children}</Banner>
     </div>
   )
 }
@@ -122,8 +39,14 @@ function PolicyForm({
 }) {
   const queryClient = useQueryClient()
   const [initial] = useState(settings.policy)
+  const [enabled, setEnabled] = useState(initial.enabled)
+  const [channelPrefix, setChannelPrefix] = useState(initial.channel_prefix)
   const [excludedChannelIds, setExcludedChannelIds] = useState(
-    settings.policy.excluded_channel_ids
+    initial.excluded_channel_ids
+  )
+  const [model, setModel] = useState(initial.model ?? "")
+  const [maxModelCalls, setMaxModelCalls] = useState(
+    String(initial.max_model_calls)
   )
   const [validation, setValidation] = useState<string | null>(null)
   const save = useMutation({
@@ -140,14 +63,13 @@ function PolicyForm({
     operation?.command_id === save.data?.command_id ? operation : null
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
     const policy: IncidentPolicy = {
       ...initial,
-      enabled: form.has("enabled"),
-      channel_prefix: String(form.get("channel_prefix") ?? "").trim(),
+      enabled,
+      channel_prefix: channelPrefix.trim(),
       excluded_channel_ids: excludedChannelIds,
-      model: String(form.get("model") ?? "").trim() || null,
-      max_model_calls: Number(form.get("max_model_calls")),
+      model: model.trim() || null,
+      max_model_calls: Number(maxModelCalls),
     }
     if (!/^[a-z0-9_-]+$/.test(policy.channel_prefix)) {
       setValidation(
@@ -169,25 +91,30 @@ function PolicyForm({
           label="Enable Incidents"
           htmlFor="policy-enabled"
           control={
-            <Toggle
-              name="enabled"
-              label="Enable Incidents"
-              checked={initial.enabled}
+            <Switch
+              id="policy-enabled"
+              aria-label="Enable Incidents"
+              checked={enabled}
+              onChange={setEnabled}
             />
           }
         />
         <SettingsPanel>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field
-              name="channel_prefix"
+          <div className="grid gap-space-5 sm:grid-cols-2">
+            <Input
+              size="md"
+              id="policy-channel_prefix"
               label="Channel prefix"
-              value={initial.channel_prefix}
+              value={channelPrefix}
+              onChange={setChannelPrefix}
               placeholder="inc-"
+              maxLength={60}
+              pattern="[a-z0-9_-]+"
             />
-            <div className="space-y-2">
-              <span className="block text-xs font-medium">
+            <div className="space-y-space-1">
+              <Text as="span" variant="sm" weight="medium" className="block">
                 Excluded channels
-              </span>
+              </Text>
               <SlackChannelMultiCombobox
                 value={excludedChannelIds}
                 onValueChange={setExcludedChannelIds}
@@ -203,38 +130,24 @@ function PolicyForm({
           </summary>
           <SettingsPanel>
             <div className="grid gap-x-5 gap-y-6 sm:grid-cols-2">
-              {[
-                {
-                  name: "max_model_calls",
-                  label: "Model calls per turn",
-                  value: initial.max_model_calls,
-                  min: 1,
-                  max: 20,
-                },
-              ].map(({ name, label, value, min, max }) => (
-                <label
-                  key={name}
-                  htmlFor={`policy-${name}`}
-                  className="space-y-2"
-                >
-                  <span className="block text-xs font-medium">{label}</span>
-                  <Input
-                    type="number"
-                    min={min}
-                    max={max}
-                    step={1}
-                    required
-                    id={`policy-${name}`}
-                    name={name}
-                    defaultValue={value}
-                    className="h-9 bg-surface-level-1"
-                  />
-                </label>
-              ))}
-              <Field
-                name="model"
+              <Input
+                size="md"
+                type="number"
+                id="policy-max_model_calls"
+                label="Model calls per turn"
+                value={maxModelCalls}
+                onChange={setMaxModelCalls}
+                min={1}
+                max={20}
+                step={1}
+                required
+              />
+              <Input
+                size="md"
+                id="policy-model"
                 label="Model"
-                value={initial.model ?? ""}
+                value={model}
+                onChange={setModel}
                 placeholder="Server default"
               />
             </div>
@@ -262,28 +175,23 @@ function PolicyForm({
         </p>
         <div className="flex gap-2">
           <Button
-            type="button"
-            variant="outline"
-            size="sm"
+            color="secondary"
+            variant="outlined"
+            leftDecorator={ArrowsClockwiseIcon}
             onClick={onReload}
             disabled={save.isPending}
           >
-            <RefreshCw className="size-3.5" />
             Reload settings
           </Button>
           <Button
             type="submit"
-            size="sm"
+            leftDecorator={CheckIcon}
+            loading={save.isPending}
             disabled={
               save.isPending ||
               (save.isSuccess && submittedOperation?.status !== "failed")
             }
           >
-            {save.isPending ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <Check className="size-3.5" />
-            )}
             Save settings
           </Button>
         </div>
@@ -309,12 +217,20 @@ function SlackConnectionStatus({
     <div className="px-4 py-4">
       <div className="flex items-start gap-3">
         {connectionError ? (
-          <CircleAlert className="mt-0.5 size-5 text-warning-secondary" />
+          <WarningCircleIcon
+            size={20}
+            weight="regular"
+            className="mt-0.5 shrink-0 text-icon-warning"
+          />
         ) : (
-          <Radio className="mt-0.5 size-5 text-brand-primary" />
+          <BroadcastIcon
+            size={20}
+            weight="regular"
+            className="mt-0.5 shrink-0 text-icon-brand"
+          />
         )}
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-medium">
+          <h2 className="text-sm font-medium text-primary">
             {connectionError
               ? "Slack connection needs attention"
               : "Slack connection configured"}

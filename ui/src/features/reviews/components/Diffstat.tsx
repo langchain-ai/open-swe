@@ -1,4 +1,4 @@
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import type { OpenPullRequest } from "@/lib/api"
 
 export function Diffstat({ pr }: { pr: OpenPullRequest }) {
@@ -11,7 +11,7 @@ export function Diffstat({ pr }: { pr: OpenPullRequest }) {
       aria-label={`${pr.additions} lines added, ${pr.deletions} lines deleted`}
     >
       <div className="flex gap-2 font-mono text-xs tabular-nums">
-        <span className="text-emerald-600 dark:text-emerald-400">
+        <span className="text-success-secondary">
           +{pr.additions.toLocaleString()}
         </span>
         <span className="text-error-secondary">
@@ -25,7 +25,7 @@ export function Diffstat({ pr }: { pr: OpenPullRequest }) {
         {total > 0 && (
           <>
             <span
-              className="bg-emerald-500"
+              className="bg-success-strong"
               style={{ width: `${(pr.additions / total) * 100}%` }}
             />
             <span

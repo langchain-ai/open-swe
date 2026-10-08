@@ -1,6 +1,8 @@
-import { ArrowUpRight, CircleAlert, LoaderCircle, Radar } from "lucide-react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Spinner } from "@langchain/macaw-components/Spinner"
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import type { ReactNode } from "react"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { ApiError } from "@/lib/api"
 import type { IncidentReport, IncidentView, Timestamp } from "./api"
@@ -36,7 +38,7 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xxs font-medium",
         {
           "border-brand bg-brand-subtle text-brand-primary": [
             "pending",
@@ -67,9 +69,9 @@ export function LoadingState() {
   return (
     <div
       role="status"
-      className="flex items-center justify-center gap-2 py-24 text-sm text-secondary"
+      className="flex items-center justify-center gap-space-2 py-24 text-sm text-secondary"
     >
-      <LoaderCircle className="size-4 animate-spin" />
+      <Spinner size="xs" />
       Loading incidents…
     </div>
   )
@@ -83,18 +85,18 @@ export function ErrorState({
   retry: () => void
 }) {
   return (
-    <div
-      role="alert"
-      className="rounded-xl border border-error bg-error p-5"
-    >
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <CircleAlert className="size-4 text-error-secondary" />
-        Unable to load Incidents
-      </div>
-      <p className="mt-2 text-sm text-secondary">{error.message}</p>
-      <Button variant="outline" size="sm" className="mt-4" onClick={retry}>
-        Try again
-      </Button>
+    <div role="alert">
+      <Banner
+        intent="error"
+        title="Unable to load Incidents"
+        action={
+          <Button color="secondary" variant="outlined" onClick={retry}>
+            Try again
+          </Button>
+        }
+      >
+        {error.message}
+      </Banner>
     </div>
   )
 }
@@ -121,7 +123,7 @@ export function ExternalLink({
       )}
     >
       {children}
-      <ArrowUpRight className="size-3.5 shrink-0" />
+      <ArrowUpRightIcon size={14} weight="regular" className="shrink-0" />
     </a>
   )
 }
@@ -174,19 +176,6 @@ export function sourceLabel(summary: string, channelName: string) {
 export function slackMessageTime(url: string | null | undefined) {
   const timestamp = url?.match(/\/archives\/[^/]+\/p(\d{10})(\d{6})(?:[?#]|$)/)
   return timestamp ? Number(timestamp[1]) : null
-}
-
-export function IncidentsMark({ className }: { className?: string }) {
-  return (
-    <div
-      className={cn(
-        "flex size-9 items-center justify-center rounded-xl border border-brand bg-brand-subtle text-brand-primary",
-        className
-      )}
-    >
-      <Radar className="size-5" />
-    </div>
-  )
 }
 
 export function isReadUnavailable(error: Error) {

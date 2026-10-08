@@ -1,13 +1,17 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Input } from "@langchain/macaw-components/Input"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Typeahead } from "@langchain/macaw-components/Typeahead"
+import { ArrowDownIcon } from "@phosphor-icons/react/dist/ssr/ArrowDown"
+import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
+import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import { Button } from "@/components/ui/button"
-import { MultiSelect } from "@/components/ui/multi-select"
-import { Skeleton } from "@/components/ui/skeleton"
 import { api, type OpenPullRequest, type ReviewSummary } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { expiresInBrowser } from "@/lib/query"
-import { cn } from "@/lib/utils"
 import {
   PullRequestCard,
   type PullRequestOutcome,
@@ -18,7 +22,6 @@ import { PullRequestReview } from "./components/PullRequestReview"
 import { pullRequestPreviewQuery, refreshPullRequest } from "./lib/cache"
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
-import { control } from "./lib/styles"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
 import { usePullRequestSearch } from "./lib/usePullRequestSearch"
@@ -198,7 +201,7 @@ export function OpenPullRequests({
     visible.length === filtered.length ? (
       <div className="py-4 text-center">
         <Button
-          variant="link"
+          variant="underlined"
           onClick={() => onFiltersChange({ github: true, pr: undefined })}
         >
           Show my GitHub review requests
@@ -261,8 +264,8 @@ export function OpenPullRequests({
               </span>
               {scope === "review-requested" && (
                 <Button
-                  size="sm"
-                  variant="link"
+                  size="xs"
+                  variant="underlined"
                   onClick={() =>
                     onFiltersChange({ github: undefined, pr: undefined })
                   }
@@ -273,62 +276,78 @@ export function OpenPullRequests({
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <MultiSelect
-              label="Filter by repository"
-              placeholder="All repositories"
-              searchPlaceholder="Search repositories…"
-              emptyMessage={
-                knownRepos.isPending
-                  ? "Loading repositories…"
-                  : knownRepos.isError
-                    ? "Could not load repositories"
-                    : "No matches"
-              }
-              options={repoNames}
-              value={repo}
-              onValueChange={(chosen) =>
-                onFiltersChange({ repo: chosen.length ? chosen : undefined })
-              }
-            />
-            <input
-              className={cn(control, "min-w-40 flex-1")}
+            <div className="w-56 shrink-0">
+              <Typeahead
+                multiple
+                disableCloseOnSelect
+                size="sm"
+                aria-label="Filter by repository"
+                placeholder="All repositories"
+                emptyText={
+                  knownRepos.isPending
+                    ? "Loading repositories…"
+                    : knownRepos.isError
+                      ? "Could not load repositories"
+                      : "No matches"
+                }
+                options={repoNames}
+                value={repo}
+                onChange={(chosen) =>
+                  onFiltersChange({ repo: chosen.length ? chosen : undefined })
+                }
+              />
+            </div>
+            <Input
+              size="sm"
+              className="min-w-40 flex-1"
+              leftIcon={MagnifyingGlassIcon}
               aria-label="Search pull requests"
               placeholder="Search title, description, or PR number…"
               value={search}
-              onChange={(event) =>
-                onFiltersChange({ q: event.target.value || undefined }, true)
+              onChange={(next) =>
+                onFiltersChange({ q: next || undefined }, true)
               }
             />
-            <MultiSelect
-              label="Filter by status"
-              placeholder="All statuses"
-              options={reviewStatuses}
-              value={filter ?? []}
-              onValueChange={(status) =>
-                onFiltersChange({ status: status.length ? status : undefined })
-              }
-            />
+            <div className="w-48 shrink-0">
+              <Typeahead
+                multiple
+                disableCloseOnSelect
+                size="sm"
+                aria-label="Filter by status"
+                placeholder="All statuses"
+                options={[...reviewStatuses]}
+                value={filter ?? []}
+                onChange={(chosen) => {
+                  const status = reviewStatuses.filter((option) =>
+                    chosen.includes(option)
+                  )
+                  onFiltersChange({
+                    status: status.length ? status : undefined,
+                  })
+                }}
+              />
+            </div>
             {!railed && (
-              <span className="flex items-center gap-1 text-xs text-secondary">
+              <span className="flex items-center gap-space-1 text-xs text-secondary">
                 Sort
                 {sortOptions.map(([label, key]) => (
-                  <button
+                  <Button
                     key={key}
-                    type="button"
+                    size="xs"
+                    color="secondary"
+                    variant={sort === key ? "outlined" : "plain"}
                     aria-pressed={sort === key}
+                    rightDecorator={
+                      sort !== key
+                        ? ArrowsDownUpIcon
+                        : direction === "asc"
+                          ? ArrowUpIcon
+                          : ArrowDownIcon
+                    }
                     onClick={() => toggleSort(key)}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-md border px-2 py-1",
-                      sort === key
-                        ? "border-default bg-surface-level-2 text-primary"
-                        : "border-transparent hover:text-primary"
-                    )}
                   >
                     {label}
-                    <span aria-hidden="true">
-                      {sort === key ? (direction === "asc" ? "↑" : "↓") : "↕"}
-                    </span>
-                  </button>
+                  </Button>
                 ))}
               </span>
             )}
@@ -347,8 +366,9 @@ export function OpenPullRequests({
               </span>
             )}
             <Button
-              size="sm"
-              variant="outline"
+              size="xs"
+              color="secondary"
+              variant="outlined"
               disabled={query.isFetching}
               onClick={() => {
                 setSettled({})
@@ -399,7 +419,7 @@ export function OpenPullRequests({
           ) : incomplete ? (
             <p
               role="status"
-              className="rounded-lg border border-default bg-surface-level-1 px-4 py-12 text-center text-xs text-amber-700 dark:text-amber-400"
+              className="rounded-lg border border-default bg-surface-level-1 px-4 py-12 text-center text-xs text-warning-secondary"
             >
               GitHub&rsquo;s pull request search timed out, and the partial
               answer it returned would have hidden most of your PRs. Filter by

@@ -1,34 +1,34 @@
+import { useId, useState } from "react"
 import Editor from "@monaco-editor/react"
-
-import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogClose,
-  DialogDescription,
-  DialogPopup,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Button } from "@langchain/macaw-components/Button"
+import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import {
   Popover,
-  PopoverPopup,
-  PopoverTitle,
+  PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover"
+} from "@langchain/macaw-components/Popover"
+
 import { useResolvedTheme } from "@/lib/theme"
 
 function WorkspaceReposPopover({ repos }: { repos: string[] }) {
+  const titleId = useId()
   return (
     <Popover>
       <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-primary focus-visible:outline-2 focus-visible:outline-[color:var(--border-focus)]">
         OPENSWE_WORKSPACE_REPOS
       </PopoverTrigger>
-      <PopoverPopup align="start" className="w-96 max-w-[calc(100vw-2rem)]">
-        <PopoverTitle>Expanded value</PopoverTitle>
-        <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-surface-level-2 p-3 font-mono text-xs break-all whitespace-pre-wrap">
+      <PopoverContent
+        align="start"
+        aria-labelledby={titleId}
+        className="w-96 max-w-[calc(100vw-2rem)]"
+      >
+        <p id={titleId} className="text-sm font-medium text-primary">
+          Expanded value
+        </p>
+        <pre className="mt-space-2 max-h-60 overflow-auto rounded-md bg-surface-level-2 p-space-3 font-mono text-xs break-all whitespace-pre-wrap text-primary">
           <code>{`OPENSWE_WORKSPACE_REPOS="${repos.join(" ")}"`}</code>
         </pre>
-      </PopoverPopup>
+      </PopoverContent>
     </Popover>
   )
 }
@@ -47,52 +47,63 @@ export function WorkspaceScriptEditor({
   description?: string
 }) {
   const theme = useResolvedTheme()
+  const [open, setOpen] = useState(false)
   const lines = value ? value.trimEnd().split("\n").length : 0
 
   return (
-    <Dialog>
-      <div className="mt-2 flex items-center gap-2">
-        <DialogTrigger render={<Button size="sm" variant="outline" />}>
-          Edit {label.toLowerCase()}
-        </DialogTrigger>
+    <>
+      <div className="mt-space-2 flex items-center gap-space-2">
+        <Button
+          size="xs"
+          color="secondary"
+          variant="outlined"
+          onClick={() => setOpen(true)}
+        >
+          {`Edit ${label.toLowerCase()}`}
+        </Button>
         <span className="text-xs text-secondary">
           {lines
             ? `${lines} ${lines === 1 ? "line" : "lines"}`
             : "Not configured"}
         </span>
       </div>
-      <DialogPopup className="max-w-4xl">
-        <div className="space-y-2 border-b border-default p-4">
-          <DialogTitle>{label}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-          <p className="text-sm text-secondary">
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          title={label}
+          description={description}
+          className="w-[56rem] max-w-[calc(100vw-2rem)]"
+          childrenClassName="gap-0 p-0"
+        >
+          <p className="border-b border-default px-space-4 pb-space-4 text-sm text-secondary">
             Bound repositories are available in{" "}
             <WorkspaceReposPopover repos={repos} /> to preload; runs clone any
             other repository on demand.
           </p>
-        </div>
-        <div className="min-h-0 overflow-auto">
-          <Editor
-            height="min(60vh, 600px)"
-            language="shell"
-            value={value}
-            onChange={(next) => onChange((next ?? "").replace(/\r\n/g, "\n"))}
-            theme={theme === "dark" ? "vs-dark" : "light"}
-            options={{
-              ariaLabel: label,
-              automaticLayout: true,
-              minimap: { enabled: false },
-              fontSize: 13,
-              scrollBeyondLastLine: false,
-              padding: { top: 12, bottom: 12 },
-              tabSize: 2,
-            }}
-          />
-        </div>
-        <div className="flex justify-end border-t border-default p-3">
-          <DialogClose render={<Button size="sm" />}>Done</DialogClose>
-        </div>
-      </DialogPopup>
-    </Dialog>
+          <div className="min-h-0 overflow-auto">
+            <Editor
+              height="min(60vh, 600px)"
+              language="shell"
+              value={value}
+              onChange={(next) => onChange((next ?? "").replace(/\r\n/g, "\n"))}
+              theme={theme === "dark" ? "vs-dark" : "light"}
+              options={{
+                ariaLabel: label,
+                automaticLayout: true,
+                minimap: { enabled: false },
+                fontSize: 13,
+                scrollBeyondLastLine: false,
+                padding: { top: 12, bottom: 12 },
+                tabSize: 2,
+              }}
+            />
+          </div>
+          <div className="flex justify-end border-t border-default p-space-3">
+            <Button size="xs" color="primary" onClick={() => setOpen(false)}>
+              Done
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

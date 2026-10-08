@@ -1,13 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
+import { Select } from "@langchain/macaw-components/Select"
 
 import { SettingsSection } from "@/components/AppShell"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   useScopedSettings,
   type SettingsScope,
@@ -62,27 +56,18 @@ export function ManagedToolsGatewaySection({
           }
           control={
             <Select
-              items={items}
+              aria-label="Gateway"
+              options={items}
               value={current ?? NONE}
-              onValueChange={(next) =>
+              onChange={(next) =>
+                next &&
                 settings.save({
-                  managed_tools_gateway_id:
-                    next === NONE ? null : (next as string),
+                  managed_tools_gateway_id: next === NONE ? null : next,
                 })
               }
               disabled={!canEdit || !settings.data || gateways.isLoading}
-            >
-              <SelectTrigger className="w-64">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {items.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              triggerClassName="w-64"
+            />
           }
         />
       </div>

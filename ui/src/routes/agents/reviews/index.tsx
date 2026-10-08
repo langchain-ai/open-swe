@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { createFileRoute } from "@tanstack/react-router"
 
 import { pageTitle } from "@/lib/pageTitle"
@@ -60,11 +61,12 @@ function ReviewsPage() {
             <h1 className="font-heading text-base font-medium text-primary">
               Pull Requests
             </h1>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-space-1">
               {tabs.map(([value, label]) => (
-                <button
+                <Button
                   key={value}
-                  type="button"
+                  color="secondary"
+                  variant={tab === value ? "normal" : "plain"}
                   aria-pressed={tab === value}
                   onClick={() => {
                     changeFilters({
@@ -73,15 +75,9 @@ function ReviewsPage() {
                       pr: undefined,
                     })
                   }}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 text-xs transition-colors",
-                    tab === value
-                      ? "bg-surface-level-2-hover font-medium text-primary"
-                      : "text-secondary hover:bg-surface-level-2-hover"
-                  )}
                 >
                   {label}
-                </button>
+                </Button>
               ))}
             </div>
             <OpenPullRequestInput />

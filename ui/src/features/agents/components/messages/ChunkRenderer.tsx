@@ -48,7 +48,7 @@ export function ChunkRenderer({
       return (
         <MessageImage
           chunk={chunk}
-          className="max-h-48 max-w-48 rounded border border-default"
+          className="max-h-48 max-w-48 rounded-sm border border-default"
         />
       )
   }

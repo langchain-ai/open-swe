@@ -1,7 +1,9 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { PrReviewComment } from "@/lib/api"
 import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewCommentsMenu"
@@ -13,7 +15,6 @@ import {
   reviewChatQuery,
 } from "@/features/agents/lib/queries"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
-import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -140,17 +141,18 @@ function ReviewDetailPage() {
           to="/agents/reviews"
           className="inline-flex items-center gap-1.5 text-secondary hover:text-primary"
         >
-          <ArrowLeftIcon className="size-3.5" />
+          <ArrowLeftIcon weight="regular" className="size-3.5" />
           Reviews
         </Link>
         <span className="text-secondary">/</span>
         <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
-          <GitPullRequestIcon className="size-3.5 shrink-0 text-secondary" />
+          <GitPullRequestIcon
+            weight="regular"
+            className="size-3.5 shrink-0 text-icon-secondary"
+          />
           <span className="truncate font-medium">
             {owner}/{repo}
-            <span className="ml-1.5 font-normal text-secondary">
-              #{number}
-            </span>
+            <span className="ml-1.5 font-normal text-secondary">#{number}</span>
             {detail.data ? ` ${detail.data.pr.title}` : ""}
           </span>
         </span>

@@ -1,22 +1,17 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Card } from "@langchain/macaw-components/Card"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Text } from "@langchain/macaw-components/Text"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef } from "react"
-import { ArrowSquareOutIcon, GitPullRequestIcon } from "@phosphor-icons/react"
-import { useMutation, useQuery } from "@tanstack/react-query"
 
-import { buttonVariants } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/$owner/$repo/pull/$number")({
   component: PullRequestReviewLinkPage,
@@ -158,55 +153,64 @@ function ReviewLinkCard({
 }) {
   return (
     <main className="flex min-h-svh items-center justify-center bg-surface-level-1 p-6 text-primary">
-      <Card className="w-full max-w-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl">
-            <GitPullRequestIcon className="size-5 text-secondary" />
+      <Card className="flex w-full max-w-lg flex-col gap-space-4 p-space-5">
+        <div className="flex flex-col gap-space-1">
+          <Text
+            as="h1"
+            variant="h3"
+            weight="semibold"
+            className="flex items-center gap-space-2"
+          >
+            <GitPullRequestIcon
+              weight="regular"
+              className="size-5 text-icon-secondary"
+            />
             {title}
-          </CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-lg border border-default bg-surface-level-2/40 p-3 text-sm">
+          </Text>
+          <Text variant="sm" color="secondary">
+            {description}
+          </Text>
+        </div>
+        <div>
+          <div className="rounded-lg border border-default bg-surface-level-1 p-3 text-sm">
             <div className="font-medium">
               {owner}/{repo} #{number}
             </div>
-            <a
+            <MacawLink
               href={githubPrUrl}
-              className="mt-1 inline-flex items-center gap-1 text-secondary hover:text-primary"
+              variant="sm"
+              rightDecorator={ArrowSquareOutIcon}
+              className="mt-1"
             >
               View on GitHub
-              <ArrowSquareOutIcon className="size-3.5" />
-            </a>
+            </MacawLink>
           </div>
           {loading && <Skeleton className="mt-4 h-2 w-full" />}
-        </CardContent>
-        <CardFooter className="flex flex-wrap gap-2">
-          {onRetry && (
-            <button
-              type="button"
-              className={buttonVariants()}
-              onClick={onRetry}
-            >
-              Try again
-            </button>
-          )}
+        </div>
+        <div className="flex flex-wrap gap-space-2">
+          {onRetry && <Button onClick={onRetry}>Try again</Button>}
           {stableReviewPath && (
-            <Link
-              to="/agents/reviews/$owner/$repo/$number"
-              params={{ owner, repo, number }}
-              className={cn(buttonVariants({ variant: "outline" }))}
+            <Button
+              color="secondary"
+              variant="outlined"
+              as={
+                <Link
+                  to="/agents/reviews/$owner/$repo/$number"
+                  params={{ owner, repo, number }}
+                />
+              }
             >
               Open stable review page
-            </Link>
+            </Button>
           )}
-          <a
-            href={githubPrUrl}
-            className={cn(buttonVariants({ variant: "ghost" }))}
+          <Button
+            color="secondary"
+            variant="plain"
+            as={<a href={githubPrUrl} />}
           >
             Open GitHub PR
-          </a>
-        </CardFooter>
+          </Button>
+        </div>
       </Card>
     </main>
   )

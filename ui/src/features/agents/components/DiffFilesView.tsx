@@ -5,7 +5,9 @@ import {
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import { CaretDownIcon } from "@phosphor-icons/react"
+import { Button } from "@langchain/macaw-components/Button"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import type { FileContents } from "@pierre/diffs/react"
 import { useDiffLineSelection } from "@/features/agents/utils/diffSelection"
 import {
@@ -14,8 +16,6 @@ import {
 } from "@/features/agents/utils/codeExcerpt"
 import { DiffSelectionPopover } from "@/features/agents/components/DiffSelectionPopover"
 import { reportError } from "@/lib/errorReporting"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
@@ -84,10 +84,9 @@ export function toPanelFiles(
   }))
 }
 
-// Neutral filename foreground from the pierre Shiki themes (pierre-light /
-// pierre-dark sidebar foreground). The tree tints filename text by git status,
-// so feeding this keeps names neutral grey/white instead of accent-blue.
-const TREE_FILE_FG = "light-dark(#525252, #a3a3a3)"
+// The tree tints filename text by git status; feeding a neutral foreground
+// keeps names grey instead of accent-blue.
+const TREE_FILE_FG = "var(--text-secondary)"
 
 // Selected rows must read as high-contrast (white in dark, near-black in light)
 // while the rest stay neutral. The built-in git-status content color outranks
@@ -111,23 +110,21 @@ export function treeThemeStyle(): React.CSSProperties {
     "--trees-theme-sidebar-fg": "var(--text-primary)",
     "--trees-theme-sidebar-border": "var(--border-default)",
     "--trees-theme-sidebar-header-fg": "var(--text-secondary)",
-    "--trees-theme-list-hover-bg":
-      "color-mix(in oklab, var(--bg-brand) 10%, transparent)",
-    "--trees-theme-list-active-selection-bg":
-      "color-mix(in oklab, var(--bg-brand) 22%, transparent)",
+    "--trees-theme-list-hover-bg": "var(--bg-surface-level-1-hover)",
+    "--trees-theme-list-active-selection-bg": "var(--bg-selected)",
     "--trees-theme-list-active-selection-fg": "var(--text-primary)",
     "--trees-selected-focused-border-color-override": "transparent",
     "--trees-theme-input-bg": "var(--bg-surface-level-1)",
     "--trees-theme-input-fg": "var(--text-primary)",
     "--trees-theme-input-border": "var(--border-default)",
-    "--trees-theme-focus-ring": "var(--bg-brand)",
+    "--trees-theme-focus-ring": "var(--border-focus)",
     "--trees-theme-scrollbar-thumb": "var(--border-default)",
     "--trees-theme-git-added-fg": TREE_FILE_FG,
     "--trees-theme-git-modified-fg": TREE_FILE_FG,
     "--trees-theme-git-deleted-fg": TREE_FILE_FG,
     "--trees-theme-git-renamed-fg": TREE_FILE_FG,
     "--trees-theme-git-untracked-fg": TREE_FILE_FG,
-    "--trees-theme-git-ignored-fg": "var(--text-secondary)",
+    "--trees-theme-git-ignored-fg": "var(--text-tertiary)",
   } as React.CSSProperties
 }
 
@@ -227,7 +224,9 @@ export function DiffFilesView({
                 <span className="text-success-secondary">
                   +{totals.additions}
                 </span>
-                <span className="text-error-secondary">-{totals.deletions}</span>
+                <span className="text-error-secondary">
+                  -{totals.deletions}
+                </span>
               </span>
             )}
           </div>
@@ -361,15 +360,14 @@ const FileDiffSection = memo(
           className="flex w-full items-center gap-2 bg-surface-level-1 px-3 py-2 text-left text-xs transition-colors hover:bg-surface-level-1-hover"
         >
           <CaretDownIcon
+            weight="regular"
             className={cn(
-              "size-3 shrink-0 text-secondary transition-transform",
+              "size-3 shrink-0 text-icon-secondary transition-transform",
               !open && "-rotate-90"
             )}
           />
           <span className="min-w-0 truncate" title={file.treePath}>
-            {directory && (
-              <span className="text-secondary">{directory}</span>
-            )}
+            {directory && <span className="text-secondary">{directory}</span>}
             <span className="font-medium text-primary">{fileName}</span>
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2">
@@ -414,7 +412,7 @@ const FileDiffSection = memo(
             className="w-80 p-2"
           >
             <form
-              className="space-y-2"
+              className="flex flex-col gap-space-2"
               onSubmit={(event) => {
                 event.preventDefault()
                 void submitComment()
@@ -430,10 +428,11 @@ const FileDiffSection = memo(
               )}
               <Textarea
                 ref={textareaRef}
+                size="md"
                 aria-label="Comment on selected code"
                 placeholder="Ask Open SWE about these lines…"
                 value={comment}
-                onChange={(event) => setComment(event.target.value)}
+                onChange={setComment}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
@@ -445,13 +444,15 @@ const FileDiffSection = memo(
                   }
                 }}
                 disabled={sending}
-                className="max-h-48 min-h-20"
+                autoResize
+                maxHeight={192}
+                inputClassName="min-h-16"
               />
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-space-2">
                 <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
                   disabled={sending}
                   onClick={() => {
                     lineSelection.close()
@@ -462,7 +463,7 @@ const FileDiffSection = memo(
                 </Button>
                 <Button
                   type="submit"
-                  size="sm"
+                  size="xs"
                   disabled={sending || !comment.trim()}
                 >
                   {sending ? "Sending…" : "Send to Open SWE"}

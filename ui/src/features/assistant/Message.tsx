@@ -15,7 +15,8 @@ import {
 } from "@assistant-ui/react-langchain"
 import { useMessages } from "@langchain/react"
 import type { AnyStream, SubagentDiscoverySnapshot } from "@langchain/react"
-import { Copy } from "lucide-react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { parseStructuredInput } from "@/features/agents/lib/structuredInputMessages"
 import {
@@ -208,9 +209,7 @@ export function AssistantMessage() {
                   {reading ? "Read" : "Edit"} {path} · {part.indices.length}{" "}
                   calls
                   {part.status.type === "running" && (
-                    <span className="ml-2 text-xs text-secondary">
-                      Running
-                    </span>
+                    <span className="ml-2 text-xs text-secondary">Running</span>
                   )}
                 </summary>
                 <div className="mt-3 space-y-3">{children}</div>
@@ -274,11 +273,14 @@ export function AssistantMessage() {
       </MessagePrimitive.GroupedParts>
       {role === "assistant" && (
         <ActionBarPrimitive.Root className="mt-2">
-          <ActionBarPrimitive.Copy
-            aria-label="Copy message"
-            className="rounded p-1.5 text-secondary opacity-0 group-hover/message:opacity-100 focus-visible:opacity-100"
-          >
-            <Copy className="size-3.5" />
+          <ActionBarPrimitive.Copy asChild>
+            <IconButton
+              icon={CopyIcon}
+              label="Copy message"
+              color="secondary"
+              variant="plain"
+              className="opacity-0 group-hover/message:opacity-100 focus-visible:opacity-100"
+            />
           </ActionBarPrimitive.Copy>
         </ActionBarPrimitive.Root>
       )}

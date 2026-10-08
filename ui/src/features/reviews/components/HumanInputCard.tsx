@@ -1,9 +1,7 @@
 import { cn } from "@/lib/utils"
 
 export function HumanInputText({ summary }: { summary: string }) {
-  return (
-    <p className="text-sm whitespace-pre-wrap text-primary">{summary}</p>
-  )
+  return <p className="text-sm whitespace-pre-wrap text-primary">{summary}</p>
 }
 
 /**
@@ -21,11 +19,12 @@ export function HumanInputCard({
   return (
     <section
       aria-label="Human input"
-      className={cn("rounded-lg border border-default bg-surface-level-1 p-4", className)}
+      className={cn(
+        "rounded-lg border border-default bg-surface-level-1 p-4",
+        className
+      )}
     >
-      <h3 className="mb-2.5 text-xs font-medium text-primary">
-        Human input
-      </h3>
+      <h3 className="mb-2.5 text-xs font-medium text-primary">Human input</h3>
       <HumanInputText summary={summary} />
     </section>
   )

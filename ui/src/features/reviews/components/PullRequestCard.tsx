@@ -56,7 +56,7 @@ export function PullRequestCard({
         onClick={onSelect}
         className={cn(
           "flex w-full gap-2.5 rounded-md py-2 pr-2.5 pl-2 text-left transition-colors",
-          selected ? "bg-surface-level-2-hover" : "hover:bg-surface-level-2-hover",
+          selected ? "bg-selected" : "hover:bg-surface-level-1-hover",
           outcome && "opacity-60"
         )}
       >
@@ -64,7 +64,7 @@ export function PullRequestCard({
           aria-hidden="true"
           className={cn(
             "mt-0.5 w-0.5 shrink-0 self-stretch rounded-full",
-            selected ? "bg-[color:var(--text-primary)]/60" : "bg-transparent"
+            selected ? "bg-brand" : "bg-transparent"
           )}
         />
         <span className="min-w-0 flex-1">
@@ -113,9 +113,7 @@ export function PullRequestCard({
       onClick={openFromCard}
       className={cn(
         "cursor-pointer rounded-lg border bg-surface-level-1 p-4 transition-colors",
-        selected
-          ? "border-strong"
-          : "border-default hover:border-strong",
+        selected ? "border-strong" : "border-default hover:border-strong",
         outcome && "opacity-60"
       )}
     >
@@ -163,7 +161,7 @@ export function PullRequestCard({
           </span>
           <UnresolvedConversations pr={pr} />
           {!pr.statusAvailable && !pr.detailsLoading && (
-            <span className="text-amber-700 dark:text-amber-400">
+            <span className="text-warning-secondary">
               Live PR status unavailable
             </span>
           )}

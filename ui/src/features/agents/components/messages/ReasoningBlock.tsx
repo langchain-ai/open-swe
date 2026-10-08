@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-import { ChevronRight } from "lucide-react"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 
-import { formatElapsed } from "@/lib/utils"
+import { cn, formatElapsed } from "@/lib/utils"
 
 function reasoningLabel(elapsedMs: number | null): string {
   if (elapsedMs === null) return "Thought"
@@ -51,26 +51,31 @@ export function ReasoningBlock({
         onClick={() => {
           if (!isLive) setUserExpanded((value) => !value)
         }}
-        className="flex items-center gap-1 text-left transition-opacity hover:opacity-90 disabled:cursor-default"
+        className="group/reasoning flex items-center gap-space-1 rounded-sm text-left text-xs focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-default"
         aria-expanded={expanded}
         disabled={isLive}
       >
         {isLive ? (
-          <span className="shimmer-text text-[13px]">Thinking...</span>
+          <span className="shimmer-text">Thinking...</span>
         ) : (
           <>
-            <ChevronRight
-              className={`size-3 shrink-0 text-tertiary transition-transform ${expanded ? "rotate-90" : ""}`}
+            <CaretRightIcon
+              size={12}
+              weight="bold"
+              className={cn(
+                "shrink-0 text-icon-tertiary transition-transform duration-fast",
+                expanded && "rotate-90"
+              )}
               aria-hidden
             />
-            <span className="text-[13px] text-secondary">
+            <span className="text-secondary transition-colors duration-normal group-hover/reasoning:text-primary">
               {reasoningLabel(elapsedMs)}
             </span>
           </>
         )}
       </button>
       {expanded && trimmed && (
-        <div className="ms-1 mt-1 border-s border-subtle ps-3 text-[13px] leading-5 break-words whitespace-pre-wrap text-secondary">
+        <div className="ms-1 mt-space-1 border-s border-subtle ps-space-3 text-xs leading-5 break-words whitespace-pre-wrap text-secondary">
           {trimmed}
         </div>
       )}

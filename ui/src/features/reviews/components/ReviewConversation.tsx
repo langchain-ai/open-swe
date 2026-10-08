@@ -1,21 +1,21 @@
-import {
-  ArrowSquareOutIcon,
-  ChatCircleIcon,
-  CheckCircleIcon,
-  EyeIcon,
-  ProhibitIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react"
+import { Avatar } from "@langchain/macaw-components/Avatar"
+import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
+import { ProhibitIcon } from "@phosphor-icons/react/dist/ssr/Prohibit"
+import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useState } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import {
   getReviewConversation,
@@ -38,35 +38,39 @@ interface ReviewConversationProps {
 interface StateStyle {
   label: string
   verb: string
-  icon: ReactNode
-  className: string
+  icon: IconComponent
+  filled?: boolean
+  color: BadgeProps["color"]
+  className?: string
 }
 
 const REVIEW_STATE_STYLES: Record<ConversationReviewState, StateStyle> = {
   APPROVED: {
     label: "Approved",
     verb: "approved these changes",
-    icon: <CheckCircleIcon weight="fill" />,
-    className:
-      "bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+    icon: CheckCircleIcon,
+    filled: true,
+    color: "success",
   },
   CHANGES_REQUESTED: {
     label: "Changes requested",
     verb: "requested changes",
-    icon: <XCircleIcon weight="fill" />,
-    className: "bg-error text-error-secondary dark:bg-error",
+    icon: XCircleIcon,
+    filled: true,
+    color: "error",
   },
   COMMENTED: {
     label: "Commented",
     verb: "reviewed",
-    icon: <EyeIcon />,
-    className: "bg-surface-level-2 text-secondary",
+    icon: EyeIcon,
+    color: "secondary",
   },
   DISMISSED: {
     label: "Dismissed",
     verb: "left a review that was dismissed",
-    icon: <ProhibitIcon />,
-    className: "bg-surface-level-2 text-secondary line-through",
+    icon: ProhibitIcon,
+    color: "secondary",
+    className: "line-through",
   },
 }
 
@@ -81,10 +85,13 @@ export function reviewConversationQueryKey(
 function AuthorAvatar({ author }: { author: ConversationAuthor | null }) {
   const login = author?.login ?? "ghost"
   return (
-    <Avatar size="sm" className="mt-0.5">
-      {author ? <AvatarImage src={author.avatar_url} alt={login} /> : null}
-      <AvatarFallback>{login.slice(0, 2).toUpperCase()}</AvatarFallback>
-    </Avatar>
+    <Avatar
+      size="md"
+      shape="circle"
+      className="mt-0.5"
+      label={login}
+      imageUrl={author?.avatar_url}
+    />
   )
 }
 
@@ -124,7 +131,7 @@ function TimelineEntry({
     <li className="flex gap-3">
       <AuthorAvatar author={item.author} />
       <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-default">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-default bg-surface-level-2/40 px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-default bg-surface-level-2 px-3 py-2 text-xs">
           <span className="font-medium text-primary">{login}</span>
           <span className="text-secondary">
             {style ? style.verb : "commented"}
@@ -133,7 +140,7 @@ function TimelineEntry({
           <span className="ml-auto flex items-center gap-2">
             {review && review.inline_comment_count > 0 ? (
               <span className="flex items-center gap-1 text-secondary">
-                <ChatCircleIcon />
+                <ChatCircleIcon weight="regular" className="size-3.5" />
                 {review.inline_comment_count}{" "}
                 {review.inline_comment_count === 1
                   ? "inline comment"
@@ -141,20 +148,26 @@ function TimelineEntry({
               </span>
             ) : null}
             {style ? (
-              <Badge className={cn("gap-1", style.className)}>
-                {style.icon}
+              <Badge
+                size="sm"
+                color={style.color}
+                leftDecorator={style.icon}
+                iconWeight={style.filled ? "fill" : "regular"}
+                className={style.className}
+              >
                 {style.label}
               </Badge>
             ) : null}
-            <a
-              href={item.html_url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Open on GitHub"
-              className="text-secondary hover:text-primary"
+            <IconButton
+              asChild
+              icon={ArrowSquareOutIcon}
+              label="Open on GitHub"
+              size="xs"
+              color="secondary"
+              variant="plain"
             >
-              <ArrowSquareOutIcon />
-            </a>
+              <a href={item.html_url} target="_blank" rel="noreferrer" />
+            </IconButton>
           </span>
         </div>
         {hasBody ? (
@@ -216,15 +229,16 @@ function CommentBox({
       }}
     >
       <Textarea
+        size="md"
         value={draft}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={setDraft}
         onKeyDown={onKeyDown}
         placeholder="Leave a comment"
         aria-label="Leave a comment"
-        aria-invalid={mutation.isError || undefined}
+        isError={mutation.isError}
         disabled={mutation.isPending}
         autoFocus
-        className="min-h-24"
+        rows={4}
       />
       {mutation.isError ? (
         <p role="alert" className="text-xs text-error-secondary">
@@ -236,15 +250,15 @@ function CommentBox({
           Cmd/Ctrl + Enter to comment
         </span>
         <Button
-          type="button"
-          size="sm"
-          variant="ghost"
+          size="xs"
+          color="secondary"
+          variant="plain"
           onClick={onClose}
           disabled={mutation.isPending}
         >
           Cancel
         </Button>
-        <Button type="submit" size="sm" disabled={!canSubmit}>
+        <Button type="submit" size="xs" disabled={!canSubmit}>
           {mutation.isPending ? "Commenting…" : "Comment"}
         </Button>
       </div>
@@ -277,15 +291,14 @@ export function ReviewConversation({
       </div>
     )
   } else if (query.isError) {
-    timeline = (
-      <Alert variant="error">
-        <AlertDescription>{query.error.message}</AlertDescription>
-      </Alert>
-    )
+    timeline = <Banner intent="error">{query.error.message}</Banner>
   } else if (query.data.items.length === 0) {
     timeline = (
       <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-default px-4 py-8 text-center text-sm text-secondary">
-        <ChatCircleIcon className="size-5" />
+        <ChatCircleIcon
+          weight="regular"
+          className="size-5 text-icon-tertiary"
+        />
         No comments or reviews yet.
       </div>
     )
@@ -312,12 +325,12 @@ export function ReviewConversation({
         <h2 className="text-sm font-medium">Conversation</h2>
         {!composing && (
           <Button
-            type="button"
-            size="sm"
-            variant="outline"
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            leftDecorator={ChatCircleIcon}
             onClick={() => setComposing(true)}
           >
-            <ChatCircleIcon />
             Comment
           </Button>
         )}

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import {
-  ArrowsInIcon,
-  ArrowsOutIcon,
-  SidebarSimpleIcon,
-} from "@phosphor-icons/react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { ArrowsInIcon } from "@phosphor-icons/react/dist/ssr/ArrowsIn"
+import { ArrowsOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowsOut"
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr/SidebarSimple"
 import type { ReactNode } from "react"
 
 import type {
@@ -12,7 +11,6 @@ import type {
 } from "@/features/agents/lib/rightPanelStore"
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   TerminalActions,
   TerminalPanel,
@@ -59,26 +57,6 @@ function useIsNarrowLayout(): boolean {
     return () => media.removeEventListener("change", onChange)
   }, [])
   return narrow
-}
-
-function PanelControl(props: {
-  label: string
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        aria-label={props.label}
-        className="rounded-md p-1.5 text-tertiary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
-        onClick={props.onClick}
-        type="button"
-      >
-        {props.children}
-      </TooltipTrigger>
-      <TooltipPopup>{props.label}</TooltipPopup>
-    </Tooltip>
-  )
 }
 
 /**
@@ -262,15 +240,15 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   if (collapsed) {
     return (
-      <button
-        type="button"
+      <IconButton
+        className="fixed top-2 right-2 z-30 size-7"
+        color="secondary"
+        icon={SidebarSimpleIcon}
+        label="Show panel"
         onClick={() => onCollapsedChange(false)}
-        aria-label="Show panel"
-        title="Show panel"
-        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-secondary hover:bg-surface-level-1-hover hover:text-primary"
-      >
-        <SidebarSimpleIcon className="size-4" />
-      </button>
+        tooltipProps={{ side: "left" }}
+        variant="plain"
+      />
     )
   }
 
@@ -283,26 +261,26 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         />
       ) : null}
       {narrow ? null : (
-        <PanelControl
+        <IconButton
+          className="size-7"
+          color="secondary"
+          icon={maximized ? ArrowsInIcon : ArrowsOutIcon}
           label={maximized ? "Exit full screen" : "Expand panel"}
           onClick={() => setMaximized((value) => !value)}
-        >
-          {maximized ? (
-            <ArrowsInIcon className="size-4" />
-          ) : (
-            <ArrowsOutIcon className="size-4" />
-          )}
-        </PanelControl>
+          variant="plain"
+        />
       )}
-      <PanelControl
+      <IconButton
+        className="size-7"
+        color="secondary"
+        icon={SidebarSimpleIcon}
         label="Hide panel"
         onClick={() => {
           setMaximized(false)
           onCollapsedChange(true)
         }}
-      >
-        <SidebarSimpleIcon className="size-4" />
-      </PanelControl>
+        variant="plain"
+      />
     </div>
   )
 

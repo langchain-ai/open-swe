@@ -1,13 +1,13 @@
-import { GitPullRequestIcon } from "@phosphor-icons/react"
-import { IoLogoGithub } from "react-icons/io5"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
 import { cn, formatRelativeTime } from "@/lib/utils"
 
 const STATE_STYLES: Record<string, string> = {
-  open: "border-emerald-600/40 text-emerald-500",
+  open: "border-status-green text-status-green",
   draft: "border-default text-secondary",
-  merged: "border-purple-600/40 text-purple-500",
-  closed: "border-red-600/40 text-red-500",
+  merged: "border-purple text-purple",
+  closed: "border-status-red text-status-red",
 }
 
 export interface PrHeaderProps {
@@ -50,11 +50,11 @@ export function PrHeader({
       <div className="flex min-w-0 items-center gap-2">
         <span
           className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] capitalize",
+            "inline-flex shrink-0 items-center gap-space-1 rounded-full border px-space-2 py-0.5 text-xxs capitalize",
             STATE_STYLES[state] ?? STATE_STYLES.open
           )}
         >
-          <GitPullRequestIcon className="size-3" />
+          <GitPullRequestIcon weight="regular" className="size-3" />
           {state}
         </span>
         <h1
@@ -71,9 +71,10 @@ export function PrHeader({
             rel="noreferrer"
             className={cn("hover:underline", compact && "block truncate")}
           >
-            <IoLogoGithub
+            <GithubLogoIcon
               aria-label="GitHub"
-              className="mr-1.5 inline size-4 align-[-2px] text-secondary"
+              weight="regular"
+              className="mr-1.5 inline size-4 align-[-2px] text-icon-secondary"
             />
             {title}
             {number != null && (
@@ -103,11 +104,11 @@ export function PrHeader({
           </>
         ) : (
           <>
-            <span className="rounded border border-default px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="rounded border border-default px-1.5 py-0.5 font-mono text-xxs">
               {baseRef}
             </span>
             <span>←</span>
-            <span className="rounded border border-default px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="rounded border border-default px-1.5 py-0.5 font-mono text-xxs">
               {headRef}
             </span>
           </>
@@ -117,10 +118,12 @@ export function PrHeader({
             <span className="shrink-0">
               {stats.changedFiles} file{stats.changedFiles === 1 ? "" : "s"}
             </span>
-            <span className="shrink-0 text-emerald-500">
+            <span className="shrink-0 text-success-secondary">
               +{stats.additions}
             </span>
-            <span className="shrink-0 text-red-500">-{stats.deletions}</span>
+            <span className="shrink-0 text-error-secondary">
+              -{stats.deletions}
+            </span>
           </>
         )}
       </div>

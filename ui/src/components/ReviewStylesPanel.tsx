@@ -1,34 +1,22 @@
+import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Select } from "@langchain/macaw-components/Select"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Text } from "@langchain/macaw-components/Text"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
+import { AddRepositoryField } from "@/components/AddRepositoryField"
 import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "@/components/ui/combobox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
 import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
 
 const APPROVAL_MODES: Array<{ value: ReviewApprovalMode; label: string }> = [
   { value: "off", label: "Off" },
@@ -36,16 +24,16 @@ const APPROVAL_MODES: Array<{ value: ReviewApprovalMode; label: string }> = [
   { value: "approve", label: "Approve" },
 ]
 
-function statusVariant(status: ReviewStyle["status"]) {
+function statusColor(status: ReviewStyle["status"]): BadgeProps["color"] {
   switch (status) {
     case "completed":
-      return "default" as const
+      return "success"
     case "running":
-      return "secondary" as const
+      return "primary"
     case "failed":
-      return "destructive" as const
+      return "error"
     default:
-      return "outline" as const
+      return "secondary"
   }
 }
 
@@ -225,99 +213,54 @@ export function ReviewStylesPanel() {
       .some(isGithubReauthError)
 
   return (
-    <div className="flex flex-col gap-6 p-4">
+    <div className="flex flex-col gap-space-5 p-space-4">
       {githubReauth && (
-        <div className="rounded-md border border-error bg-error px-3 py-2 text-xs text-error-secondary">
-          Your GitHub connection expired.{" "}
-          <a
-            href={loginUrl()}
-            className="font-medium underline underline-offset-2"
-          >
-            Sign in with GitHub again
-          </a>{" "}
-          to list installed repos and run style analysis.
-        </div>
+        <Banner intent="error">
+          <span className="text-xs text-error-secondary">
+            Your GitHub connection expired.{" "}
+            <a
+              href={loginUrl()}
+              className="font-medium underline underline-offset-2"
+            >
+              Sign in with GitHub again
+            </a>{" "}
+            to list installed repos and run style analysis.
+          </span>
+        </Banner>
       )}
       <section className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="add-repo">Add repository</Label>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <Input
-              id="add-repo"
-              placeholder="owner/repo"
-              value={addRepo}
-              onChange={(e) => setAddRepo(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  handleAdd()
-                }
-              }}
-              className="sm:flex-1"
-            />
-            <Button
-              size="sm"
-              className="shrink-0 sm:w-auto"
-              disabled={!canAdd || createStyle.isPending}
-              onClick={handleAdd}
-            >
-              Add
-            </Button>
-          </div>
-          {suggestedRepos.length > 0 && (
-            <Combobox
-              items={suggestedRepos.map((r) => r.full_name)}
-              value={addRepo}
-              onValueChange={(v) => setAddRepo(typeof v === "string" ? v : "")}
-            >
-              <ComboboxInput
-                placeholder="Search installed repos…"
-                showClear
-                className="w-full"
-              />
-              <ComboboxContent className="min-w-[var(--anchor-width)]">
-                <ComboboxList className="max-h-48">
-                  <ComboboxEmpty>No matches</ComboboxEmpty>
-                  {suggestedRepos.map((r) => (
-                    <ComboboxItem key={r.full_name} value={r.full_name}>
-                      <span className="truncate" title={r.full_name}>
-                        {r.full_name}
-                      </span>
-                      {r.private && (
-                        <span className="ml-auto text-[10px] text-secondary">
-                          private
-                        </span>
-                      )}
-                    </ComboboxItem>
-                  ))}
-                </ComboboxList>
-              </ComboboxContent>
-            </Combobox>
-          )}
-        </div>
+        <AddRepositoryField
+          id="add-repo"
+          value={addRepo}
+          onChange={setAddRepo}
+          suggestions={suggestedRepos}
+          canAdd={canAdd && !createStyle.isPending}
+          onAdd={handleAdd}
+        />
 
         <div className="space-y-2">
           <p className="text-xs font-medium text-primary">Repositories</p>
           {(styles.data ?? []).length === 0 ? (
-            <p className="text-xs text-secondary">
-              No repositories yet.
-            </p>
+            <p className="text-xs text-secondary">No repositories yet.</p>
           ) : (
             <ul className="flex flex-wrap gap-2">
               {(styles.data ?? []).map((s) => (
                 <li key={s.full_name}>
                   <button
                     type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-level-2 ${
+                    aria-pressed={selected === s.full_name}
+                    className={cn(
+                      "inline-flex max-w-full items-center gap-space-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-level-1-hover",
                       selected === s.full_name
-                        ? "border-brand bg-surface-level-2 font-medium"
+                        ? "border-brand bg-selected font-medium"
                         : "border-default"
-                    }`}
+                    )}
                     onClick={() => setSelected(s.full_name)}
                   >
                     <span className="truncate">{s.full_name}</span>
                     <Badge
-                      variant={statusVariant(s.status)}
+                      color={statusColor(s.status)}
+                      size="xs"
                       className="shrink-0"
                     >
                       {s.status}
@@ -343,7 +286,7 @@ export function ReviewStylesPanel() {
               {active.full_name}
             </p>
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant={statusVariant(active.status)}>
+              <Badge color={statusColor(active.status)} size="xs">
                 {active.status}
               </Badge>
               {active.top_reviewers.length > 0 && (
@@ -366,10 +309,11 @@ export function ReviewStylesPanel() {
             {active.error && (
               <p className="text-xs text-error-secondary">{active.error}</p>
             )}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-space-2">
               <Button
-                size="sm"
-                variant="secondary"
+                color="secondary"
+                variant="normal"
+                size="xs"
                 disabled={active.status === "running" || analyze.isPending}
                 onClick={() => {
                   void analyze
@@ -381,8 +325,9 @@ export function ReviewStylesPanel() {
               </Button>
               {active.status === "running" && (
                 <Button
-                  size="sm"
-                  variant="outline"
+                  color="secondary"
+                  variant="outlined"
+                  size="xs"
                   disabled={cancelAnalysis.isPending}
                   onClick={() => cancelAnalysis.mutate(active.full_name)}
                 >
@@ -390,7 +335,8 @@ export function ReviewStylesPanel() {
                 </Button>
               )}
               <Button
-                size="sm"
+                color="primary"
+                size="xs"
                 disabled={!draftPrompt.trim() || savePrompt.isPending}
                 onClick={() =>
                   savePrompt.mutate({
@@ -402,8 +348,8 @@ export function ReviewStylesPanel() {
                 Save prompt
               </Button>
               <Button
-                size="sm"
-                variant="destructive"
+                color="error"
+                size="xs"
                 disabled={
                   removeStyle.isPending ||
                   (!!active.approval_mode && !session.data?.is_admin)
@@ -423,9 +369,11 @@ export function ReviewStylesPanel() {
               </Button>
             </div>
             <Textarea
-              className="min-h-[320px] w-full font-mono text-xs"
+              inputClassName="min-h-[320px] font-mono text-xs"
+              resize="none"
+              size="md"
               value={draftPrompt}
-              onChange={(e) => setDraftPrompt(e.target.value)}
+              onChange={setDraftPrompt}
               placeholder={
                 active.status === "running"
                   ? "Analysis in progress…"
@@ -433,35 +381,30 @@ export function ReviewStylesPanel() {
               }
               disabled={active.status === "running"}
             />
-            <Label htmlFor="repo-approval-mode">Approval mode</Label>
+            <Text as="h3" variant="sm" weight="medium">
+              Approval Mode
+            </Text>
             <p className="text-xs text-secondary">
               Criteria come from <code>.open-swe/APPROVALS.md</code> in the
               repository, read from each pull request&apos;s base branch. Dry
               run posts the assessment without approving; Approve submits a
               GitHub approval when the assessment passes. Nothing is merged.
             </p>
-            <Select
-              items={APPROVAL_MODES}
+            <Select<ReviewApprovalMode>
+              aria-label="Approval mode"
+              hideSearch
+              options={APPROVAL_MODES}
+              size="md"
+              triggerClassName="w-40"
               value={detail.data?.approval_mode ?? "dry_run"}
-              onValueChange={(mode) => {
+              onChange={(mode) => {
                 if (!mode) return
                 saveMode.mutate({ repo: active.full_name, mode })
               }}
               disabled={
                 !session.data?.is_admin || !detail.data || saveMode.isPending
               }
-            >
-              <SelectTrigger id="repo-approval-mode" className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {APPROVAL_MODES.map((mode) => (
-                  <SelectItem key={mode.value} value={mode.value}>
-                    {mode.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
             {approvalsFile.data && (
               <p className="text-xs text-secondary">
                 {approvalsFile.data.found ? (

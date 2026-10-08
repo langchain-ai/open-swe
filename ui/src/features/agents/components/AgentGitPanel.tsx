@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { DownloadIcon } from "lucide-react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import { agentsApi } from "@/features/agents/lib/api"
@@ -216,16 +217,19 @@ export function AgentGitPanel({
           onScopeChange={(next) => selectScope(threadRef, next)}
           extraActions={
             canDownloadRecovery ? (
-              <button
-                type="button"
-                aria-label="Download recovery patch"
-                title={recoveryError ?? "Download recovery patch"}
+              <IconButton
+                icon={DownloadSimpleIcon}
+                label="Download recovery patch"
+                tooltipProps={
+                  recoveryError ? { title: recoveryError } : undefined
+                }
+                size="sm"
+                color="secondary"
+                variant="plain"
+                loading={recoveringPatch}
                 disabled={recoveringPatch}
                 onClick={() => void downloadRecoveryPatch()}
-                className="flex size-7 items-center justify-center rounded-md text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary disabled:opacity-50"
-              >
-                <DownloadIcon className="size-3.5" />
-              </button>
+              />
             ) : undefined
           }
         />

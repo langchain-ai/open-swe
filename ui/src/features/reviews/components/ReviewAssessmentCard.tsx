@@ -1,14 +1,17 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { ThumbsDownIcon } from "@phosphor-icons/react/dist/ssr/ThumbsDown"
+import { ThumbsUpIcon } from "@phosphor-icons/react/dist/ssr/ThumbsUp"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { CheckIcon, ThumbsDownIcon, ThumbsUpIcon } from "@phosphor-icons/react"
+
 import type {
   PublishedReviewAssessment,
   ReviewAssessmentFeedbackInput,
 } from "@/lib/api"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 
 interface Props {
   assessment: PublishedReviewAssessment
@@ -112,12 +115,14 @@ function AssessmentCard({
                 role="status"
                 className="flex items-center gap-1 text-xs text-secondary"
               >
-                <CheckIcon /> Feedback saved
+                <CheckIcon weight="regular" className="size-3.5" /> Feedback
+                saved
               </span>
             )}
             <Button
-              size="sm"
-              variant="ghost"
+              size="xs"
+              color="secondary"
+              variant="plain"
               onClick={() => {
                 save.reset()
                 setEditing(true)
@@ -139,7 +144,7 @@ function AssessmentCard({
         </p>
       </details>
       {headSha !== assessment.head_sha && (
-        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+        <p className="mt-2 text-xs text-warning-secondary">
           This assessment is for an earlier commit.
         </p>
       )}
@@ -168,49 +173,46 @@ function AssessmentCard({
             <legend className="mb-2 text-xs font-medium">
               Was this assessment helpful?
             </legend>
-            <div className="flex gap-2">
+            <div className="flex gap-space-2">
               {(["helpful", "unhelpful"] as const).map((rating) => (
                 <Button
                   key={rating}
-                  type="button"
-                  size="sm"
-                  variant={value?.rating === rating ? "secondary" : "outline"}
+                  size="xs"
+                  color="secondary"
+                  variant={value?.rating === rating ? "normal" : "outlined"}
                   aria-pressed={value?.rating === rating}
+                  leftDecorator={
+                    rating === "helpful" ? ThumbsUpIcon : ThumbsDownIcon
+                  }
                   onClick={() =>
                     setDraft({ rating, comment: value?.comment ?? "" })
                   }
                 >
-                  {rating === "helpful" ? <ThumbsUpIcon /> : <ThumbsDownIcon />}
                   {rating === "helpful" ? "Helpful" : "Not helpful"}
                 </Button>
               ))}
             </div>
-            <label className="block space-y-1.5 text-xs text-secondary">
-              <span>Comment (optional)</span>
-              <Textarea
-                maxLength={3000}
-                value={value?.comment ?? ""}
-                onChange={(event) =>
-                  setDraft({
-                    rating: value?.rating,
-                    comment: event.target.value,
-                  })
-                }
-                placeholder="What was right, or what did we miss?"
-                className="min-h-20 text-sm"
-              />
-            </label>
+            <Textarea
+              size="md"
+              label="Comment (optional)"
+              maxLength={3000}
+              value={value?.comment ?? ""}
+              onChange={(comment) =>
+                setDraft({ rating: value?.rating, comment })
+              }
+              placeholder="What was right, or what did we miss?"
+            />
             <p className="text-xs text-secondary">
               Saved in Open SWE. Your comment is not posted to GitHub.
             </p>
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={!value?.rating}>
+            <div className="flex gap-space-2">
+              <Button type="submit" size="xs" disabled={!value?.rating}>
                 {save.isPending ? "Saving…" : "Save feedback"}
               </Button>
               <Button
-                type="button"
-                size="sm"
-                variant="ghost"
+                size="xs"
+                color="secondary"
+                variant="plain"
                 onClick={() => {
                   setEditing(false)
                   setDraft(null)

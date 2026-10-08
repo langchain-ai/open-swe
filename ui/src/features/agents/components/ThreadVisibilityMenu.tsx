@@ -1,12 +1,14 @@
-import { CaretDownIcon, GlobeIcon, LockIcon } from "@phosphor-icons/react"
-
+import { Button } from "@langchain/macaw-components/Button"
 import {
-  Menu,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuTrigger,
-} from "@/components/ui/menu"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
+import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
+
+import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
 import type { ThreadVisibility } from "@/lib/api"
 
 const OPTIONS: Record<
@@ -31,43 +33,45 @@ export function ThreadVisibilityMenu({
 }) {
   const current = OPTIONS[value]
   return (
-    <Menu>
-      <MenuTrigger
-        aria-label="Thread visibility"
-        aria-busy={busy}
-        disabled={busy}
-        data-no-drag=""
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-subtle px-2 text-xs text-primary transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:opacity-60"
-      >
-        <current.Icon className="size-3.5" />
-        {current.label}
-        <CaretDownIcon className="size-3 text-secondary" />
-      </MenuTrigger>
-      <MenuPopup align="end" className="min-w-36">
-        <MenuRadioGroup
-          value={value}
-          onValueChange={(next) => {
-            if (next !== value) onChange(next as ThreadVisibility)
-          }}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          color="secondary"
+          variant="outlined"
+          aria-label="Thread visibility"
+          aria-busy={busy}
+          disabled={busy}
+          data-no-drag=""
+          leftDecorator={current.Icon}
+          rightDecorator={CaretDownIcon}
+          className="shrink-0"
         >
-          {ORDER.map((option) => {
-            const { label, Icon } = OPTIONS[option]
-            return (
-              <MenuRadioItem
-                key={option}
-                value={option}
-                disabled={disabledValues.includes(option)}
-                closeOnClick
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Icon className="size-3.5 text-secondary" />
-                  {label}
-                </span>
-              </MenuRadioItem>
-            )
-          })}
-        </MenuRadioGroup>
-      </MenuPopup>
-    </Menu>
+          {current.label}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-36">
+        {ORDER.map((option) => {
+          const { label, Icon } = OPTIONS[option]
+          return (
+            <MenuCheckItem
+              key={option}
+              type="radio"
+              checked={option === value}
+              disabled={disabledValues.includes(option)}
+              onSelect={() => {
+                if (option !== value) onChange(option)
+              }}
+            >
+              <Icon
+                size={14}
+                weight="regular"
+                className="text-icon-secondary"
+              />
+              {label}
+            </MenuCheckItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

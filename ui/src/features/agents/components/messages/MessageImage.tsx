@@ -78,7 +78,7 @@ export function MessageImage({
     <img
       src={src}
       alt={label}
-      className={cn(className, "animate-in duration-300 fade-in")}
+      className={cn(className, "duration-300 animate-in fade-in")}
     />
   )
 }

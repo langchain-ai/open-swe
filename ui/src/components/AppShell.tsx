@@ -1,10 +1,12 @@
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { Link, Navigate } from "@tanstack/react-router"
-import { ArrowLeftIcon, CaretRightIcon } from "@phosphor-icons/react"
 import type { ReactNode } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import { AppSidebar } from "@/components/AppSidebar"
-import { Skeleton } from "@/components/ui/skeleton"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -43,7 +45,7 @@ export function AppShell({
               to={backTo.to}
               className="mb-4 inline-flex items-center gap-1.5 text-xs text-secondary hover:text-primary"
             >
-              <ArrowLeftIcon className="size-3.5" />
+              <ArrowLeftIcon size={14} weight="regular" />
               {backTo.label}
             </Link>
           )}
@@ -167,20 +169,18 @@ export function SettingsRow({
             {label}
           </span>
           {(comingSoon || badge) && (
-            <span
-              className={cn(
-                "rounded-sm border border-default bg-surface-level-2 px-1.5 py-0.5 text-[10px] font-normal text-secondary",
-                !comingSoon && badgeClassName
-              )}
+            <Badge
+              color="secondary"
+              rounded="sm"
+              size="xxs"
+              className={comingSoon ? undefined : badgeClassName}
             >
-              {comingSoon ? "Coming soon" : badge}
-            </span>
+              {comingSoon ? "Coming soon" : (badge ?? "")}
+            </Badge>
           )}
         </span>
         {description && (
-          <span className="text-xs/relaxed text-secondary">
-            {description}
-          </span>
+          <span className="text-xs/relaxed text-secondary">{description}</span>
         )}
       </label>
       <div className={cn("sm:shrink-0", comingSoon && "opacity-50")}>
@@ -206,19 +206,19 @@ export function SettingsNavRow({
     <Link
       to={to}
       params={params}
-      className="flex items-center justify-between gap-8 px-4 py-3.5 transition-colors hover:bg-surface-level-2/40"
+      className="flex items-center justify-between gap-8 px-4 py-3.5 transition-colors hover:bg-surface-level-2-hover"
     >
       <div className="flex flex-col gap-1">
-        <span className="text-sm/none font-medium text-primary">
-          {label}
-        </span>
+        <span className="text-sm/none font-medium text-primary">{label}</span>
         {description && (
-          <span className="text-xs/relaxed text-secondary">
-            {description}
-          </span>
+          <span className="text-xs/relaxed text-secondary">{description}</span>
         )}
       </div>
-      <CaretRightIcon className="size-3.5 shrink-0 text-secondary" />
+      <CaretRightIcon
+        className="shrink-0 text-icon-secondary"
+        size={14}
+        weight="regular"
+      />
     </Link>
   )
 }

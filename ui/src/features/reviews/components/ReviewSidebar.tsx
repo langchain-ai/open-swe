@@ -1,14 +1,14 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react"
+import { Input } from "@langchain/macaw-components/Input"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ListBulletsIcon } from "@phosphor-icons/react/dist/ssr/ListBullets"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
+import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import {
   FileTree,
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import {
-  ListBulletsIcon,
-  MagnifyingGlassIcon,
-  TreeViewIcon,
-} from "@phosphor-icons/react"
+import { memo, useCallback, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
 import type {
@@ -17,12 +17,6 @@ import type {
   GitStatusEntry,
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
@@ -75,7 +69,7 @@ function OverviewRow({
       className={cn(
         "flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left text-xs leading-5 transition-colors",
         active
-          ? "border-brand bg-surface-level-2-hover font-medium text-primary"
+          ? "border-brand bg-selected font-medium text-primary"
           : "border-transparent text-secondary hover:bg-surface-level-2-hover"
       )}
     >
@@ -151,7 +145,7 @@ function ReviewViewTabs({
         count={stepCount}
         onClick={() => onChange("ai")}
       >
-        <ListBulletsIcon className="size-3.5" />
+        <ListBulletsIcon weight="regular" className="size-3.5" />
       </ReviewViewTab>
       <ReviewViewTab
         active={view === "files"}
@@ -159,7 +153,7 @@ function ReviewViewTabs({
         count={fileCount}
         onClick={() => onChange("files")}
       >
-        <TreeViewIcon className="size-3.5" />
+        <TreeViewIcon weight="regular" className="size-3.5" />
       </ReviewViewTab>
     </div>
   )
@@ -194,9 +188,7 @@ function ReviewViewTab({
       {children}
       {label}
       {count !== null && (
-        <span className="text-[11px] text-tertiary tabular-nums">
-          {count}
-        </span>
+        <span className="text-xxs text-tertiary tabular-nums">{count}</span>
       )}
     </button>
   )
@@ -282,11 +274,11 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       className={cn(
         "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
         active
-          ? "border-brand bg-surface-level-2-hover"
+          ? "border-brand bg-selected"
           : "border-transparent hover:bg-surface-level-2-hover"
       )}
     >
-      <span className="mt-px shrink-0 text-[11px] font-medium text-tertiary tabular-nums">
+      <span className="mt-px shrink-0 text-xxs font-medium text-tertiary tabular-nums">
         {group.index}.
       </span>
       <span
@@ -364,18 +356,14 @@ function ReviewFileTreeExplorer({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="px-3 pt-1 pb-1.5">
-        <InputGroup>
-          <InputGroupAddon>
-            <MagnifyingGlassIcon />
-          </InputGroupAddon>
-          <InputGroupInput
-            type="search"
-            aria-label="Filter files"
-            placeholder="Filter files"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-          />
-        </InputGroup>
+        <Input
+          size="sm"
+          leftIcon={MagnifyingGlassIcon}
+          aria-label="Filter files"
+          placeholder="Filter files"
+          value={filter}
+          onChange={setFilter}
+        />
       </div>
       <div className="min-h-0 flex-1">
         <FileTree

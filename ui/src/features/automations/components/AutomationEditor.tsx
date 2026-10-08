@@ -1,15 +1,21 @@
 import { useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
-import {
-  CheckIcon,
-  ClockIcon,
-  GithubLogoIcon,
-  KanbanIcon,
-  PencilSimpleIcon,
-  PlusIcon,
-  SlackLogoIcon,
-  TrashIcon,
-} from "@phosphor-icons/react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Input } from "@langchain/macaw-components/Input"
+import { Switch } from "@langchain/macaw-components/Switch"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
+import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
+import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 
 import type { ModelOption } from "@/lib/api"
 import type {
@@ -28,8 +34,6 @@ import { AutomationRuns } from "@/features/automations/components/AutomationRuns
 import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
-import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
 import { describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
@@ -72,10 +76,10 @@ const SLACK_EVENT_ITEMS = eventItems<SlackTriggerEvent>(
 const LINEAR_EVENT_ITEMS = eventItems<LinearTriggerEvent>(
   AUTOMATION_EVENT_PROVIDERS.linear.events
 )
-const SENDER_ITEMS: Array<{ value: SlackTriggerSenders; label: string }> = [
-  { value: "anyone", label: "Anyone" },
-  { value: "people", label: "People" },
-  { value: "bots", label: "Bots" },
+const SENDER_OPTIONS: Array<{ value: SlackTriggerSenders; display: string }> = [
+  { value: "anyone", display: "Anyone" },
+  { value: "people", display: "People" },
+  { value: "bots", display: "Bots" },
 ]
 
 /** ``list`` with ``item`` toggled, kept in ``order``. */
@@ -326,18 +330,21 @@ export function AutomationEditor({
         {canManage && (
           <div className="flex shrink-0 items-center gap-2">
             {mode === "edit" && (
-              <Button
-                variant="ghost"
-                size="icon"
+              <IconButton
+                icon={TrashIcon}
+                label="Delete automation"
+                color="error"
+                variant="plain"
+                size="md"
                 onClick={handleDelete}
                 disabled={deleteSchedule.isPending}
-                aria-label="Delete automation"
-                className="text-tertiary hover:text-error-secondary"
-              >
-                <TrashIcon className="size-4" />
-              </Button>
+              />
             )}
-            <Button onClick={handleSave} disabled={!canSave || isSaving}>
+            <Button
+              size="md"
+              onClick={handleSave}
+              disabled={!canSave || isSaving}
+            >
               {isSaving
                 ? "Saving…"
                 : mode === "create"
@@ -350,31 +357,31 @@ export function AutomationEditor({
 
       <div className="mx-auto w-full max-w-3xl px-6 pt-2 pb-16">
         {!canManage && (
-          <p className="mb-4 rounded-lg border border-default bg-surface-level-1 px-3 py-2 text-xs text-secondary">
+          <Banner intent="neutral" className="mb-space-4">
             This workspace automation is read-only. Ask a workspace admin to
             change it.
-          </p>
+          </Banner>
         )}
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           disabled={!canManage}
           placeholder="Untitled automation"
-          className="w-full bg-transparent text-base font-medium text-primary outline-none placeholder:text-tertiary"
+          aria-label="Automation name"
+          className="w-full bg-transparent text-base font-medium text-primary outline-none placeholder:text-placeholder"
         />
 
         <div className="mt-3 flex items-center gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={enabled}
-              onCheckedChange={setEnabled}
-              disabled={!canManage}
-            />
-            <span className="text-secondary">
-              {enabled ? "Active" : "Paused"}
-            </span>
-          </div>
-          <span className="text-border">|</span>
+          <Switch
+            checked={enabled}
+            onChange={setEnabled}
+            disabled={!canManage}
+            label={enabled ? "Active" : "Paused"}
+            labelClassName="text-xs text-secondary"
+          />
+          <span aria-hidden="true" className="text-quaternary">
+            |
+          </span>
           <WorkspaceSelector
             workspaces={workspaces}
             selectedSlug={workspace}
@@ -414,7 +421,7 @@ export function AutomationEditor({
               return (
                 <TriggerCard
                   key={draft.key}
-                  icon={<ClockIcon className="size-4" />}
+                  icon={ClockIcon}
                   removeLabel="Remove schedule"
                   onRemove={() => removeDraft(draft.key)}
                   canManage={canManage}
@@ -425,7 +432,7 @@ export function AutomationEditor({
                         aria-label="Change schedule"
                         className={CARD_ACTION}
                       >
-                        <PencilSimpleIcon className="size-3.5" />
+                        <PencilSimpleIcon size={14} weight="regular" />
                       </TriggerMenu>
                     )
                   }
@@ -437,7 +444,7 @@ export function AutomationEditor({
                       disabled={!canManage}
                       placeholder="0 9 * * 1-5"
                       aria-label="Cron schedule"
-                      className="w-full bg-transparent font-mono text-sm text-primary outline-none placeholder:text-tertiary"
+                      className="w-full bg-transparent font-mono text-sm text-primary outline-none placeholder:text-placeholder"
                     />
                   ) : (
                     <p className="text-sm text-primary">
@@ -448,7 +455,9 @@ export function AutomationEditor({
                     </p>
                   )}
                   {problem && (
-                    <p className="mt-1 text-xs text-error-secondary">{problem}</p>
+                    <p className="mt-1 text-xs text-error-secondary">
+                      {problem}
+                    </p>
                   )}
                 </TriggerCard>
               )
@@ -457,7 +466,7 @@ export function AutomationEditor({
               return (
                 <TriggerCard
                   key={draft.key}
-                  icon={<GithubLogoIcon className="size-4" />}
+                  icon={GithubLogoIcon}
                   removeLabel="Remove GitHub trigger"
                   onRemove={() => removeDraft(draft.key)}
                   canManage={canManage}
@@ -490,7 +499,7 @@ export function AutomationEditor({
               return (
                 <TriggerCard
                   key={draft.key}
-                  icon={<SlackLogoIcon className="size-4" />}
+                  icon={SlackLogoIcon}
                   removeLabel="Remove Slack trigger"
                   onRemove={() => removeDraft(draft.key)}
                   canManage={canManage}
@@ -511,25 +520,13 @@ export function AutomationEditor({
                   />
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-secondary">
                     <span>From</span>
-                    <div className="flex overflow-hidden rounded-md border border-default">
-                      {SENDER_ITEMS.map((item) => (
-                        <button
-                          key={item.value}
-                          type="button"
-                          aria-pressed={draft.senders === item.value}
-                          onClick={() => set({ senders: item.value })}
-                          disabled={!canManage}
-                          className={cn(
-                            "px-2 py-1 transition-colors disabled:pointer-events-none",
-                            draft.senders === item.value
-                              ? "bg-brand/20 text-primary"
-                              : "hover:text-primary"
-                          )}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
+                    <GroupedTabs
+                      size="xs"
+                      value={draft.senders}
+                      onChange={(senders) => set({ senders })}
+                      options={SENDER_OPTIONS}
+                      disabled={!canManage}
+                    />
                   </div>
                   <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_9rem]">
                     <FilterInput
@@ -557,7 +554,7 @@ export function AutomationEditor({
             return (
               <TriggerCard
                 key={draft.key}
-                icon={<KanbanIcon className="size-4" />}
+                icon={KanbanIcon}
                 removeLabel="Remove Linear trigger"
                 onRemove={() => removeDraft(draft.key)}
                 canManage={canManage}
@@ -619,7 +616,7 @@ export function AutomationEditor({
               }
               className="flex items-center gap-1.5 self-start rounded-lg border border-dashed border-default px-3 py-2 text-xs text-secondary transition-colors hover:border-strong hover:text-primary"
             >
-              <PlusIcon className="size-3.5" />
+              <PlusIcon size={14} weight="regular" />
               Add trigger
             </TriggerMenu>
           )}
@@ -648,23 +645,22 @@ export function AutomationEditor({
             />
           </div>
           {session.data?.is_admin === true && (
-            <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-subtle pt-3">
-              <input
-                type="checkbox"
+            <div className="mt-space-3 border-t border-subtle pt-space-3">
+              <Checkbox
                 checked={adminThread}
-                onChange={(event) => setAdminThread(event.target.checked)}
+                onCheckedChange={(checked) => setAdminThread(checked === true)}
                 disabled={!canManage}
-                className="mt-0.5 size-4 accent-[color:var(--border-error)]"
+                label="Run as admin thread"
+                labelClassName="text-xs font-medium text-primary"
+                aria-describedby="automation-admin-thread-description"
               />
-              <span>
-                <span className="block text-xs font-medium text-primary">
-                  Run as admin thread
-                </span>
-                <span className="mt-0.5 block text-xs text-tertiary">
-                  Allow this automation to use workspace admin capabilities.
-                </span>
-              </span>
-            </label>
+              <p
+                id="automation-admin-thread-description"
+                className="mt-0.5 pl-6 text-xs text-tertiary"
+              >
+                Allow this automation to use workspace admin capabilities.
+              </p>
+            </div>
           )}
         </div>
 
@@ -680,7 +676,7 @@ export function AutomationEditor({
 }
 
 const CARD_ACTION =
-  "rounded p-1 text-tertiary hover:bg-surface-level-1-hover hover:text-primary"
+  "rounded-sm p-1 text-tertiary hover:bg-surface-level-1-hover hover:text-primary"
 
 function EventChips<E extends string>({
   items,
@@ -707,11 +703,13 @@ function EventChips<E extends string>({
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:pointer-events-none",
               on
-                ? "border-brand bg-brand/20 text-primary"
+                ? "border-brand bg-brand-subtle text-primary"
                 : "border-default text-secondary hover:border-strong hover:text-primary"
             )}
           >
-            {on && <CheckIcon className="size-3 text-brand-primary" />}
+            {on && (
+              <CheckIcon size={12} weight="bold" className="text-icon-brand" />
+            )}
             {item.label}
           </button>
         )
@@ -736,29 +734,27 @@ function FilterInput({
   inputMode?: "numeric"
 }) {
   return (
-    <label className="flex flex-col gap-1 text-xs text-secondary">
-      {label}
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        inputMode={inputMode}
-        disabled={disabled}
-        className="rounded-md border border-default bg-transparent px-2 py-1 text-sm text-primary outline-none placeholder:text-tertiary focus:border-strong"
-      />
-    </label>
+    <Input
+      size="sm"
+      label={label}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      inputMode={inputMode}
+      disabled={disabled}
+    />
   )
 }
 
 function TriggerCard({
-  icon,
+  icon: Icon,
   children,
   actions,
   removeLabel,
   onRemove,
   canManage,
 }: {
-  icon: React.ReactNode
+  icon: IconComponent
   children: React.ReactNode
   actions?: React.ReactNode
   removeLabel: string
@@ -768,20 +764,19 @@ function TriggerCard({
   return (
     <div className="flex items-start gap-3 rounded-xl border border-default bg-surface-level-1 px-3 py-2.5">
       <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-level-2 text-secondary">
-        {icon}
+        <Icon size={16} weight="regular" />
       </div>
       <div className="min-w-0 flex-1 py-0.5">{children}</div>
       {canManage && (
         <div className="flex shrink-0 items-center gap-0.5">
           {actions}
-          <button
-            type="button"
+          <IconButton
+            icon={TrashIcon}
+            label={removeLabel}
+            color="secondary"
+            variant="plain"
             onClick={onRemove}
-            aria-label={removeLabel}
-            className={CARD_ACTION}
-          >
-            <TrashIcon className="size-3.5" />
-          </button>
+          />
         </div>
       )}
     </div>
@@ -790,8 +785,6 @@ function TriggerCard({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mt-8 mb-2 text-xs font-medium text-secondary">
-      {children}
-    </h2>
+    <h2 className="mt-8 mb-2 text-xs font-medium text-secondary">{children}</h2>
   )
 }

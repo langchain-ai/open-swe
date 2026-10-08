@@ -1,5 +1,7 @@
 import { useState } from "react"
-import { ChevronDown, Download } from "lucide-react"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 
 import type { OutputIframeDisplay } from "@/features/agents/lib/types"
 import {
@@ -7,7 +9,6 @@ import {
   ARTIFACT_SANDBOX,
 } from "@/features/agents/lib/artifactShell"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
-import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const IFRAME_HEIGHT = 480
@@ -26,17 +27,20 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
   const isLegacy = "html" in display
 
   return (
-    <section className="my-2 overflow-hidden rounded-lg border border-default bg-surface-level-1">
-      <header className="flex items-center gap-2 px-3 py-2">
+    <section className="my-space-2 overflow-hidden rounded-lg border border-default bg-surface-level-2">
+      <header className="flex items-center gap-space-2 px-space-3 py-space-2">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-space-2 rounded-sm text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
         >
-          <ChevronDown
+          <CaretDownIcon
+            size={14}
+            weight="regular"
+            aria-hidden
             className={cn(
-              "size-3.5 shrink-0 text-secondary transition-transform",
+              "shrink-0 text-icon-secondary transition-transform duration-fast",
               !expanded && "-rotate-90"
             )}
           />
@@ -46,14 +50,13 @@ export function OutputIframe({ display }: { display: OutputIframeDisplay }) {
         </button>
         {!isLegacy && (
           <IconButton
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Download HTML"
+            icon={DownloadSimpleIcon}
+            label="Download HTML"
+            size="sm"
+            color="secondary"
+            variant="plain"
             onClick={() => openDownload(display.downloadUrl)}
-          >
-            <Download />
-          </IconButton>
+          />
         )}
       </header>
       {expanded &&

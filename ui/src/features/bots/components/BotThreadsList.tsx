@@ -1,17 +1,19 @@
 import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
-import {
-  ArrowSquareOutIcon,
-  CircleNotchIcon,
-  RobotIcon,
-} from "@phosphor-icons/react"
-import { IoLogoSlack } from "react-icons/io5"
+import { Avatar } from "@langchain/macaw-components/Avatar"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Spinner } from "@langchain/macaw-components/Spinner"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
 import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
 import type { AllowedSlackBotEntry } from "@/lib/api"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useThreadsPage } from "@/features/agents/lib/queries"
 import { AllowedSlackBotsSection } from "@/features/bots/components/AllowedSlackBotsSection"
 import { api } from "@/lib/api"
@@ -54,11 +56,13 @@ export function BotThreadsList({
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
         {bot && (
           <Button
-            variant="link"
-            className="mb-3 h-auto p-0"
+            color="secondary"
+            variant="underlined"
+            leftDecorator={ArrowLeftIcon}
+            className="mb-space-3"
             onClick={() => onBotChange(undefined)}
           >
-            ← Bots
+            Bots
           </Button>
         )}
         <h1 className="text-base font-medium text-primary">
@@ -76,43 +80,54 @@ export function BotThreadsList({
               <AllowedSlackBotsSection onBotChange={onBotChange} />
             </div>
           ) : (
-            <div className="mt-4 divide-y rounded-xl border border-default bg-surface-level-1">
+            <div className="mt-4 divide-y divide-default rounded-xl border border-default bg-surface-level-1">
               {directory.isPending ? (
                 <p className="p-4 text-xs text-secondary">
                   Loading enabled bots…
                 </p>
               ) : directory.isError ? (
-                <div className="p-4">
-                  <p className="text-xs text-error-secondary">
-                    Enabled bots could not be loaded.
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => void directory.refetch()}
-                  >
-                    Retry
-                  </Button>
-                </div>
+                <Banner
+                  intent="error"
+                  flush
+                  action={
+                    <Button
+                      color="secondary"
+                      variant="outlined"
+                      onClick={() => void directory.refetch()}
+                    >
+                      Retry
+                    </Button>
+                  }
+                >
+                  Enabled bots could not be loaded.
+                </Banner>
               ) : bots.length === 0 ? (
-                <p className="p-4 text-xs text-secondary">
-                  No Slack bots are enabled.
-                </p>
+                <EmptyState
+                  size="sm"
+                  icon={RobotIcon}
+                  title="No Slack bots are enabled."
+                />
               ) : (
                 bots.map((entry) => (
                   <button
                     key={entry.key}
                     type="button"
                     onClick={() => onBotChange(entry.key)}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-level-1-hover focus-visible:outline-2 focus-visible:outline-[color:var(--border-focus)]"
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                   >
                     <BotAvatar entry={entry} />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
                       {entry.name}
                     </span>
-                    <span className="text-xs text-success-secondary">Enabled</span>
-                    <span aria-hidden="true">→</span>
+                    <span className="text-xs text-success-secondary">
+                      Enabled
+                    </span>
+                    <CaretRightIcon
+                      aria-hidden="true"
+                      size={14}
+                      weight="regular"
+                      className="text-icon-secondary"
+                    />
                   </button>
                 ))
               )}
@@ -127,26 +142,28 @@ export function BotThreadsList({
                 <Skeleton className="h-16 w-full rounded-xl" />
               </div>
             ) : threadsQuery.isError ? (
-              <div className="flex flex-col items-center rounded-xl border border-error bg-error px-6 py-12 text-center">
-                <p className="text-xs text-error-secondary">
-                  Bot threads could not be loaded.
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="mt-3"
-                  onClick={() => void threadsQuery.refetch()}
-                  disabled={threadsQuery.isFetching}
-                >
-                  {threadsQuery.isFetching ? "Retrying…" : "Retry"}
-                </Button>
-              </div>
+              <Banner
+                intent="error"
+                action={
+                  <Button
+                    color="secondary"
+                    variant="outlined"
+                    onClick={() => void threadsQuery.refetch()}
+                    disabled={threadsQuery.isFetching}
+                  >
+                    {threadsQuery.isFetching ? "Retrying…" : "Retry"}
+                  </Button>
+                }
+              >
+                Bot threads could not be loaded.
+              </Banner>
             ) : threads.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-default px-6 py-12 text-center text-xs text-secondary">
-                No bot threads yet. They appear here once an allowed bot
-                mentions Open SWE in Slack.
-              </div>
+              <EmptyState
+                icon={RobotIcon}
+                title="No bot threads yet"
+                description="They appear here once an allowed bot mentions Open SWE in Slack."
+                className="rounded-xl border border-dashed border-default"
+              />
             ) : (
               <div className="space-y-2">
                 {threads.map((thread) => (
@@ -176,12 +193,13 @@ export function BotThreadsList({
 
 function BotAvatar({ entry }: { entry: AllowedSlackBotEntry }) {
   return (
-    <Avatar className="size-4">
-      {entry.image_url && <AvatarImage src={entry.image_url} alt="" />}
-      <AvatarFallback>
-        <RobotIcon className="size-3" />
-      </AvatarFallback>
-    </Avatar>
+    <span aria-hidden="true" className="flex">
+      <Avatar
+        size="xs"
+        label={entry.name}
+        imageUrl={entry.image_url || undefined}
+      />
+    </span>
   )
 }
 
@@ -201,7 +219,7 @@ function BotThreadRow({
         className="flex min-w-0 flex-1 items-center gap-3"
       >
         {thread.status === "running" ? (
-          <CircleNotchIcon className="size-4 shrink-0 animate-spin text-brand-primary" />
+          <Spinner size="xs" className="shrink-0 text-icon-brand" />
         ) : (
           <span
             className={cn(
@@ -210,7 +228,7 @@ function BotThreadRow({
                 ? "bg-error-strong"
                 : thread.status === "finished"
                   ? "bg-success-strong"
-                  : "bg-[color:var(--border-default)]"
+                  : "bg-surface-level-4"
             )}
           />
         )}
@@ -232,18 +250,21 @@ function BotThreadRow({
         </div>
       </Link>
       {slackUrl ? (
-        <a
-          href={slackUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+        <Button
+          as={<a href={slackUrl} target="_blank" rel="noreferrer" />}
+          color="secondary"
+          variant="plain"
+          leftDecorator={SlackLogoIcon}
           aria-label="Open the Slack thread"
         >
-          <IoLogoSlack className="size-3.5" />
           Slack
-        </a>
+        </Button>
       ) : (
-        <ArrowSquareOutIcon className="size-4 shrink-0 text-tertiary" />
+        <ArrowSquareOutIcon
+          size={16}
+          weight="regular"
+          className="shrink-0 text-icon-tertiary"
+        />
       )}
     </div>
   )

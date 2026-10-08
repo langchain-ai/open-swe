@@ -1,7 +1,7 @@
-import { ExternalLink } from "lucide-react"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Link } from "@tanstack/react-router"
 
-import { Button } from "@/components/ui/button"
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
 
 import { MessageTimestamp } from "./MessageTimestamp"
@@ -34,7 +34,7 @@ export function TaskEventMessage({
 
   return (
     <div
-      className="my-3 flex flex-col items-start gap-1"
+      className="my-3 flex flex-col items-start gap-space-1"
       data-testid="task-event"
       data-message-id={messageId}
     >
@@ -49,30 +49,27 @@ export function TaskEventMessage({
           </>
         }
         actions={
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            nativeButton={false}
-            role="link"
-            render={
-              <Link
-                to="/agents/$threadId"
-                params={{ threadId: event.sender_thread_id }}
-              />
-            }
-            aria-label={`Open ${label} thread`}
-            title={`Open ${label} thread`}
+          <IconButton
+            asChild
+            icon={ArrowSquareOutIcon}
+            label={`Open ${label} thread`}
+            size="xs"
+            color="secondary"
+            variant="plain"
           >
-            <ExternalLink className="size-3" />
-          </Button>
+            <Link
+              to="/agents/$threadId"
+              params={{ threadId: event.sender_thread_id }}
+            />
+          </IconButton>
         }
       >
-        <div className="mt-1 max-w-full rounded-xl border border-default bg-surface-level-2/50 p-3">
-          <div className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-primary">
+        <div className="mt-space-1 max-w-full rounded-xl border border-default bg-surface-level-2 p-space-3">
+          <div className="text-xs leading-relaxed break-words whitespace-pre-wrap text-primary">
             {event.content}
           </div>
           {timestamp && (
-            <MessageTimestamp timestamp={timestamp} className="mt-2" />
+            <MessageTimestamp timestamp={timestamp} className="mt-space-2" />
           )}
         </div>
       </ExpandableMessageChip>
