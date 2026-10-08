@@ -500,6 +500,8 @@ async function handoffThreadToWorktree(threadId, params) {
   const branch = await validBranchName(repo, params.branch);
   if (!branch) throw new Error("A valid branch name is required");
   const ref = (await localBranches(repo)).find((it) => it.name === branch);
+  if (params.user_checkout)
+    return moveThreadToUserCheckout(thread, repo, ref ?? { name: branch });
   if (ref?.current || ref?.worktreePath)
     return followCheckedOutBranch(thread, repo, ref);
   if (thread.worktreePath)
@@ -537,6 +539,22 @@ async function followCheckedOutBranch(thread, repo, ref) {
   await moveThreadWorkspace(thread, target);
   sendLocalThreadsChanged();
   return { worktree_path: target ?? repo, branch: ref.name };
+}
+
+/** Switches the user's own checkout to `ref`, as the project branch picker does, and moves the thread there. */
+async function moveThreadToUserCheckout(thread, repo, ref) {
+  if (ref.worktreePath)
+    throw new Error(
+      `“${ref.name}” is checked out in the worktree ${ref.worktreePath}, so it cannot also be checked out in ${repo}.`,
+    );
+  await assertWorkspaceFree(repo, thread.id);
+  if (!ref.current) {
+    await git(repo, ["fetch", "origin", ref.name], null, 60_000).catch(
+      (error) => console.warn("Could not fetch the branch", error),
+    );
+    await checkoutBranch(repo, ref.name);
+  }
+  return followCheckedOutBranch(thread, repo, { ...ref, current: true });
 }
 
 /** Prevent branch switches and worktree reuse from disrupting running agents. */
