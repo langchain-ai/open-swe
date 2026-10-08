@@ -12,7 +12,12 @@ import {
   DialogPopup,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { api, type AuditLog, type AuditLogFilters } from "@/lib/api"
+import {
+  api,
+  type AuditLog,
+  type AuditLogFilters,
+  type ExpeditedExclusions,
+} from "@/lib/api"
 
 const DAY = 24 * 60 * 60 * 1000
 const FILTERS = [
@@ -153,8 +158,85 @@ function AuditDetails({ log }: { log: AuditLog }) {
             )}
           </section>
         )}
+        {meta.expedited_exclusions != null && (
+          <ExclusionsSection exclusions={meta.expedited_exclusions} />
+        )}
       </div>
     </>
+  )
+}
+
+function ExclusionsSection({
+  exclusions,
+}: {
+  exclusions: ExpeditedExclusions
+}) {
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-medium">
+        Excluded under .open-swe/APPROVALS.md
+      </h3>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-3 text-xs">
+        {(
+          [
+            ["Pull request ID", exclusions.pull_request_id ?? "Not stored"],
+            ["Base SHA", exclusions.base_sha],
+            ["Head SHA", exclusions.head_sha],
+            ["APPROVALS.md SHA-256", exclusions.approvals_md_sha256],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label} className="contents">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="font-mono break-all">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="text-muted-foreground">
+            <tr>
+              <th className="p-2">File</th>
+              <th className="p-2">Hunk</th>
+              <th className="p-2">Lines</th>
+              <th className="p-2">Guideline</th>
+              <th className="p-2">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {exclusions.hunks.length > 0
+              ? exclusions.hunks.map((hunk, index) => (
+                  <tr
+                    key={`${hunk.path}:${hunk.digest}:${index}`}
+                    className="border-t"
+                  >
+                    <td className="p-2 font-mono break-all">{hunk.path}</td>
+                    <td className="p-2 font-mono break-all">
+                      {hunk.header || "Whole file"}
+                    </td>
+                    <td className="p-2 whitespace-nowrap">
+                      +{hunk.additions} −{hunk.deletions}
+                    </td>
+                    <td className="p-2">{hunk.guideline}</td>
+                    <td className="p-2">{hunk.reason}</td>
+                  </tr>
+                ))
+              : exclusions.requested.map((request, index) => (
+                  <tr key={`${request.path}:${index}`} className="border-t">
+                    <td className="p-2 font-mono break-all">{request.path}</td>
+                    <td className="p-2 font-mono break-all">
+                      {request.hunks.length > 0
+                        ? `Starting at ${request.hunks.join(", ")}`
+                        : "Whole file"}
+                    </td>
+                    <td className="p-2">Not resolved</td>
+                    <td className="p-2">{request.guideline}</td>
+                    <td className="p-2">{request.reason}</td>
+                  </tr>
+                ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }
 

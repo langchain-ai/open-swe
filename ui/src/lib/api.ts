@@ -51,7 +51,30 @@ export interface AuditLog {
         after: boolean | number | "[REDACTED]" | null
       }
     > | null
+    expedited_exclusions: ExpeditedExclusions | null
   }
+}
+
+export interface ExpeditedExclusions {
+  pull_request_id: string | null
+  base_sha: string
+  head_sha: string
+  approvals_md_sha256: string
+  requested: {
+    path: string
+    hunks: number[]
+    guideline: string
+    reason: string
+  }[]
+  hunks: {
+    path: string
+    digest: string
+    header: string
+    additions: number
+    deletions: number
+    guideline: string
+    reason: string
+  }[]
 }
 
 export interface AuditLogsPage {
