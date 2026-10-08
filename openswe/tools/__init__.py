@@ -18,6 +18,7 @@ _TOOL_MODULES = {
     "expose_port": ".expose_port",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
+    "get_human_review_status": ".request_human_review",
     "get_thread": ".threads",
     "http_request": ".http_request",
     "list_automations": ".automations",
@@ -97,6 +98,7 @@ __all__ = [
     "expose_port",
     "fetch_review_diff",
     "fetch_url",
+    "get_human_review_status",
     "get_thread",
     "http_request",
     "list_automations",
@@ -216,6 +218,7 @@ if TYPE_CHECKING:
         assign_human_reviewer,
         auto_assign_human_reviewer,
         dismiss_human_review_request,
+        get_human_review_status,
         request_human_review,
     )
     from openswe.tools.request_service_connection import request_service_connection

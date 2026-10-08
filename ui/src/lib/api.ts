@@ -1943,6 +1943,32 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
     ),
+  getPullRequestLabels: (owner: string, repo: string, number: number) =>
+    request<{
+      available: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+      selected: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+    }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`
+    ),
+  changePullRequestLabel: (
+    owner: string,
+    repo: string,
+    number: number,
+    name: string,
+    selected: boolean
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`,
+      { method: "PATCH", body: JSON.stringify({ name, selected }) }
+    ),
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/preview`

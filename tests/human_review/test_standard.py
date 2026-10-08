@@ -66,6 +66,66 @@ async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -
     )
 
 
+async def test_decline_only_withdraws_the_users_pending_pick() -> None:
+    from openswe.human_review.standard import decline
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    picked = User()
+    participant = HumanReviewParticipant(user_id=picked.id, decision="picked")
+    participant.user = picked
+    request.participants.append(participant)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("openswe.human_review.lifecycle.repo_token", AsyncMock(return_value=None)),
+        patch("openswe.human_review.lifecycle.refresh_card", AsyncMock()),
+        patch("openswe.human_review.standard.start_auto_assign", AsyncMock()) as rotate,
+    ):
+        await decline(request, User(), "Away or unavailable")
+        assert participant.decision == "picked"
+        rotate.assert_not_awaited()
+        await decline(request, picked, "Away or unavailable")
+        assert participant.decision == "expired"
+        rotate.assert_awaited_once()
+        await decline(request, picked, "Away or unavailable")
+        assert rotate.await_count == 1
+
+
+async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
+    from openswe.human_review.standard import expire_picks, snooze
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    user = User()
+    pick = HumanReviewParticipant(user_id=user.id, decision="picked")
+    pick.user = user
+    request.participants.append(pick)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch("openswe.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("openswe.human_review.standard._assignment_minutes", AsyncMock(return_value=120)),
+    ):
+        await snooze(request, User(), "1 hour")
+        assert pick.joined_at is None
+        await snooze(request, user, "2 days")
+        assert pick.joined_at is not None and pick.joined_at > datetime.now(UTC)
+        assert await expire_picks(request) == "accepted"
+        assert pick.decision == "picked"
+
+
 async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
     from openswe.human_review.picking import Pick
     from openswe.human_review.standard import RequestResult, _auto_assign
@@ -86,7 +146,7 @@ async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
         ),
         patch("openswe.human_review.standard._wake_picker", AsyncMock()) as wake,
     ):
-        assert (await _auto_assign(request, asked=True)).status == "claimed"
+        assert (await _auto_assign(request, asked=True, trigger=None)).status == "claimed"
     wake.assert_not_awaited()
 
 

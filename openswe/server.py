@@ -206,6 +206,7 @@ from openswe.tools import (
     expedite_pr_approval,
     expose_port,
     fetch_url,
+    get_human_review_status,
     get_thread,
     http_request,
     link_pull_request,
@@ -546,6 +547,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "assign_human_reviewer",
         "auto_assign_human_reviewer",
         "dismiss_human_review_request",
+        "get_human_review_status",
         "manage_baby_sit",
         "listen_events",
         "manage_thread",
@@ -1776,6 +1778,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         assign_human_reviewer,
         auto_assign_human_reviewer,
         dismiss_human_review_request,
+        get_human_review_status,
         open_pull_request,
         link_pull_request,
         *(
@@ -1838,6 +1841,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 assign_human_reviewer,
                 auto_assign_human_reviewer,
                 dismiss_human_review_request,
+                get_human_review_status,
             )
         ]
     if (

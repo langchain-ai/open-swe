@@ -525,7 +525,8 @@ async def slack_webhook(
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
 
-    # Watching a review channel post never takes over the message's own routing.
+    # Watching a review channel post never takes over the message's own routing, and a post
+    # that mentions Open SWE is the agent's to handle, or both would open a review request.
     if (
         not is_message_update
         and allowed_bot is None
@@ -536,6 +537,7 @@ async def slack_webhook(
         and not reply_thread_ts
         and user_id
         and "/pull/" in text
+        and not (bot_user_id and f"<@{bot_user_id}>" in text)
     ):
         background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
 
@@ -859,6 +861,11 @@ async def slack_interactivity(
         and interaction.view.callback_id == expedited_review.CHANNEL_MODAL
     ):
         return expedited_review.handle_picker_submission(interaction, background_tasks)
+    if (
+        interaction.type == "view_submission"
+        and interaction.view.callback_id in human_review.PICK_MODALS
+    ):
+        return await human_review.handle_pick_modal_submission(interaction, background_tasks)
     if interaction.type == "block_actions" and any(
         action.action_id == expedited_review.CHANNEL_SELECT_ACTION for action in interaction.actions
     ):

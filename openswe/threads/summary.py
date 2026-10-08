@@ -107,8 +107,8 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
-    """A `/oswe` question thread: readable and promptable, but kept out of thread lists."""
-    return metadata.get("unlisted") is True
+    """Threads that remain accessible directly but stay out of thread lists."""
+    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
 
 
 def thread_is_readable(
