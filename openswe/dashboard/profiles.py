@@ -3,7 +3,7 @@
 Storage is split into two records to avoid the read-modify-write race
 between profile-edit writes and OAuth-callback token refreshes:
 
-* ``profile`` — user-editable settings (model, effort, default_repo).
+* ``profile`` — user-editable settings (default_repo, branch, PR behavior).
 * ``github_oauth_token`` — encrypted GitHub OAuth access token + email.
 
 Each upsert only touches its own record, so the two flows can't clobber
