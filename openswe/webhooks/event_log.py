@@ -1,4 +1,4 @@
-"""Append-only log of verified GitHub, Slack, and Linear webhook deliveries, and Open SWE's own decisions."""
+"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries, and Open SWE's own decisions."""
 
 import asyncio
 import json
@@ -19,7 +19,7 @@ from openswe.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
-type WebhookSource = Literal["github", "slack", "linear"]
+type WebhookSource = Literal["github", "slack", "linear", "deployment"]
 type EventSource = WebhookSource | Literal["openswe"]
 
 RETAINED_DAYS = 2
@@ -237,12 +237,16 @@ class EventLog:
         event_type: str = "",
         delivery_id: str = "",
         refs: EventRefs | None = None,
-    ) -> None:
-        """Log, then wake subscribed threads. Never raises: the delivery is still handled."""
+    ) -> bool:
+        """Log, then wake subscribed threads.
+
+        Never raises. False means the row was not stored, so a caller that must
+        not drop the delivery can ask the sender to retry.
+        """
         from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
 
         if not configured():
-            return
+            return False
         if source == "slack":
             from openswe.slack.channels import SlackChannel
 
@@ -251,9 +255,9 @@ class EventLog:
                 channel = await SlackChannel.load(channel_id)
             except Exception:
                 logger.warning("Checking event log Slack channel failed", exc_info=True)
-                return
+                return True
             if channel is None or not channel.details.publishes_events:
-                return
+                return True
         payload = cls._decode(request, body)
         action = payload.get("action") if isinstance(payload, dict) else None
         if event_type and isinstance(action, str) and action:
@@ -262,13 +266,14 @@ class EventLog:
             source, request.url.path, event_type, delivery_id, payload, refs or EventRefs()
         )
         if event is None:
-            return
+            return False
         from openswe.analytics.segment import record_webhook
 
         task = asyncio.create_task(record_webhook(event))
         _SEGMENT_TASKS.add(task)
         task.add_done_callback(_SEGMENT_TASKS.discard)
         await EventSubscription.deliver(event)
+        return True
 
     @classmethod
     async def emit(cls, event_type: str, payload: JsonValue, refs: EventRefs) -> None:

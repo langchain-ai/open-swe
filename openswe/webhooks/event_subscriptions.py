@@ -180,6 +180,8 @@ class EventSummary(BaseModel):
             return cls._slack(event, _SlackDelivery.model_validate(payload))
         if event.source == "openswe":
             return cls._openswe(event, _OpenSweDecision.model_validate(payload))
+        if event.source == "deployment":
+            return cls._deployment(event, payload)
         return cls._linear(event, _LinearDelivery.model_validate(payload))
 
     @classmethod
@@ -253,6 +255,24 @@ class EventSummary(BaseModel):
             trusted=event.user_id is not None,
             from_open_swe=bool(own_user) and message.user_id == own_user,
             slack_channel_id=message.channel_id,
+        )
+
+    @classmethod
+    def _deployment(cls, event: LoggedEvent, payload: dict[str, JsonValue]) -> Self:
+        """A verified deploy. ``from_open_swe`` stays false so a subscription can wake."""
+        target = payload.get("target")
+        commits = payload.get("commits")
+        count = len(commits) if isinstance(commits, list) else 0
+        return cls(
+            source="deployment",
+            event_type=event.event_type,
+            target=target.strip() if isinstance(target, str) else "",
+            status="deployed",
+            body=(
+                "This deploy includes the merge commit the thread subscribed for "
+                f"({count} commits)."
+            ),
+            trusted=True,
         )
 
     @classmethod

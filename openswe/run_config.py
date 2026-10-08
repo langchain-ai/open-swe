@@ -129,6 +129,11 @@ class RunConfig(BaseModel):
     diff_text: str | None = None
     diff_line_set: dict[str, Any] | None = None
 
+    # A review guide run that only prepares chunks ahead of the reader, and may not post
+    review_guide_prefetch: bool = False
+    # The review guide message whose "Looks good" this run records before the model runs.
+    review_guide_approve_ts: str = ""
+
     # Reviewer run shape
     reviewer_event: str | None = None
     reviewer_thread_id: str | None = None

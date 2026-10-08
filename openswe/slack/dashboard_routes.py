@@ -4,6 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Path
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.slack.allowed_bots import (
     ALLOWED_SLACK_BOTS,
@@ -96,6 +97,7 @@ async def api_allowed_slack_bot_directory(
 
 
 @router.post("/slack/allowed-bots")
+@audit_endpoint
 async def api_allow_slack_bot(
     body: AllowSlackBot,
     admin: dict[str, Any] = ADMIN_DEP,
@@ -104,6 +106,7 @@ async def api_allow_slack_bot(
 
 
 @router.delete("/slack/allowed-bots/{team_id}/{bot_id}")
+@audit_endpoint
 async def api_remove_allowed_slack_bot(
     team_id: str,
     bot_id: str,
