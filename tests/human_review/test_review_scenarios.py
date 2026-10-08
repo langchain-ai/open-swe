@@ -79,9 +79,7 @@ async def test_two_unaccepted_picks_escalate_to_the_author(scenario: ReviewScena
 
         with scenario.step("Carol lets her pick lapse too, two of her work hours later"):
             await scenario.wait(hours=2)
-            scenario.expect(
-                overdue(carol, cause="rotation_exhausted"), dm_to(carol, "review_reminder")
-            )
+            scenario.expect(overdue(carol, cause="rotation_exhausted"))
 
         with scenario.step("It is 06:00 in New York, so Ada hears when her day starts at 09:00"):
             await scenario.wait(hours=3)

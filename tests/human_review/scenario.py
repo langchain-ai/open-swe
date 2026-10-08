@@ -401,6 +401,20 @@ class ReviewScenario(Scenario):
         ]
 
     @invariant
+    def only_accepted_reviewers_are_reminded(self) -> list[str]:
+        """Nobody is reminded to submit a review they never accepted."""
+        accepted = {
+            login
+            for _, logins in self._decisions_of("reviewer_joined", "accepted_pick")
+            for login in logins
+        }
+        return [
+            f"{m.target} was reminded to submit a review they never accepted"
+            for m in self.timeline
+            if m.kind == "message" and m.label == "review_reminder" and m.target not in accepted
+        ]
+
+    @invariant
     def released_picks_lose_their_buttons(self) -> list[str]:
         """Once someone is released, every pick DM they got has been edited."""
         found: list[str] = []

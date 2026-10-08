@@ -580,6 +580,7 @@ async def claim(
         ],
     )
     if accepting:
+        await _schedule(added, f"remind:{reviewer.user.id}", timedelta(0))
         await _check_overdue(added, str(reviewer.user.id))
         return Outcome(
             f"You accepted the review of {label}. It merges once every reviewer approves on GitHub."
@@ -789,7 +790,6 @@ async def _notify_pick(request: HumanReviewRequest, user: User, reason: str) -> 
         user,
         f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}",
     )
-    await _schedule(request, f"remind:{user.id}", timedelta(0))
 
 
 async def _start_held_pick(request: HumanReviewRequest, user_id: str) -> str:
@@ -1337,13 +1337,19 @@ async def _wake_picker(
 
 
 async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
+    """Remind a reviewer Open SWE picked who accepted but has not reviewed yet.
+
+    A pick not yet accepted is asked to accept, not to review; its window handles it.
+    """
     try:
         participant = request.participant(UUID(user_id))
     except ValueError:
         return "invalid_reviewer"
+    if participant is not None and participant.decision == "picked":
+        return "not_accepted"
     if (
         participant is None
-        or participant.decision not in ("picked", "review")
+        or participant.decision != "review"
         or not participant.assigned_by_agent
         or participant.joined_at is None
         or not participant.user.slack_user_id
@@ -1399,7 +1405,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
             or row.state != "open"
             or current is None
             or not current.assigned_by_agent
-            or current.decision not in ("picked", "review")
+            or current.decision != "review"
             or current.joined_at != participant.joined_at
             or row.run_config.get(marker)
         ):
