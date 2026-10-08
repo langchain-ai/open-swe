@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import type {
+  ManagedToolsConnectCard,
   ManagedToolsGatewayStatus,
   ManagedToolsMissingCredential,
 } from "@/lib/api"
@@ -14,7 +15,7 @@ import { ConnectLangSmithButton } from "./ConnectionsSection"
 export const MANAGED_TOOLS_KEY = ["myManagedTools"]
 
 /** Opens LMT's consent page in a popup and re-checks the gateways when the person returns. */
-function useConnectPopup() {
+export function useConnectPopup(card?: ManagedToolsConnectCard) {
   const qc = useQueryClient()
   const pending = useRef(false)
   const [connecting, setConnecting] = useState<string | null>(null)
@@ -41,7 +42,7 @@ function useConnectPopup() {
       slug: string
       popup: Window
     }) => {
-      const result = await api.connectManagedTool(gatewayId, slug)
+      const result = await api.connectManagedTool(gatewayId, slug, card)
       if (result.url) {
         pending.current = true
         popup.location.replace(result.url)
@@ -74,7 +75,7 @@ function useConnectPopup() {
   }
 }
 
-function MissingRow({
+export function MissingRow({
   gatewayId,
   credential,
   connecting,
