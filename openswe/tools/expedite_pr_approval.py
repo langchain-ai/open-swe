@@ -14,7 +14,7 @@ from openswe.expedited_review.eligibility import (
     fingerprint_matches,
 )
 from openswe.github.comments import derive_pr_state
-from openswe.github.http import GitHubClient
+from openswe.github.http import GitHubClient, or_none
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.github.token import resolve_github_token
@@ -148,7 +148,7 @@ async def expedite_pr_approval(
         return _failure(f"GitHub authentication failed: {exc}")
     async with GitHubClient.connect(token=token) as github:
         pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)
-        pr = await pull.pull()
+        pr = await or_none(pull.pull())
         files = await ChangedFile.of_pull(pull) if pr else None
     if not pr:
         return _failure("Pull request is unavailable")

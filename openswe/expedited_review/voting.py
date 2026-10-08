@@ -16,7 +16,12 @@ from openswe.dashboard.profiles import get_valid_access_token
 from openswe.expedited_review.channels import sendable_channel, still_internal
 from openswe.expedited_review.eligibility import ChangedFile, fingerprint_matches
 from openswe.expedited_review.reviews import github_token_hint, submit_approval
-from openswe.github.http import GitHubAppUnavailable, GitHubClient, GitHubSignInRequired
+from openswe.github.http import (
+    GitHubAppUnavailable,
+    GitHubClient,
+    GitHubSignInRequired,
+    or_none,
+)
 from openswe.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from openswe.human_review.clicks import answer_click
 from openswe.human_review.lifecycle import (
@@ -116,7 +121,7 @@ async def _submit_review(approval: HumanReviewRequest, voter_user_id: UUID) -> s
     try:
         async with GitHubClient.as_app(pr.owner, pr.repo) as github:
             pull = github.repo(pr.owner, pr.repo).pull_request(pr.number)
-            head_sha = await pull.head_sha()
+            head_sha = await or_none(pull.head_sha())
             files = await ChangedFile.of_pull(pull)
     except GitHubAppUnavailable:
         return unavailable

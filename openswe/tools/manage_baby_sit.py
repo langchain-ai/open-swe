@@ -7,7 +7,7 @@ from langgraph.config import get_config
 
 from openswe.baby_sit import record_retry, start_watch, stop_watch, watch_key
 from openswe.github.app import get_github_app_installation_id_for_repo
-from openswe.github.http import GitHubClient
+from openswe.github.http import GitHubClient, or_none
 from openswe.github.token import resolve_github_token
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
@@ -106,7 +106,9 @@ async def manage_baby_sit(
     except Exception as exc:
         return {"success": False, "error": f"GitHub authentication failed: {exc}"}
     async with GitHubClient.connect(token=token) as github:
-        pr = await github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number).pull()
+        pr = await or_none(
+            github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number).pull()
+        )
     if not pr:
         return {"success": False, "error": "Pull request is unavailable"}
     if pr.get("state") != "open":

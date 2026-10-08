@@ -76,10 +76,7 @@ class ChangedFile(BaseModel):
     async def of_pull(cls, pull: PullRequestClient) -> list[ChangedFile] | None:
         """The PR's first ``MAX_FILES`` changed files, or ``None`` when GitHub could not say."""
         try:
-            payload = await pull.repo.get(
-                f"pulls/{pull.number}/files", {"per_page": str(MAX_FILES)}
-            )
-            return _CHANGED_FILES.validate_python(payload)
+            return _CHANGED_FILES.validate_python(await pull.files())
         except httpx2.HTTPError, ValueError, ValidationError:
             logger.warning(
                 "Could not read the pull request's changed files",

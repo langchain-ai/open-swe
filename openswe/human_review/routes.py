@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
-from openswe.github.http import GitHubClient
+from openswe.github.http import GitHubClient, or_none
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.card import mention
@@ -57,7 +57,7 @@ async def api_human_review_availability(
     await require_repo_access_for_user(str(session["sub"]), f"{owner}/{repo}")
     async with GitHubClient.as_app(owner, repo) as github:
         pull = github.repo(owner, repo).pull_request(number)
-        sha = await pull.head_sha()
+        sha = await or_none(pull.head_sha())
         if sha is None:
             raise HTTPException(404, "Pull request is unavailable")
         settings = await RepoSettings.fetch(pull.repo, ref=sha)

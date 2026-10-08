@@ -34,7 +34,13 @@ from openswe.expedited_review.readiness import (
     review_authors,
 )
 from openswe.github.codeowners import CodeOwners
-from openswe.github.http import GitHubAppUnavailable, GitHubClient, GitHubError, RepoClient
+from openswe.github.http import (
+    GitHubAppUnavailable,
+    GitHubClient,
+    GitHubError,
+    RepoClient,
+    or_none,
+)
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
@@ -314,7 +320,7 @@ async def record_pull_request(
     pull: PullRequestClient,
 ) -> tuple[PullRequest, PullRequestPayload] | None:
     """Fetch the pull request and save what a review request shows of it; ``None`` if unavailable."""
-    payload = await pull.pull()
+    payload = await or_none(pull.pull())
     if payload is None:
         return None
     details = PullRequestPayload.model_validate(payload)
@@ -445,7 +451,7 @@ async def _request_github_review(request: HumanReviewRequest, login: str) -> boo
     pr = request.pull_request
     try:
         async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-            await pull.repo.post(f"pulls/{pull.number}/requested_reviewers", {"reviewers": [login]})
+            await pull.request_reviewers([login])
     except GitHubAppUnavailable:
         return False
     except GitHubError as refused:
@@ -828,7 +834,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
         if row is None or row.state != "open":
             return True
         result = await merge_pull_request(
-            row, snapshot.head_sha, snapshot.allowed_merge_methods, pull.repo
+            row, snapshot.head_sha, snapshot.allowed_merge_methods, pull
         )
         if result.status != "merged":
             row.detail = result.message
@@ -1001,7 +1007,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
     pr = request.pull_request
     try:
         async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-            details = await pull.pull()
+            details = await or_none(pull.pull())
             authors = await review_authors(pull) if details is not None else None
     except GitHubAppUnavailable:
         details = authors = None

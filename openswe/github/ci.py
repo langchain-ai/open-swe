@@ -69,8 +69,8 @@ class RequiredCheck:
     async def for_branch(cls, repo: RepoClient, branch: str) -> set[Self] | None:
         """Checks ``branch`` requires, from branch protection and rulesets; read access suffices."""
         try:
-            protection = _Branch.model_validate(await repo.get(f"branches/{branch}")).protection
-            rules = _BRANCH_RULES.validate_python(await repo.pages(f"rules/branches/{branch}"))
+            protection = _Branch.model_validate(await repo.branch(branch)).protection
+            rules = _BRANCH_RULES.validate_python(await repo.branch_rules(branch))
         except httpx2.HTTPError, ValueError, ValidationError:
             logger.warning(
                 "Failed to read required checks",

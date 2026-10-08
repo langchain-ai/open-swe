@@ -22,7 +22,7 @@ from openswe.github.ci import (
     is_completed_ci_payload,
 )
 from openswe.github.comments import post_github_comment
-from openswe.github.http import GitHubAppUnavailable, GitHubClient
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.human_review.requests import HumanReviewRequest
@@ -452,7 +452,7 @@ async def _evaluate_watch(key: str) -> str:
 
 async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
     key = watch.key
-    pr = await pull.pull()
+    pr = await or_none(pull.pull())
     if not pr:
         return await _record_evaluation_error(watch, "pull request unavailable")
     # A merged or closed PR already says so where people look; the watch just ends.

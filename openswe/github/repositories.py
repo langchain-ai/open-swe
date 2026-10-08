@@ -60,7 +60,7 @@ class Repository(Base):
             return repository.default_branch
         try:
             async with GitHubClient.as_app(owner, name) as github:
-                payload = await github.get(f"repos/{full_name}")
+                info = await github.repo(owner, name).info()
         except GitHubAppUnavailable, httpx2.HTTPError, ValueError:
             logger.warning(
                 "Could not resolve repository default branch",
@@ -68,7 +68,7 @@ class Repository(Base):
                 exc_info=True,
             )
             return ""
-        value = payload.get("default_branch") if isinstance(payload, dict) else None
+        value = info.get("default_branch")
         if isinstance(value, str) and value:
             await cls(full_name=full_name, default_branch=value).save()
             return value

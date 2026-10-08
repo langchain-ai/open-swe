@@ -523,6 +523,17 @@ class RepoClient:
             raise ValueError("GitHub answered the branch without an object")
         return payload
 
+    async def branch_rules(self, name: str) -> list[dict[str, Any]]:
+        """The rulesets' rules that apply to branch ``name``."""
+        return await self.pages(f"rules/branches/{quote(name, safe='')}")
+
+    async def commits(self, *, path: str, since: str, ref: str | None = None) -> object:
+        """The first 100 commits since ``since`` that touched ``path``, on ``ref`` or the default."""
+        params = {"path": path, "since": since, "per_page": "100"}
+        if ref:
+            params["sha"] = ref
+        return await self.get("commits", params)
+
     async def review_comment(self, comment_id: int) -> object:
         return await self.get(f"pulls/comments/{comment_id}")
 

@@ -29,7 +29,7 @@ from openswe.expedited_review.readiness import (
     review_authors,
 )
 from openswe.expedited_review.reviews import dismiss_approval
-from openswe.github.http import GitHubAppUnavailable, GitHubClient
+from openswe.github.http import GitHubAppUnavailable, or_none
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
@@ -731,7 +731,7 @@ async def _unrequest_github_review(
     request: HumanReviewRequest, pull: PullRequestClient, login: str
 ) -> None:
     try:
-        await pull.repo.delete(f"pulls/{pull.number}/requested_reviewers", {"reviewers": [login]})
+        await pull.remove_requested_reviewers([login])
     except httpx2.HTTPError:
         logger.warning(
             "GitHub review request removal did not complete",
@@ -854,14 +854,13 @@ async def withdraw_reviews(approval: HumanReviewRequest) -> None:
     """
     pr = approval.pull_request
     try:
-        async with GitHubClient.as_app(pr.owner, pr.repo) as github:
-            repo = github.repo(pr.owner, pr.repo)
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
             for stale in await HumanReviewRequest.with_standing_reviews(approval.pull_request_id):
                 async with HumanReviewRequest.locked(stale.id) as (_, row):
                     if row is None or row.state in {"open", "merged"}:
                         continue
                     for vote in row.approvals:
-                        await dismiss_approval(row, vote, repo, row.detail)
+                        await dismiss_approval(row, vote, pull, row.detail)
     except GitHubAppUnavailable:
         logger.warning(
             "No GitHub App token to dismiss expedited review approvals",
@@ -881,7 +880,7 @@ async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
         return
     try:
         async with PullRequestClient.as_app(owner, repo, number) as pull:
-            payload = await pull.pull()
+            payload = await or_none(pull.pull())
     except GitHubAppUnavailable:
         payload = None
     if payload is None:

@@ -4,7 +4,8 @@ import logging
 
 import httpx2
 
-from openswe.github.http import GitHubClient, GitHubError, GitHubSignInRequired, RepoClient
+from openswe.github.http import GitHubClient, GitHubError, GitHubSignInRequired
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.slack.client import get_slack_permalink
 from openswe.slack.code_channels import is_code_channel_session
@@ -60,7 +61,9 @@ async def submit_approval(
     payload = {"commit_id": head_sha, "event": "APPROVE", "body": await _review_body(approval)}
     try:
         async with GitHubClient.as_user(login) as github:
-            data = await github.repo(pr.owner, pr.repo).post(f"pulls/{pr.number}/reviews", payload)
+            data = (
+                await github.repo(pr.owner, pr.repo).pull_request(pr.number).create_review(payload)
+            )
     except GitHubSignInRequired:
         return f"Open SWE has no GitHub token for @{login}. {github_token_hint()}"
     except httpx2.HTTPStatusError as exc:
@@ -76,7 +79,7 @@ async def submit_approval(
 
 
 async def dismiss_approval(
-    approval: HumanReviewRequest, vote: HumanReviewParticipant, repo: RepoClient, reason: str
+    approval: HumanReviewRequest, vote: HumanReviewParticipant, pull: PullRequestClient, reason: str
 ) -> None:
     """Withdraw the GitHub review ``vote`` submitted; clears its id once GitHub confirms.
 
@@ -84,10 +87,8 @@ async def dismiss_approval(
     """
     if vote.github_review_id is None:
         return
-    path = f"pulls/{approval.pull_request.number}/reviews/{vote.github_review_id}/dismissals"
-    payload = {"message": f"Expedited review closed: {reason}", "event": "DISMISS"}
     try:
-        await repo.github.request("PUT", f"repos/{repo.full_name}/{path}", json=payload)
+        await pull.dismiss_review(vote.github_review_id, f"Expedited review closed: {reason}")
     except GitHubError as refused:
         # A review GitHub no longer has cannot count toward a merge either.
         if refused.response.status_code != 404:

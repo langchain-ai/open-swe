@@ -92,7 +92,7 @@ class RepoSettings(BaseModel):
         if not self.review_channel_rules:
             return self.review_channel.strip()
         files = TypeAdapter(list[ReviewFile]).validate_python(
-            await pull.repo.pages(f"pulls/{pull.number}/files", max_pages=_ROUTED_FILE_PAGES)
+            await pull.files(max_pages=_ROUTED_FILE_PAGES)
         )
         if len(files) >= _ROUTED_FILE_PAGES * 100:
             raise ValueError("Cannot route a pull request with an incomplete changed-file list")

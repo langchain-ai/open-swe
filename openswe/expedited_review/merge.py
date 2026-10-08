@@ -18,7 +18,7 @@ from openswe.expedited_review.eligibility import (
 )
 from openswe.expedited_review.readiness import Readiness
 from openswe.expedited_review.reviews import submit_approval
-from openswe.github.http import GitHubAppUnavailable, GitHubClient
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.lifecycle import mark_merged, retire
 from openswe.human_review.merging import MergeResult, merge_pull_request
@@ -40,12 +40,9 @@ async def _keep_approval(
         if row is None or row.state != "open":
             return None
         try:
-            await pull.repo.post(
-                f"issues/{pull.number}/comments",
-                {
-                    "body": "The diff changed after the expedited approval; the approval was "
-                    f"kept because: {reason.strip()}"
-                },
+            await pull.comment(
+                "The diff changed after the expedited approval; the approval was kept because: "
+                f"{reason.strip()}"
             )
         except httpx2.HTTPError:
             logger.warning(
@@ -143,7 +140,7 @@ async def _merge_approved(
             )
         if not row.approvals:
             return _NO_APPROVALS
-        if await pull.head_sha() != snapshot.head_sha:
+        if await or_none(pull.head_sha()) != snapshot.head_sha:
             return MergeResult(
                 "not_ready",
                 "The pull request's head changed while it was being checked. Call "
@@ -168,7 +165,7 @@ async def _merge_approved(
             if failed is not None:
                 return MergeResult("error", failed)
         result = await merge_pull_request(
-            row, snapshot.head_sha, snapshot.allowed_merge_methods, pull.repo
+            row, snapshot.head_sha, snapshot.allowed_merge_methods, pull
         )
     if result.status == "merged":
         await mark_merged(approval)

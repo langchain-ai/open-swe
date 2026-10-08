@@ -451,6 +451,28 @@ class PullRequestClient:
             {"input": {"pullRequestReviewCommentId": comment_node_id, "body": body}},
         )
 
+    async def dismiss_review(self, review_id: int, message: str) -> None:
+        await self.repo.github.request(
+            "PUT",
+            f"repos/{self.repo.full_name}/pulls/{self.number}/reviews/{review_id}/dismissals",
+            json={"message": message, "event": "DISMISS"},
+        )
+
+    async def request_reviewers(self, logins: list[str]) -> None:
+        await self.repo.post(f"pulls/{self.number}/requested_reviewers", {"reviewers": logins})
+
+    async def remove_requested_reviewers(self, logins: list[str]) -> None:
+        await self.repo.delete(f"pulls/{self.number}/requested_reviewers", {"reviewers": logins})
+
+    async def merge(self, *, sha: str, method: str, commit_message: str | None = None) -> None:
+        """Merge ``sha`` with ``method``; GitHub refusing it raises ``GitHubError``."""
+        payload: dict[str, object] = {"sha": sha, "merge_method": method}
+        if commit_message is not None:
+            payload["commit_message"] = commit_message
+        await self.repo.github.request(
+            "PUT", f"repos/{self.repo.full_name}/pulls/{self.number}/merge", json=payload
+        )
+
     async def mergeable_pull(self) -> dict[str, Any] | None:
         """Read the pull request, waiting for GitHub to decide whether it merges.
 

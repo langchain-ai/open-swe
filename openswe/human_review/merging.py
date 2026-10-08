@@ -6,7 +6,8 @@ from typing import Literal
 
 import httpx2
 
-from openswe.github.http import GitHubAppUnavailable, GitHubClient, GitHubError, RepoClient
+from openswe.github.http import GitHubAppUnavailable, GitHubClient, GitHubError
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.squash_message import SquashSource
 from openswe.human_review.requests import HumanReviewRequest
 
@@ -33,43 +34,43 @@ class MergeResult:
 
 
 async def merge_pull_request(
-    request: HumanReviewRequest, head_sha: str, allowed_methods: list[str], repo: RepoClient
+    request: HumanReviewRequest, head_sha: str, allowed_methods: list[str], pull: PullRequestClient
 ) -> MergeResult:
     """Merge ``head_sha`` with the first method the repository allows; GitHub's answer is final.
 
     Merges with an App token narrowed to merging this repository when one can be minted,
-    else through ``repo``.
+    else through ``pull``.
     """
+    repo = pull.repo
     try:
         async with GitHubClient.as_app(
             repo.owner, repo.name, permissions=_MERGE_PERMISSIONS
         ) as scoped:
             return await _merge(
-                request, head_sha, allowed_methods, scoped.repo(repo.owner, repo.name)
+                request,
+                head_sha,
+                allowed_methods,
+                scoped.repo(repo.owner, repo.name).pull_request(pull.number),
             )
     except GitHubAppUnavailable:
         logger.info(
             "No merge-scoped App token; merging with the repository's",
             extra={"request_id": str(request.id)},
         )
-        return await _merge(request, head_sha, allowed_methods, repo)
+        return await _merge(request, head_sha, allowed_methods, pull)
 
 
 async def _merge(
-    request: HumanReviewRequest, head_sha: str, allowed_methods: list[str], repo: RepoClient
+    request: HumanReviewRequest, head_sha: str, allowed_methods: list[str], pull: PullRequestClient
 ) -> MergeResult:
     pr = request.pull_request
-    methods = allowed_methods or ["merge"]
-    payload: dict[str, object] = {"sha": head_sha, "merge_method": methods[0]}
+    method = (allowed_methods or ["merge"])[0]
+    message = None
     try:
-        if methods[0] == "squash":
-            source = await SquashSource.fetch(repo.github.http, pr.owner, pr.repo, pr.number)
+        if method == "squash":
+            source = await SquashSource.fetch(pull.repo.github.http, pr.owner, pr.repo, pr.number)
             message = source.message() if source is not None else None
-            if message is not None:
-                payload["commit_message"] = message
-        await repo.github.request(
-            "PUT", f"repos/{repo.full_name}/pulls/{pr.number}/merge", json=payload
-        )
+        await pull.merge(sha=head_sha, method=method, commit_message=message)
     except GitHubError as refused:
         return MergeResult(
             "refused",

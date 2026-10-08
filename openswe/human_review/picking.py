@@ -189,12 +189,11 @@ async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) 
     gate = asyncio.Semaphore(_HISTORY_CONCURRENCY)
 
     async def authors(path: str) -> set[str]:
-        params = {"path": path, "since": since, "per_page": "100"}
-        if ref:
-            params["sha"] = ref
         async with gate:
             try:
-                commits = _COMMITS.validate_python(await repo.get("commits", params))
+                commits = _COMMITS.validate_python(
+                    await repo.commits(path=path, since=since, ref=ref)
+                )
             except httpx2.HTTPError, ValueError, ValidationError:
                 logger.warning(
                     "Could not read a changed file's history",
