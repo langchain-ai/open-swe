@@ -883,7 +883,7 @@ async def _process_slack_mention_impl(
                 user_timezone = timezone_value.strip()
         await persist_display_name(user_id, user_name)
 
-    thread_metadata = await common.authorize_github_thread(
+    await common.authorize_github_thread(
         thread_id, (await slack_login(user_id, user_email) or "") if allowed_bot is None else ""
     )
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
@@ -959,16 +959,6 @@ async def _process_slack_mention_impl(
         user_names_by_id[user_id] = user_name
     logins_by_user_id = await _slack_logins_by_user_id([*context_user_ids, user_id])
     person_ids_by_user_id = await _slack_person_ids_by_user_id([*context_user_ids, user_id])
-    if common.thread_is_private(thread_metadata):
-        context_messages = [
-            message
-            for message in context_messages
-            if common.thread_is_promptable(
-                thread_metadata, logins_by_user_id.get(str(message.get("user") or ""), "")
-            )
-        ]
-        if not message_update:
-            source_messages = context_messages
     clean_text = (
         slack_utils.replace_bot_mention_with_username(
             text, bot_user_id, common.SLACK_BOT_USERNAME

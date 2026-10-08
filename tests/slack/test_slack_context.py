@@ -514,6 +514,60 @@ async def test_slack_files_reach_bound_sandbox_with_thread_environment(
     assert "/workspace/.open-swe/slack-files/bundle.zip" in str(run["input"]["messages"])
 
 
+@pytest.mark.parametrize("requester_login", ["mason-gh", "teammate-gh"])
+async def test_private_slack_thread_keeps_shared_history_only_for_authorized_requester(
+    monkeypatch, fake_store, requester_login
+):
+    from fastapi import HTTPException
+
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    client = slack_webhooks.get_langgraph_client()
+    client.store = fake_store
+    client.threads = _FakeThreadsClient(
+        thread={"metadata": {"source": "slack", "visibility": "private", "owner_login": "mason-gh"}}
+    )
+    request = SlackRequest(
+        channel_id="C123",
+        thread_ts="1700000000.000050",
+        event_ts="1700000000.000100",
+        thread_id="mapped-thread",
+        user_id="U123",
+        text="<@UBOT> look at this instead",
+        bot_user_id="UBOT",
+    )
+    monkeypatch.setattr(
+        webhook_common.User,
+        "login_for_slack",
+        AsyncMock(side_effect=lambda uid: requester_login if uid == "U123" else "arthur-gh"),
+    )
+    monkeypatch.setattr(
+        webhook_common,
+        "fetch_slack_thread_messages",
+        AsyncMock(
+            return_value=[
+                {
+                    "ts": "1700000000.000050",
+                    "text": "Check self-granted permissions",
+                    "user": "U456",
+                },
+                {"ts": request.event_ts, "text": request.text, "user": request.user_id},
+            ]
+        ),
+    )
+    if requester_login != "mason-gh":
+        with pytest.raises(HTTPException) as exc:
+            await slack_webhooks._process_slack_mention_impl(request, None)
+        assert exc.value.status_code == 404
+        assert "run_create" not in captured
+        return
+
+    await slack_webhooks._process_slack_mention_impl(request, None)
+
+    messages = str(captured["run_create"]["kwargs"]["input"]["messages"])
+    assert "Check self-granted permissions" in messages
+
+
 @pytest.mark.parametrize("failure", ["account", "public-persistence", "private-persistence"])
 async def test_slack_file_provisioning_requires_account_and_persisted_thread(
     monkeypatch, slack_file_mention, failure
