@@ -10802,7 +10802,79 @@
       }
     },
     "/dashboard/api/my-managed-tools/{gateway}/connect/{slug}": {
+      "get": {
+        "description": "A Slack card button: mint the consent link here, for the signed-in owner only.",
+        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools__gateway__connect__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": true,
+            "schema": {
+              "title": "Card",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Connect Managed Tool From Card",
+        "tags": [
+          "dashboard"
+        ]
+      },
       "post": {
+        "description": "A consent link for one service; from a thread's card, the thread resumes once connected.",
         "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools__gateway__connect__slug__post",
         "parameters": [
           {
@@ -10821,6 +10893,38 @@
             "schema": {
               "title": "Slug",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Thread Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Card"
             }
           }
         ],

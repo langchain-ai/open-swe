@@ -13,6 +13,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Literal
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -36,11 +37,17 @@ from openswe.mcp.transport import mcp_http_client
 logger = logging.getLogger(__name__)
 
 GATEWAYS_PATH = "/v1/managed-tools/gateways"
+CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
 CONNECTION_NAME = "lmt"
 _TIMEOUT_SECONDS = 30
 _MAX_PAGES = 5
+# LangSmith holds each status request open this long while consent is pending.
+_CONSENT_WAIT_SECONDS = 25
+# Consent links expire after ten minutes; stop waiting shortly after.
+_CONSENT_DEADLINE_SECONDS = 11 * 60
 
 type CredentialKind = Literal["oauth", "secret"]
+type ConsentOutcome = Literal["completed", "failed", "expired"]
 
 
 class ManagedToolsError(ValueError):
@@ -60,13 +67,21 @@ class MissingCredential(BaseModel):
     kind: CredentialKind
 
 
+class ConsentLink(BaseModel):
+    """LMT's single-use consent link for one service; whoever completes it connects the
+    service to the token owner's account, so it goes only to that person."""
+
+    url: str
+    auth_id: str | None = None
+
+
 class GatewayCredentialsRequired(ManagedToolsError):
     """LMT's 428: every service in the gateway this person still has to connect."""
 
-    def __init__(self, missing: list[MissingCredential], urls: dict[str, str]) -> None:
+    def __init__(self, missing: list[MissingCredential], links: dict[str, ConsentLink]) -> None:
         super().__init__("Connect every service in this gateway before using its tools")
         self.missing = missing
-        self.urls = urls
+        self.links = links
 
 
 class Gateway(BaseModel):
@@ -117,7 +132,7 @@ def _client() -> httpx.AsyncClient:
 def _credentials_required(body: object) -> GatewayCredentialsRequired:
     entries = body.get("credentials") if isinstance(body, dict) else None
     missing: list[MissingCredential] = []
-    urls: dict[str, str] = {}
+    links: dict[str, ConsentLink] = {}
     for entry in entries if isinstance(entries, list) else []:
         if not isinstance(entry, dict) or not isinstance(entry.get("slug"), str):
             continue
@@ -130,8 +145,11 @@ def _credentials_required(body: object) -> GatewayCredentialsRequired:
         )
         url = entry.get("verification_url")
         if kind == "oauth" and isinstance(url, str) and url.startswith("https://"):
-            urls[slug] = url
-    return GatewayCredentialsRequired(missing, urls)
+            auth_id = entry.get("auth_id")
+            links[slug] = ConsentLink(
+                url=url, auth_id=auth_id if isinstance(auth_id, str) else None
+            )
+    return GatewayCredentialsRequired(missing, links)
 
 
 def _failure(response: httpx.Response) -> ManagedToolsError:
@@ -275,8 +293,8 @@ async def gateway_status(login: str, gateway: str, workspaces: list[str]) -> Gat
     return GatewayStatus(gateway=summary, workspaces=workspaces, ready=True, tool_count=count)
 
 
-async def connect_url(login: str, gateway: str, slug: str) -> str | None:
-    """LMT's consent link for one service in the gateway; None when it is connected."""
+async def connect_link(login: str, gateway: str, slug: str) -> ConsentLink | None:
+    """A fresh consent link for one service in the gateway; None when it is connected."""
     try:
         await _with_session(login, gateway, _tool_count)
     except GatewayCredentialsRequired as required:
@@ -284,11 +302,31 @@ async def connect_url(login: str, gateway: str, slug: str) -> str | None:
             raise ManagedToolsError(
                 "Set this service's API key in LangSmith, then refresh"
             ) from None
-        if slug in required.urls:
-            return required.urls[slug]
+        if slug in required.links:
+            return required.links[slug]
         if any(item.slug == slug for item in required.missing):
             raise ManagedToolsError("LangSmith did not return a consent link; retry") from None
     return None
+
+
+async def consent_outcome(login: str, auth_id: str) -> ConsentOutcome:
+    """Wait for the person to finish (or abandon) one consent link."""
+    headers = await _headers(login)
+    url = f"{langsmith_issuer()}{CONSENT_SESSIONS_PATH}/{quote(auth_id, safe='')}"
+    timeout = httpx.Timeout(_TIMEOUT_SECONDS + _CONSENT_WAIT_SECONDS)
+    async with asyncio.timeout(_CONSENT_DEADLINE_SECONDS):
+        async with mcp_http_client(langsmith_issuer(), timeout=timeout) as client:
+            while True:
+                response = await client.get(
+                    url, headers=headers, params={"wait_seconds": str(_CONSENT_WAIT_SECONDS)}
+                )
+                if not response.is_success:
+                    raise ManagedToolsError(
+                        f"Consent status unavailable (HTTP {response.status_code})"
+                    )
+                status = response.json().get("status")
+                if status in ("completed", "failed", "expired"):
+                    return status
 
 
 class _GatewayConnection(MCPConnection):

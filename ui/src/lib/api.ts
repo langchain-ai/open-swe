@@ -459,6 +459,12 @@ export interface ManagedToolsGatewayStatus {
   missing: ManagedToolsMissingCredential[]
 }
 
+/** The card the agent offered in a thread, identified by its tool call. */
+export interface ManagedToolsConnectCard {
+  threadId: string
+  cardId: string
+}
+
 export interface ManagedToolsView {
   configured: boolean
   langsmith_connected: boolean
@@ -1752,9 +1758,18 @@ export const api = {
   listManagedToolsGateways: () =>
     request<ManagedToolsGateway[]>("/managed-tools/gateways"),
   getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
-  connectManagedTool: (gatewayId: string, slug: string) =>
+  /** With a thread's connect card, the thread continues once every service is connected. */
+  connectManagedTool: (
+    gatewayId: string,
+    slug: string,
+    card?: ManagedToolsConnectCard
+  ) =>
     request<{ connected: boolean; url?: string | null }>(
-      `/my-managed-tools/${encodeURIComponent(gatewayId)}/connect/${encodeURIComponent(slug)}`,
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/connect/${encodeURIComponent(slug)}${
+        card
+          ? `?${new URLSearchParams({ thread_id: card.threadId, card: card.cardId })}`
+          : ""
+      }`,
       { method: "POST" }
     ),
   listAutoReviewRepos: () =>

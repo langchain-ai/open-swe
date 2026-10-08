@@ -41,6 +41,7 @@ export function toolKind(name: string): ToolKind {
   if (lowered === "task") return "task"
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
+  if (lowered === "connect_managed_tools") return "managed-tools"
   if (lowered === "linear_comment") return "linear"
   if (
     EDIT_TOOLS.has(lowered) ||

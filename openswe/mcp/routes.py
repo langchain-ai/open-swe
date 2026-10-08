@@ -4,10 +4,12 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.dashboard.oauth import frontend_base_url
+from openswe.mcp.cards import ConnectCard
 from openswe.mcp.instance import (
     delete_instance_mcp,
     discover_instance_mcp,
@@ -20,7 +22,7 @@ from openswe.mcp.managed import (
     GatewayStatus,
     LangSmithNotConnected,
     ManagedToolsError,
-    connect_url,
+    connect_link,
     gateway_id,
     gateway_status,
     list_gateways,
@@ -47,6 +49,7 @@ from openswe.mcp.workspace import (
     save_workspace_mcp,
 )
 from openswe.tool_loaders.workspace_mcp import discover_workspace_mcp
+from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.workspaces.store import slugify
 
 logger = logging.getLogger(__name__)
@@ -271,19 +274,52 @@ async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> Managed
     return ManagedToolsView(configured=True, langsmith_connected=True, gateways=statuses)
 
 
+async def _card(thread_id: str, card_id: str, login: str, gateway: str) -> ConnectCard:
+    """The connect card the agent offered this person in their thread."""
+    card = await ConnectCard.load(thread_id, card_id)
+    if card is None or not card.owned_by(login, gateway):
+        raise HTTPException(404, "Unknown connect card")
+    return card
+
+
 @managed_mcp_router.post(
     "/my-managed-tools/{gateway}/connect/{slug}", response_model=ManagedConnectResponse
 )
 async def api_connect_managed_tool(
-    gateway: str, slug: str, session: dict[str, Any] = SESSION_DEP
+    gateway: str,
+    slug: str,
+    thread_id: str | None = None,
+    card: str | None = None,
+    session: dict[str, Any] = SESSION_DEP,
 ) -> ManagedConnectResponse:
+    """A consent link for one service; from a thread's card, the thread resumes once connected."""
     try:
-        if gateway_id(gateway) not in await _gateway_workspaces():
-            raise HTTPException(404, "No workspace uses this gateway")
-        url = await connect_url(session["sub"], gateway, slug)
+        if thread_id and card:
+            link = await (await _card(thread_id, card, session["sub"], gateway)).connect(slug)
+        else:
+            if gateway_id(gateway) not in await _gateway_workspaces():
+                raise HTTPException(404, "No workspace uses this gateway")
+            link = await connect_link(session["sub"], gateway, slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
-    return ManagedConnectResponse(connected=url is None, url=url)
+    return ManagedConnectResponse(connected=link is None, url=link.url if link else None)
+
+
+@managed_mcp_router.get("/my-managed-tools/{gateway}/connect/{slug}")
+async def connect_managed_tool_from_card(
+    gateway: str,
+    slug: str,
+    thread_id: str,
+    card: str,
+    session: dict[str, Any] = SESSION_DEP,
+) -> RedirectResponse:
+    """A Slack card button: mint the consent link here, for the signed-in owner only."""
+    try:
+        link = await (await _card(thread_id, card, session["sub"], gateway)).connect(slug)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    target = link.url if link else dashboard_thread_url(thread_id) or frontend_base_url()
+    return RedirectResponse(target, status_code=302)
 
 
 router = APIRouter()

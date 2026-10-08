@@ -192,6 +192,7 @@ from openswe.tools import (
     background_execute,
     background_task,
     configure_repository,
+    connect_managed_tools,
     create_automation,
     create_sandbox_file_download_url,
     delete_automation,
@@ -610,6 +611,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
+        "connect_managed_tools",
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -717,7 +719,9 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
-async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
+async def _mcp_tools_for(
+    credential_login: str | None, workspace: str, managed_gateway: str | None
+) -> list[Any]:
     """Load the run's MCPs by tier: instance, then workspace, then the user's own.
 
     A later tier's connection replaces a same-named one from the tier before. The
@@ -726,8 +730,8 @@ async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[A
     sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
-        if gateway := (await cached_workspace_settings(workspace)).managed_tools_gateway_id:
-            sources.append(managed_mcp_source(credential_login, gateway))
+        if managed_gateway:
+            sources.append(managed_mcp_source(credential_login, managed_gateway))
     return await load_mcp_tools(*sources)
 
 
@@ -1653,11 +1657,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     cli_result_required = not stop_summary_mode and bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
     mcp_tools: list[Any] = []
+    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+    managed_gateway = (
+        (await cached_workspace_settings(workspace)).managed_tools_gateway_id
+        if credential_login and not stop_summary_mode and not local_run
+        else None
+    )
     if not stop_summary_mode and not local_run and credential_scope_known:
         async with aphase(thread_id, "factory.mcp_tools"):
-            mcp_tools = await _mcp_tools_for(
-                credential_login, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
-            )
+            mcp_tools = await _mcp_tools_for(credential_login, workspace, managed_gateway)
 
     slack_tools = [
         manage_code_channel,
@@ -1712,6 +1720,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ),
         read_user_settings,
         request_pr_review,
+        *((connect_managed_tools,) if managed_gateway else ()),
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
