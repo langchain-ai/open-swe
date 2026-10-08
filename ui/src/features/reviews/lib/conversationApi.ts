@@ -12,6 +12,7 @@ export type ConversationReviewState =
 export interface ConversationAuthor {
   login: string
   avatar_url: string
+  bot: boolean
 }
 
 interface ConversationItemBase {
@@ -32,14 +33,59 @@ export interface ConversationReview extends ConversationItemBase {
   inline_comment_count: number
 }
 
-export type ConversationItem = ConversationComment | ConversationReview
+export interface ConversationCommit {
+  kind: "commit"
+  sha: string
+  author: ConversationAuthor | null
+  created_at: string
+  message: string
+  html_url: string
+}
+
+export type ConversationItem =
+  | ConversationComment
+  | ConversationReview
+  | ConversationCommit
+
+export interface ThreadComment {
+  id: number
+  author: ConversationAuthor | null
+  created_at: string
+  body: string
+  html_url: string
+}
+
+/** An inline thread: its first comment's anchor, then every reply in order. */
+export interface ReviewThread {
+  id: number
+  node_id: string | null
+  review_id: number | null
+  path: string
+  line: number | null
+  start_line: number | null
+  side: "LEFT" | "RIGHT"
+  original_line: number | null
+  diff_hunk: string
+  outdated: boolean
+  resolved: boolean
+  comments: Array<ThreadComment>
+}
 
 export interface Conversation {
   items: Array<ConversationItem>
+  threads: Array<ReviewThread>
 }
 
-function conversationPath(owner: string, repo: string, number: number) {
-  return `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/conversation`
+export function reviewConversationQueryKey(
+  owner: string,
+  repo: string,
+  number: number
+): ReadonlyArray<string | number> {
+  return ["review-conversation", owner, repo, number]
+}
+
+function reviewPath(owner: string, repo: string, number: number) {
+  return `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
 }
 
 async function errorDetail(res: Response): Promise<string> {
@@ -55,10 +101,10 @@ async function errorDetail(res: Response): Promise<string> {
   return res.statusText || `Request failed (${res.status})`
 }
 
-async function conversationRequest<T>(
+async function conversationRequest(
   path: string,
   init: RequestInit = {}
-): Promise<T> {
+): Promise<Response> {
   const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
@@ -69,27 +115,56 @@ async function conversationRequest<T>(
     },
   })
   if (!res.ok) throw new Error(await errorDetail(res))
-  return (await res.json()) as T
+  return res
 }
 
-export function getReviewConversation(
+export async function getReviewConversation(
   owner: string,
   repo: string,
   number: number
 ): Promise<Conversation> {
-  return conversationRequest<Conversation>(
-    conversationPath(owner, repo, number)
+  const res = await conversationRequest(
+    `${reviewPath(owner, repo, number)}/conversation`
   )
+  return (await res.json()) as Conversation
 }
 
-export function postReviewConversationComment(
+export async function postReviewConversationComment(
   owner: string,
   repo: string,
   number: number,
   body: string
 ): Promise<ConversationComment> {
-  return conversationRequest<ConversationComment>(
-    `${conversationPath(owner, repo, number)}/comments`,
+  const res = await conversationRequest(
+    `${reviewPath(owner, repo, number)}/conversation/comments`,
     { method: "POST", body: JSON.stringify({ body }) }
+  )
+  return (await res.json()) as ConversationComment
+}
+
+export async function replyToReviewThread(
+  owner: string,
+  repo: string,
+  number: number,
+  commentId: number,
+  body: string
+): Promise<ThreadComment> {
+  const res = await conversationRequest(
+    `${reviewPath(owner, repo, number)}/threads/${commentId}/replies`,
+    { method: "POST", body: JSON.stringify({ body }) }
+  )
+  return (await res.json()) as ThreadComment
+}
+
+export async function setReviewThreadResolved(
+  owner: string,
+  repo: string,
+  number: number,
+  threadNodeId: string,
+  resolved: boolean
+): Promise<void> {
+  await conversationRequest(
+    `${reviewPath(owner, repo, number)}/threads/${encodeURIComponent(threadNodeId)}/resolution`,
+    { method: "PUT", body: JSON.stringify({ resolved }) }
   )
 }

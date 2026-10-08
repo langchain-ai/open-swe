@@ -14,7 +14,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
+import { reviewConversationQueryKey } from "@/features/reviews/lib/conversationApi"
 
 const VERDICTS: ReadonlyArray<{
   event: PullRequestReviewEvent
@@ -43,16 +43,30 @@ export function SubmitReviewPopover({
   owner,
   repo,
   number,
+  open,
+  onOpenChange,
+  defaultVerdict,
 }: {
   owner: string
   repo: string
   number: number
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** The verdict the form opens on, e.g. from an "approve" shortcut. */
+  defaultVerdict: PullRequestReviewEvent
 }) {
   const queryClient = useQueryClient()
   const pending = usePendingReview(owner, repo, number)
   const pendingCount = pending.comments.length
-  const [open, setOpen] = useState(false)
-  const [event, setEvent] = useState<PullRequestReviewEvent>("COMMENT")
+  const setOpen = onOpenChange
+  const [event, setEvent] = useState<PullRequestReviewEvent>(defaultVerdict)
+  const [openedOn, setOpenedOn] = useState<PullRequestReviewEvent | null>(null)
+  if (open && openedOn !== defaultVerdict) {
+    setOpenedOn(defaultVerdict)
+    setEvent(defaultVerdict)
+  } else if (!open && openedOn !== null) {
+    setOpenedOn(null)
+  }
   const [body, setBody] = useState("")
   const needsBody = event !== "APPROVE" && pendingCount === 0
   const submit = useMutation({

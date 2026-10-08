@@ -333,7 +333,7 @@ def apply() -> None:
     from openswe.review import reviews as review_reviews
     from openswe.review_scout import graph as review_scout_graph
 
-    for module in (review_reviews, pull_request_diff, review_conversation):
+    for module in (review_reviews, pull_request_diff):
         module.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
     review_conversation.__dict__["get_valid_access_token"] = _dummy_user_token
     for module in (review_reviews, review_chat, chat_graph):

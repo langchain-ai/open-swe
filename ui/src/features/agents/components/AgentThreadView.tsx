@@ -699,32 +699,37 @@ export function AgentThreadView({
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <AgentThreadHeader
-          key={thread.id}
-          title={thread.title}
-          onRename={(title) =>
-            renameThread.mutateAsync({ threadId: thread.id, title })
-          }
-          target={
-            localThread || thread.sandboxBridgeClient === "desktop"
-              ? "This Mac"
-              : thread.sandboxBridgeClient === "cli"
-                ? "Local CLI"
-                : "Cloud"
-          }
-          targetMenu={
-            canMove ? (
-              <ThreadTargetMenu
-                value={handoff ?? runsHere}
-                pending={handoff !== null}
-                disabled={isStreaming}
-                onChange={(next) => setHandoff(next === runsHere ? null : next)}
-              />
-            ) : undefined
-          }
-          panelCollapsed={panelCollapsed}
-          thread={thread}
-        />
+        {/* The review page's rail is the header for its chat. */}
+        {!reviewChat && (
+          <AgentThreadHeader
+            key={thread.id}
+            title={thread.title}
+            onRename={(title) =>
+              renameThread.mutateAsync({ threadId: thread.id, title })
+            }
+            target={
+              localThread || thread.sandboxBridgeClient === "desktop"
+                ? "This Mac"
+                : thread.sandboxBridgeClient === "cli"
+                  ? "Local CLI"
+                  : "Cloud"
+            }
+            targetMenu={
+              canMove ? (
+                <ThreadTargetMenu
+                  value={handoff ?? runsHere}
+                  pending={handoff !== null}
+                  disabled={isStreaming}
+                  onChange={(next) =>
+                    setHandoff(next === runsHere ? null : next)
+                  }
+                />
+              ) : undefined
+            }
+            panelCollapsed={panelCollapsed}
+            thread={thread}
+          />
+        )}
         {(macOffline || bridgeError) && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Alert
@@ -886,9 +891,11 @@ export function AgentThreadView({
                           </AlertDescription>
                         </Alert>
                       ) : (
-                        <p className="text-xs text-muted-foreground/70">
-                          This thread has no messages yet.
-                        </p>
+                        (reviewChat?.emptyState ?? (
+                          <p className="text-xs text-muted-foreground/70">
+                            This thread has no messages yet.
+                          </p>
+                        ))
                       )}
                     </div>
                   }

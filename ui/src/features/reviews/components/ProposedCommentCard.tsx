@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect } from "react"
 
-import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
-import { getReviewConversation } from "@/features/reviews/lib/conversationApi"
+import {
+  getReviewConversation,
+  reviewConversationQueryKey,
+} from "@/features/reviews/lib/conversationApi"
 import { rangeLabel } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"

@@ -1,0 +1,53 @@
+import type { FindingGroup, ReviewFinding } from "@/lib/api"
+
+export const findingGroupLabel: Record<FindingGroup, string> = {
+  bug: "Bug",
+  investigate: "Look into",
+  informational: "FYI",
+}
+
+/** The severity rule colour, as a CSS colour so margins and dots share it. */
+export const findingGroupColor: Record<FindingGroup, string> = {
+  bug: "var(--destructive)",
+  investigate: "var(--warning)",
+  informational: "var(--muted-foreground)",
+}
+
+const groupRank: Record<FindingGroup, number> = {
+  bug: 0,
+  investigate: 1,
+  informational: 2,
+}
+
+export function isAnchored(finding: ReviewFinding): boolean {
+  return finding.in_diff && finding.end_line !== null && !finding.outdated
+}
+
+export function findingLocation(finding: ReviewFinding): string {
+  const name = finding.file.split("/").pop() ?? finding.file
+  if (finding.end_line === null) return name
+  return finding.start_line !== null && finding.start_line !== finding.end_line
+    ? `${name}:${finding.start_line}-${finding.end_line}`
+    : `${name}:${finding.end_line}`
+}
+
+/** Open before settled, then bugs before flags; settled findings sink, as on Devin. */
+export function rankFindings(
+  findings: ReadonlyArray<ReviewFinding>
+): Array<ReviewFinding> {
+  return [...findings].sort(
+    (a, b) =>
+      Number(a.status !== "open") - Number(b.status !== "open") ||
+      groupRank[a.group] - groupRank[b.group] ||
+      a.file.localeCompare(b.file) ||
+      (a.end_line ?? 0) - (b.end_line ?? 0)
+  )
+}
+
+export function askAboutFinding(finding: ReviewFinding): string {
+  return `About Open SWE's finding "${finding.title}" at \`${finding.file}${finding.end_line !== null ? `:${finding.end_line}` : ""}\`: `
+}
+
+export function fixFinding(finding: ReviewFinding): string {
+  return `Fix Open SWE's finding "${finding.title}" at \`${finding.file}${finding.end_line !== null ? `:${finding.end_line}` : ""}\` on this branch.`
+}

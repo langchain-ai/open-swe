@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import type { ReactNode } from "react"
 import type { Message } from "@/features/agents/lib/types"
 import { chatDiffAction } from "@/features/reviews/lib/chatDiffActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
@@ -11,6 +12,8 @@ export const ReviewChatActionsContext = createContext<{
   repo: string
   number: number
   showInDiff: (range: DiffRange) => void
+  /** What an empty chat shows: ways in, specific to this pull request. */
+  emptyState?: ReactNode
 } | null>(null)
 
 export function ReviewChatActions({ messages }: { messages: Array<Message> }) {

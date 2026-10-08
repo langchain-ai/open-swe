@@ -52,9 +52,9 @@
         "ui/src/features/agents/lib/prChecks.ts",
         "ui/src/features/agents/lib/queries.ts",
         "ui/src/features/assistant/AssistantProvider.tsx",
+        "ui/src/features/reviews/page/queries.ts",
         "ui/src/lib/query.ts",
         "ui/src/routes/admin_.evals.tsx",
-        "ui/src/routes/agents/reviews/$owner.$repo.$number.tsx",
         "ui/src/routes/usage.tsx"
       ],
       "rules": { "invalidations/no-polling": "off" }

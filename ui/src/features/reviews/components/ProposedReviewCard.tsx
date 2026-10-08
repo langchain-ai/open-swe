@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
+import { reviewConversationQueryKey } from "@/features/reviews/lib/conversationApi"
 import { Button } from "@/components/ui/button"
 import {
   Card,

@@ -910,6 +910,7 @@ def review_threads_graphql(pull: dict[str, Any], viewer: str) -> list[dict[str, 
     """``reviewThreads`` with the comment ids and review links the pending-review read selects."""
     return [
         {
+            "id": f"PRRT_node_{comment['id']}",
             "path": comment["path"],
             "line": comment["line"],
             "startLine": comment["start_line"],
