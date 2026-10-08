@@ -236,13 +236,11 @@ class EventLog:
         event_type: str = "",
         delivery_id: str = "",
         refs: EventRefs | None = None,
-        payload: JsonValue | None = None,
     ) -> bool:
         """Log, then wake subscribed threads.
 
         Never raises. False means the row was not stored, so a caller that must
-        not drop the delivery can ask the sender to retry. ``payload`` is stored
-        as given. Without it, the body is decoded from the request content type.
+        not drop the delivery can ask the sender to retry.
         """
         from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
 
@@ -263,8 +261,7 @@ class EventLog:
             await cls.ensure_partitions()
         except Exception:  # noqa: BLE001
             logger.warning("Rotating event log partitions failed", exc_info=True)
-        if payload is None:
-            payload = cls._decode(request, body)
+        payload = cls._decode(request, body)
         action = payload.get("action") if isinstance(payload, dict) else None
         if event_type and isinstance(action, str) and action:
             event_type = f"{event_type}.{action}"

@@ -81,30 +81,6 @@ async def test_rollout_webhook_acknowledges_a_github_actions_token(app: FastAPI)
         "target": "gcp-dev",
         "commits": ["a" * 40, "b" * 40],
     }
-    assert args.kwargs["payload"] == {"target": "gcp-dev", "commits": ["a" * 40, "b" * 40]}
-
-
-@pytest.mark.asyncio
-async def test_rollout_webhook_stores_parsed_json_when_the_content_type_is_form(
-    app: FastAPI,
-) -> None:
-    body = json.dumps({"target": "gcp-staging", "commits": ["c" * 40]}).encode()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.post(
-            "/webhooks/rollout",
-            content=body,
-            headers={
-                "Authorization": f"Bearer {_token()}",
-                "content-type": "application/x-www-form-urlencoded",
-            },
-        )
-    assert response.status_code == 200
-    assert app.state.record.await_args.kwargs["payload"] == {
-        "target": "gcp-staging",
-        "commits": ["c" * 40],
-    }
 
 
 @pytest.mark.asyncio
