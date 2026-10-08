@@ -30,6 +30,7 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.human_review.events import ReviewDecision, ReviewDecisionCause, ReviewDecisionKind
 from openswe.human_review.notices import NoticeKind, ReviewNotice
 from openswe.human_review.pick_messages import PickMessage
 from openswe.slack.client import lookup_slack_thread_id
@@ -37,6 +38,7 @@ from openswe.slack.dm import DmOrigin
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client
+from openswe.webhooks.event_log import EventLog, EventRefs
 
 RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
@@ -197,6 +199,44 @@ class HumanReviewRequest(Base):
 
     def participant(self, user_id: UUID) -> HumanReviewParticipant | None:
         return next((p for p in self.participants if p.user_id == user_id), None)
+
+    async def log_decision(
+        self,
+        decision: ReviewDecisionKind,
+        *,
+        cause: ReviewDecisionCause = "",
+        reviewers: Collection[str] = (),
+        code_owners: Collection[str] = (),
+        reason: str = "",
+    ) -> None:
+        """Record ``decision`` in the event log, where other threads can listen for it."""
+        pr = self.pull_request
+        who = ", ".join(f"@{login}" for login in reviewers)
+        summary = " ".join(
+            part
+            for part in (
+                decision.replace("_", " ").capitalize(),
+                who,
+                f"({cause.replace('_', ' ')})" if cause else "",
+                f"on {pr.url}",
+            )
+            if part
+        )
+        event = ReviewDecision(
+            decision=decision,
+            review_request_id=str(self.id),
+            pr_url=pr.url,
+            summary=f"{summary}: {reason}" if reason else summary,
+            cause=cause,
+            reviewers=list(reviewers),
+            code_owners=list(code_owners),
+            reason=reason,
+        )
+        await EventLog.emit(
+            f"human_review.{decision}",
+            event.model_dump(mode="json"),
+            EventRefs(github_repository=f"{pr.owner}/{pr.repo}", pull_request_number=pr.number),
+        )
 
     @property
     def dm_origin(self) -> DmOrigin | None:

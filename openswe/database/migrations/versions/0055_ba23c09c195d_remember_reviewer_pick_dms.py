@@ -1,4 +1,4 @@
-"""Remember reviewer pick DMs"""
+"""Remember reviewer pick DMs; the event log also holds Open SWE's own decisions"""
 
 from alembic import op
 
@@ -12,6 +12,10 @@ def upgrade() -> None:
     op.execute(
         "ALTER TABLE human_review_participant "
         "ADD COLUMN slack_pick_messages JSONB NOT NULL DEFAULT '[]'"
+    )
+    op.execute(
+        "COMMENT ON COLUMN event_log.source IS 'Sending service: github, slack, linear; or "
+        "openswe for a decision Open SWE made, such as human_review.reviewers_released.'"
     )
 
 

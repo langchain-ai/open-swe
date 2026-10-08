@@ -37,6 +37,7 @@ from openswe.github.repo_files import RepoSettings
 from openswe.github.repositories import Repository
 from openswe.github.sdk import github_sdk
 from openswe.human_review import card as standard_card
+from openswe.human_review.events import ReviewDecisionCause
 from openswe.human_review.people import Outcome, repo_token
 from openswe.human_review.requests import (
     ChannelChoice,
@@ -614,6 +615,8 @@ async def retire(
     if state != "merged" and updated.kind == "expedited":
         await withdraw_reviews(updated)
     await refresh_card_in_thread(updated, outcome=outcome)
+    if state != "open":
+        await updated.log_decision("request_closed", cause=state, reason=outcome)
     return updated
 
 
@@ -638,7 +641,7 @@ async def dismiss_by(request: HumanReviewRequest, by: str, reason: str) -> bool:
     updated = await retire(request, "cancelled", outcome)
     if updated is None:
         return False
-    await release_picks(updated, f"it was {outcome}")
+    await release_picks(updated, f"it was {outcome}", cause="dismissed")
     return True
 
 
@@ -717,13 +720,13 @@ async def mark_merged(request: HumanReviewRequest) -> None:
     if updated is not None:
         # ✅ means approved, so a workspace without :merged: gets 🔀 instead.
         await _react(updated, "merged", "twisted_rightwards_arrows")
-        await release_picks(updated, "it was merged")
+        await release_picks(updated, "it was merged", cause="merged")
 
 
 async def mark_closed(request: HumanReviewRequest) -> None:
     updated = await retire(request, "cancelled", "the pull request was closed")
     if updated is not None:
-        await release_picks(updated, "it was closed")
+        await release_picks(updated, "it was closed", cause="closed")
 
 
 async def mark_approved(request: HumanReviewRequest) -> None:
@@ -801,7 +804,11 @@ async def _tell_withdrawn(
 
 
 async def release_picks(
-    request: HumanReviewRequest, reason: str, *, covered: Callable[[str], bool] | None = None
+    request: HumanReviewRequest,
+    reason: str,
+    *,
+    cause: ReviewDecisionCause,
+    covered: Callable[[str], bool] | None = None,
 ) -> HumanReviewRequest:
     """Take reviewers Open SWE picked who have not reviewed off the pull request, and tell them.
 
@@ -858,11 +865,23 @@ async def release_picks(
         )
         await _unrequest_github_review(request, reviewer.github_login, token)
         await _tell_withdrawn(request, reviewer, text)
+    await request.log_decision(
+        "reviewers_released",
+        cause=cause,
+        reviewers=[reviewer.github_login for reviewer in released],
+        reason=reason,
+    )
     return await HumanReviewRequest.get(request.id) or current
 
 
 async def drop_picks(
-    request: HumanReviewRequest, user_ids: set[UUID], message: str, *, expired: bool = False
+    request: HumanReviewRequest,
+    user_ids: set[UUID],
+    message: str,
+    *,
+    cause: ReviewDecisionCause,
+    expired: bool = False,
+    reason: str = "",
 ) -> list[HumanReviewParticipant]:
     """Withdraw pending picks of ``user_ids`` from the card and GitHub, showing each ``message``.
 
@@ -898,6 +917,12 @@ async def drop_picks(
             "No GitHub App token to withdraw review requests for dropped picks",
             extra={"request_id": str(request.id)},
         )
+    await request.log_decision(
+        "reviewers_released",
+        cause=cause,
+        reviewers=[pick.github_login for pick in dropped],
+        reason=reason,
+    )
     current = await HumanReviewRequest.get(request.id)
     if current is not None and current.state == "open":
         await refresh_card(current)

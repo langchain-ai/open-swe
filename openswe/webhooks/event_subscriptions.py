@@ -30,7 +30,7 @@ from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_L
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.prompts import prompt
-from openswe.webhooks.event_log import LoggedEvent, WebhookSource
+from openswe.webhooks.event_log import EventSource, LoggedEvent
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 
 logger = logging.getLogger(__name__)
@@ -132,10 +132,17 @@ class _LinearDelivery(BaseModel):
     data: _LinearData | None = None
 
 
+class _OpenSweDecision(BaseModel):
+    """The fields every event Open SWE emits about itself carries."""
+
+    pr_url: str = ""
+    summary: str = ""
+
+
 class EventSummary(BaseModel):
     """What a wake message says about one delivery, whatever its source."""
 
-    source: WebhookSource
+    source: EventSource
     event_type: str
     target: str = ""
     sender: str = ""
@@ -171,7 +178,22 @@ class EventSummary(BaseModel):
             return cls._github(event, _GitHubDelivery.model_validate(payload))
         if event.source == "slack":
             return cls._slack(event, _SlackDelivery.model_validate(payload))
+        if event.source == "openswe":
+            return cls._openswe(event, _OpenSweDecision.model_validate(payload))
         return cls._linear(event, _LinearDelivery.model_validate(payload))
+
+    @classmethod
+    def _openswe(cls, event: LoggedEvent, decision: _OpenSweDecision) -> Self:
+        # A decision is emitted for listeners, so it is never filtered out as Open SWE's own echo.
+        return cls(
+            source="openswe",
+            event_type=event.event_type,
+            target=decision.pr_url,
+            sender="Open SWE",
+            status=event.event_type,
+            body=decision.summary,
+            trusted=True,
+        )
 
     @classmethod
     def _github(cls, event: LoggedEvent, delivery: _GitHubDelivery) -> Self:

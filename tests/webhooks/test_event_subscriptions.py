@@ -177,6 +177,37 @@ async def test_a_one_shot_matches_once_and_ends(
     assert delivered == [(_THREAD, "enqueue")]
 
 
+async def test_open_swe_decisions_reach_listeners_on_the_pull_request(
+    workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
+) -> None:
+    await _subscribe(
+        workspace,
+        sources=["openswe"],
+        pull_request_id=workspace["pull_request"],
+        event_types=["human_review.reviewers_released"],
+    )
+
+    await EventLog.emit(
+        "human_review.reviewers_released",
+        {
+            "pr_url": "https://github.com/acme/widgets/pull/7",
+            "summary": "Reviewers released @grace (code owners approved)",
+            "cause": "code_owners_approved",
+        },
+        EventRefs(github_repository="acme/widgets", pull_request_number=7),
+    )
+    await EventLog.emit(
+        "human_review.reviewer_picked",
+        {"pr_url": "https://github.com/acme/widgets/pull/7", "summary": "Reviewer picked"},
+        EventRefs(github_repository="acme/widgets", pull_request_number=7),
+    )
+
+    (owed,) = await _owed()
+    assert owed.source == "openswe"
+    assert "Reviewers released @grace (code owners approved)" in owed.content
+    assert delivered == [(_THREAD, "enqueue")]
+
+
 async def test_matches_are_owed_oldest_first_until_their_messages_are_in_state(
     workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
 ) -> None:

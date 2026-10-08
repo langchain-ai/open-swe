@@ -1,4 +1,4 @@
-"""Append-only log of verified GitHub, Slack, and Linear webhook deliveries."""
+"""Append-only log of verified GitHub, Slack, and Linear webhook deliveries, and Open SWE's own decisions."""
 
 import asyncio
 import json
@@ -7,7 +7,7 @@ import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Self
 from urllib.parse import parse_qs
-from uuid import UUID
+from uuid import UUID, uuid7
 
 from fastapi import Request
 from pydantic import BaseModel, JsonValue, ValidationError
@@ -20,6 +20,7 @@ from openswe.slack.pr_links import event_pull_requests
 logger = logging.getLogger(__name__)
 
 type WebhookSource = Literal["github", "slack", "linear"]
+type EventSource = WebhookSource | Literal["openswe"]
 
 RETAINED_DAYS = 2
 _TABLE = "event_log"
@@ -90,7 +91,7 @@ _SHAPE_DEPTH = 6
 class LoggedEvent(BaseModel):
     """A row as written, with the links resolved on insert."""
 
-    source: WebhookSource
+    source: EventSource
     event_type: str
     delivery_id: str
     received_at: datetime
@@ -107,7 +108,7 @@ class LoggedEvent(BaseModel):
 
 
 class EventKind(BaseModel):
-    source: WebhookSource
+    source: EventSource
     event_type: str
     count: int
     last_received_at: datetime
@@ -253,46 +254,73 @@ class EventLog:
                 return
             if channel is None or not channel.details.publishes_events:
                 return
-        try:
-            await cls.ensure_partitions()
-        except Exception:  # noqa: BLE001
-            logger.warning("Rotating event log partitions failed", exc_info=True)
         payload = cls._decode(request, body)
         action = payload.get("action") if isinstance(payload, dict) else None
         if event_type and isinstance(action, str) and action:
             event_type = f"{event_type}.{action}"
-        try:
-            async with transaction() as conn:
-                result = await conn.execute(
-                    _INSERT,
-                    {
-                        "source": source,
-                        "endpoint": request.url.path,
-                        "event_type": event_type,
-                        "delivery_id": delivery_id,
-                        "payload": json.dumps(payload),
-                        **(refs or EventRefs()).model_dump(),
-                    },
-                )
-                row = result.mappings().one()
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Recording a webhook in the event log failed",
-                extra={"webhook_source": source, "webhook_endpoint": request.url.path},
-                exc_info=True,
-            )
+        event = await cls._insert(
+            source, request.url.path, event_type, delivery_id, payload, refs or EventRefs()
+        )
+        if event is None:
             return
         from openswe.analytics.segment import record_webhook
 
-        event = LoggedEvent.model_validate({**row, "payload": payload})
         task = asyncio.create_task(record_webhook(event))
         _SEGMENT_TASKS.add(task)
         task.add_done_callback(_SEGMENT_TASKS.discard)
         await EventSubscription.deliver(event)
 
     @classmethod
+    async def emit(cls, event_type: str, payload: JsonValue, refs: EventRefs) -> None:
+        """Log a decision Open SWE made, then wake subscribed threads. Never raises."""
+        from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
+
+        if not configured():
+            return
+        event = await cls._insert("openswe", "", event_type, str(uuid7()), payload, refs)
+        if event is not None:
+            await EventSubscription.deliver(event)
+
+    @classmethod
+    async def _insert(
+        cls,
+        source: EventSource,
+        endpoint: str,
+        event_type: str,
+        delivery_id: str,
+        payload: JsonValue,
+        refs: EventRefs,
+    ) -> LoggedEvent | None:
+        try:
+            await cls.ensure_partitions()
+        except Exception:  # noqa: BLE001
+            logger.warning("Rotating event log partitions failed", exc_info=True)
+        try:
+            async with transaction() as conn:
+                result = await conn.execute(
+                    _INSERT,
+                    {
+                        "source": source,
+                        "endpoint": endpoint,
+                        "event_type": event_type,
+                        "delivery_id": delivery_id,
+                        "payload": json.dumps(payload),
+                        **refs.model_dump(),
+                    },
+                )
+                row = result.mappings().one()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Recording an event in the event log failed",
+                extra={"webhook_source": source, "webhook_endpoint": endpoint},
+                exc_info=True,
+            )
+            return None
+        return LoggedEvent.model_validate({**row, "payload": payload})
+
+    @classmethod
     async def kinds(
-        cls, since: datetime, *, source: WebhookSource | None = None, event_type: str = ""
+        cls, since: datetime, *, source: EventSource | None = None, event_type: str = ""
     ) -> list[EventKind]:
         """Every distinct source and event type received since ``since``.
 
