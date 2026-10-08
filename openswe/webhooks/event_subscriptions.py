@@ -184,7 +184,8 @@ class EventSummary(BaseModel):
 
     @classmethod
     def _openswe(cls, event: LoggedEvent, decision: _OpenSweDecision) -> Self:
-        # A decision is emitted for listeners, so it is never filtered out as Open SWE's own echo.
+        # Emitted for listeners, so never filtered as Open SWE's own echo; untrusted because a
+        # summary can carry a person's free-text reason, such as why they declined.
         return cls(
             source="openswe",
             event_type=event.event_type,
@@ -192,7 +193,6 @@ class EventSummary(BaseModel):
             sender="Open SWE",
             status=event.event_type,
             body=decision.summary,
-            trusted=True,
         )
 
     @classmethod

@@ -955,7 +955,8 @@ test.describe("Human review in Slack", () => {
     );
     expect(modal.blocks[0].element.initial_option).toBeUndefined();
 
-    // 5. Submitting a reason withdraws the pick on Slack and GitHub and tells them.
+    // 5. Submitting a reason withdraws the pick on Slack and GitHub. No new DM is
+    //    sent: the pick's own message trades its buttons for the outcome.
     await control(request, "/mock/slack/view-submit", {
       view_id: modal.id,
       user: declining.slack,
@@ -965,24 +966,18 @@ test.describe("Human review in Slack", () => {
         },
       },
     });
+    const pickMessage = async () =>
+      (await channelMessages(request, dmChannel)).find(
+        (m) => m.ts === picked.ts,
+      );
     await expect
-      .poll(
-        async () =>
-          (await channelMessages(request, dmChannel)).some(
-            (m) =>
-              m.is_bot &&
-              m.text.includes("You declined the review") &&
-              m.text.includes("Away or unavailable"),
-          ),
-        { timeout: 30_000 },
-      )
-      .toBe(true);
-    // The pick's own message trades its buttons for the outcome.
-    const settled = (await channelMessages(request, dmChannel)).find(
-      (m) => m.ts === picked.ts,
-    );
+      .poll(async () => cardText((await pickMessage())!), { timeout: 30_000 })
+      .toContain("Review declined");
+    const settled = await pickMessage();
     expect(buttons(settled!)).toEqual([]);
-    expect(cardText(settled!)).toContain("Review declined");
+    expect(
+      (await channelMessages(request, dmChannel)).filter((m) => m.is_bot),
+    ).toHaveLength(1);
     await expect
       .poll(async () =>
         (await pull(request, seeded.number)).requested_reviewers.includes(
@@ -1004,8 +999,8 @@ test.describe("Human review in Slack", () => {
     await expectNoPickReplies(request, posted);
     await showSlack(page, REVIEW_CHANNEL, "decline-4-card-repicked");
 
-    // 7. The pick DM links back to the review's thread, and a thread started under it
-    //    knows which review it came from.
+    // 7. The pick DM links back to the review's thread, and a reply under it reaches the
+    //    agent as a structured reply to that review's pick.
     expect(cardText(nextPicked)).toContain("Slack thread");
     const reply = (await control(request, "/mock/slack/send", {
       channel: nextDmChannel,
@@ -1015,17 +1010,16 @@ test.describe("Human review in Slack", () => {
       thread_ts: nextPicked.ts,
       text: "Why me? E2E_HELLO",
     })) as { thread_id: string };
+    const replyState = async () =>
+      JSON.stringify(
+        await (await request.get(`/threads/${reply.thread_id}/state`)).json(),
+      );
     await expect
-      .poll(
-        async () =>
-          JSON.stringify(
-            await (
-              await request.get(`/threads/${reply.thread_id}/state`)
-            ).json(),
-          ),
-        { timeout: 60_000 },
-      )
-      .toContain("on behalf of the Slack thread");
+      .poll(replyState, { timeout: 60_000 })
+      .toContain("<kind>reviewer_pick</kind>");
+    expect(await replyState()).toContain(
+      `<review_request_id>${posted.id}</review_request_id>`,
+    );
   });
 
   test("the agent dismisses the review request its thread posted", async ({

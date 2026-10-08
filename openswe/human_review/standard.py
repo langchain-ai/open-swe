@@ -602,9 +602,9 @@ async def snooze(request: HumanReviewRequest, user: User | None, length: str) ->
             return Outcome("This reviewer pick is no longer pending for you.")
         participant.joined_at = until
         row.run_config = {**row.run_config, f"review_snoozed:{user.id}": until.isoformat()}
-    await _schedule(
-        request, "pick_expiry", duration + timedelta(minutes=await _assignment_minutes(request))
-    )
+    window = timedelta(minutes=await _assignment_minutes(request))
+    accept_by = (await WorkHours.for_user(user)).after(until, window)
+    await _schedule(request, "pick_expiry", accept_by - datetime.now(UTC))
     await _schedule(request, f"snooze:{user.id}", duration)
     return Outcome(f"Review snoozed for {length}; your pick stays reserved until then.")
 
@@ -825,10 +825,15 @@ class ReviewStatus(BaseModel):
         for pick in request.picks:
             snoozed = request.run_config.get(f"review_snoozed:{pick.user_id}")
             until = datetime.fromisoformat(snoozed) if isinstance(snoozed, str) else None
+            accept_by = (
+                (await WorkHours.for_user(pick.user)).after(pick.joined_at, wait)
+                if pick.joined_at
+                else None
+            )
             picks.append(
                 PendingPick(
                     github_login=pick.github_login,
-                    accept_by=pick.joined_at + wait if pick.joined_at else None,
+                    accept_by=accept_by,
                     snoozed_until=until if until and until > now else None,
                 )
             )
@@ -1379,7 +1384,6 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     window = timedelta(minutes=minutes)
     now = datetime.now(UTC)
     stale: list[HumanReviewParticipant] = []
-    next_due: datetime | None = None
     for pick in request.picks:
         snoozed = request.run_config.get(f"review_snoozed:{pick.user_id}")
         if isinstance(snoozed, str) and (until := datetime.fromisoformat(snoozed)) > now:
@@ -1391,10 +1395,6 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         due = (await WorkHours.for_user(pick.user)).after(pick.joined_at, window)
         if now >= due - _SCHEDULER_EARLINESS:
             stale.append(pick)
-        elif next_due is None or due < next_due:
-            next_due = due
-    if next_due is not None:
-        await _schedule(request, "pick_expiry", next_due - now)
     logger.info(
         "Checking reviewer picks for expiry",
         extra={
@@ -1467,7 +1467,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         },
     )
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
-    await drop_picks(
+    if not await drop_picks(
         request,
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
@@ -1475,7 +1475,9 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         cause="expired",
         expired=True,
         reason=f"not accepted within {minutes} minutes of their work hours",
-    )
+    ):
+        # Another run released them first and woke the picker itself.
+        return "already_released"
     current = await HumanReviewRequest.get(request.id)
     if current is None or current.state != "open":
         return "closed"
