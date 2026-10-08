@@ -200,7 +200,10 @@ test.describe("thread pull requests", () => {
     });
     await page.reload();
 
-    await expect(summary).toHaveAttribute("data-pr-tone", "text-destructive");
+    await expect(summary).toHaveAttribute(
+      "data-pr-tone",
+      "text-error-secondary",
+    );
     await expect(summary).toContainText("3 checks");
     await expect(summary).toContainText("2 comments");
     await expect(summary).toContainText("Conflict");
