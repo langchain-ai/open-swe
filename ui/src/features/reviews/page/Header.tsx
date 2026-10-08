@@ -30,6 +30,8 @@ import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewP
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
 import { useReviewPage } from "./store"
+import { statusLabels } from "@/features/reviews/lib/status"
+import { StatusPill } from "@/features/reviews/components/StatusPill"
 
 type PillState = "open" | "draft" | "merged" | "closed"
 
@@ -116,7 +118,20 @@ export function Header({
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex min-h-7 min-w-0 items-center gap-2">
-          {state ? (
+          {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
+          {(state === "open" || state === "draft") && status ? (
+            <span className="flex shrink-0 items-center gap-1 max-sm:[&>*:not(:first-child)]:hidden">
+              {statusLabels(status).map((label) => (
+                <StatusPill
+                  key={label}
+                  status={label}
+                  className="h-5 py-0 text-[11px]"
+                />
+              ))}
+            </span>
+          ) : (state === "open" || state === "draft") && !status ? (
+            <Skeleton className="h-5 w-16 shrink-0 rounded-full" />
+          ) : state ? (
             <span
               className={cn(
                 "inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium capitalize max-sm:px-1.5",
