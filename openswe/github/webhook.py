@@ -264,6 +264,7 @@ async def trigger_pr_review_from_ref(
     github_user_id: int | None = None,
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
+    use_mda: bool = False,
 ) -> dict[str, Any]:
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
 
@@ -377,6 +378,7 @@ async def trigger_pr_review_from_ref(
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
+        use_mda=use_mda,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}

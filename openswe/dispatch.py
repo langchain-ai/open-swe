@@ -45,7 +45,11 @@ from openswe.input_messages import (
     build_run_input,
 )
 from openswe.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
-from openswe.remote_runtime.client import remote_run_context, remote_runtime_client
+from openswe.remote_runtime.client import (
+    RemoteRuntimeConfigurationError,
+    remote_run_context,
+    remote_runtime_client,
+)
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
@@ -304,14 +308,20 @@ async def create_durable_run(
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
+    use_mda: bool = False,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread.
+    means the caller already created and titled the thread. ``use_mda`` runs the
+    graph on its Managed Deep Agents deployment instead of this one.
     """
     client = client or dispatch_client()
-    remote_client = remote_runtime_client(assistant_id)
+    remote_client = remote_runtime_client(assistant_id) if use_mda else None
+    if use_mda and remote_client is None:
+        raise RemoteRuntimeConfigurationError(
+            f"No Managed Deep Agents runtime serves {assistant_id}"
+        )
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
     run_metadata = dict(metadata or {})
@@ -389,6 +399,7 @@ async def dispatch_agent_run(
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
     source_context: SourceContext | None = None,
+    use_mda: bool = False,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
@@ -429,4 +440,5 @@ async def dispatch_agent_run(
         client=client,
         multitask_strategy=multitask_strategy,
         source_context=source_context,
+        use_mda=use_mda,
     )

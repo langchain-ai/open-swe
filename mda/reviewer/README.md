@@ -28,7 +28,7 @@ The backend:
 
 | Variable | Purpose |
 |---|---|
-| `REVIEWER_RUNTIME_URL` | This deployment's URL; set it to route reviewer runs here |
+| `REVIEWER_RUNTIME_URL` | This deployment's URL; reviews started with `request_pr_review(use_mda=True)` run here |
 | `REVIEWER_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 
