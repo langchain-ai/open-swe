@@ -423,6 +423,15 @@ async def test_control_rejects_worker_from_another_task(
 async def test_lost_launch_response_retries_same_worker_without_waiting_for_work(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(
+        flags,
+        "task_coordination_enabled",
+        AsyncMock(
+            side_effect=lambda *args, **kwargs: (
+                client.owner.typed_preferences.experimental_task_coordination
+            )
+        ),
+    )
     actor = service.Actor(COORDINATOR, OWNER)
     workspace = WorkspaceRow(slug="engineering", name="Engineering")
     async with postgres.session() as session:
@@ -510,6 +519,15 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
 async def test_concurrent_first_spawns_and_replay_share_one_task(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(
+        flags,
+        "task_coordination_enabled",
+        AsyncMock(
+            side_effect=lambda *args, **kwargs: (
+                client.owner.typed_preferences.experimental_task_coordination
+            )
+        ),
+    )
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     results = await asyncio.gather(
@@ -545,6 +563,15 @@ async def test_concurrent_first_spawns_and_replay_share_one_task(
 async def test_cancel_discards_owed_assignment_without_reviving_worker(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(
+        flags,
+        "task_coordination_enabled",
+        AsyncMock(
+            side_effect=lambda *args, **kwargs: (
+                client.owner.typed_preferences.experimental_task_coordination
+            )
+        ),
+    )
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     result = await service.spawn_worker(
@@ -589,6 +616,15 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
 async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(
+        flags,
+        "task_coordination_enabled",
+        AsyncMock(
+            side_effect=lambda *args, **kwargs: (
+                client.owner.typed_preferences.experimental_task_coordination
+            )
+        ),
+    )
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     first = await service.spawn_worker(
