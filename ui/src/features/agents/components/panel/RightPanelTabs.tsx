@@ -325,9 +325,7 @@ function RightPanelEmptyState(props: {
                   isHighlighted(action) && highlightedCardClass
                 )}
               >
-                <Kbd className="top-space-3 right-space-3 absolute">
-                  {action.shortcut}
-                </Kbd>
+                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
                 <span className="flex items-center gap-2 pe-8">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
@@ -344,9 +342,7 @@ function RightPanelEmptyState(props: {
                   cardShellClass
                 )}
               >
-                <Kbd className="top-space-3 right-space-3 absolute">
-                  {action.shortcut}
-                </Kbd>
+                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
                 <span className="flex items-center gap-2 pe-8">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
