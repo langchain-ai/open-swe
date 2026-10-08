@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Self
@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
 from openswe.github.ci import read_required_checks, unreported_required_checks
@@ -110,6 +110,68 @@ query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cu
 
 CheckState = Literal["passing", "failing", "pending", "unknown", "none"]
 ReviewDecision = Literal["approved", "changes_requested", "none"]
+ReviewerState = Literal["approved", "changes_requested", "dismissed", "commented"]
+PullRequestState = Literal["open", "closed", "merged"]
+
+_ANY_STATE: frozenset[PullRequestState] = frozenset({"open", "closed", "merged"})
+
+
+class _GithubReviewUser(BaseModel):
+    id: int
+    login: str
+    avatar_url: str | None = None
+
+
+class _GithubReview(BaseModel):
+    id: int
+    state: ReviewerState | Literal["pending"]
+    user: _GithubReviewUser | None = None
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def _lowercase(cls, value: object) -> object:
+        return value.lower() if isinstance(value, str) else value
+
+
+class PullRequestReviewer(BaseModel):
+    """Someone who reviewed the pull request, and where their review stands.
+
+    A comment never overrides an earlier approval or change request, as on GitHub.
+    """
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    user_id: int
+    login: str
+    avatar_url: str | None = None
+    state: ReviewerState
+
+    @classmethod
+    def latest(cls, reviews: Sequence[_GithubReview]) -> list[PullRequestReviewer]:
+        latest: dict[int, PullRequestReviewer] = {}
+        for review in sorted(reviews, key=lambda review: review.id):
+            if review.user is None or review.state == "pending":
+                continue
+            previous = latest.get(review.user.id)
+            if review.state == "commented" and previous and previous.state != "commented":
+                continue
+            latest[review.user.id] = cls(
+                user_id=review.user.id,
+                login=review.user.login,
+                avatar_url=review.user.avatar_url,
+                state=review.state,
+            )
+        return list(latest.values())
+
+    @staticmethod
+    def decision(reviewers: Sequence[PullRequestReviewer]) -> ReviewDecision:
+        states = {reviewer.state for reviewer in reviewers}
+        if "changes_requested" in states:
+            return "changes_requested"
+        return "approved" if "approved" in states else "none"
+
+
+_GITHUB_REVIEWS = TypeAdapter(list[_GithubReview])
 
 
 class OpenPullRequest(BaseModel):
@@ -118,6 +180,7 @@ class OpenPullRequest(BaseModel):
     repo: str
     number: int
     title: str
+    state: PullRequestState = "open"
     created_at: str | None = None
     updated_at: str | None = None
     draft: bool | None = None
@@ -131,6 +194,7 @@ class OpenPullRequest(BaseModel):
     status_available: bool = False
     ci: CheckState = "unknown"
     review_decision: ReviewDecision | None = None
+    reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
     unresolved_threads: int | None = None
     failing_checks: list[str] = Field(default_factory=list)
@@ -213,11 +277,16 @@ def _merge_conflict_state(pull: Mapping[str, Any]) -> str:
     return "unknown"
 
 
-def _live_state(pull: Mapping[str, Any]) -> str | None:
+def _live_state(pull: Mapping[str, Any]) -> PullRequestState | None:
     if pull.get("merged") is True or isinstance(pull.get("merged_at"), str):
         return "merged"
-    state = pull.get("state")
-    return state if state in {"open", "closed"} else None
+    match pull.get("state"):
+        case "open":
+            return "open"
+        case "closed":
+            return "closed"
+        case _:
+            return None
 
 
 def _normalize_checks(
@@ -468,27 +537,16 @@ class PullRequestClient:
     async def reviews(self) -> list[dict[str, Any]]:
         return await self.repo.pages(f"pulls/{self.number}/reviews")
 
-    async def review_decision(self) -> ReviewDecision | None:
-        """The standing decision across each reviewer's latest approval, change request or dismissal."""
+    async def reviewers(self) -> list[PullRequestReviewer] | None:
+        """Each reviewer's standing review."""
         reviews = await or_none(self.reviews())
         if reviews is None:
             return None
-        latest: dict[str, tuple[int, str]] = {}
-        for review in reviews:
-            state = review.get("state")
-            user = review.get("user")
-            login = user.get("login") if isinstance(user, dict) else None
-            review_id = review.get("id")
-            if state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
-                continue
-            if isinstance(login, str) and isinstance(review_id, int):
-                key = login.lower()
-                if review_id > latest.get(key, (-1, ""))[0]:
-                    latest[key] = (review_id, state)
-        decisions = {state for _, state in latest.values()}
-        if "CHANGES_REQUESTED" in decisions:
-            return "changes_requested"
-        return "approved" if "APPROVED" in decisions else "none"
+        try:
+            return PullRequestReviewer.latest(_GITHUB_REVIEWS.validate_python(reviews))
+        except ValueError:
+            logger.warning("Unreadable pull request reviews", extra=self._log_extra, exc_info=True)
+            return None
 
     async def mergeability(self) -> Mergeability | None:
         """Mergeability over GraphQL.
@@ -661,21 +719,27 @@ class PullRequestClient:
             )
         return result
 
-    async def load_open(
-        self, *, details: bool = True, listed: Mapping[str, Any] | None = None
+    async def load(
+        self,
+        *,
+        details: bool = True,
+        listed: Mapping[str, Any] | None = None,
+        wanted: Collection[PullRequestState] = _ANY_STATE,
     ) -> OpenPullRequest | None:
-        """The open PR's live status, or ``None`` once it is closed or merged.
+        """The PR's live status, or ``None`` when its state is not ``wanted``.
 
         Without ``details`` only ``listed`` (a search hit) is used, and nothing is read.
         """
         pull = await self.mergeable_pull() if details else None
-        if pull is not None and _live_state(pull) != "open":
+        state = _live_state(pull) if pull is not None else "open"
+        if state is None or state not in wanted:
             return None
         source: Mapping[str, Any] = pull if pull is not None else listed or {}
         result = OpenPullRequest(
             repo=self.repo.full_name,
             number=self.number,
             title=_as_str(source.get("title"), ""),
+            state=state,
             created_at=_as_optional_str(source.get("created_at")),
             updated_at=_as_optional_str(source.get("updated_at")),
             draft=_as_optional_bool(source.get("draft")),
@@ -696,13 +760,16 @@ class PullRequestClient:
         if sha is None or not _SHA_PATTERN.fullmatch(sha):
             return result
         result.head_sha = sha
-        runs, statuses, decision, review_state = await asyncio.gather(
+        runs, statuses, reviewers, review_state = await asyncio.gather(
             or_none(self.repo.check_runs(sha)),
             or_none(self.repo.commit_statuses(sha)),
-            self.review_decision(),
+            self.reviewers(),
             self.review_state(),
         )
-        result.review_decision = decision
+        result.reviewers = reviewers
+        result.review_decision = (
+            None if reviewers is None else PullRequestReviewer.decision(reviewers)
+        )
         result.review_required = review_state.review_required
         result.unresolved_threads = review_state.unresolved_threads
         if runs is None or statuses is None:
@@ -820,7 +887,7 @@ async def list_open_pull_requests(
         if client is None or not isinstance(item, Mapping):
             return None
         async with semaphore:
-            return await client.load_open(details=not lightweight, listed=item)
+            return await client.load(details=not lightweight, listed=item, wanted={"open"})
 
     items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
     total = payload.get("total_count")

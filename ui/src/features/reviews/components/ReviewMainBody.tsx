@@ -87,6 +87,7 @@ import type {
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
 import { ReviewPageActions } from "@/features/reviews/components/ReviewPageActions"
+import { ReviewersSection } from "@/features/reviews/components/ReviewersSection"
 import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
 import { ReviewConversation } from "@/features/reviews/components/ReviewConversation"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
@@ -3061,9 +3062,10 @@ function SidePanel({
             />
 
             <ChecksSection checks={detail.checks} />
-            <PeopleSection
-              title="Reviewers"
-              people={detail.pr.requested_reviewers}
+            <ReviewersSection
+              repo={`${detail.owner}/${detail.repo}`}
+              number={detail.number}
+              requested={detail.pr.requested_reviewers}
             />
             <PeopleSection title="Assignees" people={detail.pr.assignees} />
             <section className="px-3 py-3">

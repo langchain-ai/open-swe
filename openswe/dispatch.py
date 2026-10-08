@@ -27,14 +27,16 @@ busy-check and the custom store-queue) with one function that uses:
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Self
 from urllib.parse import urlparse
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
+from pydantic import BaseModel, ConfigDict
 
 from openswe.config import ENV
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.input_messages import (
     ChannelIdentity,
     InputMessageContext,
@@ -48,12 +50,33 @@ from openswe.invocation import new_invocation_id, resolve_invocation_id, with_in
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
+from openswe.ui_invalidations import Topic
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
 ContentBlocks = str | list[dict[str, Any]]
 LangGraphRunConfig = dict[str, Any]
+
+
+_PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
+
+
+class RunMetadata(BaseModel):
+    """What ``create_durable_run`` records on a run and the run-complete webhook reads back."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    pull_request: PullRequestKey | None = None
+    """The pull request whose review page shows this run; its start and end refresh it."""
+
+    @classmethod
+    def of_run(cls, assistant_id: str, config: LangGraphRunConfig | None) -> Self:
+        cfg = RunConfig.from_config(config)
+        if assistant_id not in _PULL_REQUEST_GRAPHS or cfg.repo is None or cfg.pr_number is None:
+            return cls()
+        return cls(pull_request=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number))
+
 
 # The server's legacy-named compatibility marker selects the v3 stream path.
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
@@ -336,7 +359,8 @@ async def create_durable_run(
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
-    run_metadata = dict(metadata or {})
+    recorded = RunMetadata.of_run(assistant_id, config)
+    run_metadata = dict(metadata or {}) | recorded.model_dump(exclude_none=True)
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
@@ -366,6 +390,8 @@ async def create_durable_run(
         create_kwargs["after_seconds"] = after_seconds
 
     run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    if recorded.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=recorded.pull_request)
     cfg = RunConfig.from_config(run_config)
     if assistant_id == "agent" and cfg.slack_ask is not True:
         from openswe.slack.thinking import sync_slack_background_status

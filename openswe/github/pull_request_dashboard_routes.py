@@ -108,7 +108,7 @@ async def api_pull_request_details(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     async with GitHubClient.as_user(session["sub"]) as github:
-        return await github.repo(owner, repo).pull_request(number).load_open()
+        return await github.repo(owner, repo).pull_request(number).load()
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/action")
