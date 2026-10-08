@@ -296,12 +296,11 @@ async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
     assert (
         await service.authorized_metadata(service.Actor(COORDINATOR, "renamed-owner"))
     ).owner_user_id == owner_id
-    assert await flags.task_coordination_enabled(OWNER, owner_user_id=owner_id) is enabled
-    if enabled:
+    assert not await flags.task_coordination_enabled(OWNER, owner_user_id=owner_id)
+    assert not await flags.task_coordination_enabled("renamed-owner")
+    with pytest.raises(PermissionError, match="disabled"):
         await flags.require_task_coordination(client.metadata[COORDINATOR])
-    else:
-        with pytest.raises(PermissionError, match="disabled"):
-            await flags.require_task_coordination(client.metadata[COORDINATOR])
+    assert owner.typed_preferences.experimental_task_coordination is enabled
     with pytest.raises(PermissionError, match="thread owner"):
         await service.authorized_metadata(service.Actor(COORDINATOR, OWNER))
     monkeypatch.setattr(User, "get", AsyncMock(return_value=None))
