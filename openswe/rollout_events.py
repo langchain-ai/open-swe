@@ -1,8 +1,8 @@
 """Accept a deployment event after an environment has finished syncing.
 
 The route trusts a GitHub Actions OIDC token instead of a shared secret. A
-verified deploy is written to the event log so a thread that subscribed when
-its pull request merged can wake through ``listen_events``.
+verified deploy is written to the event log so a thread that was asked for
+a rollout check can wake through ``listen_events`` after its pull request merges.
 """
 
 import hashlib
@@ -37,6 +37,7 @@ class RolloutAccepted(TypedDict):
 
 
 _AUDIENCE = "openswe-rollout"
+ROLLOUT_CHECK_REQUESTED = "rollout_check"
 _DEPLOYED = "deployed"
 _MAX_COMMITS = 5000
 _MAX_SUBSCRIPTIONS = 5

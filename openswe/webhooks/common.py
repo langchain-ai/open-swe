@@ -1536,9 +1536,14 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from openswe.analytics.emitter import task_rework
 
             await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
-        if newly_merged and event.identity is not None:
-            from openswe.rollout_events import subscribe_merged_thread
+        from openswe.rollout_events import ROLLOUT_CHECK_REQUESTED, subscribe_merged_thread
 
+        if (
+            newly_merged
+            and event.identity is not None
+            and isinstance(metadata, dict)
+            and metadata.get(ROLLOUT_CHECK_REQUESTED) is True
+        ):
             owner, repo, number = event.identity
             await subscribe_merged_thread(
                 thread_id,
