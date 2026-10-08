@@ -354,19 +354,16 @@ async def run_agent(prompt: str, stdin: str, timeout: float) -> Completed:
     return Completed(await proc.wait(), report, "")
 
 
-async def resolve_with_agent(
-    prompt: str, pending: list[Pending], timeout: float
-) -> AgentReport | None:
-    """Hand every conflicting PR to one oswe run and return what it reports doing."""
+async def resolve_with_agent(prompt: str, pending: list[Pending], timeout: float) -> AgentReport:
+    """Hand every conflicting PR to one oswe run and require its merge report."""
     before = await rev_parse("HEAD")
     listing = "\n".join(f"#{item.pull.number} {item.sha} {item.pull.title}" for item in pending)
     print(f"merging {len(pending)} conflicting PR(s) with oswe", file=sys.stderr, flush=True)
     result = await run_agent(prompt, listing, timeout)
     if parsed := AgentReport.parse(result.stdout):
         return parsed
-    warn(f"oswe exited {result.code} without a report in the required format; discarding its work")
     await restore_head(before)
-    return None
+    raise PreviewError(f"oswe exited {result.code} without a report in the required format")
 
 
 async def typecheck() -> str | None:
@@ -624,10 +621,10 @@ The preview resets to plain `main` every Sunday, in the
         report = await resolve_with_agent(prompt, remaining, self.settings.agent_timeout_seconds)
         for item in remaining:
             number = item.pull.number
-            if report is not None and number in report.merged:
+            if number in report.merged:
                 self.included.append(f"{item.pull.link} — `{item.sha[:7]}` — {AGENT_NOTE}")
             else:
-                note = report.reasons.get(number) if report is not None else None
+                note = report.reasons.get(number)
                 await self.skip_pull(item.pull, item.sha, Conflicted(item.conflicts, note))
 
     def write_summary(self, base_sha: str) -> None:
