@@ -13,6 +13,7 @@ interface WorkspaceSelectorProps {
   showWithOneWorkspace?: boolean
   /** Shown while nothing is selected. */
   placeholder?: string
+  side?: "top" | "bottom"
 }
 
 /**
@@ -29,6 +30,7 @@ export function WorkspaceSelector({
   disabled = false,
   showWithOneWorkspace = false,
   placeholder = "No workspace",
+  side = "bottom",
 }: WorkspaceSelectorProps) {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -66,7 +68,12 @@ export function WorkspaceSelector({
         <CaretDownIcon className="size-3 shrink-0 opacity-70" />
       </button>
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 flex max-h-72 w-64 flex-col overflow-y-auto rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg">
+        <div
+          className={cn(
+            "absolute left-0 z-50 flex max-h-72 w-64 flex-col overflow-y-auto rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg",
+            side === "top" ? "bottom-full mb-1" : "top-full mt-1"
+          )}
+        >
           <div className="px-2 pt-2 pb-1 text-muted-foreground">Workspace</div>
           {workspaces.map((workspace) => {
             const isSelected = workspace.slug === selectedSlug
