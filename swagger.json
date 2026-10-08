@@ -5393,6 +5393,30 @@
         ],
         "type": "string"
       },
+      "RolloutAccepted": {
+        "properties": {
+          "commits": {
+            "title": "Commits",
+            "type": "integer"
+          },
+          "status": {
+            "const": "accepted",
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "target",
+          "commits"
+        ],
+        "title": "RolloutAccepted",
+        "type": "object"
+      },
       "ScheduleCreateBody": {
         "properties": {
           "admin_thread": {
@@ -20565,6 +20589,25 @@
           }
         },
         "summary": "Linear Webhook"
+      }
+    },
+    "/webhooks/rollout": {
+      "post": {
+        "description": "Verify a deployment event, record it, and acknowledge it.",
+        "operationId": "rollout_webhook_webhooks_rollout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolloutAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rollout Webhook"
       }
     },
     "/webhooks/run-complete": {
