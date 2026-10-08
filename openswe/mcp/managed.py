@@ -45,6 +45,7 @@ _MAX_PAGES = 5
 _CONSENT_WAIT_SECONDS = 25
 # Consent links expire after ten minutes; stop waiting shortly after.
 _CONSENT_DEADLINE_SECONDS = 11 * 60
+_CONSENT_POLL_FLOOR_SECONDS = 1
 
 type CredentialKind = Literal["oauth", "secret"]
 type ConsentOutcome = Literal["completed", "failed", "expired"]
@@ -98,6 +99,11 @@ class GatewayStatus(BaseModel):
     ready: bool
     tool_count: int | None = None
     missing: list[MissingCredential] = Field(default_factory=list)
+
+    @property
+    def consent_only(self) -> bool:
+        """Every missing service has a consent link to wait on; API keys are set in LangSmith."""
+        return all(item.kind == "oauth" for item in self.missing)
 
 
 def managed_tools_configured() -> bool:
@@ -327,6 +333,10 @@ async def consent_outcome(login: str, auth_id: str) -> ConsentOutcome:
                 status = response.json().get("status")
                 if status in ("completed", "failed", "expired"):
                     return status
+                if status != "pending":
+                    raise ManagedToolsError("LangSmith returned an unknown consent status")
+                # Long polls return early sometimes; never hammer LangSmith with the owner's token.
+                await asyncio.sleep(_CONSENT_POLL_FLOOR_SECONDS)
 
 
 class _GatewayConnection(MCPConnection):

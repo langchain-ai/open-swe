@@ -38,11 +38,16 @@ def _slack_blocks(card: ConnectCard, status: GatewayStatus | None) -> list[Block
         ]
     oauth = [item for item in status.missing if item.kind == "oauth"]
     secret = [item for item in status.missing if item.kind == "secret"]
+    then = (
+        "I'll continue here once all are connected."
+        if status.consent_only
+        else "Once every service is set up, ask me to continue."
+    )
     blocks: list[Block] = [
         section(
             f"Connect these services to use the *{status.gateway.name}* managed tools. "
             "Each button opens the service's consent screen for your account only; sign "
-            "in to Open SWE in your browser first. I'll continue here once all are connected."
+            f"in to Open SWE in your browser first. {then}"
         )
     ]
     if oauth:
@@ -95,7 +100,18 @@ async def connect_managed_tools(
         status = None
     except ManagedToolsError as exc:
         return {"success": False, "error": str(exc)}
+    surface = current_reply_surface(state) if state is not None else cfg.source
     if status is not None and status.ready:
+        if surface == "slack":
+            # A Slack call ends the turn, so the person must hear something.
+            posted = await slack_reply(
+                f"Every service in the *{status.gateway.name}* managed tools is already "
+                "connected; they load on your next message.",
+                "final",
+                state=state,
+            )
+            if posted.get("success") is not True:
+                return {"success": False, "error": posted.get("error", "Could not reply")}
         return {
             "success": True,
             "status": "connected",
@@ -104,7 +120,6 @@ async def connect_managed_tools(
         }
     if status is not None:
         await card.save()
-    surface = current_reply_surface(state) if state is not None else cfg.source
     if surface == "slack":
         posted = await slack_reply(
             "Connect your managed tools",
@@ -121,4 +136,5 @@ async def connect_managed_tools(
         "status": "connection_required",
         "gateway": status.gateway.model_dump(),
         "missing": [item.model_dump() for item in status.missing],
+        "continues_automatically": status.consent_only,
     }
