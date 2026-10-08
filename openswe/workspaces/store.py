@@ -60,6 +60,7 @@ from openswe.github.repositories import Repository
 from openswe.review.styles import normalize_repo_full_name
 from openswe.store import now_iso
 from openswe.ui_invalidations import Topic
+from openswe.utils.message_commands import find_message_command, remove_message_command
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -1570,15 +1571,14 @@ def parse_workspace_tag(text: str) -> tuple[str | None, str]:
     caller decides whether the slug names a real workspace — an unresolvable tag
     should be left in the text rather than silently dropped.
     """
-    match = _ENV_TAG_RE.search(text or "")
+    match = find_message_command(_ENV_TAG_RE, text or "")
     if match is None:
         return None, text
     try:
         slug = slugify(match.group(1))
     except ValueError:
         return None, text
-    before, after = text[: match.start()].rstrip(), text[match.end() :].lstrip()
-    return slug, f"{before} {after}".strip() if before and after else f"{before}{after}".strip()
+    return slug, remove_message_command(text, match)
 
 
 def require_capture_support() -> None:

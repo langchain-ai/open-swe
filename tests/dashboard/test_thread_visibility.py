@@ -67,6 +67,21 @@ def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(privat
     assert summary.thread_is_promptable({"source": "dashboard"}, "bob")
 
 
+def test_review_chat_is_hidden_without_hiding_normal_pr_threads():
+    metadata = {
+        "source": "dashboard",
+        "pr_url": "https://github.com/langchain-ai/open-swe/pull/3795",
+        "title": "A renamed review chat",
+        "review_chat": True,
+        "unlisted": False,
+    }
+    assert not listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
+    assert summary.thread_is_readable(metadata, "alice")
+    assert summary.thread_is_promptable(metadata, "alice")
+    metadata["review_chat"] = False
+    assert listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
+
+
 @pytest.mark.parametrize(
     "operation",
     [

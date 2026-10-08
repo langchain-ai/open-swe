@@ -9,7 +9,8 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from openswe.config import ENV
-from openswe.dispatch import dispatch_agent_run
+from openswe.dispatch import dispatch_agent_run, thread_workspace
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import (
     lookup_slack_run_mapping,
@@ -23,10 +24,7 @@ from openswe.source_context import SourceContext
 logger = logging.getLogger(__name__)
 
 LANGGRAPH_URL = ENV.LANGGRAPH_URL.get()
-_QUEUE_RECORDS = (
-    (("queue",), "pending_messages"),
-    (("autofix",), "pending_event"),
-)
+_QUEUE_RECORDS = ((("autofix",), "pending_event"),)
 
 
 def _mapping_value(value: object, key: str) -> object:
@@ -102,17 +100,9 @@ async def _active_run_ids(client: LangGraphClient, thread_id: str) -> list[str]:
 
 
 async def _clear_deferred_work(client: LangGraphClient, thread_id: str) -> None:
+    await QueuedMessage.clear(thread_id)
     for namespace_prefix, key in _QUEUE_RECORDS:
         await client.store.delete_item((*namespace_prefix, thread_id), key)
-
-
-def _thread_workspace(metadata: Mapping[str, Any]) -> str | None:
-    """The workspace to carry into the stop-summary run; ``environment`` is the pre-workspace key."""
-    for key in ("workspace", "environment"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
 
 
 def _summary_configurable(
@@ -142,7 +132,7 @@ def _summary_configurable(
         if isinstance(value, str) and value:
             configurable[config_key] = value
 
-    workspace = _thread_workspace(metadata)
+    workspace = thread_workspace(metadata)
     if workspace is not None:
         configurable["workspace"] = workspace
         configurable["environment"] = workspace
