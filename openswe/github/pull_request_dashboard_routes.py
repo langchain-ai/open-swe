@@ -85,7 +85,7 @@ async def api_list_pull_requests(
     sort: Literal["created", "updated"] = "updated",
     direction: Literal["asc", "desc"] = "desc",
     page: int = 1,
-    scope: Literal["mine"] = "mine",
+    scope: Literal["mine", "review-requested"] = "mine",
     session: dict[str, Any] = SESSION_DEP,
 ) -> OpenPullRequests:
     token = await get_valid_access_token(session["sub"])
@@ -99,6 +99,7 @@ async def api_list_pull_requests(
         sort=sort,
         direction=direction,
         page=page,
+        scope=scope,
     )
 
 

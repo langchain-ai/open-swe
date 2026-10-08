@@ -364,6 +364,8 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
+  /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
+  managed_tools_gateway_id?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -437,10 +439,36 @@ export interface LangSmithConnectionStatus {
   updated_at?: string | null
 }
 
-export interface NotionCredentialStatus {
-  connected: boolean
-  token_expires_at?: string | null
-  updated_at?: string | null
+export interface ManagedToolsGateway {
+  id: string
+  name: string
+  tool_count: number
+}
+
+export interface ManagedToolsMissingCredential {
+  slug: string
+  display_name: string
+  kind: "oauth" | "secret"
+}
+
+export interface ManagedToolsGatewayStatus {
+  gateway: ManagedToolsGateway
+  workspaces: string[]
+  ready: boolean
+  tool_count?: number | null
+  missing: ManagedToolsMissingCredential[]
+}
+
+/** The card the agent offered in a thread, identified by its tool call. */
+export interface ManagedToolsConnectCard {
+  threadId: string
+  cardId: string
+}
+
+export interface ManagedToolsView {
+  configured: boolean
+  langsmith_connected: boolean
+  gateways: ManagedToolsGatewayStatus[]
 }
 
 export interface AdminUser {
@@ -1737,12 +1765,23 @@ export const api = {
     request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
       method: "DELETE",
     }),
-  getMyNotionStatus: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion"),
-  disconnectNotion: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion", {
-      method: "DELETE",
-    }),
+  listManagedToolsGateways: () =>
+    request<ManagedToolsGateway[]>("/managed-tools/gateways"),
+  getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
+  /** With a thread's connect card, the thread continues once every service is connected. */
+  connectManagedTool: (
+    gatewayId: string,
+    slug: string,
+    card?: ManagedToolsConnectCard
+  ) =>
+    request<{ connected: boolean; url?: string | null }>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/connect/${encodeURIComponent(slug)}${
+        card
+          ? `?${new URLSearchParams({ thread_id: card.threadId, card: card.cardId })}`
+          : ""
+      }`,
+      { method: "POST" }
+    ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
@@ -1790,14 +1829,15 @@ export const api = {
     request<PullRequestSearchResults>(
       `/pull-requests/search?q=${encodeURIComponent(query)}&offset=${offset}`
     ),
-  myPullRequests: (
+  openPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",
     direction: "asc" | "desc" = "desc",
-    page = 1
+    page = 1,
+    scope: "mine" | "review-assigned" | "review-requested" = "mine"
   ) =>
     request<OpenPullRequestsPayload>(
-      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=mine`
+      `${scope === "review-assigned" ? "/review-assignments" : "/pull-requests"}?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=${scope}`
     ),
   pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
@@ -1901,6 +1941,32 @@ export const api = {
     request<ReviewAssessmentFeedback>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
+    ),
+  getPullRequestLabels: (owner: string, repo: string, number: number) =>
+    request<{
+      available: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+      selected: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+    }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`
+    ),
+  changePullRequestLabel: (
+    owner: string,
+    repo: string,
+    number: number,
+    name: string,
+    selected: boolean
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`,
+      { method: "PATCH", body: JSON.stringify({ name, selected }) }
     ),
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(
@@ -2050,21 +2116,17 @@ export function loginUrl(redirectTo?: string): string {
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "notion" | "langsmith",
-  redirectTo?: string,
-  target: "_self" | "_blank" = "_self"
+  provider: "slack" | "langsmith",
+  redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
     const query = redirectTo
       ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
       : ""
-    const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
-    if (target === "_blank") {
-      window.open(url, "_blank", "noopener,noreferrer")
-    } else {
-      window.location.assign(url)
-    }
+    window.location.assign(
+      `${API_BASE}/dashboard/api/${provider}/login${query}`
+    )
   }
   return pending
 }

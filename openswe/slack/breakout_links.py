@@ -27,5 +27,9 @@ async def mark_broken_out(
     )
     where = "" if breakout_channel_id == channel_id else f" in <#{breakout_channel_id}>"
     await post_slack_thread_reply(
-        channel_id, thread_ts, f"Continued in <{permalink}|the breakout thread>{where}."
+        channel_id,
+        thread_ts,
+        f"Continued in <{permalink}|the breakout thread>{where}.",
+        unfurl_links=False,
+        unfurl_media=False,
     )

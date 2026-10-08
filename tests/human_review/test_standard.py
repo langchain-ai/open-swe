@@ -66,6 +66,66 @@ async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -
     )
 
 
+async def test_decline_only_withdraws_the_users_pending_pick() -> None:
+    from openswe.human_review.standard import decline
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    picked = User()
+    participant = HumanReviewParticipant(user_id=picked.id, decision="picked")
+    participant.user = picked
+    request.participants.append(participant)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch("openswe.human_review.lifecycle.repo_token", AsyncMock(return_value=None)),
+        patch("openswe.human_review.lifecycle.refresh_card", AsyncMock()),
+        patch("openswe.human_review.standard.start_auto_assign", AsyncMock()) as rotate,
+    ):
+        await decline(request, User(), "Away or unavailable")
+        assert participant.decision == "picked"
+        rotate.assert_not_awaited()
+        await decline(request, picked, "Away or unavailable")
+        assert participant.decision == "expired"
+        rotate.assert_awaited_once()
+        await decline(request, picked, "Away or unavailable")
+        assert rotate.await_count == 1
+
+
+async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
+    from openswe.human_review.standard import expire_picks, snooze
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    user = User()
+    pick = HumanReviewParticipant(user_id=user.id, decision="picked")
+    pick.user = user
+    request.participants.append(pick)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch("openswe.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("openswe.human_review.standard._assignment_minutes", AsyncMock(return_value=120)),
+    ):
+        await snooze(request, User(), "1 hour")
+        assert pick.joined_at is None
+        await snooze(request, user, "2 days")
+        assert pick.joined_at is not None and pick.joined_at > datetime.now(UTC)
+        assert await expire_picks(request) == "accepted"
+        assert pick.decision == "picked"
+
+
 async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
     from openswe.human_review.picking import Pick
     from openswe.human_review.standard import RequestResult, _auto_assign
@@ -86,7 +146,7 @@ async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
         ),
         patch("openswe.human_review.standard._wake_picker", AsyncMock()) as wake,
     ):
-        assert (await _auto_assign(request, asked=True)).status == "claimed"
+        assert (await _auto_assign(request, asked=True, trigger=None)).status == "claimed"
     wake.assert_not_awaited()
 
 
@@ -343,3 +403,71 @@ async def test_repo_settings_fall_back_to_the_default_branch() -> None:
 async def test_missing_or_invalid_settings_have_no_review_channel(status: int, text: str) -> None:
     with patch("openswe.github.repo_files.github_request", _github(status, text)):
         assert (await RepoSettings.fetch("o", "r", token="t")).review_channel == ""
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_reviews(
+    monkeypatch,
+):
+    from fastapi import HTTPException
+
+    from openswe.github.pull_requests import PullRequest
+    from openswe.human_review.requests import (
+        HumanReviewParticipant,
+        HumanReviewRequest,
+        RequestKind,
+        RequestState,
+    )
+    from openswe.human_review.routes import api_review_assignments
+    from openswe.users import User
+
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada,grace")
+    ada = await User.sign_in("github", "1", login="ada")
+    grace = await User.sign_in("github", "2", login="grace")
+    cases: list[tuple[int, User, bool, RequestState, RequestKind]] = [
+        (1, ada, True, "open", "standard"),
+        (2, ada, False, "open", "standard"),
+        (3, grace, True, "open", "standard"),
+        (4, ada, True, "cancelled", "standard"),
+        (5, ada, True, "open", "posted"),
+        (6, ada, True, "open", "standard"),
+    ]
+    for number, user, assigned, state, kind in cases:
+        pr = await PullRequest(
+            owner="o", repo="hidden" if number == 6 else "r", number=number, title=f"PR {number}"
+        ).save()
+        await HumanReviewRequest(
+            pull_request_id=pr.id,
+            head_sha="abc",
+            kind=kind,
+            state=state,
+            participants=[
+                HumanReviewParticipant(
+                    user_id=user.id, decision="review", assigned_by_agent=assigned
+                )
+            ],
+        ).save()
+
+    @asynccontextmanager
+    async def client(**kwargs):
+        yield object()
+
+    async def access(repo, token):
+        if repo == "o/hidden":
+            raise HTTPException(404, "repository not found")
+        return repo
+
+    async def states(client, owner, repo, number, author):
+        return {"ada": "APPROVED"} if number == 5 else {}
+
+    with (
+        patch("openswe.human_review.routes.github_client", client),
+        patch(
+            "openswe.human_review.routes.profiles.get_valid_access_token",
+            AsyncMock(return_value="token"),
+        ),
+        patch("openswe.human_review.routes.repo_access.assert_repo_access", access),
+        patch("openswe.human_review.routes.latest_review_states", states),
+    ):
+        result = await api_review_assignments(page=1, session={"sub": "ada"})
+    assert [row.number for row in result.pull_requests] == [1]

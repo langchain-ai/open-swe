@@ -102,8 +102,8 @@ async def slack_callback(
     handoff = desktop_handoff_from_state(state_payload)
 
     if handoff is not None:
-        # Same as the Notion flow: hand the verified identity back over the
-        # loopback port, for the app to redeem under the session it holds.
+        # Hand the verified identity back over the loopback port, for the app
+        # to redeem under the session it holds.
         challenge, port = handoff
         identity = await _verified_slack_identity(code)
         handoff_code = issue_connect_handoff(
