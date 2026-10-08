@@ -41,6 +41,7 @@ from openswe.human_review.people import (
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.prompts import prompt
+from openswe.slack.dm import note_for_concierge
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,7 @@ async def _submit_review(approval: HumanReviewRequest, voter_user_id: UUID) -> s
 async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Outcome:
     """Undraft the PR as its author, then open the card for approval."""
     if not approval.awaiting_ready:
-        return Outcome("This pull request is already ready for review.")
+        return Outcome("This pull request is already ready for review.", dm_card_success=True)
     pr = approval.pull_request
     try:
         async with GitHubClient.as_user(voter.github_login) as github:
@@ -168,9 +169,9 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
     marked = "Marked ready for review. Someone else can approve it now."
     current = await HumanReviewRequest.get(approval.id)
     if current is None:
-        return Outcome(marked)
+        return Outcome(marked, dm_card_success=True)
     await refresh_card(current)
-    return Outcome(marked)
+    return Outcome(marked, dm_card_success=True)
 
 
 async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
@@ -233,6 +234,12 @@ async def process_vote(
     slack_user_id = split_person_id(person)[1]
 
     async def handle(approval: HumanReviewRequest) -> Outcome:
+        if channel_id == approval.slack_dm_channel_id:
+            await note_for_concierge(
+                slack_user_id,
+                channel_id,
+                f"Clicked {decision} on the expedited review card for {approval.pull_request.url}.",
+            )
         match decision:
             case "dismiss":
                 return await dismiss_request(approval, slack_user_id)

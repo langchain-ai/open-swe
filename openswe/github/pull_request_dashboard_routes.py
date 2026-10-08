@@ -84,7 +84,7 @@ async def api_list_pull_requests(
     sort: Literal["created", "updated"] = "updated",
     direction: Literal["asc", "desc"] = "desc",
     page: int = 1,
-    scope: Literal["mine"] = "mine",
+    scope: Literal["mine", "review-requested"] = "mine",
     session: dict[str, Any] = SESSION_DEP,
 ) -> OpenPullRequests:
     async with GitHubClient.as_user(session["sub"]) as github:
@@ -96,6 +96,7 @@ async def api_list_pull_requests(
             sort=sort,
             direction=direction,
             page=page,
+            scope=scope,
         )
 
 

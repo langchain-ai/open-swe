@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Self
+from urllib.parse import quote
 
 import httpx2
 from fastapi import HTTPException
@@ -394,6 +395,15 @@ class PullRequestClient:
     async def comment(self, body: str) -> object:
         """Add a top-level conversation comment."""
         return await self.repo.post(f"issues/{self.number}/comments", {"body": body})
+
+    async def labels(self) -> list[dict[str, Any]]:
+        return await self.repo.pages(f"issues/{self.number}/labels")
+
+    async def add_label(self, name: str) -> None:
+        await self.repo.post(f"issues/{self.number}/labels", {"labels": [name]})
+
+    async def remove_label(self, name: str) -> None:
+        await self.repo.delete(f"issues/{self.number}/labels/{quote(name, safe='')}")
 
     async def review_comments(
         self, *, newest_first: bool = False, max_pages: int | None = None
@@ -791,8 +801,9 @@ async def list_open_pull_requests(
     sort: str = "updated",
     direction: str = "desc",
     page: int = 1,
+    scope: Literal["mine", "review-requested"] = "mine",
 ) -> OpenPullRequests:
-    """Read ``login``'s open PRs and current-head checks."""
+    """Read the open PRs ``login`` authored or is asked to review, with current-head checks."""
     if not _OWNER_PATTERN.fullmatch(login):
         raise HTTPException(422, "invalid GitHub login")
     if not 1 <= page <= _SEARCH_MAX_PAGES:
@@ -805,7 +816,8 @@ async def list_open_pull_requests(
         raise HTTPException(422, "repository must be owner/repo")
     if sort not in {"created", "updated"} or direction not in {"asc", "desc"}:
         raise HTTPException(422, "invalid PR sort")
-    query = f"is:pr is:open author:{login}"
+    qualifier = "author" if scope == "mine" else "review-requested"
+    query = f"is:pr is:open {qualifier}:{login}"
     for name in repositories:
         query += f" repo:{name}"
     try:

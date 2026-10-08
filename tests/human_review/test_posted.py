@@ -110,9 +110,12 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is not None
-    monkeypatch.setattr(
-        CodeOwners, "fetch", AsyncMock(side_effect=standard.RepoFileUnreadableError("unreadable"))
-    )
+
+    async def unreadable(*_: object, strict: bool = False) -> None:
+        if strict:
+            raise standard.RepoFileUnreadableError("unreadable")
+
+    monkeypatch.setattr(CodeOwners, "fetch", unreadable)
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is None

@@ -13,6 +13,7 @@ class Outcome:
     """What the clicker is told, privately; empty says nothing."""
 
     message: str = ""
+    dm_card_success: bool = False
 
 
 @dataclass(frozen=True, slots=True)

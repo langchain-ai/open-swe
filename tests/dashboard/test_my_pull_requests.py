@@ -22,7 +22,12 @@ def response(payload, status=200):
     )
 
 
-async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypatch):
+@pytest.mark.parametrize(
+    ("scope", "qualifier"), [("mine", "author"), ("review-requested", "review-requested")]
+)
+async def test_open_prs_use_live_state_current_head_and_legacy_statuses(
+    monkeypatch, scope, qualifier
+):
     queries = []
 
     async def request(_client, method, url, **kwargs):
@@ -86,9 +91,9 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(monkeypa
 
     monkeypatch.setattr(github_http, "github_request", request)
     result = await prs.list_open_pull_requests(
-        github_http.GitHubClient(MagicMock()), "octocat", "acme/app"
+        github_http.GitHubClient(MagicMock()), "octocat", "acme/app", scope=scope
     )
-    assert queries == ["is:pr is:open author:octocat repo:acme/app"]
+    assert queries == [f"is:pr is:open {qualifier}:octocat repo:acme/app"]
     assert [pr.number for pr in result.pull_requests] == [1, 3, 4]
     live, unavailable, no_checks = result.pull_requests
     assert live.ci == "failing"
@@ -157,7 +162,8 @@ async def test_mergeability_is_not_awaited_forever(monkeypatch):
     assert result.status_available is True and result.mergeable is None
 
 
-async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypatch):
+@pytest.mark.parametrize("scope", ["mine", "review-requested"])
+async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypatch, scope):
     token = AsyncMock(return_value="user-token")
     listing = AsyncMock(
         return_value=prs.OpenPullRequests(
@@ -166,11 +172,12 @@ async def test_route_uses_signed_in_user_token_and_rejects_missing_auth(monkeypa
     )
     monkeypatch.setattr(profiles, "get_valid_access_token", token)
     monkeypatch.setattr(pr_routes, "list_open_pull_requests", listing)
-    await pr_routes.api_list_pull_requests(repo="acme/app", session={"sub": "octocat"})
+    await pr_routes.api_list_pull_requests(repo="acme/app", scope=scope, session={"sub": "octocat"})
     token.assert_awaited_once_with("octocat")
     github, *args = listing.await_args.args
     assert github.http.headers["Authorization"] == "Bearer user-token"
     assert args == ["octocat", "acme/app"]
+    assert listing.await_args.kwargs["scope"] == scope
     token.return_value = None
     with pytest.raises(github_http.GitHubSignInRequired):
         await pr_routes.api_list_pull_requests(session={"sub": "another-user"})

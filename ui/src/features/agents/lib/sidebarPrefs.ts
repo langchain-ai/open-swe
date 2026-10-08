@@ -32,6 +32,8 @@ export interface SidebarPrefs {
   collapseSubagentsByDefault: boolean
   /** Thread rows whose fold state differs from the default. */
   collapsedSubagentKeys: Array<string>
+  /** Nav links moved into the "More" menu. */
+  hiddenNavItems: Array<string>
   organize: OrganizeMode
   sortChats: ChatSort
   sortPinned: PinnedSort
@@ -47,6 +49,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   collapsedSectionKeys: [],
   collapseSubagentsByDefault: true,
   collapsedSubagentKeys: [],
+  hiddenNavItems: ["/agents/bots", "/incidents"],
   organize: "workspace",
   sortChats: "created",
   sortPinned: "manual",
@@ -135,6 +138,9 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
       typeof raw.collapseSubagentsByDefault === "boolean"
         ? asStringArray(raw.collapsedSubagentKeys)
         : [],
+    hiddenNavItems: Array.isArray(raw.hiddenNavItems)
+      ? asStringArray(raw.hiddenNavItems)
+      : DEFAULT_SIDEBAR_PREFS.hiddenNavItems,
     organize: asEnum(
       raw.organize === "project" ? "repo" : raw.organize,
       ORGANIZE_MODES,
@@ -294,6 +300,14 @@ export function useSidebarPrefs() {
       })),
     []
   )
+  const toggleNavItemHidden = useCallback(
+    (to: string) =>
+      setPrefs((prev) => ({
+        ...prev,
+        hiddenNavItems: toggleMembership(prev.hiddenNavItems, to),
+      })),
+    []
+  )
   const setView = useCallback(
     (
       patch: Partial<
@@ -314,6 +328,7 @@ export function useSidebarPrefs() {
     toggleSubagentsCollapsed,
     toggleSectionCollapsed,
     expandRepo,
+    toggleNavItemHidden,
     setView,
   }
 }

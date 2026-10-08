@@ -40,6 +40,7 @@ from openswe.review.eval_jobs import (
     resolve_eval_config,
     start_reviewer_eval,
 )
+from openswe.review.labels import LabelChange, PullRequestLabels
 from openswe.review.reviews import (
     PendingReview,
     PendingReviewCommentInput,
@@ -254,6 +255,29 @@ async def api_get_pull_request_preview(
 ) -> PullRequestPreview:
     async with _as_viewer(session, owner, repo) as repository:
         return await get_pull_request_preview(repository.pull_request(pr_number))
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/labels")
+async def api_get_pull_request_labels(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, Any] = SESSION_DEP,
+) -> PullRequestLabels:
+    async with _as_viewer(session, owner, repo) as repository:
+        return await PullRequestLabels.read(repository.pull_request(pr_number))
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/labels", status_code=204)
+async def api_change_pull_request_label(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    change: LabelChange,
+    session: dict[str, Any] = SESSION_DEP,
+) -> None:
+    async with _as_viewer(session, owner, repo) as repository:
+        await change.apply(repository.pull_request(pr_number))
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")

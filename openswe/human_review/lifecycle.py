@@ -202,7 +202,11 @@ async def post_card(approval: HumanReviewRequest, *, title: str, files: list[Cha
 
 async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
     """Ask only the author to undraft; return a delivery problem, if any."""
-    if not approval.awaiting_ready:
+    approval = await HumanReviewRequest.get(approval.id) or approval
+    if approval.state != "open" or not approval.awaiting_ready:
+        await refresh_author_dm_card(approval, None)
+        return None
+    if approval.slack_dm_channel_id and approval.slack_dm_message_ts:
         return None
     pr = approval.pull_request
     author = (
@@ -225,10 +229,14 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         diff_image_id=approval.slack_diff_file_id or None,
     )
     text, blocks = await _warn_target(approval, (text, blocks))
+    origin = approval.dm_origin
     dm_location = await send_dm_with_location(
         author.slack_user_id,
         text,
-        blocks=block_payload([*blocks, *await origin_footer(approval.thread_id)]),
+        blocks=block_payload(
+            [*blocks, *await origin_footer(approval.thread_id, origin.location if origin else None)]
+        ),
+        origin=origin,
     )
     if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
@@ -360,24 +368,68 @@ async def _render_card(
     )
 
 
-async def _refresh_dm_card(request: HumanReviewRequest, outcome: str | None) -> None:
+async def refresh_author_dm_card(request: HumanReviewRequest, outcome: str | None) -> bool:
     if not request.slack_dm_channel_id or not request.slack_dm_message_ts:
-        return
-    if request.awaiting_ready and outcome is None:
-        return
-    channel_id = request.slack_dm_channel_id
-    if not await delete_slack_message(channel_id, request.slack_dm_message_ts):
-        logger.warning("Could not delete author DM card", extra={"request_id": str(request.id)})
-        return
-    request.slack_dm_channel_id = ""
-    request.slack_dm_message_ts = ""
-    await request.save()
-    pr = request.pull_request
-    author = await User.get(pr.author_user_id) if pr.author_user_id else None
-    if author is not None and author.slack_user_id:
-        await note_for_concierge(
-            author.slack_user_id, channel_id, f"Removed the author-only draft card for {pr.url}."
+        return False
+    async with HumanReviewRequest.locked(request.id) as (_, current):
+        if current is None or not current.slack_dm_channel_id or not current.slack_dm_message_ts:
+            return False
+        if current.state == "open" and current.awaiting_ready and outcome is None:
+            return False
+        status = (
+            current.detail or current.state
+            if current.state != "open"
+            else outcome
+            or (
+                "Approved. Waiting to merge."
+                if current.approved
+                else "Ready for review. Someone else can approve it now."
+            )
         )
+        status_key = [
+            status,
+            current.pull_request.url,
+            current.pull_request.title,
+            current.slack_channel_id,
+            current.slack_thread_ts,
+            current.slack_dm_channel_id,
+            current.slack_dm_message_ts,
+        ]
+        if current.run_config.get("author_dm_status") == status_key:
+            request.run_config = current.run_config
+            return True
+        origin_url = (
+            await get_slack_permalink(current.slack_channel_id, current.slack_thread_ts)
+            if current.slack_channel_id and current.slack_thread_ts
+            else None
+        )
+        text, blocks = expedited_card.author_status(current, status, origin_url=origin_url)
+        try:
+            await update_slack_message(
+                current.slack_dm_channel_id,
+                current.slack_dm_message_ts,
+                text,
+                blocks=block_payload(blocks),
+                login=_requester_login(current),
+            )
+        except SlackRequestError:
+            logger.warning(
+                "Could not update author DM card",
+                extra={"request_id": str(current.id)},
+                exc_info=True,
+            )
+            return False
+        pr = current.pull_request
+        author = (
+            await User.get(pr.author_user_id)
+            if pr.author_user_id
+            else await User.for_login("github", pr.author)
+        )
+        if author is not None and author.slack_user_id:
+            await note_for_concierge(author.slack_user_id, current.slack_dm_channel_id, text)
+        current.run_config = {**current.run_config, "author_dm_status": status_key}
+        request.run_config = current.run_config
+        return True
 
 
 async def broadcast_configured(approval: HumanReviewRequest) -> None:
@@ -408,7 +460,7 @@ async def broadcast_configured(approval: HumanReviewRequest) -> None:
 
 async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = None) -> None:
     """Re-render the posted card from current state; used after clicks and outcomes."""
-    await _refresh_dm_card(request, outcome)
+    await refresh_author_dm_card(request, outcome)
     if (
         request.kind == "expedited"
         and request.state == "open"
@@ -485,7 +537,7 @@ async def _repost(
                 row.slack_broadcast = broadcast
             return kept
 
-    await _refresh_dm_card(request, outcome)
+    await refresh_author_dm_card(request, outcome)
     return await repost_thread_card(
         location,
         old_ts,
@@ -613,8 +665,8 @@ async def reopen(request: HumanReviewRequest) -> None:
 async def dismiss_request(request: HumanReviewRequest, slack_user_id: str) -> Outcome:
     """Anyone who can see the card may take it down; it needs no GitHub link or access."""
     if not await dismiss_by(request, f"<@{slack_user_id}>", ""):
-        return Outcome("This review request is already closed.")
-    return Outcome("Dismissed.")
+        return Outcome("This review request is already closed.", dm_card_success=True)
+    return Outcome("Dismissed.", dm_card_success=True)
 
 
 async def dismiss_by(request: HumanReviewRequest, by: str, reason: str) -> bool:
@@ -790,10 +842,19 @@ async def _release_picks(
                 f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
                 "Open SWE removed you as a reviewer."
             )
+            origin = request.dm_origin
             await send_dm(
                 reviewer.user.slack_user_id,
                 text,
-                blocks=block_payload([section(text), *await origin_footer(request.thread_id)]),
+                blocks=block_payload(
+                    [
+                        section(text),
+                        *await origin_footer(
+                            request.thread_id, origin.location if origin else None
+                        ),
+                    ]
+                ),
+                origin=origin,
             )
     return await HumanReviewRequest.get(request.id) or current
 
@@ -836,10 +897,19 @@ async def drop_picks(
             },
         )
         if pick.user.slack_user_id:
+            origin = request.dm_origin
             await send_dm(
                 pick.user.slack_user_id,
                 message,
-                blocks=block_payload([section(message), *await origin_footer(request.thread_id)]),
+                blocks=block_payload(
+                    [
+                        section(message),
+                        *await origin_footer(
+                            request.thread_id, origin.location if origin else None
+                        ),
+                    ]
+                ),
+                origin=origin,
             )
     current = await HumanReviewRequest.get(request.id)
     if current is not None and current.state == "open":
