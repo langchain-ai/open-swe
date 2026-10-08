@@ -1,6 +1,5 @@
-"""The graph factory tool loaders must overlap, not run back-to-back."""
+"""Integration tools the graph factory loads into a run."""
 
-import asyncio
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,8 +14,6 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.server import get_agent
-
-_START_TIMEOUT_SECONDS = 2.0
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-5.6-sol",
@@ -35,7 +32,7 @@ def _config() -> RunnableConfig:
     return {
         "configurable": {
             "__is_for_execution__": True,
-            "thread_id": "thread-parallel-tools",
+            "thread_id": "thread-factory-tools",
             "github_login": "octocat",
         },
         "metadata": {},
@@ -61,7 +58,6 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
             )
         ),
     )
-    barrier = asyncio.Barrier(2)
 
     async def delete_incident() -> str:
         return "deleted"
@@ -72,16 +68,7 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         description="Delete an incident",
     )
 
-    def rendezvous(result: Any) -> Any:
-        # Serial loaders never all reach the barrier, so a regression times out
-        # here instead of quietly costing a few seconds per run.
-        async def loader(*_args: Any) -> Any:
-            await asyncio.wait_for(barrier.wait(), timeout=_START_TIMEOUT_SECONDS)
-            return result
-
-        return loader
-
-    thread_id = "thread-parallel-tools"
+    thread_id = "thread-factory-tools"
     SANDBOX_BACKENDS.pop(thread_id, None)
     with (
         patch(
@@ -112,8 +99,7 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
         patch("openswe.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
         patch("openswe.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
-        patch("openswe.server._mcp_tools_for", side_effect=rendezvous([mcp_tool])),
-        patch("openswe.server._notion_tools_for", side_effect=rendezvous([])),
+        patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[mcp_tool]),
     ):
         config = _config()
         config["configurable"]["github_login"] = github_login
@@ -223,8 +209,8 @@ async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
     )
     assert exposed == [tools[0], http_tool, file_tool, write_tool]
     assert list(ordinary) == tools[1:]
-    dynamic = server._integration_middleware(ordinary, [], set())
-    full = server._integration_middleware(tools, [], set())
+    dynamic = server._integration_middleware(ordinary, set())
+    full = server._integration_middleware(tools, set())
     assert dynamic is not None and full is not None
     assert {tool.name for tool in await dynamic.catalog_tools()} == {
         tool.name for tool in tools[1:]
@@ -232,23 +218,3 @@ async def test_code_mode_keeps_invalid_names_in_dynamic_catalog(
     catalog = await full.catalog_tools()
     assert {tool.name for tool in catalog} == {tool.name for tool in tools}
     assert await catalog[0].ainvoke({}) == "ok"
-
-
-@pytest.mark.asyncio
-async def test_notion_connection_changes_are_visible_without_waiting_for_cache(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from openswe import server
-
-    status = AsyncMock(return_value={"notion": {"connected": False}})
-    load = AsyncMock(return_value=["first-tool"])
-    monkeypatch.setattr(server, "get_notion_status", status)
-    monkeypatch.setattr(server, "load_notion_tools", load)
-    assert await server._notion_tools_for("alice") == []
-    status.return_value = {"notion": {"connected": True, "updated_at": "first"}}
-    assert await server._notion_tools_for("alice") == ["first-tool"]
-    load.return_value = ["reconnected-tool"]
-    status.return_value = {"notion": {"connected": True, "updated_at": "second"}}
-    assert await server._notion_tools_for("alice") == ["reconnected-tool"]
-    status.return_value = {"notion": {"connected": False}}
-    assert await server._notion_tools_for("alice") == []

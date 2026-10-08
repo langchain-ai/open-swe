@@ -116,6 +116,13 @@ TEST_USERS = [
         "email": "bob@example.com",
         "github_id": "1002",
     },
+    {
+        "name": "Dana",
+        "slack_id": "U_DANA",
+        "login": "dana",
+        "email": "dana@example.com",
+        "github_id": "1005",
+    },
 ]
 
 # Alice is the workspace admin (so admin threads + the workspaces dashboard are

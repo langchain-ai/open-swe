@@ -698,6 +698,7 @@ export const ChatComposer = memo(function ChatComposer({
           workspaces={workspaceOptions}
           selectedSlug={selectedWorkspace}
           onChange={onWorkspaceChange}
+          side="top"
         />
       )}
       {runTarget !== "local" && onRepoChange && (

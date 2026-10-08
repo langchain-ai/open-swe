@@ -1452,6 +1452,13 @@
         "title": "CreateResponseRequest",
         "type": "object"
       },
+      "CredentialKind": {
+        "enum": [
+          "oauth",
+          "secret"
+        ],
+        "type": "string"
+      },
       "CustomToolCallItem": {
         "properties": {
           "call_id": {
@@ -1659,6 +1666,73 @@
           "arguments"
         ],
         "title": "FunctionCallItem",
+        "type": "object"
+      },
+      "Gateway": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tool_count"
+        ],
+        "title": "Gateway",
+        "type": "object"
+      },
+      "GatewayStatus": {
+        "description": "What one person sees for a gateway: ready, or what to connect first.",
+        "properties": {
+          "gateway": {
+            "$ref": "#/components/schemas/Gateway"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/MissingCredential"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "tool_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Count"
+          },
+          "workspaces": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workspaces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "gateway",
+          "workspaces",
+          "ready"
+        ],
+        "title": "GatewayStatus",
         "type": "object"
       },
       "GitHubTrigger": {
@@ -1984,6 +2058,24 @@
         "type": "string"
       },
       "JsonValue": {},
+      "LabelChange": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "selected"
+        ],
+        "title": "LabelChange",
+        "type": "object"
+      },
       "LineComment": {
         "description": "A comment on diff lines that lives only in the agent's prompt, not on GitHub.",
         "properties": {
@@ -2356,6 +2448,57 @@
           "name"
         ],
         "title": "MCPToolDescription",
+        "type": "object"
+      },
+      "ManagedConnectResponse": {
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "connected"
+        ],
+        "title": "ManagedConnectResponse",
+        "type": "object"
+      },
+      "ManagedToolsView": {
+        "description": "The managed tools gateways the caller's workspaces use, and what each still needs.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "gateways": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayStatus"
+            },
+            "title": "Gateways",
+            "type": "array"
+          },
+          "langsmith_connected": {
+            "default": false,
+            "title": "Langsmith Connected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configured",
+          "gateways"
+        ],
+        "title": "ManagedToolsView",
         "type": "object"
       },
       "MarkReadyAction": {
@@ -2740,6 +2883,29 @@
           "secret"
         ],
         "title": "MintedApiKey",
+        "type": "object"
+      },
+      "MissingCredential": {
+        "description": "A service in the gateway this person has not connected yet.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "display_name",
+          "kind"
+        ],
+        "title": "MissingCredential",
         "type": "object"
       },
       "ModelList": {
@@ -3963,6 +4129,59 @@
           "reviewDecision"
         ],
         "title": "PullRequestFixContext",
+        "type": "object"
+      },
+      "PullRequestLabel": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "title": "PullRequestLabel",
+        "type": "object"
+      },
+      "PullRequestLabels": {
+        "properties": {
+          "available": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestLabel"
+            },
+            "title": "Available",
+            "type": "array"
+          },
+          "selected": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestLabel"
+            },
+            "title": "Selected",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "selected"
+        ],
+        "title": "PullRequestLabels",
         "type": "object"
       },
       "PullRequestPreview": {
@@ -7187,6 +7406,17 @@
             ],
             "title": "Human Review Auto Assign Minutes"
           },
+          "managed_tools_gateway_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Tools Gateway Id"
+          },
           "model_routing_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -9968,6 +10198,37 @@
         ]
       }
     },
+    "/dashboard/api/managed-tools/gateways": {
+      "get": {
+        "description": "Gateways an admin can pick for a workspace, read with the admin's own LangSmith login.",
+        "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Gateway"
+                  },
+                  "title": "Response Api List Managed Tools Gateways Dashboard Api Managed Tools Gateways Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Managed Tools Gateways",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/mcps": {
       "get": {
         "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
@@ -10526,17 +10787,15 @@
         ]
       }
     },
-    "/dashboard/api/my-credentials/notion": {
-      "delete": {
-        "operationId": "disconnect_my_notion_dashboard_api_my_credentials_notion_delete",
+    "/dashboard/api/my-managed-tools": {
+      "get": {
+        "operationId": "api_my_managed_tools_dashboard_api_my_managed_tools_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Disconnect My Notion Dashboard Api My Credentials Notion Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ManagedToolsView"
                 }
               }
             },
@@ -10548,26 +10807,159 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Disconnect My Notion",
+        "summary": "Api My Managed Tools",
         "tags": [
-          "dashboard",
-          "notion"
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/{gateway}/connect/{slug}": {
+      "get": {
+        "description": "A Slack card button: mint the consent link here, for the signed-in owner only.",
+        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools__gateway__connect__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": true,
+            "schema": {
+              "title": "Card",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Connect Managed Tool From Card",
+        "tags": [
+          "dashboard"
         ]
       },
-      "get": {
-        "operationId": "get_my_notion_status_dashboard_api_my_credentials_notion_get",
+      "post": {
+        "description": "A consent link for one service; from a thread's card, the thread resumes once connected.",
+        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools__gateway__connect__slug__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thread_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Thread Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "card",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Card"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get My Notion Status Dashboard Api My Credentials Notion Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ManagedConnectResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -10575,10 +10967,9 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Get My Notion Status",
+        "summary": "Api Connect Managed Tool",
         "tags": [
-          "dashboard",
-          "notion"
+          "dashboard"
         ]
       }
     },
@@ -10817,232 +11208,6 @@
         "summary": "Api Reveal My Mcp Headers",
         "tags": [
           "dashboard"
-        ]
-      }
-    },
-    "/dashboard/api/notion/callback": {
-      "get": {
-        "operationId": "notion_callback_dashboard_api_notion_callback_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": true,
-            "schema": {
-              "title": "State",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "code",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Code"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error"
-            }
-          },
-          {
-            "in": "query",
-            "name": "error_description",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Error Description"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Notion Callback",
-        "tags": [
-          "dashboard",
-          "notion"
-        ]
-      }
-    },
-    "/dashboard/api/notion/desktop/exchange": {
-      "post": {
-        "description": "Finish a desktop Notion connection with the app's own session.",
-        "operationId": "notion_desktop_exchange_dashboard_api_notion_desktop_exchange_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DesktopConnectExchange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Notion Desktop Exchange Dashboard Api Notion Desktop Exchange Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Notion Desktop Exchange",
-        "tags": [
-          "dashboard",
-          "notion"
-        ]
-      }
-    },
-    "/dashboard/api/notion/login": {
-      "get": {
-        "operationId": "notion_login_dashboard_api_notion_login_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "redirect_to",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Redirect To"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_handoff",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Handoff"
-            }
-          },
-          {
-            "in": "query",
-            "name": "desktop_port",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 65535,
-                  "minimum": 1024,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Desktop Port"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Notion Login",
-        "tags": [
-          "dashboard",
-          "notion"
         ]
       }
     },
@@ -11804,8 +11969,11 @@
             "name": "scope",
             "required": false,
             "schema": {
-              "const": "mine",
               "default": "mine",
+              "enum": [
+                "mine",
+                "review-requested"
+              ],
               "title": "Scope",
               "type": "string"
             }
@@ -12675,6 +12843,94 @@
         "tags": [
           "dashboard",
           "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/review-assignments": {
+      "get": {
+        "operationId": "api_review_assignments_dashboard_api_review_assignments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated",
+              "enum": [
+                "created",
+                "updated"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenPullRequests"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Review Assignments",
+        "tags": [
+          "dashboard",
+          "human-review"
         ]
       }
     },
@@ -14377,6 +14633,139 @@
           }
         ],
         "summary": "Api Get Review Image",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/labels": {
+      "get": {
+        "operationId": "api_get_pull_request_labels_dashboard_api_reviews__owner___repo___pr_number__labels_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestLabels"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Pull Request Labels",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "patch": {
+        "operationId": "api_change_pull_request_label_dashboard_api_reviews__owner___repo___pr_number__labels_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Change Pull Request Label",
         "tags": [
           "dashboard",
           "review"
@@ -16942,6 +17331,16 @@
           },
           {
             "in": "query",
+            "name": "owned",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Owned",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -17105,6 +17504,16 @@
             "schema": {
               "default": false,
               "title": "Include Automations",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owned",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Owned",
               "type": "boolean"
             }
           },

@@ -262,7 +262,7 @@ def decode_state(state: str) -> dict[str, Any]:
 _S256_CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
-def _s256(verifier: str) -> str:
+def pkce_s256_challenge(verifier: str) -> str:
     digest = hashlib.sha256(verifier.encode()).digest()
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
 
@@ -315,7 +315,7 @@ def _decode_handoff(*, code: str, verifier: str) -> dict[str, Any]:
     challenge = payload.get("challenge")
     if not isinstance(challenge, str):
         raise HTTPException(400, "malformed handoff code")
-    if not hmac.compare_digest(_s256(verifier), challenge):
+    if not hmac.compare_digest(pkce_s256_challenge(verifier), challenge):
         raise HTTPException(400, "handoff verifier mismatch")
     return payload
 
