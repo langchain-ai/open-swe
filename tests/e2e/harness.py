@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -451,10 +451,27 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                     }
                     for vote in approval.participants
                 ],
+                "pull_request_id": str(approval.pull_request_id),
+                "excluded_hunks": approval.excluded_hunks,
             }
             for approval in approvals
         ]
     )
+
+
+@app.get("/control/audit-logs")
+async def control_audit_logs(operation_name: str) -> JSONResponse:
+    """The last day's audit entries for one operation, newest first."""
+    from openswe.audit_logs.store import list_logs
+
+    now = datetime.now(UTC)
+    page = await list_logs(
+        start_time=now - timedelta(days=1),
+        end_time=now,
+        limit=50,
+        operation_name=operation_name,
+    )
+    return JSONResponse([entry.model_dump(mode="json") for entry in page.items])
 
 
 @app.get("/control/human-review-requests")

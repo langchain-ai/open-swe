@@ -1,4 +1,4 @@
-"""Expedited review diff exclusions"""
+"""Expedited review excluded hunks"""
 
 from alembic import op
 
@@ -11,7 +11,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         "ALTER TABLE human_review_request "
-        "ADD COLUMN IF NOT EXISTS diff_exclusions jsonb NOT NULL DEFAULT '[]'::jsonb"
+        "ADD COLUMN IF NOT EXISTS excluded_hunks jsonb NOT NULL DEFAULT '[]'::jsonb"
     )
 
 

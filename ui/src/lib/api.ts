@@ -56,10 +56,16 @@ export interface AuditLog {
 }
 
 export interface ExpeditedExclusions {
-  pull_request: string
+  pull_request_id: string | null
   base_sha: string
   head_sha: string
   approvals_md_sha256: string
+  requested: {
+    path: string
+    hunks: number[]
+    guideline: string
+    reason: string
+  }[]
   hunks: {
     path: string
     digest: string

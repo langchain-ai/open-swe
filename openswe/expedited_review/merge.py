@@ -82,7 +82,7 @@ async def merge_approved(
     if files is None:
         return MergeResult("error", "Could not read the pull request's changed files.")
     if not fingerprint_matches(files, approval.diff_fingerprint):
-        verdict = assess_eligibility(files, approval.diff_exclusions)
+        verdict = assess_eligibility(files, approval.excluded_hunks)
         if isinstance(verdict, Ineligible):
             await retire(
                 approval,

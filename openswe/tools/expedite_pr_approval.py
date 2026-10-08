@@ -3,6 +3,7 @@
 import hashlib
 from collections.abc import Mapping
 from typing import Any, Literal
+from uuid import UUID
 
 from langgraph.config import get_config
 
@@ -112,18 +113,29 @@ async def _resolve_exclusions(
             f"Nothing can be excluded: `{pr_ref.owner}/{pr_ref.repo}` has no `{APPROVALS_PATH}` "
             "at the pull request's base commit."
         )
-    resolved = [entry for exclusion in excluded for entry in exclusion.resolve(files)]
+    audited = ExpeditedExclusions(
+        base_sha=payload.base_sha,
+        head_sha=payload.head_sha,
+        approvals_md_sha256=hashlib.sha256(approvals.encode()).hexdigest(),
+        requested=excluded,
+    )
     entry = current_audit_log.get()
     if entry is not None:
-        entry.enrichments.resource_ids = [pr_ref.url]
-        entry.enrichments.expedited_exclusions = ExpeditedExclusions(
-            pull_request=pr_ref.url,
-            base_sha=payload.base_sha,
-            head_sha=payload.head_sha,
-            approvals_md_sha256=hashlib.sha256(approvals.encode()).hexdigest(),
-            hunks=resolved,
-        )
-    return resolved
+        entry.enrichments.expedited_exclusions = audited
+        stored = await PullRequest.get(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        if stored is not None:
+            _audit_pull_request(stored.id)
+    audited.hunks = [hunk for exclusion in excluded for hunk in exclusion.resolve(files)]
+    return audited.hunks
+
+
+def _audit_pull_request(pull_request_id: UUID) -> None:
+    """The row may first exist once the card is saved, so the audit entry learns its id then."""
+    entry = current_audit_log.get()
+    if entry is None or entry.enrichments.expedited_exclusions is None:
+        return
+    entry.enrichments.expedited_exclusions.pull_request_id = pull_request_id
+    entry.enrichments.resource_ids = [str(pull_request_id)]
 
 
 @audit_tool()
@@ -240,9 +252,10 @@ async def expedite_pr_approval(
     if (
         active is not None
         and fingerprint_matches(files, active.diff_fingerprint)
-        and {(e["path"], e["digest"]) for e in active.diff_exclusions}
+        and {(e["path"], e["digest"]) for e in active.excluded_hunks}
         == {(e["path"], e["digest"]) for e in exclusions}
     ):
+        _audit_pull_request(active.pull_request_id)
         if active.awaiting_ready and not payload.draft:
             updated = await transition(active.id, expected=("open",), awaiting_ready=False)
             if updated is not None:
@@ -297,6 +310,7 @@ async def expedite_pr_approval(
     pull_request.author_github_id = payload.author_id
     pull_request = await pull_request.save()
     pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
+    _audit_pull_request(pull_request.id)
     # One open request per PR, so the displaced one closes before this row is written;
     # it is reopened below if the expedited card cannot be posted.
     if displaced is not None and (
@@ -309,7 +323,7 @@ async def expedite_pr_approval(
         head_sha=head_sha,
         kind="expedited",
         diff_fingerprint=verdict.fingerprint,
-        diff_exclusions=exclusions,
+        excluded_hunks=exclusions,
         tldr=summary_line(inline_summary),
         slack_channel_choices=broadcast_choice,
         awaiting_ready=payload.draft,

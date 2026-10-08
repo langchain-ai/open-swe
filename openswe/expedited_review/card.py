@@ -54,7 +54,7 @@ def _header(approval: HumanReviewRequest, title: str, author: str) -> list[Block
 def _diff_sections(
     approval: HumanReviewRequest, files: list[ChangedFile], diff_image_id: str | None
 ) -> list[Block]:
-    diff = ExpeditedDiff.of(files, approval.diff_exclusions)
+    diff = ExpeditedDiff(files, approval.excluded_hunks)
     shown = diff.shown
     trailer = [*_overflow_note(shown), *_test_diffstat(diff.tests), *_excluded_summary(diff)]
     if diff_image_id:

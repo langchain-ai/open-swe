@@ -179,7 +179,7 @@ function ExclusionsSection({
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-3 text-xs">
         {(
           [
-            ["Pull request", exclusions.pull_request],
+            ["Pull request ID", exclusions.pull_request_id ?? "Not stored"],
             ["Base SHA", exclusions.base_sha],
             ["Head SHA", exclusions.head_sha],
             ["APPROVALS.md SHA-256", exclusions.approvals_md_sha256],
@@ -203,22 +203,36 @@ function ExclusionsSection({
             </tr>
           </thead>
           <tbody>
-            {exclusions.hunks.map((hunk, index) => (
-              <tr
-                key={`${hunk.path}:${hunk.digest}:${index}`}
-                className="border-t"
-              >
-                <td className="p-2 font-mono break-all">{hunk.path}</td>
-                <td className="p-2 font-mono break-all">
-                  {hunk.header || "Whole file"}
-                </td>
-                <td className="p-2 whitespace-nowrap">
-                  +{hunk.additions} −{hunk.deletions}
-                </td>
-                <td className="p-2">{hunk.guideline}</td>
-                <td className="p-2">{hunk.reason}</td>
-              </tr>
-            ))}
+            {exclusions.hunks.length > 0
+              ? exclusions.hunks.map((hunk, index) => (
+                  <tr
+                    key={`${hunk.path}:${hunk.digest}:${index}`}
+                    className="border-t"
+                  >
+                    <td className="p-2 font-mono break-all">{hunk.path}</td>
+                    <td className="p-2 font-mono break-all">
+                      {hunk.header || "Whole file"}
+                    </td>
+                    <td className="p-2 whitespace-nowrap">
+                      +{hunk.additions} −{hunk.deletions}
+                    </td>
+                    <td className="p-2">{hunk.guideline}</td>
+                    <td className="p-2">{hunk.reason}</td>
+                  </tr>
+                ))
+              : exclusions.requested.map((request, index) => (
+                  <tr key={`${request.path}:${index}`} className="border-t">
+                    <td className="p-2 font-mono break-all">{request.path}</td>
+                    <td className="p-2 font-mono break-all">
+                      {request.hunks.length > 0
+                        ? `Starting at ${request.hunks.join(", ")}`
+                        : "Whole file"}
+                    </td>
+                    <td className="p-2">Not resolved</td>
+                    <td className="p-2">{request.guideline}</td>
+                    <td className="p-2">{request.reason}</td>
+                  </tr>
+                ))}
           </tbody>
         </table>
       </div>

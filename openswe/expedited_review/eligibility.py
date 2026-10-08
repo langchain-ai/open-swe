@@ -204,53 +204,60 @@ class Exclusion(BaseModel):
         ]
 
 
-@dataclass(frozen=True, slots=True)
 class ExpeditedDiff:
-    """The diff as the card splits it: drawn, tests, and still-present exclusions."""
+    """The diff as the card splits it: drawn, tests, and still-present exclusions.
 
-    shown: list[ChangedFile]
-    tests: list[ChangedFile]
-    excluded: list[ExcludedHunk]
-    partially_shown: frozenset[str]
+    An exclusion whose content changed no longer matches, so its hunk is drawn again.
+    """
 
-    @classmethod
-    def of(cls, files: list[ChangedFile], exclusions: Sequence[ExcludedHunk] = ()) -> ExpeditedDiff:
-        """An exclusion whose content changed no longer matches, so its hunk is drawn again."""
-        reviewed, tests = ChangedFile.split(files)
+    __slots__ = ("excluded", "partially_shown", "shown", "tests", "total_lines")
+
+    def __init__(self, files: list[ChangedFile], exclusions: Sequence[ExcludedHunk] = ()) -> None:
+        reviewed, self.tests = ChangedFile.split(files)
+        self.total_lines = ChangedFile.total_lines(files)
         by_path: dict[str, dict[str, ExcludedHunk]] = {}
         for entry in exclusions:
             by_path.setdefault(entry["path"], {})[entry["digest"]] = entry
-        shown: list[ChangedFile] = []
-        excluded: list[ExcludedHunk] = []
+        self.shown: list[ChangedFile] = []
+        self.excluded: list[ExcludedHunk] = []
         partial: set[str] = set()
         for file in reviewed:
             wanted = by_path.get(file.filename)
             if not wanted:
-                shown.append(file)
+                self.shown.append(file)
                 continue
             if file.patch is None:
                 if (hit := wanted.get(file.whole_digest)) is not None:
-                    excluded.append(hit)
+                    self.excluded.append(hit)
                 else:
-                    shown.append(file)
+                    self.shown.append(file)
                 continue
             hunks = file.hunks
             kept: list[Hunk] = []
             for hunk in hunks:
                 if (hit := wanted.get(hunk.digest)) is not None:
-                    excluded.append(hit)
+                    self.excluded.append(hit)
                 else:
                     kept.append(hunk)
             if len(kept) == len(hunks):
-                shown.append(file)
+                self.shown.append(file)
             elif kept:
-                shown.append(file.keeping(kept))
+                self.shown.append(file.keeping(kept))
                 partial.add(file.filename)
-        return cls(shown, tests, excluded, frozenset(partial))
+        self.partially_shown = frozenset(partial)
 
     @property
     def excluded_lines(self) -> int:
         return sum(entry["additions"] + entry["deletions"] for entry in self.excluded)
+
+    @property
+    def accounted_lines(self) -> int:
+        """Drawn, excluded and test lines; anything short of the PR's total fell through."""
+        return (
+            ChangedFile.total_lines(self.shown)
+            + self.excluded_lines
+            + ChangedFile.total_lines(self.tests)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,12 +296,18 @@ def assess_eligibility(
         return Ineligible("the pull request changes no files")
     if len(files) >= MAX_FILES:
         return Ineligible("the pull request changes too many files")
-    diff = ExpeditedDiff.of(files, exclusions)
+    diff = ExpeditedDiff(files, exclusions)
     for file in diff.shown:
         if file.patch is None:
             return Ineligible(
                 f"`{file.filename}` has no text diff (binary, oversized, or a rename)"
             )
+    if diff.accounted_lines != diff.total_lines:
+        return Ineligible(
+            f"the card would account for {diff.accounted_lines} of the pull request's "
+            f"{diff.total_lines} changed lines, so some change would be neither drawn nor "
+            "listed as excluded"
+        )
     changed = ChangedFile.total_lines(diff.shown)
     test_lines = ChangedFile.total_lines(diff.tests)
     if changed + test_lines + diff.excluded_lines < 1:

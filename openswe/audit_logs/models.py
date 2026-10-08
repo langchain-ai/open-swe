@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database.orm import Base
-from openswe.expedited_review.eligibility import ExcludedHunk
+from openswe.expedited_review.eligibility import ExcludedHunk, Exclusion
 
 
 class SettingsChange(TypedDict):
@@ -23,11 +23,12 @@ class ExpeditedExclusions(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    pull_request: str
+    pull_request_id: UUID | None = None
     base_sha: str
     head_sha: str
     approvals_md_sha256: str
-    hunks: list[ExcludedHunk]
+    requested: list[Exclusion]
+    hunks: list[ExcludedHunk] = Field(default_factory=list)
 
 
 class AuditLogEnrichments(BaseModel):

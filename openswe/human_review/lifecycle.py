@@ -113,7 +113,7 @@ async def _files_for(request: HumanReviewRequest, token: str) -> list[ChangedFil
 
 async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile]) -> str | None:
     """A hosted-but-unposted PNG of the diff, which the card renders inline."""
-    shown = ExpeditedDiff.of(files, approval.diff_exclusions).shown
+    shown = ExpeditedDiff(files, approval.excluded_hunks).shown
     if not shown:
         return None
     try:

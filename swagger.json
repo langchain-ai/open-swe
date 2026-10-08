@@ -1623,6 +1623,38 @@
         "title": "ExcludedHunk",
         "type": "object"
       },
+      "Exclusion": {
+        "description": "Changes the agent judged to qualify under the target repository's APPROVALS.md.",
+        "properties": {
+          "guideline": {
+            "title": "Guideline",
+            "type": "string"
+          },
+          "hunks": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Hunks",
+            "type": "array"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "guideline",
+          "reason"
+        ],
+        "title": "Exclusion",
+        "type": "object"
+      },
       "ExpeditedExclusions": {
         "additionalProperties": false,
         "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
@@ -1646,17 +1678,31 @@
             "title": "Hunks",
             "type": "array"
           },
-          "pull_request": {
-            "title": "Pull Request",
-            "type": "string"
+          "pull_request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pull Request Id"
+          },
+          "requested": {
+            "items": {
+              "$ref": "#/components/schemas/Exclusion"
+            },
+            "title": "Requested",
+            "type": "array"
           }
         },
         "required": [
-          "pull_request",
           "base_sha",
           "head_sha",
           "approvals_md_sha256",
-          "hunks"
+          "requested"
         ],
         "title": "ExpeditedExclusions",
         "type": "object"

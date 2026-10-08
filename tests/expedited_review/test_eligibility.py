@@ -80,7 +80,12 @@ def test_excluded_hunks_leave_the_card_until_their_content_changes() -> None:
     verdict = assess_eligibility([file], exclusions)
     assert isinstance(verdict, EligibleDiff)
     assert (verdict.changed_lines, verdict.excluded_lines) == (1, 29)
-    assert ExpeditedDiff.of([file], exclusions).shown[0].patch == small
+    assert ExpeditedDiff([file], exclusions).shown[0].patch == small
 
     edited = file.model_copy(update={"patch": f"{small}\n{big}\n+sneaky", "additions": 31})
     assert isinstance(assess_eligibility([edited], exclusions), Ineligible)
+
+    unparsed = file.model_copy(update={"additions": 40})
+    verdict = assess_eligibility([unparsed], exclusions)
+    assert isinstance(verdict, Ineligible)
+    assert "30 of the pull request's 40" in verdict.reason
