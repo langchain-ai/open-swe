@@ -477,7 +477,7 @@ This prevents the publisher from approving their
 own PR; it does not prevent other task participants from approving it.
 
 Public threads load workspace MCP connections and organization skills. Personal
-Notion connections, user skills, and user custom instructions are available only in a private thread
+MCP connections, user skills, and user custom instructions are available only in a private thread
 started by its immutable owner. The same ownership check applies when a personal
 MCP tool refreshes its credentials at execution time.
 

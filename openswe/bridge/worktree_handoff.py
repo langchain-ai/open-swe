@@ -19,7 +19,10 @@ _UNCONFIRMED = (
 
 
 async def worktree_handoff(
-    branch: str, base_ref: str | None = None, start_from_origin: bool = True
+    branch: str,
+    base_ref: str | None = None,
+    start_from_origin: bool = True,
+    user_checkout: bool = False,
 ) -> dict[str, JsonValue]:
     """Implement the `worktree_handoff` tool."""
     thread_id = RunConfig.from_runtime().thread_id
@@ -28,7 +31,10 @@ async def worktree_handoff(
     if not isinstance(backend, BridgeSandboxBackend):
         return {"success": False, "error": "This thread is not running on the desktop app."}
     params = WorktreeHandoffParams(
-        branch=branch, base_ref=base_ref, start_from_origin=start_from_origin
+        branch=branch,
+        base_ref=base_ref,
+        start_from_origin=start_from_origin,
+        user_checkout=user_checkout,
     )
     try:
         result = await backend.ahandoff_worktree(params)

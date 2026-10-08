@@ -495,14 +495,19 @@ function sendLocalThreadsChanged() {
 async function handoffThreadToWorktree(threadId, params) {
   const thread = localThreadStore.get(threadId);
   if (!thread) throw new Error("This thread does not run on This Mac");
+  const repo = await repoRoot(thread.cwd);
+  if (!repo) throw new Error("Local projects must be git repositories");
+  const branch = await validBranchName(repo, params.branch);
+  if (!branch) throw new Error("A valid branch name is required");
+  const ref = (await localBranches(repo)).find((it) => it.name === branch);
+  if (params.user_checkout)
+    return moveThreadToUserCheckout(thread, repo, ref ?? { name: branch });
+  if (ref?.current || ref?.worktreePath)
+    return followCheckedOutBranch(thread, repo, ref);
   if (thread.worktreePath)
     throw new Error(
       `This thread already works in its own worktree at ${thread.worktreePath}`,
     );
-  const repo = await repoRoot(thread.cwd);
-  if (!repo) throw new Error("Local projects must be git repositories");
-  const branch = await validBranchName(repo, params.branch);
-  if (!branch) throw new Error("A valid new branch name is required");
   const base =
     (await validBranchName(repo, params.base_ref)) ??
     (await defaultBranch(repo));
@@ -521,6 +526,35 @@ async function handoffThreadToWorktree(threadId, params) {
   );
   sendLocalThreadsChanged();
   return { worktree_path: worktree, branch, base: startPoint };
+}
+
+/** Moves the thread to wherever `ref` is already checked out, as the branch picker does. */
+async function followCheckedOutBranch(thread, repo, ref) {
+  const target = ref.worktreePath ? managedWorktree(ref.worktreePath) : null;
+  if (ref.worktreePath && !target)
+    throw new Error(
+      `“${ref.name}” is checked out in ${ref.worktreePath}, which Open SWE does not manage.`,
+    );
+  await assertWorkspaceFree(target ?? repo, thread.id);
+  await moveThreadWorkspace(thread, target);
+  sendLocalThreadsChanged();
+  return { worktree_path: target ?? repo, branch: ref.name };
+}
+
+/** Switches the user's own checkout to `ref`, as the project branch picker does, and moves the thread there. */
+async function moveThreadToUserCheckout(thread, repo, ref) {
+  if (ref.worktreePath)
+    throw new Error(
+      `“${ref.name}” is checked out in the worktree ${ref.worktreePath}, so it cannot also be checked out in ${repo}.`,
+    );
+  await assertWorkspaceFree(repo, thread.id);
+  if (!ref.current) {
+    await git(repo, ["fetch", "origin", ref.name], null, 60_000).catch(
+      (error) => console.warn("Could not fetch the branch", error),
+    );
+    await checkoutBranch(repo, ref.name);
+  }
+  return followCheckedOutBranch(thread, repo, { ...ref, current: true });
 }
 
 /** Prevent branch switches and worktree reuse from disrupting running agents. */
@@ -1532,7 +1566,7 @@ async function startExternalLogin() {
 }
 
 /**
- * Link a Slack, Notion, or LangSmith account from the desktop app.
+ * Link a Slack or LangSmith account from the desktop app.
  *
  * The consent leg has to run in the user's own browser, which carries neither
  * the app's session cookie nor the flow's state cookie — that mismatch is why
