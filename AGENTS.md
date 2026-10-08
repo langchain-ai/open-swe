@@ -18,11 +18,12 @@ Before making any change, first till the soil: refactor the surrounding code so 
 - Model-facing prompts live in `openswe/resources/prompts/` as `<name>.md` or `<name>.md.jinja`, rendered with `prompt("<dir>/<name>")`. Never inline prompt text in Python. User-facing copy (UI labels, Slack/GitHub notifications) may stay inline.
 - Keep comments minimal and only explain non-obvious reasons.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions. Typed and slash commands are optional shortcuts, never the only way.
-- User-initiated UI mutations are optimistic: update immediately, roll back on failure, show an error toast. Skip this only when an immediate update would be unsafe or misleading.
+- User-initiated UI mutations are optimistic: update immediately, roll back on failure, show an error toast. Skip this only when an immediate update would be unsafe or misleading. Slack Block Kit counts: update the clicked message before slow GitHub or Slack calls.
 - Create database migrations with `make migration m="Short description"`.
 - Structured logging: static message, values in `extra`. Avoid standard `LogRecord` field names in `extra`.
 - Prefer exposing UI write operations as authorized agent tools. Destructive or sensitive actions may stay human-only. Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
 - A person's concierge DM thread must see everything in their DM with the bot: every post from outside its own run and every button click there must reach its context.
+- Only the agent that owns a Slack channel thread posts in it. Background work hands it events instead: `wake_thread_owner` when it must act or report, `note_for_thread_owner` to queue informational ones for its next run. A DM sent for a thread passes `origin` to `send_dm`.
 - Use exceptions for Python failures, not `(value, error)` returns. Convert to user-facing errors only at API/tool boundaries.
 - Never discard an error: every `except` re-raises or logs what it swallowed.
 
