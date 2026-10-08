@@ -1,6 +1,4 @@
-"""A bot DM, for someone who turned concierge mode on: every message routes
-to the same agent thread. Off by default, where a DM keeps a thread per message.
-"""
+"""Every bot DM routes to one concierge conversation."""
 
 import json
 from types import SimpleNamespace
@@ -94,7 +92,6 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "openswe")
     monkeypatch.setattr(slack_service, "process_slack_mention", AsyncMock())
-    monkeypatch.setattr(slack_routes.User, "concierge_mode_for_slack", AsyncMock(return_value=True))
 
 
 async def _queued_request(payload: dict[str, Any]) -> SlackRequest:
@@ -107,14 +104,8 @@ async def _queued_request(payload: dict[str, Any]) -> SlackRequest:
     return cast(SlackRequest, background_tasks.tasks[0][1][0])
 
 
-@pytest.mark.parametrize("concierge_on", [True, False])
-async def test_web_breakout_in_dm_stays_in_normal_dm_processing(
-    monkeypatch: pytest.MonkeyPatch, concierge_on: bool
-) -> None:
-    monkeypatch.setattr(
-        slack_routes.User, "concierge_mode_for_slack", AsyncMock(return_value=concierge_on)
-    )
-    payload = _dm_payload(f"Ev-web-dm-{concierge_on}")
+async def test_web_breakout_in_dm_stays_in_normal_dm_processing() -> None:
+    payload = _dm_payload("Ev-web-dm")
     payload["event"]["text"] = "<@BOT> /breakout:web explain this"
     tasks = _FakeBackgroundTasks()
     response = await slack_routes.slack_webhook(
@@ -123,7 +114,7 @@ async def test_web_breakout_in_dm_stays_in_normal_dm_processing(
     assert response["status"] == "accepted"
     assert tasks.tasks[0][0] is slack_service.process_slack_mention
     request = tasks.tasks[0][1][0]
-    assert request.concierge_mode is concierge_on
+    assert request.concierge_mode is True
     assert request.text == payload["event"]["text"]
 
 
@@ -136,18 +127,11 @@ async def test_dm_thread_reply_keeps_the_session_but_answers_in_the_thread() -> 
     assert request.reply_thread_ts == "1786573300.000000"
 
 
-async def test_dm_keeps_a_thread_per_message_until_the_person_opts_in(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The default: a DM behaves as it always has, but still answers untagged messages."""
-    monkeypatch.setattr(
-        slack_routes.User, "concierge_mode_for_slack", AsyncMock(return_value=False)
-    )
+async def test_every_dm_uses_one_conversation_without_an_opt_in() -> None:
+    request = await _queued_request(_dm_payload("Ev-dm-default"))
 
-    request = await _queued_request(_dm_payload("Ev-dm-off"))
-
-    assert request.thread_ts == "1786573369.551099"
-    assert request.concierge_mode is False
+    assert request.thread_ts == CONCIERGE_TS
+    assert request.concierge_mode is True
     assert request.treat_all_messages_as_mentions is True
 
 
@@ -178,13 +162,9 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("concierge_on", [True, False])
-async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
-    monkeypatch: pytest.MonkeyPatch, concierge_on: bool
-) -> None:
+async def test_a_note_reaches_the_concierge_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     from openswe.slack import dm
 
-    monkeypatch.setattr(dm.User, "concierge_mode_for_slack", AsyncMock(return_value=concierge_on))
     lookup = AsyncMock(return_value="concierge-thread")
     monkeypatch.setattr(dm, "lookup_slack_thread_id", lookup)
     monkeypatch.setattr(dm, "langgraph_client", lambda: object())
@@ -193,8 +173,5 @@ async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
 
     await dm.note_for_concierge("U1", "D1", "a note")
 
-    if concierge_on:
-        assert lookup.await_args.args[1:] == ("D1", CONCIERGE_TS)
-        queue.assert_awaited_once_with("concierge-thread", [{"type": "text", "text": "a note"}])
-    else:
-        queue.assert_not_awaited()
+    assert lookup.await_args.args[1:] == ("D1", CONCIERGE_TS)
+    queue.assert_awaited_once_with("concierge-thread", [{"type": "text", "text": "a note"}])

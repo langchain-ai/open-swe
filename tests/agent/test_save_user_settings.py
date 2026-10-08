@@ -190,7 +190,7 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     before = deepcopy(fake_store.items)
     result = await save_user_settings(settings)
     assert result["ok"] is False
-    assert "dashboard" in str(result["error"])
+    assert "always enabled" in str(result["error"])
     assert fake_store.items == before
 
 
@@ -272,7 +272,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "login": "Alice",
             "profile": {
                 **ordinary,
-                "concierge_mode": False,
                 "preserve_sandbox_memory": True,
                 "pr_review_links": False,
                 "pr_failure_reactions": False,

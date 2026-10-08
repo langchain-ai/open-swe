@@ -288,7 +288,6 @@ export interface Profile {
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean
   recent_thread_context_enabled?: boolean
-  concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
@@ -315,7 +314,6 @@ export interface ProfileUpdate {
   auto_fix_ci?: boolean
   model_routing_enabled?: boolean | null
   recent_thread_context_enabled?: boolean
-  concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean

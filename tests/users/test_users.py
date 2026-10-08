@@ -116,13 +116,13 @@ async def test_preference_patches_merge_and_skip_unset_fields() -> None:
     await User.sign_in("github", "8", login="bob")
     async with postgres.session() as session:
         await session.execute(
-            update(User).values(preferences={"concierge_mode": True, "future": "kept"})
+            update(User).values(preferences={"pr_review_links": True, "future": "kept"})
         )
 
     unchanged = await User.update_preferences("bob", UserPreferencesPatch())
-    turned_off = await User.update_preferences("bob", UserPreferencesPatch(concierge_mode=False))
+    turned_off = await User.update_preferences("bob", UserPreferencesPatch(pr_review_links=False))
 
-    assert unchanged == UserPreferences(concierge_mode=True)
-    assert turned_off == UserPreferences(concierge_mode=False)
+    assert unchanged == UserPreferences(pr_review_links=True)
+    assert turned_off == UserPreferences(pr_review_links=False)
     stored = await User.for_login("github", "bob")
-    assert stored is not None and stored.preferences == {"concierge_mode": False, "future": "kept"}
+    assert stored is not None and stored.preferences == {"pr_review_links": False, "future": "kept"}

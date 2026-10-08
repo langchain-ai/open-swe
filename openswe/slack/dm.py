@@ -1,12 +1,4 @@
-"""Bot DMs, optionally run in concierge mode: one conversation instead of a thread per message.
-
-Off unless the person turns on ``concierge_mode`` in their own preferences. When
-it is on, the conversation is keyed with the same non-message timestamp code
-channels and incident channels use, so replies post into the DM instead of
-opening a thread and the channel's own history is the conversation transcript. That
-timestamp is also how the rest of the code recognizes the mode: only a DM the
-owner enabled ever reaches a run with it.
-"""
+"""Bot DMs run as one concierge conversation instead of a thread per message."""
 
 import logging
 from typing import Any, Self
@@ -22,7 +14,6 @@ from openswe.slack.client import (
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.thread_notes import note_for_thread_owner
-from openswe.users import User
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 
 logger = logging.getLogger(__name__)
@@ -52,8 +43,6 @@ def dm_thread_title(name: str) -> str:
 
 async def note_for_concierge(slack_user_id: str, dm_channel_id: str, note: str) -> None:
     """Queue ``note`` for the person's concierge thread, which skips the bot's own DM posts."""
-    if not await User.concierge_mode_for_slack(slack_user_id):
-        return
     thread_id = await lookup_slack_thread_id(langgraph_client(), dm_channel_id, CONCIERGE_TS)
     if thread_id is None:
         return
@@ -168,8 +157,7 @@ async def send_dm_with_location(
             *origin.location,
             prompt("slack/dm-sent-for-thread", recipient=f"<@{slack_user_id}>", text=text),
         )
-    if await User.concierge_mode_for_slack(slack_user_id):
-        await _record_in_concierge_thread(channel_id, text, origin)
+    await _record_in_concierge_thread(channel_id, text, origin)
     return channel_id, message_ts
 
 

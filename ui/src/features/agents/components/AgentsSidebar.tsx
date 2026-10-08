@@ -20,7 +20,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { DesktopUpdateState } from "@/desktop"
 import { api, type SessionUser } from "@/lib/api"
-import { useProfile } from "@/lib/profile"
 import type {
   PullRequestSnapshot,
   SidebarRepo,
@@ -191,11 +190,10 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const chat = useChatRoutes()
-  const profile = useProfile()
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
     queryFn: api.concierge,
-    enabled: !!profile.data?.concierge_mode,
+    enabled: !!user,
     refetchInterval: 30_000,
   })
   const {
@@ -747,7 +745,7 @@ export function AgentsSidebar({
           <NotePencilIcon className="size-4" />
           New Thread
         </Link>
-        {profile.data?.concierge_mode && (
+        {user && (
           <a
             href={
               concierge.data?.thread_id

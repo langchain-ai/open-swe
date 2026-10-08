@@ -224,14 +224,6 @@ class User(Base):
         return user.typed_preferences if user is not None else UserPreferences()
 
     @classmethod
-    async def concierge_mode_for_slack(cls, slack_user_id: str) -> bool:
-        """Whether the person behind this Slack member keeps their bot DM as one conversation."""
-        if not slack_user_id:
-            return False
-        user = await cls.for_identity("slack", slack_user_id)
-        return user is not None and user.typed_preferences.concierge_mode
-
-    @classmethod
     async def update_preferences(
         cls, login: str, patch: UserPreferencesPatch
     ) -> UserPreferences | None:
