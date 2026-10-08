@@ -57,3 +57,4 @@ class WorktreeHandoffParams(BridgeParams):
     branch: str
     base_ref: str | None = None
     start_from_origin: bool = True
+    user_checkout: bool = False
