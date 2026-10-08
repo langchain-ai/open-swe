@@ -22,12 +22,12 @@ import {
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
 import { makeQueryClient } from "@/lib/query"
-import { MyPullRequests } from "./MyPullRequests"
+import { OpenPullRequests } from "./OpenPullRequests"
 import type { ReviewsSearch } from "./search"
 
 vi.mock("@/lib/api", () => ({
   api: {
-    myPullRequests: vi.fn(),
+    openPullRequests: vi.fn(),
     searchPullRequests: vi.fn(),
     myPullRequestDetails: vi.fn(),
     repos: vi.fn(),
@@ -111,8 +111,9 @@ function mount() {
   function Harness() {
     const [filters, setFilters] = useState<ReviewsSearch>({})
     return (
-      <MyPullRequests
+      <OpenPullRequests
         login="octocat"
+        scope="mine"
         filters={filters}
         onFiltersChange={(changes) =>
           setFilters((previous) => ({ ...previous, ...changes }))
@@ -181,7 +182,7 @@ beforeEach(() => {
   })
   vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: false })
   vi.mocked(api.reviewSummaries).mockResolvedValue({})
-  vi.mocked(api.myPullRequests).mockResolvedValue(payload)
+  vi.mocked(api.openPullRequests).mockResolvedValue(payload)
   vi.mocked(api.searchPullRequests).mockResolvedValue({
     pull_requests: [],
     has_more: false,
@@ -275,7 +276,7 @@ describe("My PRs", () => {
   })
 
   it("merges in the background and keeps the merged card in place", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" }), pull(2)],
     })
@@ -307,7 +308,7 @@ describe("My PRs", () => {
   })
 
   it("rolls a rejected merge back to a retry action", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" })],
     })
@@ -352,7 +353,7 @@ describe("My PRs", () => {
     ).toBe("/agents/reviews/acme/app/1")
   })
   it("shows pending checks as Pending alongside the PR's other conditions", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, { ci: "pending", pendingChecks: ["build"] }),
@@ -376,7 +377,7 @@ describe("My PRs", () => {
     expect(titles()).toEqual(["Change 4"])
   })
   it("shows fix actions on conflicted or failing drafts but not healthy drafts", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, { draft: true, mergeable: false }),
@@ -423,31 +424,50 @@ describe("My PRs", () => {
   it("offers only global date sorting and passes it to the server", async () => {
     mount()
     await screen.findByText("Change 1")
-    expect(api.myPullRequests).toHaveBeenCalledWith("", "updatedAt", "desc", 1)
+    expect(api.openPullRequests).toHaveBeenCalledWith(
+      "",
+      "updatedAt",
+      "desc",
+      1,
+      "mine"
+    )
     for (const name of ["PR", "Pull request", "Diffstat"]) {
       expect(screen.queryByRole("button", { name })).toBeNull()
     }
     fireEvent.click(screen.getByRole("button", { name: /Created/ }))
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenCalledWith("", "createdAt", "asc", 1)
+      expect(api.openPullRequests).toHaveBeenCalledWith(
+        "",
+        "createdAt",
+        "asc",
+        1,
+        "mine"
+      )
     )
     fireEvent.click(screen.getByRole("button", { name: /Created/ }))
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenCalledWith(
+      expect(api.openPullRequests).toHaveBeenCalledWith(
         "",
         "createdAt",
         "desc",
-        1
+        1,
+        "mine"
       )
     )
     fireEvent.click(screen.getByRole("button", { name: /Last updated/ }))
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenCalledWith("", "updatedAt", "asc", 1)
+      expect(api.openPullRequests).toHaveBeenCalledWith(
+        "",
+        "updatedAt",
+        "asc",
+        1,
+        "mine"
+      )
     )
   })
 
   it("reads details for the first rows only, leaving the rest to scrolling", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: Array.from({ length: 12 }, (_, index) =>
         pull(index + 1, { detailsLoading: true, additions: null })
@@ -476,7 +496,7 @@ describe("My PRs", () => {
   })
 
   it("loads the next GitHub page as soon as the loaded rows run out", async () => {
-    vi.mocked(api.myPullRequests).mockImplementation(
+    vi.mocked(api.openPullRequests).mockImplementation(
       async (_repo, _sort, _direction, page = 1) => ({
         ...payload,
         pullRequests: Array.from({ length: 10 }, (_, index) =>
@@ -488,22 +508,23 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 10")
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenLastCalledWith(
+      expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "",
         "updatedAt",
         "desc",
-        2
+        2,
+        "mine"
       )
     )
     await screen.findByText(/10 of 20 PRs/)
     expect(titles()).toEqual(
       Array.from({ length: 10 }, (_, index) => `Change ${index + 1}`)
     )
-    expect(api.myPullRequests).toHaveBeenCalledTimes(2)
+    expect(api.openPullRequests).toHaveBeenCalledTimes(2)
   })
 
   it("shows no PRs and offers a repository filter when the search times out", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [],
       incomplete: true,
@@ -531,7 +552,7 @@ describe("My PRs", () => {
   })
 
   it("keeps the review verdict while GitHub decides whether the branch merges", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, {
@@ -550,7 +571,7 @@ describe("My PRs", () => {
   })
 
   it("names a required check that never reported instead of offering the merge", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, {
@@ -571,7 +592,7 @@ describe("My PRs", () => {
   })
 
   it("offers both a fix and a merge when only optional checks fail", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, {
@@ -593,7 +614,7 @@ describe("My PRs", () => {
   })
 
   it("shows a draft's conflicts and failing checks alongside Draft", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, { draft: true, mergeable: false, mergeState: "dirty" }),
@@ -623,7 +644,7 @@ describe("My PRs", () => {
   })
 
   it("still offers a merge while the checks could not be read", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, {
@@ -640,7 +661,7 @@ describe("My PRs", () => {
   })
 
   it("withholds the merge only where GitHub has already refused it", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, { mergeable: false, mergeState: "dirty" }),
@@ -659,7 +680,7 @@ describe("My PRs", () => {
   })
 
   it("offers the merge method used last time", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" })],
     })
@@ -679,7 +700,7 @@ describe("My PRs", () => {
       )
     )
     cleanup()
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(2, { reviewDecision: "approved" })],
     })
@@ -689,7 +710,7 @@ describe("My PRs", () => {
   })
 
   it("offers only the merge methods the repository allows", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, { reviewDecision: "approved" }),
@@ -729,7 +750,7 @@ describe("My PRs", () => {
   })
 
   it("offers every merge method when the repository settings cannot be read", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { reviewDecision: "approved" })],
     })
@@ -761,7 +782,7 @@ describe("My PRs", () => {
   })
 
   it("rediscovers a reopened PR on manual refresh", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { detailsLoading: true })],
     })
@@ -779,7 +800,7 @@ describe("My PRs", () => {
   })
 
   it("filters conflicts and sends the applied repository to the server", async () => {
-    vi.mocked(api.myPullRequests).mockImplementation(async (repo) => ({
+    vi.mocked(api.openPullRequests).mockImplementation(async (repo) => ({
       ...payload,
       pullRequests: payload.pullRequests.filter(
         (pr) => !repo || repo.split(",").includes(pr.repo)
@@ -822,11 +843,12 @@ describe("My PRs", () => {
       await screen.findByRole("menuitemcheckbox", { name: "acme/other" })
     )
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenLastCalledWith(
+      expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other",
         "updatedAt",
         "desc",
-        1
+        1,
+        "mine"
       )
     )
     searchRepos("app")
@@ -834,11 +856,12 @@ describe("My PRs", () => {
       await screen.findByRole("menuitemcheckbox", { name: "acme/app" })
     )
     await waitFor(() =>
-      expect(api.myPullRequests).toHaveBeenLastCalledWith(
+      expect(api.openPullRequests).toHaveBeenLastCalledWith(
         "acme/other,acme/app",
         "updatedAt",
         "desc",
-        1
+        1,
+        "mine"
       )
     )
   })
@@ -847,7 +870,7 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 1")
     let reject!: (error: Error) => void
-    vi.mocked(api.myPullRequests).mockImplementationOnce(
+    vi.mocked(api.openPullRequests).mockImplementationOnce(
       () =>
         new Promise((_resolve, fail) => {
           reject = fail
@@ -866,7 +889,7 @@ describe("My PRs", () => {
   })
 
   it("limits inline failures to three", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, { deletions: 100 }),
@@ -917,7 +940,7 @@ describe("My PRs", () => {
   })
 
   it("shows a pill for every condition a PR is in", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, { draft: true, mergeable: false, ci: "failing" }),
@@ -973,7 +996,7 @@ describe("My PRs", () => {
   })
 
   it("closes a single pull request only after confirmation", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1)],
     })
@@ -1010,7 +1033,7 @@ describe("My PRs", () => {
   })
 
   it("marks a draft ready for review from its own card", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { draft: true }), pull(2, { repo: "acme/other" })],
     })
@@ -1043,7 +1066,7 @@ describe("My PRs", () => {
   })
 
   it("surfaces a repository rule violation from a merge the dashboard could not predict", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1)],
     })
@@ -1064,7 +1087,7 @@ describe("My PRs", () => {
   })
 
   it("offers addressing comments only when conversations are left to address", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [
         pull(1, { unresolvedThreads: 3 }),
@@ -1103,7 +1126,7 @@ describe("My PRs", () => {
   })
 
   it("queues the comment fixes in the background and keeps the button disabled after success", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { unresolvedThreads: 2 })],
     })
@@ -1143,7 +1166,7 @@ describe("My PRs", () => {
   })
 
   it("reports a run that is already addressing the comments", async () => {
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { unresolvedThreads: 1 })],
     })
@@ -1166,7 +1189,7 @@ describe("My PRs", () => {
 
   it("does not address comments while the associated thread is running", async () => {
     vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
-    vi.mocked(api.myPullRequests).mockResolvedValue({
+    vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1, { unresolvedThreads: 4 })],
     })

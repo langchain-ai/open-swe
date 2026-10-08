@@ -832,10 +832,13 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
         )
 
 
-async def test_queued_images_reach_vision_fallback_for_text_only_main_model() -> None:
+async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
+    registry_db: None,
+) -> None:
     from langchain_core.messages import convert_to_messages
     from langgraph.store.memory import InMemoryStore
 
+    from openswe.message_queue import QueuedMessage
     from openswe.middleware.check_message_queue import (
         LinearNotifyState,
         check_message_queue_before_model,
@@ -849,14 +852,9 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model() ->
         make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
     store = InMemoryStore()
-    namespace = ("queue", "thread-ctx")
     url = "https://example.com/image.png"
     image = {"type": "image_url", "image_url": {"url": url}}
-    await store.aput(
-        namespace,
-        "pending_messages",
-        {"messages": [{"content": {"text": "Explain this", "image_urls": [url]}}]},
-    )
+    await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
     with (
         patch("openswe.middleware.check_message_queue.get_config", return_value=config),
         patch("openswe.middleware.check_message_queue.get_store", return_value=store),
@@ -880,4 +878,4 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model() ->
     )
     assert handler.call_args.args[0].model is not captured["model"]
     assert handler.call_args.args[0].messages == messages
-    assert await store.aget(namespace, "pending_messages") is None
+    assert await QueuedMessage.for_thread("thread-ctx") == []

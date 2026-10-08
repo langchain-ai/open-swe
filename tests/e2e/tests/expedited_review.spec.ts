@@ -379,7 +379,9 @@ test.describe("Expedited Slack review", () => {
       .toBe(false);
     expect((await pull(request)).draft).toBe(false);
     expect((await latest(request)).approvers).toEqual([]);
-    await expect(card(page)).toHaveCount(0);
+    await expect(card(page)).toContainText("Ready for review.");
+    await expect(card(page).getByRole("button")).toHaveCount(0);
+    await expect(card(page).locator("img")).toHaveCount(0);
     await page.goto("/mock/slack");
     await card(page)
       .getByRole("button", { name: /Broadcast in #/ })
@@ -485,10 +487,8 @@ test.describe("Expedited Slack review", () => {
     await page
       .locator(`[data-channel-id="D_${author!.slack_id.replace(/^U_/, "")}"]`)
       .click();
-    await expect(
-      page
-        .locator(".msg.bot")
-        .filter({ hasText: /Expedited review requested|Expedited review:/i }),
-    ).toHaveCount(0);
+    await expect(card(page)).toContainText("Expedited review: merged");
+    await expect(card(page).getByRole("button")).toHaveCount(0);
+    await expect(card(page).locator("img")).toHaveCount(0);
   });
 });

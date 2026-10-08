@@ -7,6 +7,7 @@
 
 import { AgentsApiError, agentsRequest } from "@/features/agents/lib/api"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
+import { inSendOrder } from "@/features/agents/lib/runStartOrder"
 import {
   REQUEST_ID_HEADER,
   dashboardApiUrl,
@@ -275,17 +276,19 @@ export async function startRun(
   command: RunStartCommand
 ): Promise<void> {
   const requestId = newRequestId()
-  const response = await timedFetch(
-    dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
-    {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        [REQUEST_ID_HEADER]: requestId,
-      },
-      body: JSON.stringify(command),
-    }
+  const response = await inSendOrder(threadId, () =>
+    timedFetch(
+      dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          [REQUEST_ID_HEADER]: requestId,
+        },
+        body: JSON.stringify(command),
+      }
+    )
   ).catch((cause: unknown) => {
     throw networkError(cause, requestId)
   })

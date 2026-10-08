@@ -562,22 +562,15 @@ async def control_repo_file(request: Request) -> JSONResponse:
 
 @app.get("/control/queued")
 async def control_queued(thread_id: str = "") -> JSONResponse:
-    """Count the follow-ups parked on a busy thread's message queue.
+    """The follow-ups parked on a busy thread's message queue, oldest first.
 
-    While the agent is busy, debounced follow-ups accumulate here (namespace
-    ``("queue", thread_id)``) until the active run drains them together at its
+    While the agent is busy, debounced follow-ups accumulate in
+    ``thread_queued_message`` until the active run drains them together at its
     next model call. Lets the E2E assert coalescing instead of per-message runs."""
-    from langgraph_sdk import get_client
+    from openswe.message_queue import QueuedMessage
 
-    value: Any = None
-    try:
-        client = get_client(url=os.environ["LANGGRAPH_URL"])
-        item = await client.store.get_item(("queue", thread_id), key="pending_messages")
-        value = item.get("value") if item else None
-    except Exception:  # noqa: BLE001
-        value = None
-    messages = value.get("messages") if isinstance(value, dict) else None
-    return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
+    messages = [message.content for message in await QueuedMessage.for_thread(thread_id)]
+    return JSONResponse({"queued_count": len(messages), "messages": messages})
 
 
 _MAPPINGS_SEEDED = False
@@ -1201,14 +1194,18 @@ async def gh_search_issues(
     sort: str = "updated",
     order: str = "desc",
 ) -> JSONResponse:
-    """The PR search ``list_open_pull_requests`` drives the "Mine" dashboard with.
-
-    Only the qualifiers that code sends are honoured: ``is:pr``, ``is:open``,
-    ``author:<login>`` and any number of ``repo:<owner>/<name>`` (OR'd, as GitHub
-    does)."""
+    """Search authored or awaiting-review PRs for the dashboard."""
     terms = q.split()
     author = next(
         (term.removeprefix("author:") for term in terms if term.startswith("author:")), ""
+    )
+    reviewer = next(
+        (
+            term.removeprefix("review-requested:")
+            for term in terms
+            if term.startswith("review-requested:")
+        ),
+        "",
     )
     repositories = {
         term.removeprefix("repo:").lower() for term in terms if term.startswith("repo:")
@@ -1218,6 +1215,10 @@ async def gh_search_issues(
         pull
         for pull in fakes.pulls()
         if (not author or pull["author"].lower() == author.lower())
+        and (
+            not reviewer
+            or reviewer.lower() in {login.lower() for login in pull["requested_reviewers"]}
+        )
         and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
         and (not open_only or (pull["state"] == "open" and not pull["merged"]))
     ]

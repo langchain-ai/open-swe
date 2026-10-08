@@ -296,3 +296,20 @@ def closed_card(
         context(_vote_summary(approval, author)),
     ]
     return f"{outcome} — {pr.url}", blocks
+
+
+def author_status(
+    approval: HumanReviewRequest, outcome: str, *, origin_url: str | None = None
+) -> tuple[str, list[Block]]:
+    """The persistent author DM record, without a diff or actions."""
+    pr = approval.pull_request
+    text = f"Expedited review: {outcome} — {pr.url}"
+    blocks: list[Block] = [
+        section(
+            f"*Expedited review: {outcome}*\n"
+            f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> {escape(pr.title)}"
+        )
+    ]
+    if origin_url:
+        blocks.append(context(f"Requested from <{origin_url}|this thread>."))
+    return text, blocks

@@ -14,6 +14,7 @@ from openswe.incidents.models import (
     IncidentReportRecord,
 )
 from openswe.incidents.report import CONTEXT_MARKER
+from openswe.message_queue import QueuedMessage
 
 
 @pytest.fixture
@@ -113,13 +114,15 @@ async def test_explicit_turn_interrupts_and_carries_request_and_thread(record, p
     assert "Why are we seeing 500s?" in rendered and "slack:U1" in rendered
 
 
-async def test_completion_reschedules_only_stranded_context(record, policy, platform, fake_store):
+async def test_completion_reschedules_only_stranded_context(
+    record, policy, platform, fake_store, registry_db
+):
     assert (await turns.handle_run_completion("thread-1", "r1", "success"))["reason"] == (
         "incident turn complete"
     )
     turns.create_durable_run.assert_not_awaited()
 
-    fake_store.seed(("queue", "thread-1"), "pending_messages", {"messages": [{"content": "late"}]})
+    await QueuedMessage.put("thread-1", "late")
     result = await turns.handle_run_completion("thread-1", "r1", "success")
     assert result["reason"] == "queued incident context rescheduled"
     turns.create_durable_run.assert_awaited_once()
