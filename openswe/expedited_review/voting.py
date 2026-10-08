@@ -70,7 +70,7 @@ async def handle_vote(
     authored = approval.is_author(voter.user.id, voter.github_login)
 
     if approval.awaiting_ready:
-        return Outcome("The author has to mark this draft ready for review first.")
+        return Outcome("The author has to confirm expedited review first.")
     if authored:
         return Outcome("You authored this pull request; someone else has to approve it.")
     if approval.participant(voter.user.id) is not None:
@@ -153,12 +153,16 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
             f"pull request ready. {github_token_hint()}"
         )
     pr = approval.pull_request
-    try:
-        await act_on_pull_request(
-            pr.owner, pr.repo, pr.number, MarkReadyAction(action="mark-ready"), token
-        )
-    except HTTPException as exc:
-        return Outcome(f"GitHub did not mark the pull request ready: {exc.detail}")
+    payload = await fetch_pr(owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token)
+    if payload is None:
+        return Outcome("Could not read the pull request; try confirming again.")
+    if PullRequestPayload.model_validate(payload).draft:
+        try:
+            await act_on_pull_request(
+                pr.owner, pr.repo, pr.number, MarkReadyAction(action="mark-ready"), token
+            )
+        except HTTPException as exc:
+            return Outcome(f"GitHub did not mark the pull request ready: {exc.detail}")
     async with HumanReviewRequest.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return Outcome("This expedited review closed before it was marked ready.")

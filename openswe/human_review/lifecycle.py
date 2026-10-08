@@ -226,7 +226,7 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         else await User.for_login("github", pr.author)
     )
     if author is None or not author.slack_user_id:
-        return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
+        return "The author has no linked Slack identity; link Slack to confirm expedited review."
     token = await repo_token(pr.owner, pr.repo)
     if token is None:
         return "Could not read the diff for the author-only card; try again."
@@ -255,7 +255,7 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         origin=origin,
     )
     if dm_location is None:
-        return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
+        return "Slack could not deliver the author-only confirmation prompt; try again."
     approval.slack_dm_channel_id, approval.slack_dm_message_ts = dm_location
     await approval.save()
     return None

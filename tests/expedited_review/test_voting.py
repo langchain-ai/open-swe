@@ -58,7 +58,9 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
     monkeypatch.setattr(voting, "act_on_pull_request", h.mark_ready)
     monkeypatch.setattr(voting, "refresh_card", AsyncMock())
     monkeypatch.setattr(voting, "notify_agent", h.notify_agent)
-    monkeypatch.setattr(voting, "fetch_pr", AsyncMock(return_value={"head": {"sha": "def456"}}))
+    monkeypatch.setattr(
+        voting, "fetch_pr", AsyncMock(return_value={"head": {"sha": "def456"}, "draft": True})
+    )
     monkeypatch.setattr(voting, "fetch_changed_files", AsyncMock(return_value=[]))
     monkeypatch.setattr(voting, "fingerprint_matches", lambda files, fp: h.diff_unchanged)
     monkeypatch.setattr(voting, "submit_approval", h.submit_approval)
@@ -181,9 +183,13 @@ async def test_the_author_cannot_approve_their_own_pull_request(
     assert harness.agent_prompts == []
 
 
-async def test_a_draft_waits_for_its_author_to_mark_it_ready(
-    harness: _Harness, open_approval: OpenApproval
+@pytest.mark.parametrize("draft", [True, False])
+async def test_expedited_review_waits_for_author_confirmation(
+    harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, draft: bool
 ) -> None:
+    monkeypatch.setattr(
+        voting, "fetch_pr", AsyncMock(return_value={"head": {"sha": "def456"}, "draft": draft})
+    )
     approval = await open_approval(awaiting_ready=True)
 
     early = await _click(approval, "U_GRACE")
@@ -192,10 +198,10 @@ async def test_a_draft_waits_for_its_author_to_mark_it_ready(
     await _click(approval, "U_GRACE")
 
     stored = await _stored(approval)
-    assert "mark this draft ready" in early.message
+    assert "confirm expedited review" in early.message
     assert "Only the pull request's author" in stranger.message
     assert "Marked ready" in ready.message
-    assert harness.marked_ready == ["token-ada"]
+    assert harness.marked_ready == (["token-ada"] if draft else [])
     assert not stored.awaiting_ready
     assert stored.approvers == ["grace"]
 
@@ -314,7 +320,7 @@ async def test_author_only_prompt_delivery_failure_is_reported(
 
     problem = await lifecycle.prompt_author_ready(await _stored(approval))
 
-    assert problem is not None and "mark it ready on GitHub" in problem
+    assert problem is not None and "could not deliver" in problem
     assert (await _stored(approval)).awaiting_ready
 
 
