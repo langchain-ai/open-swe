@@ -13,6 +13,7 @@ from langgraph_sdk import get_client
 
 from openswe.act_as.gate import require_consent
 from openswe.analytics.usage import record_agent_pr_usage
+from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
     PrAuthorNotAParticipant,
     pr_author_login,
@@ -1202,6 +1203,7 @@ async def _open_pull_request(
         )
 
 
+@audit_tool()
 async def open_pull_request(
     owner: str,
     repo: str,
@@ -1237,6 +1239,7 @@ def _ref_name(pr: dict[str, Any], side: str) -> str:
     return ref if isinstance(ref, str) else ""
 
 
+@audit_tool()
 async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
     """Implement the `link_pull_request` tool."""
     ref = parse_github_pr_url(pr_url)

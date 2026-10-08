@@ -29,7 +29,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     openPullRequests: vi.fn(),
     searchPullRequests: vi.fn(),
-    myPullRequestDetails: vi.fn(),
+    pullRequestStatus: vi.fn(),
     repos: vi.fn(),
     reviewSummaries: vi.fn(),
     fixPullRequest: vi.fn(),
@@ -73,6 +73,7 @@ const pull = (
   repo: "acme/app",
   number,
   title: `Change ${number}`,
+  state: "open",
   draft: false,
   additions: number,
   deletions: 3,
@@ -81,6 +82,7 @@ const pull = (
   headSha: "a".repeat(40),
   headRef: "feature/example",
   reviewDecision: "none",
+  reviewers: [],
   reviewRequired: false,
   statusAvailable: true,
   createdAt: `2026-09-0${number}T00:00:00Z`,
@@ -474,7 +476,7 @@ describe("My PRs", () => {
       ),
     })
     let resolve!: (value: OpenPullRequest) => void
-    vi.mocked(api.myPullRequestDetails).mockImplementation(
+    vi.mocked(api.pullRequestStatus).mockImplementation(
       () =>
         new Promise((done) => {
           resolve = done
@@ -484,9 +486,7 @@ describe("My PRs", () => {
     await screen.findByText("Change 10")
     expect(screen.queryByText("Change 11")).toBeNull()
     expect(cards()).toHaveLength(10)
-    await waitFor(() =>
-      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(10)
-    )
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(10))
     resolve(pull(10))
     await waitFor(() =>
       expect(
@@ -786,17 +786,15 @@ describe("My PRs", () => {
       ...payload,
       pullRequests: [pull(1, { detailsLoading: true })],
     })
-    vi.mocked(api.myPullRequestDetails)
+    vi.mocked(api.pullRequestStatus)
       .mockResolvedValueOnce(null)
       .mockResolvedValue(pull(1))
     mount()
-    await waitFor(() => expect(api.myPullRequestDetails).toHaveBeenCalledOnce())
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledOnce())
     await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
     expect(await screen.findByText("Change 1")).toBeTruthy()
-    await waitFor(() =>
-      expect(api.myPullRequestDetails).toHaveBeenCalledTimes(2)
-    )
+    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(2))
   })
 
   it("filters conflicts and sends the applied repository to the server", async () => {

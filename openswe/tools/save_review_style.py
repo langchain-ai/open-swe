@@ -5,6 +5,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.review.analyzer_cron import ensure_continual_cron
 from openswe.review.styles import (
     REVIEW_STYLES,
@@ -30,6 +31,7 @@ async def _complete_and_register(full_name: RepoFullName, **completed_kwargs: An
     return record
 
 
+@audit_tool()
 async def save_review_style_prompt(
     custom_prompt: str,
     analysis_summary: str = "",

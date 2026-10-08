@@ -1,14 +1,20 @@
 """PostgreSQL regressions for clicks on an expedited review card."""
 
+import re
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
+from openswe.dashboard import profiles
 from openswe.expedited_review import voting
-from openswe.human_review import lifecycle, people
+from openswe.github import http as github_http
+from openswe.github.http import RepoClient
+from openswe.github.pull_request_status import PullRequestClient
+from openswe.human_review import lifecycle
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.slack import cards
@@ -30,8 +36,10 @@ class _Harness:
         self.agent_prompts.append(prompt)
         return self.wake_succeeds
 
-    async def mark_ready(self, owner: str, repo: str, number: int, action: object, token: str):
-        self.marked_ready.append(token)
+    async def mark_ready(self, pull: PullRequestClient, action: object) -> None:
+        self.marked_ready.append(
+            pull.repo.github.http.headers["Authorization"].removeprefix("Bearer ")
+        )
 
     async def submit_approval(
         self, approval: HumanReviewRequest, vote: HumanReviewParticipant, head_sha: str
@@ -44,27 +52,42 @@ class _Harness:
         return None
 
 
+def _json(request: httpx2.Request, payload: object, status: int = 200) -> httpx2.Response:
+    return httpx2.Response(status, json=payload, request=request)
+
+
+async def _fake_github(
+    _client: httpx2.AsyncClient, method: str, url: str, **_kwargs: object
+) -> httpx2.Response:
+    """GitHub as a card flow reads it: an open PR on ``def456`` with no files, reviews or config."""
+    request = httpx2.Request(method, url)
+    path = request.url.path
+    if path.endswith("/permission"):
+        return _json(request, {"permission": "write"})
+    if path.endswith(("/files", "/reviews")):
+        return _json(request, [])
+    if re.search(r"/pulls/\d+$", path):
+        return _json(request, {"state": "open", "head": {"sha": "def456"}})
+    return _json(request, {"message": "Not Found"}, 404)
+
+
 @pytest.fixture
-def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
+def harness(monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock) -> _Harness:
     h = _Harness()
-    monkeypatch.setattr(voting, "repo_token", AsyncMock(return_value="app-token"))
-    monkeypatch.setattr(people, "repo_token", AsyncMock(return_value="app-token"))
-    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=True))
+    monkeypatch.setattr(github_http, "github_request", _fake_github)
 
     async def user_token(login: str) -> str:
         return f"token-{login}"
 
     monkeypatch.setattr(voting, "get_valid_access_token", user_token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", user_token)
     monkeypatch.setattr(voting, "act_on_pull_request", h.mark_ready)
     monkeypatch.setattr(voting, "refresh_card", AsyncMock())
     monkeypatch.setattr(voting, "notify_agent", h.notify_agent)
-    monkeypatch.setattr(voting, "fetch_pr", AsyncMock(return_value={"head": {"sha": "def456"}}))
-    monkeypatch.setattr(voting, "fetch_changed_files", AsyncMock(return_value=[]))
     monkeypatch.setattr(voting, "fingerprint_matches", lambda files, fp: h.diff_unchanged)
     monkeypatch.setattr(voting, "submit_approval", h.submit_approval)
     monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
     monkeypatch.setattr(lifecycle, "notify_agent", h.notify_agent)
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
     return h
 
 
@@ -92,7 +115,6 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> _FakeSlack:
     )
     monkeypatch.setattr(lifecycle, "delete_slack_message", fake.delete)
     monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://t"))
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
     monkeypatch.setattr(cards, "post_slack_thread_reply_with_ts", fake.post)
     monkeypatch.setattr(cards, "delete_slack_message", fake.delete)
     return fake
@@ -215,13 +237,12 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     ephemeral = AsyncMock(return_value=True)
     monkeypatch.setattr("openswe.slack.client.post_slack_ephemeral_message", ephemeral)
     monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
     from openswe.expedited_review.eligibility import ChangedFile
 
     monkeypatch.setattr(
         lifecycle,
-        "fetch_changed_files",
+        "_files_for",
         AsyncMock(
             return_value=[
                 ChangedFile(filename="agent/example.py", additions=1, deletions=0, patch="+fixed")
@@ -267,7 +288,6 @@ async def test_draft_card_is_not_posted_until_ready(
     monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
     monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
 
     with pytest.raises(SlackRequestError, match="draft card is author-only"):
@@ -308,8 +328,7 @@ async def test_author_only_prompt_delivery_failure_is_reported(
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
     monkeypatch.setattr(lifecycle, "send_dm_with_location", AsyncMock(return_value=None))
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
-    monkeypatch.setattr(lifecycle, "fetch_changed_files", AsyncMock(return_value=[]))
+    monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
     monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
 
     problem = await lifecycle.prompt_author_ready(await _stored(approval))
@@ -322,7 +341,7 @@ async def test_a_fork_author_without_write_access_can_mark_their_draft_ready(
     harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
-    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=False))
+    monkeypatch.setattr(RepoClient, "can_write", AsyncMock(return_value=False))
 
     outcome = await _click(approval, "U_ADA", decision="ready")
 
@@ -376,7 +395,7 @@ async def test_unlinked_read_only_or_tokenless_users_cannot_vote(
     unlinked = await _click(approval, "U_NOBODY")
     monkeypatch.setattr(voting, "get_valid_access_token", AsyncMock(return_value=None))
     tokenless = await _click(approval, "U_GRACE")
-    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=False))
+    monkeypatch.setattr(RepoClient, "can_write", AsyncMock(return_value=False))
     read_only = await _click(approval, "U_LINUS")
 
     assert "not linked" in unlinked.message
