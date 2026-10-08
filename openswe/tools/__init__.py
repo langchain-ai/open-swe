@@ -31,6 +31,7 @@ _TOOL_MODULES = {
     "link_pull_request": ".open_pull_request",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "switch_to_performance_model": ".switch_to_performance_model",
     "manage_code_channel": "openswe.slack.tools.manage_code_channel",
     "manage_incident": "openswe.incidents.tools",
     "manage_thread": ".threads",
@@ -112,6 +113,7 @@ __all__ = [
     "link_pull_request",
     "list_threads",
     "manage_baby_sit",
+    "switch_to_performance_model",
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
@@ -233,6 +235,7 @@ if TYPE_CHECKING:
     from openswe.tools.search_pull_requests import search_pull_requests
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
+    from openswe.tools.switch_to_performance_model import switch_to_performance_model
     from openswe.tools.threads import get_thread, list_threads, manage_thread, start_thread
     from openswe.tools.update_finding import update_finding
     from openswe.tools.user_skills import delete_user_skill, save_user_skill

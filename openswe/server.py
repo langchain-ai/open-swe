@@ -253,6 +253,7 @@ from openswe.tools import (
     start_thread,
     submit_thread_feedback,
     suggest_task,
+    switch_to_performance_model,
     trigger_automation,
     update_automation,
     web_search,
@@ -1724,6 +1725,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *([task_status, message_task_thread, control_worker] if task_coordination else []),
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
+        switch_to_performance_model,
         expedite_pr_approval,
         merge_expedited_pr,
         request_human_review,
@@ -1986,7 +1988,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             "default": model_id,
         },
         routing_mode=model_routing_mode,
-        requested_model_factory=requested_model_factory if requested_models else None,
+        requested_model_factory=requested_model_factory,
     )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
