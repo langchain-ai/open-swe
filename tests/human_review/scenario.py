@@ -1,6 +1,6 @@
 """Reviewer assignment as a scenario: people who review each other's pull requests.
 
-A ``ReviewOffice`` adds code owners, habits, one pull request, and the actions people take to
+A ``ReviewScenario`` adds code owners, habits, one pull request, and the actions people take to
 the general scenario core. Everything goes in through Open SWE's public doors: the review is
 opened with ``request_review``, clicks are signed Slack payloads posted to the interactivity
 webhook, and approvals settle the pull request as a GitHub webhook would. The agent woken to
@@ -100,7 +100,7 @@ def edited(person: Person) -> Seen:
 class Agent(Protocol):
     """The agent that owns the review's Slack thread, woken with Open SWE's prompt."""
 
-    async def woken(self, office: ReviewOffice, thread_id: str, prompt: str) -> None: ...
+    async def woken(self, scenario: ReviewScenario, thread_id: str, prompt: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -113,22 +113,22 @@ class TakesSuggestions:
 
     otherwise: Person | None = None
 
-    async def woken(self, office: ReviewOffice, thread_id: str, prompt: str) -> None:
+    async def woken(self, scenario: ReviewScenario, thread_id: str, prompt: str) -> None:
         suggestions = [(login, reason.strip()) for login, reason in _SUGGESTION.findall(prompt)]
         if not suggestions and self.otherwise is not None:
             suggestions = [(self.otherwise.login, "They know this code from its history.")]
         if not suggestions:
-            office.record("agent", "woken; no suggestion and nobody to pick", source=AGENT)
+            scenario.record("agent", "woken; no suggestion and nobody to pick", source=AGENT)
         for login, reason in suggestions:
-            result = await office.use_tool(
+            result = await scenario.use_tool(
                 thread_id,
                 assign_human_reviewer,
-                pr_url=office.pr_url,
+                pr_url=scenario.pr_url,
                 github_login=login,
                 reason=reason,
             )
             outcome = str(result.get("next") if result.get("success") else result.get("error"))
-            office.record("agent", f"assign_human_reviewer @{login} → {outcome}", source=AGENT)
+            scenario.record("agent", f"assign_human_reviewer @{login} → {outcome}", source=AGENT)
 
 
 @dataclass(frozen=True)
@@ -147,7 +147,7 @@ class _WorkspaceSettings:
     human_review_auto_assign_minutes: int
 
 
-class ReviewOffice(Scenario):
+class ReviewScenario(Scenario):
     """People who review each other's pull requests, with Open SWE assigning them."""
 
     def __init__(self, *, assignment_minutes: int = 120) -> None:
@@ -166,7 +166,7 @@ class ReviewOffice(Scenario):
         self._slack: Slack | None = None
         self._decisions: Decisions | None = None
 
-    # Describing the office.
+    # Describing the scenario.
 
     def owns(self, path: str, *owners: Person | str) -> None:
         """CODEOWNERS for ``path``; a plain string is a GitHub handle with no Open SWE account."""
@@ -189,7 +189,7 @@ class ReviewOffice(Scenario):
 
     async def setup(self) -> None:
         if self.author is None:
-            raise AssertionError("describe the pull request with office.pull_request() first")
+            raise AssertionError("describe the pull request with scenario.pull_request() first")
         self._directory = Directory(self)
         self._github = GitHub(
             self,
@@ -222,7 +222,7 @@ class ReviewOffice(Scenario):
         ]
 
     def attribute_fakes(self) -> list[tuple[object, str, object]]:
-        """The ``human_review_request`` table, kept in memory for the one request this office has."""
+        """The ``human_review_request`` table, kept in memory for the one request this scenario has."""
         return [
             (HumanReviewRequest, "save", instance_method(self._save)),
             (HumanReviewRequest, "locked", self._locked),

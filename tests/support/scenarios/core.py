@@ -3,17 +3,17 @@
 A scenario plays the real code against a faked outside world while time travels. It is
 written as typed Python and reads as a story:
 
-    async def test_two_unaccepted_picks_escalate_to_the_author(office: ReviewOffice) -> None:
+    async def test_two_unaccepted_picks_escalate_to_the_author(scenario: ReviewScenario) -> None:
         \"\"\"Two unaccepted picks escalate to the author.
 
         Nobody signs up for Ada's pull request. ...
         \"\"\"
         ...
-        async with office.from_(ada.at("Mon 10:00")):
-            with office.step("Ada asks for a review; nobody signs up in time"):
-                await office.request_review()
-                await office.wait(hours=2)
-                office.expect(picked(bob), dm_to(bob, "reviewer_pick"))
+        async with scenario.from_(ada.at("Mon 10:00")):
+            with scenario.step("Ada asks for a review; nobody signs up in time"):
+                await scenario.request_review()
+                await scenario.wait(hours=2)
+                scenario.expect(picked(bob), dm_to(bob, "reviewer_pick"))
 
 The core here knows nothing about any one feature. It owns the clock, the scheduler and
 store Open SWE schedules work through, the timeline of moments, steps and expectations,

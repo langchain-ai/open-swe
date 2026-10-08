@@ -1,9 +1,9 @@
 """How Open SWE assigns reviewers, told as scenarios that run against the real code."""
 
-from tests.human_review.office import (
+from tests.human_review.scenario import (
     LONDON,
     NEW_YORK,
-    ReviewOffice,
+    ReviewScenario,
     TakesSuggestions,
     dm_to,
     edited,
@@ -16,7 +16,7 @@ from tests.human_review.office import (
 
 
 async def test_a_pick_made_at_night_waits_for_the_reviewers_work_day(
-    office: ReviewOffice,
+    scenario: ReviewScenario,
 ) -> None:
     """A pick made at night waits for the reviewer's work day.
 
@@ -26,27 +26,27 @@ async def test_a_pick_made_at_night_waits_for_the_reviewers_work_day(
     but nothing reaches him until his work day starts: no GitHub review request and no DM at
     night, and his window to accept starts at 09:00.
     """
-    ada = office.person("ada", NEW_YORK)
-    eric = office.person("eric", NEW_YORK)
-    office.owns("/web/", "vera")
-    office.pull_request(author=ada, files=["web/page.tsx"])
-    office.agent = TakesSuggestions(otherwise=eric)
+    ada = scenario.person("ada", NEW_YORK)
+    eric = scenario.person("eric", NEW_YORK)
+    scenario.owns("/web/", "vera")
+    scenario.pull_request(author=ada, files=["web/page.tsx"])
+    scenario.agent = TakesSuggestions(otherwise=eric)
 
-    async with office.from_(ada.at("Mon 23:37")):
-        with office.step("Ada asks for a review late in the evening"):
-            await office.request_review()
-            office.expect()
+    async with scenario.from_(ada.at("Mon 23:37")):
+        with scenario.step("Ada asks for a review late in the evening"):
+            await scenario.request_review()
+            scenario.expect()
 
-        with office.step("Two hours on, at 01:37, the agent picks Eric; nothing reaches him"):
-            await office.wait(hours=2)
-            office.expect(picked(eric))
+        with scenario.step("Two hours on, at 01:37, the agent picks Eric; nothing reaches him"):
+            await scenario.wait(hours=2)
+            scenario.expect(picked(eric))
 
-        with office.step("Eric's work day starts at 09:00, and he hears about the pick"):
-            await office.wait(hours=8)
-            office.expect(requested_on_github(eric), dm_to(eric, "reviewer_pick"))
+        with scenario.step("Eric's work day starts at 09:00, and he hears about the pick"):
+            await scenario.wait(hours=8)
+            scenario.expect(requested_on_github(eric), dm_to(eric, "reviewer_pick"))
 
 
-async def test_two_unaccepted_picks_escalate_to_the_author(office: ReviewOffice) -> None:
+async def test_two_unaccepted_picks_escalate_to_the_author(scenario: ReviewScenario) -> None:
     """Two unaccepted picks escalate to the author.
 
     Nobody signs up for Ada's pull request. Open SWE picks a code owner, who lets the pick
@@ -55,43 +55,45 @@ async def test_two_unaccepted_picks_escalate_to_the_author(office: ReviewOffice)
     pick also lapses, Open SWE stops rotating: she stays assigned, and Ada hears once, when her
     own work day starts.
     """
-    ada = office.person("ada", NEW_YORK)
-    bob = office.person("bob", NEW_YORK)
-    carol = office.person("carol", LONDON)
-    office.owns("/api/", bob, carol)
-    office.pull_request(author=ada, files=["api/server.py", "api/routes.py"])
+    ada = scenario.person("ada", NEW_YORK)
+    bob = scenario.person("bob", NEW_YORK)
+    carol = scenario.person("carol", LONDON)
+    scenario.owns("/api/", bob, carol)
+    scenario.pull_request(author=ada, files=["api/server.py", "api/routes.py"])
 
-    async with office.from_(ada.at("Mon 10:00")):
-        with office.step("Ada asks for a review, and nobody signs up within two hours"):
-            await office.request_review()
-            await office.wait(hours=2)
-            office.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
+    async with scenario.from_(ada.at("Mon 10:00")):
+        with scenario.step("Ada asks for a review, and nobody signs up within two hours"):
+            await scenario.request_review()
+            await scenario.wait(hours=2)
+            scenario.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
 
-        with office.step("Bob ignores the pick for two of his work hours; Carol's day is over"):
-            await office.wait(hours=2)
-            office.expect(edited(bob), released(bob, cause="expired"))
+        with scenario.step("Bob ignores the pick for two of his work hours; Carol's day is over"):
+            await scenario.wait(hours=2)
+            scenario.expect(edited(bob), released(bob, cause="expired"))
 
-        with office.step("Carol's work day starts in London, and Open SWE picks her"):
-            await office.wait(hours=14)
-            office.expect(picked(carol), requested_on_github(carol), dm_to(carol, "reviewer_pick"))
+        with scenario.step("Carol's work day starts in London, and Open SWE picks her"):
+            await scenario.wait(hours=14)
+            scenario.expect(
+                picked(carol), requested_on_github(carol), dm_to(carol, "reviewer_pick")
+            )
 
-        with office.step("Carol lets her pick lapse too, two of her work hours later"):
-            await office.wait(hours=2)
-            office.expect(
+        with scenario.step("Carol lets her pick lapse too, two of her work hours later"):
+            await scenario.wait(hours=2)
+            scenario.expect(
                 overdue(carol, cause="rotation_exhausted"), dm_to(carol, "review_reminder")
             )
 
-        with office.step("It is 06:00 in New York, so Ada hears when her day starts at 09:00"):
-            await office.wait(hours=3)
-            office.expect(dm_to(ada, "review_overdue"))
+        with scenario.step("It is 06:00 in New York, so Ada hears when her day starts at 09:00"):
+            await scenario.wait(hours=3)
+            scenario.expect(dm_to(ada, "review_overdue"))
 
-        with office.step("Nothing more happens, however long the review waits"):
-            await office.wait(days=3)
-            office.expect()
+        with scenario.step("Nothing more happens, however long the review waits"):
+            await scenario.wait(days=3)
+            scenario.expect()
 
 
 async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover(
-    office: ReviewOffice,
+    scenario: ReviewScenario,
 ) -> None:
     """A volunteer and GitHub approvals cancel only the picks they cover.
 
@@ -101,39 +103,39 @@ async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover
     nobody covers yet. Erin, another UI owner, approves straight on GitHub without being asked:
     Dana's pick is no longer needed, and her DM is edited rather than deleted.
     """
-    ada = office.person("ada", NEW_YORK)
-    bob = office.person("bob", NEW_YORK)
-    carol = office.person("carol", NEW_YORK)
-    dana = office.person("dana", NEW_YORK)
-    erin = office.person("erin", NEW_YORK)
-    office.owns("/api/", bob, carol)
-    office.owns("/ui/", dana, erin)
-    office.pull_request(author=ada, files=["api/server.py", "api/routes.py", "ui/page.tsx"])
+    ada = scenario.person("ada", NEW_YORK)
+    bob = scenario.person("bob", NEW_YORK)
+    carol = scenario.person("carol", NEW_YORK)
+    dana = scenario.person("dana", NEW_YORK)
+    erin = scenario.person("erin", NEW_YORK)
+    scenario.owns("/api/", bob, carol)
+    scenario.owns("/ui/", dana, erin)
+    scenario.pull_request(author=ada, files=["api/server.py", "api/routes.py", "ui/page.tsx"])
 
-    async with office.from_(ada.at("Mon 10:00")):
-        with office.step("Ada asks for a review, and nobody signs up within two hours"):
-            await office.request_review()
-            await office.wait(hours=2)
-            office.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
+    async with scenario.from_(ada.at("Mon 10:00")):
+        with scenario.step("Ada asks for a review, and nobody signs up within two hours"):
+            await scenario.request_review()
+            await scenario.wait(hours=2)
+            scenario.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
 
-        with office.step("Carol owns the same API code and clicks I'll review on the card"):
-            await office.clicks(carol, "ill_review")
-            office.expect(
+        with scenario.step("Carol owns the same API code and clicks I'll review on the card"):
+            await scenario.clicks(carol, "ill_review")
+            scenario.expect(
                 edited(bob),
                 released(bob, cause="claimed_by_overlapping_owner"),
                 joined(carol, cause="signed_up"),
                 requested_on_github(carol),
             )
 
-        with office.step("Carol approves on GitHub; the UI still has no reviewer"):
-            await office.reviews_on_github(carol)
-            office.expect(picked(dana), requested_on_github(dana), dm_to(dana, "reviewer_pick"))
+        with scenario.step("Carol approves on GitHub; the UI still has no reviewer"):
+            await scenario.reviews_on_github(carol)
+            scenario.expect(picked(dana), requested_on_github(dana), dm_to(dana, "reviewer_pick"))
 
-        with office.step("Half an hour later, Erin approves the UI on GitHub unasked"):
-            await office.wait(minutes=30)
-            await office.reviews_on_github(erin)
-            office.expect(edited(dana), released(dana, cause="approved"))
+        with scenario.step("Half an hour later, Erin approves the UI on GitHub unasked"):
+            await scenario.wait(minutes=30)
+            await scenario.reviews_on_github(erin)
+            scenario.expect(edited(dana), released(dana, cause="approved"))
 
-        with office.step("Every area is approved, so nothing else happens"):
-            await office.wait(days=1)
-            office.expect()
+        with scenario.step("Every area is approved, so nothing else happens"):
+            await scenario.wait(days=1)
+            scenario.expect()

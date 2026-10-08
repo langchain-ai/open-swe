@@ -18,14 +18,14 @@ from typing import get_args
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from tests.human_review.office import (
+from tests.human_review.scenario import (
     BANGALORE,
     LONDON,
     NEW_YORK,
     SAN_FRANCISCO,
     TOKYO,
     Habit,
-    ReviewOffice,
+    ReviewScenario,
 )
 
 _ZONES = (NEW_YORK, SAN_FRANCISCO, LONDON, BANGALORE, TOKYO)
@@ -46,7 +46,7 @@ _COUNTEREXAMPLE = (
 
 @dataclass(frozen=True)
 class Team:
-    """One generated office and the week it plays."""
+    """One generated scenario and the week it plays."""
 
     zones: tuple[tuple[str, str], ...]
     areas: tuple[tuple[str, ...], ...]
@@ -71,32 +71,32 @@ class Team:
             for n in range(count)
         ]
 
-    def office(self) -> ReviewOffice:
-        office = ReviewOffice(assignment_minutes=self.assignment_minutes)
-        people = {login: office.person(login, zone) for login, zone in self.zones}
+    def scenario(self) -> ReviewScenario:
+        scenario = ReviewScenario(assignment_minutes=self.assignment_minutes)
+        people = {login: scenario.person(login, zone) for login, zone in self.zones}
         for area, owners in enumerate(self.areas):
-            office.owns(f"/area{area}/", *(people[o] for o in owners))
+            scenario.owns(f"/area{area}/", *(people[o] for o in owners))
         for login, action, hours in self.habits:
-            office.habit(people[login], action, after=_hours(hours))
-        office.pull_request(author=people[self.author], files=self.files)
-        return office
+            scenario.habit(people[login], action, after=_hours(hours))
+        scenario.pull_request(author=people[self.author], files=self.files)
+        return scenario
 
-    async def play(self, office: ReviewOffice) -> None:
-        author = office.people[self.author]
-        async with office.from_(author.at(self.start), check_rules=False):
-            with office.step("Review requested"):
-                await office.request_review()
-                await office.wait(hours=self.wait_hours)
-            if self.volunteer and office.card_offers_signup:
-                with office.step(f"{self.volunteer} volunteers"):
-                    await office.clicks(office.people[self.volunteer], "ill_review")
+    async def play(self, scenario: ReviewScenario) -> None:
+        author = scenario.people[self.author]
+        async with scenario.from_(author.at(self.start), check_rules=False):
+            with scenario.step("Review requested"):
+                await scenario.request_review()
+                await scenario.wait(hours=self.wait_hours)
+            if self.volunteer and scenario.card_offers_signup:
+                with scenario.step(f"{self.volunteer} volunteers"):
+                    await scenario.clicks(scenario.people[self.volunteer], "ill_review")
             if self.approver:
                 login, hours = self.approver
-                with office.step(f"{login} approves on GitHub unasked"):
-                    await office.wait(hours=hours)
-                    await office.reviews_on_github(office.people[login])
-            with office.step("A week passes"):
-                await office.wait(days=7)
+                with scenario.step(f"{login} approves on GitHub unasked"):
+                    await scenario.wait(hours=hours)
+                    await scenario.reviews_on_github(scenario.people[login])
+            with scenario.step("A week passes"):
+                await scenario.wait(days=7)
 
     @property
     def start(self) -> str:
@@ -105,50 +105,50 @@ class Team:
     def to_python(self) -> str:
         """This team as a scenario test to paste into ``test_review_scenarios.py``."""
         lines = [
-            "async def test_found_by_the_invariant_search(office: ReviewOffice) -> None:",
+            "async def test_found_by_the_invariant_search(scenario: ReviewScenario) -> None:",
             '    """Found by the invariant search.',
             "",
             "    Describe what should happen here.",
             '    """',
         ]
         if self.assignment_minutes != 120:
-            lines.append(f"    office.assignment_minutes = {self.assignment_minutes}")
+            lines.append(f"    scenario.assignment_minutes = {self.assignment_minutes}")
         lines += [
-            f'    {login} = office.person("{login}", {_ZONE_NAMES[zone]})'
+            f'    {login} = scenario.person("{login}", {_ZONE_NAMES[zone]})'
             for login, zone in self.zones
         ]
         lines += [
-            f'    office.owns("/area{i}/", {", ".join(owners)})'
+            f'    scenario.owns("/area{i}/", {", ".join(owners)})'
             for i, owners in enumerate(self.areas)
         ]
         lines += [
-            f'    office.habit({login}, "{action}", after=timedelta(hours={hours}))'
+            f'    scenario.habit({login}, "{action}", after=timedelta(hours={hours}))'
             for login, action, hours in self.habits
             if action != "ignore"
         ]
         lines += [
-            f"    office.pull_request(author={self.author}, files={self.files!r})",
+            f"    scenario.pull_request(author={self.author}, files={self.files!r})",
             "",
-            f'    async with office.from_({self.author}.at("{self.start}")):',
-            '        with office.step("Review requested"):',
-            "            await office.request_review()",
-            f"            await office.wait(hours={self.wait_hours})",
+            f'    async with scenario.from_({self.author}.at("{self.start}")):',
+            '        with scenario.step("Review requested"):',
+            "            await scenario.request_review()",
+            f"            await scenario.wait(hours={self.wait_hours})",
         ]
         if self.volunteer:
             lines += [
-                f'        with office.step("{self.volunteer} volunteers"):',
-                f'            await office.clicks({self.volunteer}, "ill_review")',
+                f'        with scenario.step("{self.volunteer} volunteers"):',
+                f'            await scenario.clicks({self.volunteer}, "ill_review")',
             ]
         if self.approver:
             login, hours = self.approver
             lines += [
-                f'        with office.step("{login} approves on GitHub unasked"):',
-                f"            await office.wait(hours={hours})",
-                f"            await office.reviews_on_github({login})",
+                f'        with scenario.step("{login} approves on GitHub unasked"):',
+                f"            await scenario.wait(hours={hours})",
+                f"            await scenario.reviews_on_github({login})",
             ]
         lines += [
-            '        with office.step("A week passes"):',
-            "            await office.wait(days=7)",
+            '        with scenario.step("A week passes"):',
+            "            await scenario.wait(days=7)",
         ]
         return "\n".join(lines)
 
@@ -193,12 +193,12 @@ def teams(draw: st.DrawFn) -> Team:
 )
 @given(teams())
 def test_every_team_keeps_every_rule(team: Team) -> None:
-    office = team.office()
-    asyncio.run(team.play(office))
-    broken = office.violations(ignoring=_IGNORED)
+    scenario = team.scenario()
+    asyncio.run(team.play(scenario))
+    broken = scenario.violations(ignoring=_IGNORED)
     if broken:
         _COUNTEREXAMPLE.parent.mkdir(parents=True, exist_ok=True)
         _COUNTEREXAMPLE.write_text(
-            office.render(title="Found by the invariant search", summary="\n".join(broken))
+            scenario.render(title="Found by the invariant search", summary="\n".join(broken))
         )
     assert not broken, "\n".join([*broken, "", team.to_python()])

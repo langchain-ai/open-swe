@@ -2,13 +2,13 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.human_review.office import ReviewOffice
+from tests.human_review.scenario import ReviewScenario
 
 
 @pytest.fixture
-def office(request: pytest.FixtureRequest) -> Iterator[ReviewOffice]:
-    """A review office for one scenario; its page is published whether it passes or not."""
-    office = ReviewOffice()
-    yield office
-    if office.timeline:
-        office.publish(request.node.name, request.function.__doc__)
+def scenario(request: pytest.FixtureRequest) -> Iterator[ReviewScenario]:
+    """One review scenario; its page is published whether the test passes or not."""
+    scenario = ReviewScenario()
+    yield scenario
+    if scenario.timeline:
+        scenario.publish(request.node.name, request.function.__doc__)
