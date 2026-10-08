@@ -5,23 +5,28 @@
     "comments": [
       {
         "comment": "Race condition: Multiple concurrent requests could pass the device count check simultaneously and create devices beyond the limit. Consider using a database transaction or lock.",
-        "severity": "High"
+        "severity": "High",
+        "category": "concurrency"
       },
       {
         "comment": "Anonymous authentication now fails entirely if anonDeviceService.TagDevice returns ErrDeviceLimitReached. Previously, device tagging was asynchronous and non-blocking. This change prevents anonymous users from authenticating when the device limit is reached.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
-        "comment": "This call won’t compile: dbSession.Exec(args...) is given a []interface{} where the first element is the query, but Exec’s signature requires a first parameter of type string (not an interface{} splat).",
-        "severity": "Medium"
-      },
-      {
-        "comment": "Returning ErrDeviceLimitReached when no rows were updated is misleading; the device might not exist.",
-        "severity": "Low"
+        "comment": "The updateDevice function returns ErrDeviceLimitReached when rowsAffected == 0, but zero affected rows means the device doesn't exist or falls outside the time window, not that a limit was reached.",
+        "severity": "Low",
+        "category": "doc_defect"
       },
       {
         "comment": "Time window calculation inconsistency: Using device.UpdatedAt.UTC().Add(-anonymousDeviceExpiration) as the lower bound but device.UpdatedAt as the current time may not match the intended logic. Consider using time.Now().UTC() consistently.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "bug"
+      },
+      {
+        "comment": "The `tagDeviceUI` function populates the local cache with the device ID before the `CreateOrUpdateDevice` call. If `ErrDeviceLimitReached` is returned, the cache entry remains set, allowing subsequent requests to bypass the device limit until the cache expires after 29 minutes.",
+        "severity": "High",
+        "category": "bug"
       }
     ]
   },
@@ -31,11 +36,18 @@
     "comments": [
       {
         "comment": "The Check operation exhibits asymmetric cache trust logic: cached permission grants are trusted and returned immediately, but cached denials from the same permission cache are ignored, leading to a fresh database lookup. This allows stale cached grants to provide access to revoked resources, posing a security risk. ",
-        "severity": "High"
+        "severity": "High",
+        "category": "security"
       },
       {
         "comment": "The test comment says the cached permissions 'allow access', but the map stores false for dashboards:uid:dash1, so checkPermission will still treat this scope as not allowed.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "doc_defect"
+      },
+      {
+        "comment": "The cache key construction in `userPermDenialCacheKey` uses simple string concatenation with underscores, which can lead to ambiguous keys and collision risks when any component contains underscores or is empty. This could result in incorrect denial cache hits, affecting user permissions.",
+        "severity": "Medium",
+        "category": "data"
       }
     ]
   },
@@ -45,11 +57,18 @@
     "comments": [
       {
         "comment": "The ContextualLoggerMiddleware methods (QueryData, CallResource, CheckHealth, CollectMetrics) panic when a nil request is received. This occurs because they directly access req.PluginContext (via the instrumentContext function) without first checking if req is nil. This is a regression, as previous middleware layers gracefully handled nil requests.",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
       },
       {
         "comment": "The traceID is no longer logged for plugin requests. During a refactoring, the tracing import and the logic to extract and add traceID from the context to log parameters were removed from the LoggerMiddleware. The newly introduced ContextualLoggerMiddleware does not add this information, resulting in missing traceID in plugin request logs and impacting debugging and request tracing capabilities.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "bug"
+      },
+      {
+        "comment": "The `TestLogger.FromContext` method returns a new `TestLogger` instance via `NewTestLogger()` instead of returning the receiver (f). This causes logs to be recorded on an un-referenced instance, leading to broken test assertions that expect logs to be recorded on the original logger.",
+        "severity": "High",
+        "category": "bug"
       }
     ]
   },
@@ -59,7 +78,8 @@
     "comments": [
       {
         "comment": "The applyTemplateVariables method is called with request.filters as the third parameter, but this parameter is not used in the corresponding test setup.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "test_gap"
       }
     ]
   },
@@ -69,11 +89,13 @@
     "comments": [
       {
         "comment": "The rendered GrafanaRuleListItem is missing the required key prop for React list items. This can cause rendering issues when the list order changes.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
         "comment": "RuleActionsButtons is invoked with only promRule, but SilenceGrafanaRuleDrawer inside RuleActionsButtons still depends on a Grafana Ruler rule being present, so for Grafana rules coming from list views the 'Silence notifications' menu entry (now driven by Grafana Prom abilities) will toggle showSilenceDrawer without ever rendering the drawer. This means clicking 'Silence notifications' for these rules has no visible effect, even when abilities indicate silencing is allowed.",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
       }
     ]
   },
@@ -83,15 +105,18 @@
     "comments": [
       {
         "comment": "The context is being created with d.Log instead of the log variable that was initialized with additional context values (name, kind, method). This means those values won't be propagated to the logging context.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "bug"
       },
       {
-        "comment": "Bug: calling recordLegacyDuration when storage operation fails should be recordStorageDuration.",
-        "severity": "High"
+        "comment": "In DualWriterMode3's DeleteCollection method, when a storage operation fails, recordStorageDuration is incorrectly called with recordLegacyDuration instead.",
+        "severity": "High",
+        "category": "bug"
       },
       {
         "comment": "Inconsistency: using name instead of options.Kind for metrics recording differs from other methods.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "api"
       }
     ]
   },
@@ -101,7 +126,13 @@
     "comments": [
       {
         "comment": "The code uses Error log level for what appears to be debugging information. This will pollute error logs in production. Consider using Debug or Info level instead.",
-        "severity": "Low"
+        "severity": "Low",
+        "category": "perf"
+      },
+      {
+        "comment": "The cleanup job ticker was changed from 10 minutes to 1 minute, which can lead to increased database load and contention due to more frequent execution of cleanup tasks. This change should be reviewed to ensure it aligns with performance expectations.",
+        "severity": "Low",
+        "category": "perf"
       }
     ]
   },
@@ -111,11 +142,13 @@
     "comments": [
       {
         "comment": "The GetWebAssets function implements an incomplete double-checked locking pattern for caching web assets. The function first checks if the cache is populated using a read lock (RLock), and if the cache is empty, it acquires a write lock to populate it. However, it fails to re-check whether the cache was populated by another goroutine while waiting to acquire the write lock.",
-        "severity": "Medium"
+        "severity": "Medium",
+        "category": "concurrency"
       },
       {
         "comment": "In addition to the missing double-check, the function has a critical flaw in its error handling: it unconditionally assigns the fetch result to the cache (line 69: entryPointAssetsCache = result) regardless of whether the fetch succeeded or failed. When an error occurs during asset fetching, result is nil, and this nil value overwrites any previously valid cache entry.",
-        "severity": "High"
+        "severity": "High",
+        "category": "bug"
       }
     ]
   },
@@ -125,11 +158,13 @@
     "comments": [
       {
         "comment": "The enableSqlExpressions function has flawed logic that always returns false, effectively disabling SQL expressions unconditionally:",
-        "severity": "Critical"
+        "severity": "Critical",
+        "category": "bug"
       },
       {
-        "comment": "Several methods such as NewInMemoryDB().RunCommands and db.QueryFramesInto return 'not implemented'.",
-        "severity": "High"
+        "comment": "The DB methods NewInMemoryDB().RunCommands, DB.QueryFramesInto, and DB.TablesList in pkg/expr/sql/db.go return hardcoded 'not implemented' errors after removing the go-duck dependency.",
+        "severity": "High",
+        "category": "api"
       }
     ]
   },
@@ -139,11 +174,13 @@
     "comments": [
       {
         "comment": "A race condition in BuildIndex allows multiple goroutines to concurrently build the same expensive index for the same key. This is caused by moving the b.cacheMu lock from protecting the entire function to only protecting the final cache assignment. ",
-        "severity": "High"
+        "severity": "High",
+        "category": "concurrency"
       },
       {
         "comment": "Calling s.search.TotalDocs() here may race with concurrent index creation: TotalDocs iterates b.cache without synchronization, and the event watcher goroutine started just above could trigger BuildIndex writes concurrently, potentially causing a concurrent map read/write panic.",
-        "severity": "High"
+        "severity": "High",
+        "category": "concurrency"
       }
     ]
   }

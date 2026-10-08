@@ -9,7 +9,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
 import { useRefreshRepos } from "@/lib/profile"
 import { cn } from "@/lib/utils"
 
-type RepoOption = { full_name: string }
+type RepoOption = { full_name: string; private?: boolean; archived?: boolean }
 
 interface RepoSelectorProps {
   repos?: Array<RepoOption>
@@ -25,6 +25,7 @@ interface RepoSelectorProps {
   dropdownClassName?: string
   side?: "top" | "bottom"
   disabled?: boolean
+  allowArchived?: boolean
 }
 
 export function RepoSelector({
@@ -41,17 +42,21 @@ export function RepoSelector({
   dropdownClassName,
   side = "bottom",
   disabled = false,
+  allowArchived = false,
 }: RepoSelectorProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
+  const [showArchived, setShowArchived] = useState(false)
   const refresh = useRefreshRepos()
 
   const filteredRepos = useMemo(() => {
-    const all = repos ?? []
     const q = query.trim().toLowerCase()
-    if (!q) return all
-    return all.filter((repo) => repo.full_name.toLowerCase().includes(q))
-  }, [repos, query])
+    return (repos ?? []).filter(
+      (repo) =>
+        ((allowArchived && showArchived) || !repo.archived) &&
+        repo.full_name.toLowerCase().includes(q)
+    )
+  }, [repos, query, showArchived, allowArchived])
 
   return (
     <Popover
@@ -67,6 +72,7 @@ export function RepoSelector({
             <button
               type="button"
               disabled={disabled}
+              title={selectedRepo ?? undefined}
               className={cn(
                 "flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
                 triggerClassName
@@ -109,6 +115,16 @@ export function RepoSelector({
               />
             </button>
           </div>
+          {allowArchived && repos?.some((repo) => repo.archived) && (
+            <label className="flex cursor-pointer items-center gap-2 border-b border-border px-2 py-1.5 text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(event) => setShowArchived(event.target.checked)}
+              />
+              Show archived
+            </label>
+          )}
           <div className="overflow-y-auto">
             <button
               type="button"
@@ -138,6 +154,7 @@ export function RepoSelector({
                   <button
                     key={repo.full_name}
                     type="button"
+                    title={repo.full_name}
                     onClick={() => {
                       onRepoChange(repo.full_name)
                       setOpen(false)
@@ -148,7 +165,15 @@ export function RepoSelector({
                       selected ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
-                    <span className="truncate">{repo.full_name}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {repo.full_name}
+                    </span>
+                    {repo.private !== undefined && (
+                      <span className="ml-2 shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground">
+                        {repo.private ? "Private" : "Public"}
+                        {repo.archived ? " archive" : ""}
+                      </span>
+                    )}
                     {selected && (
                       <span className="ml-auto pl-3 text-muted-foreground">
                         ✓

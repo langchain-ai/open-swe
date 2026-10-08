@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo } from "react"
+import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
 import { ArrowUp, ChevronDown, Clock, X } from "lucide-react"
 
 import { SkillPromptText } from "../SkillBadge"
@@ -102,7 +103,6 @@ function QueuedMessages({
 export const Messages = memo(function MessagesComponent({
   messages,
   threadId,
-  showUserNames = true,
   scrollKey,
   showPlanArtifact = false,
   emptyState,
@@ -210,13 +210,7 @@ export const Messages = memo(function MessagesComponent({
                 message.author === "user" ||
                 message.structuredSenderKind === "system"
               ) {
-                return (
-                  <UserMessage
-                    key={message.id}
-                    message={message}
-                    showUserName={showUserNames}
-                  />
-                )
+                return <UserMessage key={message.id} message={message} />
               }
 
               return (
@@ -234,6 +228,7 @@ export const Messages = memo(function MessagesComponent({
                 />
               )
             })}
+            <ReviewChatActions messages={visibleMessages} />
             {threadId && showPlanArtifact && (
               <InlinePlanArtifact threadId={threadId} />
             )}

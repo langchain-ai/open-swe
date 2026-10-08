@@ -1,3 +1,5 @@
+import { toast } from "sonner"
+
 type MessageTimestampProps = {
   timestamp: string
   startedAt?: string
@@ -63,13 +65,24 @@ export function MessageTimestamp({
     <div
       className={`flex ${align === "right" ? "justify-end" : "justify-start"} ${className}`}
     >
-      <time
-        dateTime={date.toISOString()}
-        title={title}
-        className="text-[11px] leading-4 text-muted-foreground/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-hover/turn:opacity-100"
+      <button
+        type="button"
+        aria-label={`Copy timestamp: ${title}`}
+        title={`${title} · Click to copy`}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(date.toISOString())
+            toast.success("Timestamp copied")
+          } catch {
+            toast.error(
+              "Unable to copy timestamp. Check clipboard permissions."
+            )
+          }
+        }}
+        className="cursor-pointer text-[11px] leading-4 text-muted-foreground/70 tabular-nums opacity-0 transition-opacity duration-200 select-none group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100"
       >
-        {shortTimestamp(date)}
-      </time>
+        <time dateTime={date.toISOString()}>{shortTimestamp(date)}</time>
+      </button>
     </div>
   )
 }

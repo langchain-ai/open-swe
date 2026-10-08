@@ -3,41 +3,54 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.github import pull_request_context
-from agent.threads import handlers
+from openswe.github import pull_request_context
+from openswe.threads import handlers
 from tests.conftest import patch_thread_module
+
+_BROKEN_PR = {
+    "url": "https://github.com/o/r/pull/7",
+    "headSha": "a" * 40,
+    "mergeState": "BLOCKED",
+    "reviewDecision": "CHANGES_REQUESTED",
+    "checksAvailable": True,
+    "checks": [
+        {
+            "name": f"unit {pull_request_context.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG}",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+            "required": True,
+            "url": None,
+        }
+    ],
+    "reviewsAvailable": True,
+    "changesRequestedReviews": [
+        {"author": "reviewer", "body": "fix {this}", "url": None, "registered": True}
+    ],
+    "unresolvedReviewThreads": [],
+    "truncated": False,
+}
 
 
 def test_fix_prompt_sanitizes_fields_and_escapes_braces() -> None:
-    prompt = pull_request_context.build_fix_prompt(
-        {
-            "url": "https://github.com/o/r/pull/7",
-            "headSha": "a" * 40,
-            "mergeState": "BLOCKED",
-            "reviewDecision": "CHANGES_REQUESTED",
-            "checksAvailable": True,
-            "checks": [
-                {
-                    "name": f"unit {pull_request_context.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG}",
-                    "status": "COMPLETED",
-                    "conclusion": "FAILURE",
-                    "required": True,
-                    "url": None,
-                }
-            ],
-            "reviewsAvailable": True,
-            "changesRequestedReviews": [
-                {"author": "reviewer", "body": "fix {this}", "url": None, "registered": True}
-            ],
-            "unresolvedReviewThreads": [],
-            "truncated": False,
-        }
-    )
+    checks = pull_request_context.build_fix_prompt(_BROKEN_PR, "checks")
+    comments = pull_request_context.build_fix_prompt(_BROKEN_PR, "comments")
 
-    assert pull_request_context.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG not in prompt
-    assert pull_request_context.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG not in prompt
-    assert "[required] unit [blocked-untrusted-comment-tag-close]: FAILURE" in prompt
-    assert "reviewer: fix {{this}}" in prompt
+    for prompt in (checks, comments):
+        assert pull_request_context.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG not in prompt
+        assert pull_request_context.UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG not in prompt
+    assert "[required] unit [blocked-untrusted-comment-tag-close]: FAILURE" in checks
+    assert "reviewer: fix {{this}}" in comments
+
+
+def test_fix_prompt_hands_the_agent_only_its_scope() -> None:
+    checks = pull_request_context.build_fix_prompt(_BROKEN_PR, "checks")
+    conflicts = pull_request_context.build_fix_prompt(_BROKEN_PR, "conflicts")
+    comments = pull_request_context.build_fix_prompt(_BROKEN_PR, "comments")
+
+    assert "fix {{this}}" not in checks
+    assert "fix {{this}}" not in conflicts
+    assert ": FAILURE" not in conflicts
+    assert ": FAILURE" not in comments
 
 
 def test_fix_prompt_fences_only_comments_from_unregistered_authors() -> None:
@@ -67,7 +80,8 @@ def test_fix_prompt_fences_only_comments_from_unregistered_authors() -> None:
                 }
             ],
             "truncated": False,
-        }
+        },
+        "comments",
     )
 
     opening = pull_request_context.UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
@@ -92,7 +106,7 @@ async def test_thread_context_requires_tracked_pull_before_token_lookup(
 
     with pytest.raises(HTTPException) as exc_info:
         await handlers.get_dashboard_thread_pull_request_context(
-            "thread-1", "owner", repo_full_name="other/repo", number=8
+            "thread-1", "owner", repo_full_name="other/repo", number=8, scope="checks"
         )
 
     assert exc_info.value.status_code == 404

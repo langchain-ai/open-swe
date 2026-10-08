@@ -21,7 +21,7 @@ export function AboutSection({ user }: { user: SessionUser }) {
   }, [])
 
   return (
-    <SettingsSection title="About">
+    <SettingsSection id="about" title="About">
       {version ? (
         <SettingsRow
           label="Open SWE Desktop"
@@ -35,6 +35,9 @@ export function AboutSection({ user }: { user: SessionUser }) {
       <div className="space-y-2 p-4 text-xs break-words text-muted-foreground">
         <p>
           API: {apiBase.origin ?? "same origin"} {apiBase.path}
+        </p>
+        <p>
+          OPENSWE_ENV: <IdentityValue value={buildInfo?.backend.environment} />
         </p>
         <BuildIdentityDetails buildInfo={buildInfo} />
         <CopyDiagnosticsButton
@@ -53,6 +56,20 @@ function IdentityValue({ value }: { value: string | null | undefined }) {
   )
 }
 
+function CommitValue({ value }: { value: string | null }) {
+  if (!value) return <IdentityValue value={value} />
+  return (
+    <a
+      href={`https://github.com/langchain-ai/open-swe/commit/${encodeURIComponent(value)}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline underline-offset-2 hover:text-foreground"
+    >
+      <IdentityValue value={value} />
+    </a>
+  )
+}
+
 function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
   const hydrated = useIsHydrated()
 
@@ -63,7 +80,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
           <p>
             Backend: revision{" "}
             <IdentityValue value={buildInfo.backend.revision_id} />
-            {" · "}commit <IdentityValue value={buildInfo.backend.commit} />
+            {" · "}commit <CommitValue value={buildInfo.backend.commit} />
             {" · "}built{" "}
             {buildInfo.backend.built_at ? (
               <time dateTime={buildInfo.backend.built_at}>
@@ -79,7 +96,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
             Dashboard bundle:{" "}
             {buildInfo.dashboard.served ? (
               <>
-                commit <IdentityValue value={buildInfo.dashboard.commit} />
+                commit <CommitValue value={buildInfo.dashboard.commit} />
                 {" · "}built{" "}
                 {buildInfo.dashboard.built_at ? (
                   <time dateTime={buildInfo.dashboard.built_at}>
@@ -112,7 +129,7 @@ function BuildIdentityDetails({ buildInfo }: { buildInfo: BuildInfo | null }) {
         return (
           <p>
             This browser is running: commit{" "}
-            <IdentityValue value={bundle.commit} />
+            <CommitValue value={bundle.commit} />
             {" · "}built{" "}
             <time dateTime={bundle.built_at}>
               {new Date(bundle.built_at).toLocaleString()}

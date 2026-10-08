@@ -1,9 +1,9 @@
 # Customization Guide
 
-Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function — `get_agent()` in `agent/server.py` — where you can swap out the sandbox, model, tools, and triggers.
+Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function — `get_agent()` in `openswe/server.py` — where you can swap out the sandbox, model, tools, and triggers.
 
 ```python
-# agent/server.py — the key lines
+# openswe/server.py — the key lines
 model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
 model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
 if model_id == DEFAULT_LLM_MODEL_ID:
@@ -26,7 +26,7 @@ return create_deep_agent(
 
 ## 1. Sandbox
 
-By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `agent/sandboxes/providers/langsmith.py`.
+By default, Open SWE runs each task in a [LangSmith cloud sandbox](https://docs.smith.langchain.com/) — an isolated Linux environment where the agent clones the repo and executes commands. Sandbox creation and connection is handled in `openswe/sandboxes/providers/langsmith.py`.
 
 ### Using a custom sandbox snapshot
 
@@ -53,16 +53,16 @@ The proxy token is minted at runtime from the GitHub App installation credential
 
 ### Using a different sandbox provider
 
-Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/sandboxes/providers/` and a factory function registered in `agent/sandboxes/providers/registry.py`:
+Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `openswe/sandboxes/providers/` and a factory function registered in `openswe/sandboxes/providers/registry.py`:
 
 | `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
-| `langsmith` (default) | `agent/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY`, `SANDBOX_TYPE="langsmith"` |
-| `daytona` | `agent/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
-| `runloop` | `agent/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
-| `e2b` | `agent/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
-| `modal` | `agent/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
-| `local` | `agent/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
+| `langsmith` (default) | `openswe/sandboxes/providers/langsmith.py` | `LANGSMITH_API_KEY`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `openswe/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
+| `runloop` | `openswe/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `e2b` | `openswe/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
+| `modal` | `openswe/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `local` | `openswe/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
@@ -72,7 +72,7 @@ For `langsmith`, sandbox provisioning, connection, proxy configuration, and work
 
 ### Adding a new sandbox provider
 
-1. **Create an integration file** at `agent/sandboxes/providers/my_provider.py` with a factory function matching this signature:
+1. **Create an integration file** at `openswe/sandboxes/providers/my_provider.py` with a factory function matching this signature:
 
 ```python
 def create_my_provider_sandbox(sandbox_id: str | None = None):
@@ -88,12 +88,12 @@ def create_my_provider_sandbox(sandbox_id: str | None = None):
     ...
 ```
 
-2. **Register it** in `agent/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
+2. **Register it** in `openswe/sandboxes/providers/registry.py` by adding it to `SANDBOX_FACTORIES`:
 
 ```python
 SANDBOX_FACTORIES = {
     ...
-    "my_provider": ("agent.sandboxes.providers.my_provider", "create_my_provider_sandbox"),
+    "my_provider": ("openswe.sandboxes.providers.my_provider", "create_my_provider_sandbox"),
 }
 ```
 
@@ -131,7 +131,7 @@ class MySandbox(BaseSandbox):
         )
 ```
 
-See `deepagents.backends.LangSmithSandbox` and `agent/sandboxes/providers/langsmith.py` for a full reference implementation.
+See `deepagents.backends.LangSmithSandbox` and `openswe/sandboxes/providers/langsmith.py` for a full reference implementation.
 
 ---
 
@@ -146,7 +146,7 @@ LLM_REASONING_EFFORT="high"
 
 When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC_API_KEY` is set while `OPENAI_API_KEY` is unset or empty—defaults to `anthropic:claude-opus-5-5`. All other deployments default to `openai:gpt-6.1-sol`, including deployments with both keys set. The default reasoning effort is `medium`.
 
-Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `agent/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
+Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
 These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
@@ -167,7 +167,7 @@ model = make_model("openai:gpt-6.1-sol", max_tokens=128_000, reasoning={"effort"
 model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
 ```
 
-The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
+The `make_model()` helper in `openswe/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
 
 ```python
 from langchain_anthropic import ChatAnthropic
@@ -233,7 +233,7 @@ Routing is opt-in and off by default. Enable it either way:
 
 The instance toggle lives under **Admin → LLM Gateway**, and each workspace's settings page (**Workspaces → the workspace → LLM Gateway**) can override it; when set it overrides the `LANGSMITH_GATEWAY_ENABLED` env default (a `None`/unset value inherits the env default).
 
-Routing is applied centrally in `make_model` (`agent/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `agent/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
+Routing is applied centrally in `make_model` (`openswe/utils/model.py`), which resolves the effective on/off and delegates URL/key wiring to `openswe/utils/gateway.py`. **OpenAI, Anthropic, Baseten, Fireworks, and Google Gemini** are routed; Google Vertex (service-account auth) and any other provider call the provider directly with a logged warning. Baseten uses `BASETEN_API_KEY` from LangSmith workspace Provider Secrets through Gateway, or the runtime environment for direct calls.
 
 **Caveat — OpenAI endpoint:** Open SWE uses the OpenAI Responses API by default because OpenAI reasoning models with function tools reject `reasoning_effort` on Chat Completions. Direct OpenAI calls use a `wss://` base URL; gateway-routed OpenAI uses the HTTPS gateway base URL with Responses enabled. Set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only if you need to force Chat Completions. Anthropic, Baseten, and Fireworks are unaffected.
 
@@ -245,10 +245,10 @@ Open SWE ships with a small set of custom tools on top of the built-in Deep Agen
 
 | Tool | File | Purpose |
 |---|---|---|
-| `fetch_url` | `agent/tools/fetch_url.py` | Fetch web pages as markdown |
-| `http_request` | `agent/tools/http_request.py` | HTTP API calls |
-| `slack_attach_html` | `agent/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
-| `slack_reply` | `agent/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
+| `fetch_url` | `openswe/tools/fetch_url.py` | Fetch web pages as markdown |
+| `http_request` | `openswe/tools/http_request.py` | HTTP API calls |
+| `slack_attach_html` | `openswe/slack/tools/attach_html.py` | Attach sandbox HTML previews to Slack threads |
+| `slack_reply` | `openswe/slack/tools/reply.py` | Reply to the person who asked, in a Slack thread or ephemerally |
 
 ### Workspace MCP servers
 
@@ -391,7 +391,7 @@ explicitly replacing or clearing saved headers. Requests must remain on the
 configured public HTTPS origin; redirects, private addresses, local processes,
 and interactive OAuth login are not supported by this connection manager.
 
-The backend implementation lives in `agent/mcp`: connection models and credential
+The backend implementation lives in `openswe/mcp`: connection models and credential
 preparation, OAuth, HTTPS transport, and tool discovery/execution. Workspace storage
 and dashboard authorization remain in the workspace adapters. Existing stored
 connections and imported JSON need no migration.
@@ -418,16 +418,16 @@ Investigate graphs.
 ### Personal MCP servers
 
 Any signed-in user can connect remote MCP servers with their own credentials under
-**My settings → Personal MCPs**. The form, JSON import, OAuth, header handling, and
+**Settings → Connections → MCP servers**. The form, JSON import, OAuth, header handling, and
 tool discovery work exactly like workspace connections. Records live in the Store
 under `["user_mcps", <trimmed lowercase github login>]`, so one user's connections and credentials are
 never visible to, reused by, or revealed to another user. The dashboard API is
 `/dashboard/api/my-mcps` and requires only a signed-in session.
 
 Personal connections load only inside a **private thread owned by the triggering
-user**, the same rule that applies to personal Notion connections. Collaborative
-(workspace or Slack channel) threads can be prompted by anyone, so they run without
-personal credentials; to use yours, continue the thread privately from the dashboard.
+user**. Collaborative (workspace or Slack channel) threads can be prompted by anyone, so
+they run without personal credentials; to use yours, continue the thread privately from
+the dashboard.
 Both scopes share the **MCPs** tool group. A personal connection with the same name as a
 workspace connection replaces it entirely for that user's runs, and a disabled personal
 connection hides the workspace one rather than falling back to it.
@@ -437,12 +437,12 @@ are read or a run is dispatched.
 
 ### Adding a Python tool
 
-Create a new file in `agent/tools/`, define a function, and add it to the tools list.
+Create a new file in `openswe/tools/`, define a function, and add it to the tools list.
 
 **Example — adding a Datadog search tool:**
 
 ```python
-# agent/tools/datadog_search.py
+# openswe/tools/datadog_search.py
 import requests
 from typing import Any
 
@@ -461,7 +461,7 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     ...
 ```
 
-Then register it in `agent/server.py`:
+Then register it in `openswe/server.py`:
 
 ```python
 from .tools import fetch_url, http_request, slack_reply
@@ -504,13 +504,13 @@ return create_deep_agent(tools=tools, ...)
 
 ## 4. Triggers
 
-Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `agent/webapp.py`. You can add, remove, or modify triggers independently.
+Open SWE supports three invocation surfaces: Linear, Slack, and GitHub. Each is implemented as a webhook endpoint in `openswe/webapp.py`. You can add, remove, or modify triggers independently.
 
 ### Removing a trigger
 
 If you don't use Linear, simply don't configure the Linear webhook and remove the env vars. Same for Slack. The webhook endpoints still exist but won't receive events.
 
-To fully remove a trigger's code, delete the corresponding endpoint from `agent/webapp.py`:
+To fully remove a trigger's code, delete the corresponding endpoint from `openswe/webapp.py`:
 
 - **Linear**: `linear_webhook()` and `process_linear_issue()`
 - **Slack**: `slack_webhook()` and `process_slack_mention()`
@@ -531,7 +531,7 @@ These are used as the fallback when:
 
 ### Repository extraction from messages
 
-Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `openswe/utils/repo.py` handles parsing these formats:
 
 - `repo:owner/name` — explicit org and repo
 - `repo owner/name` — space syntax (same result)
@@ -544,7 +544,7 @@ Linear comments use the triggering user's dashboard default repository, then the
 
 ### Customizing Slack routing
 
-Slack repo resolution (`get_slack_repo_config` in `agent/webapp.py`) checks, in order:
+Slack repo resolution (`get_slack_repo_config` in `openswe/webapp.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
 2. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description"). This lets a channel be pinned to a repo without anyone repeating it per-message.
@@ -560,7 +560,7 @@ Reading the channel topic/purpose requires the bot's Slack token to have the `ch
 
 To add a new invocation surface (e.g. Jira, Discord, a custom API):
 
-1. **Add a webhook endpoint** in `agent/webapp.py`:
+1. **Add a webhook endpoint** in `openswe/webapp.py`:
 
 ```python
 @app.post("/webhooks/my-trigger")
@@ -602,7 +602,7 @@ async def process_my_trigger(task_description: str, repo_config: dict):
 3. **Add a communication tool** (optional) so the agent can report back:
 
 ```python
-# agent/tools/my_trigger_reply.py
+# openswe/tools/my_trigger_reply.py
 def my_trigger_reply(message: str) -> dict:
     """Post a reply to the triggering service."""
     # Your API call here
@@ -618,7 +618,7 @@ The key fields in `config.configurable` are:
 
 ## 5. System prompt
 
-The system prompt is the template `agent/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `agent/prompt.py`. It includes each section from its own file under `agent/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run. Edit a section's file to customize it:
+The system prompt is the template `openswe/resources/prompts/system/main.md.jinja`, rendered by `construct_system_prompt` in `openswe/prompt.py`. It includes each section from its own file under `openswe/resources/prompts/system/`, and `{% if %}` blocks in the template choose the sections that depend on the run. Edit a section's file to customize it:
 
 | File | What it controls |
 |---|---|
@@ -635,7 +635,7 @@ Open SWE supports a `default_prompt.md` file for org-level instructions that app
 
 The file is loaded at agent startup and injected into the system prompt between the task overview and repository setup sections.
 
-**Location:** [`agent/resources/default_prompt.md`](../agent/resources/default_prompt.md) for the bundled default.
+**Location:** [`openswe/resources/default_prompt.md`](../openswe/resources/default_prompt.md) for the bundled default.
 
 **Override:** Set the `DEFAULT_PROMPT_PATH` environment variable to use a different file:
 

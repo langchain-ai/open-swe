@@ -5,7 +5,7 @@ This document records the design and operating constraints of expedited Slack re
 ## Summary
 
 The agent posts a tiny PR's full diff in the Slack thread. For a draft, the PR's
-author first marks it ready from the card. Then one person other than the author
+author first marks it ready from an author-only Slack DM. Then one person other than the author
 approves, and the click submits that person's GitHub review at once. Once checks and
 reviews are clean, the agent calls a merge tool that merges. The approval survives a
 later commit only if it leaves the diff shown on the card unchanged.
@@ -41,9 +41,12 @@ are already in the Slack thread.
   test-only or test lines are the majority, because otherwise there would be nothing
   to look at; when tests are the minority of a mostly-source change it names them
   instead, so the thing being voted on stays readable.
-- A draft stays a draft. Its card offers only **Mark ready for review**, which only
-  the PR's author can click; it undrafts the PR with the author's own GitHub token and
-  then opens the card for approval.
+- A draft stays a draft. **Mark ready for review** is sent by DM
+  to the PR's linked Slack author, rather than an ephemeral thread message. It undrafts
+  the PR with the author's own GitHub token and then opens the shared card for approval.
+  Calling the tool again retries this private prompt. If Slack delivery fails or the
+  author is not linked, the tool reports that they must mark it ready on GitHub;
+  calling the tool again after that opens the existing card for approval.
 - No path is refused for being sensitive. A denylist is incomplete by construction,
   so it stops nobody deliberate, while matching path segments blocks unrelated files
   that merely contain a word like `token`. The controls that hold are a diff small
@@ -56,17 +59,37 @@ are already in the Slack thread.
 
 ### Slack card
 
-PR link, author, the diff as the card draws it, and its status. A draft's card offers
-**Mark ready for review** and **Dismiss**; otherwise it has **Approve** and
-**Dismiss**. Once approved, the diff and buttons go and
+PR link, author, the diff as the card draws it, and its status. A draft's shared card
+shows a waiting status and **Dismiss**, never the author-only readiness button;
+otherwise it has **Approve** and **Dismiss**. Once approved, the diff and buttons go and
 the card says who approved. Once merged or cancelled, the whole card becomes one line,
 such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and
 the PR link. Reactions are never votes.
 
-The card is posted in the thread only. Once it is open for approval it has
-**Broadcast in #channel**, which anyone in the thread may click. Broadcasting reposts the card as a thread reply also sent to the channel.
-When the card closes for any reason, the broadcast copy is deleted and the closed card
-is posted in the thread only, so the channel keeps no finished cards.
+When `reviewChannel` is configured in `.open-swe/settings.json`, the ready card is
+automatically broadcast there, without send controls. Drafts wait until the author
+marks them ready. The destination must be public and not externally shared.
+
+Otherwise the card is posted in the thread only. Once it is open for approval it can
+be sent to one channel, once:
+
+- When the card is posted, it lists its thread's channel, then the public, not
+  externally shared channels where the PR author's non-private Open SWE threads ran
+  in the last 14 days, then channels the author's cards were sent to in the last
+  90 days. There are at most 10.
+- With only the thread's channel on the list, the card shows **Broadcast in #channel**
+  and **Other channel…**. With more, it shows a dropdown (thread's channel preselected,
+  **Other…** last) and **Send**. **Other** opens a picker of public channels, and a
+  channel picked there is on the list for the author's later cards.
+- Anyone in the thread may send the card to the thread's own channel. This reposts
+  the card as a thread reply also sent to the channel.
+- Only a voter (see below) may send it to another channel, since that shows the diff
+  to new people. The card is posted at the top of that channel with a link back to
+  the thread, and votes work from either copy.
+
+When the card is approved or closes for any reason, both the broadcast and the copy in
+the other channel are deleted, and the card stays in the thread only. So no channel
+keeps a finished card.
 
 ### Voting
 

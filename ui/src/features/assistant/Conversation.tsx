@@ -131,11 +131,12 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
                 pullRequests={thread.pullRequests ?? []}
                 health={checks.data?.pullRequests}
                 healthUnavailable={checks.isError}
-                onFix={async (pr) => {
+                onFix={async (pr, scope) => {
                   const result = await agentsApi.getThreadPullRequestContext(
                     thread.id,
                     pr.repoFullName,
-                    pr.number
+                    pr.number,
+                    scope
                   )
                   aui.composer().setText(result.prompt)
                 }}

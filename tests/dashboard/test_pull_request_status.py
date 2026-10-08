@@ -5,9 +5,10 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.github import pull_request_status
-from agent.threads import access as thread_access
-from agent.threads import handlers
+from openswe.github import http as github_http
+from openswe.github import pull_request_status
+from openswe.threads import access as thread_access
+from openswe.threads import handlers
 from tests.conftest import patch_thread_module
 
 
@@ -19,7 +20,7 @@ def _response(status: int, payload: object) -> httpx2.Response:
 
 @asynccontextmanager
 async def _client(**kwargs):
-    assert kwargs == {"token": "oauth-token"}
+    assert kwargs["token"] == "oauth-token"
     yield object()
 
 
@@ -82,7 +83,7 @@ def test_normalize_checks_classifies_failures_and_pending() -> None:
 async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pull_request_status, "github_client", _client)
+    monkeypatch.setattr(github_http, "github_client", _client)
     graphql_pages: list[str | None] = []
 
     async def request(client, method, url, **kwargs):
@@ -99,7 +100,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                     "head": {"sha": "a" * 40},
                 },
             )
-        if url == pull_request_status.GITHUB_GRAPHQL:
+        if url == github_http.GITHUB_GRAPHQL:
             cursor = kwargs["json"]["variables"]["cursor"]
             graphql_pages.append(cursor)
             if cursor is None:
@@ -156,7 +157,12 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                                                         "author": {"login": "bob"},
                                                         "body": "question",
                                                         "url": "https://github.com/o/r/pull/7#discussion_r2",
-                                                    }
+                                                    },
+                                                    {
+                                                        "author": {"login": "alice"},
+                                                        "body": "answer",
+                                                        "url": "https://github.com/o/r/pull/7#discussion_r3",
+                                                    },
                                                 ]
                                             },
                                         }
@@ -198,7 +204,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
             )
         raise AssertionError(url)
 
-    monkeypatch.setattr(pull_request_status, "github_request", request)
+    monkeypatch.setattr(github_http, "github_request", request)
 
     result = await pull_request_status.get_pull_request_statuses(
         [{"repo_full_name": "o/r", "number": 7}], "oauth-token"
@@ -235,6 +241,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                     "path": "a.py",
                     "line": 4,
                     "url": "https://github.com/o/r/pull/7#discussion_r1",
+                    "replies": [],
                 },
                 {
                     "thread_id": "PRRT_2",
@@ -243,6 +250,13 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                     "path": "b.py",
                     "line": 9,
                     "url": "https://github.com/o/r/pull/7#discussion_r2",
+                    "replies": [
+                        {
+                            "author": "alice",
+                            "body": "answer",
+                            "url": "https://github.com/o/r/pull/7#discussion_r3",
+                        }
+                    ],
                 },
             ],
         }
@@ -252,14 +266,14 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
 async def test_one_inaccessible_pull_request_does_not_fail_the_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pull_request_status, "github_client", _client)
+    monkeypatch.setattr(github_http, "github_client", _client)
 
     async def request(client, method, url, **kwargs):
-        if url == pull_request_status.GITHUB_GRAPHQL:
+        if url == github_http.GITHUB_GRAPHQL:
             return _response(200, {"errors": [{"message": "not found"}]})
         return _response(404, {"message": "Not Found"})
 
-    monkeypatch.setattr(pull_request_status, "github_request", request)
+    monkeypatch.setattr(github_http, "github_request", request)
 
     result = await pull_request_status.get_pull_request_statuses(
         [
@@ -281,7 +295,7 @@ async def test_one_inaccessible_pull_request_does_not_fail_the_response(
 async def test_partial_check_failure_cannot_appear_green(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pull_request_status, "github_client", _client)
+    monkeypatch.setattr(github_http, "github_client", _client)
 
     async def request(client, method, url, **kwargs):
         if url.endswith("/pulls/3"):
@@ -295,7 +309,7 @@ async def test_partial_check_failure_cannot_appear_green(
                     "head": {"sha": "b" * 40},
                 },
             )
-        if url == pull_request_status.GITHUB_GRAPHQL:
+        if url == github_http.GITHUB_GRAPHQL:
             return _response(
                 200,
                 {
@@ -317,7 +331,7 @@ async def test_partial_check_failure_cannot_appear_green(
             return _response(200, {"statuses": []})
         raise AssertionError(url)
 
-    monkeypatch.setattr(pull_request_status, "github_request", request)
+    monkeypatch.setattr(github_http, "github_request", request)
 
     result = (
         await pull_request_status.get_pull_request_statuses(

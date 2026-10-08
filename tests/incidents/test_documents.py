@@ -4,9 +4,9 @@ import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 
-from agent.incidents import documents, service
-from agent.incidents.models import Evidence, Hypothesis, Incident, IncidentPolicy, IncidentReport
-from agent.slack.channels import SlackChannel
+from openswe.incidents import documents, service
+from openswe.incidents.models import Evidence, Hypothesis, Incident, IncidentPolicy, IncidentReport
+from openswe.slack.channels import SlackChannel
 
 CHANNEL = {
     "id": "C1",
@@ -72,7 +72,7 @@ async def test_reports_replace_one_summary_and_keep_other_incidents(record):
     assert "Error rate increased" not in latest["markdown"]
     assert latest["markdown"].count("Recovered") == 1
     assert "Other incident" in (await current(second))["markdown"]
-    from agent.store import search_all_values
+    from openswe.store import search_all_values
 
     assert len(await search_all_values(documents.SUMMARIES)) == 2
     assert "Raw sensitive evidence excerpt" not in latest["markdown"]
@@ -108,8 +108,8 @@ async def test_store_outage_is_not_an_empty_summary(record, monkeypatch):
 
 
 async def test_documents_api_is_read_only_and_checks_channel_access(record):
-    from agent.incidents import routes as incidents_routes
-    from agent.incidents.document_routes import router
+    from openswe.incidents import routes as incidents_routes
+    from openswe.incidents.document_routes import router
 
     await documents.update_from_report(record, report())
     app = FastAPI()

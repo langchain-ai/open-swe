@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
 
 import { api, type SlackChannelDirectory } from "@/lib/api"
 
@@ -6,14 +7,33 @@ export const slackChannelDirectoryKey = ["slackChannels"] as const
 
 export const SLACK_CHANNEL_ID_PATTERN = /^[CG][A-Z0-9]{8,}$/
 
+export const slackChannelHref = (id: string): string =>
+  `https://slack.com/app_redirect?channel=${encodeURIComponent(id)}`
+
 /** The channels the bot can see; a directory to browse, refreshed on its own. */
 export function useSlackChannelDirectory(enabled: boolean) {
-  return useQuery({
+  const queryClient = useQueryClient()
+  const refresh = useMutation({
+    mutationFn: () => api.listSlackChannels(true),
+    onSuccess: (data) =>
+      queryClient.setQueryData(slackChannelDirectoryKey, data),
+    onError: () =>
+      toast.error("Could not refresh channels from Slack. Try again."),
+  })
+  const directory = useQuery({
     queryKey: slackChannelDirectoryKey,
-    queryFn: api.listSlackChannels,
+    queryFn: () => api.listSlackChannels(),
     enabled,
     staleTime: 60_000,
   })
+  return {
+    data: directory.data,
+    error: directory.error,
+    isLoading: directory.isLoading,
+    isError: directory.isError,
+    refresh: refresh.mutate,
+    isRefreshing: refresh.isPending,
+  }
 }
 
 /** `#name` for a channel the directory knows, else the id as stored. */

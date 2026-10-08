@@ -30,6 +30,41 @@ function firstStringArg(
   return undefined
 }
 
+const TEXT_ARGUMENTS = [
+  "reason",
+  "problem_description",
+  "keep_approval_reason",
+  "inline_summary",
+  "summary",
+  "description",
+  "message",
+  "comment",
+  "note",
+  "evidence",
+  "details",
+  "suggestion",
+  "instructions",
+  "prompt",
+  "custom_prompt",
+  "analysis_summary",
+  "body",
+  "content",
+  "text",
+  "query",
+  "title",
+]
+
+export function toolTextArguments(
+  input: Record<string, unknown> | undefined
+): Array<[string, string]> {
+  return TEXT_ARGUMENTS.flatMap((key) => {
+    const value = input?.[key]
+    return typeof value === "string" && value.trim()
+      ? [[key, value] as [string, string]]
+      : []
+  })
+}
+
 function truncateMiddle(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value
 }
@@ -74,9 +109,11 @@ export function formatToolDisplayParts(
   const query = firstStringArg(input, ["query"])
   const url = firstStringArg(input, ["url"])
   const command = firstStringArg(input, ["command"])
+  const text = toolTextArguments(input)[0]?.[1]
   const plain = (heading: string): ToolDisplayParts => ({
     heading,
-    preview: null,
+    preview: text ? truncateMiddle(text.trim(), 80) : null,
+    ...(text ? { previewTooltip: text } : {}),
   })
 
   switch (toolKind) {

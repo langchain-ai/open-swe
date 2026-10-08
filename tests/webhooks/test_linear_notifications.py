@@ -9,13 +9,12 @@ import pytest
 from langchain_core.tools import BaseTool
 from mcp.types import CallToolResult, TextContent, Tool
 
-from agent import completion
-from agent.github import token as auth
-from agent.linear import notifications
-from agent.mcp import MCPConnectionUpdate, runtime
-from agent.mcp import workspace as workspace_mcps
-from agent.middleware import sandbox_circuit_breaker
-from agent.run_config import RunConfig
+from openswe import completion
+from openswe.linear import notifications
+from openswe.mcp import MCPConnectionUpdate, runtime
+from openswe.mcp import workspace as workspace_mcps
+from openswe.middleware import sandbox_circuit_breaker
+from openswe.run_config import RunConfig
 
 
 @dataclass
@@ -86,22 +85,6 @@ async def test_failed_linear_run_posts_through_mcp(
     assert name == comment_tool
     assert arguments["issueId"] == "issue-1"
     assert "timed out" in arguments["body"]
-
-
-async def test_linear_auth_failure_posts_token_free_notice(
-    linear_mcp: LinearMCP, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        "agent.run_config.get_config",
-        lambda: {"configurable": {"linear_issue": {"id": "issue-1"}}},
-    )
-    await auth.leave_failure_comment("linear", "Sign in at https://auth.example/private-token")
-
-    assert len(linear_mcp.calls) == 1
-    _, arguments = linear_mcp.calls[0]
-    assert arguments["issueId"] == "issue-1"
-    assert "GitHub" in arguments["body"]
-    assert "private-token" not in arguments["body"]
 
 
 async def test_linear_sandbox_failure_posts_through_mcp(

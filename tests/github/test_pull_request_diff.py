@@ -12,8 +12,9 @@ from pathlib import Path
 
 import httpx2
 import pytest
+from fastapi import HTTPException
 
-from agent.github.pull_request_diff import build_pr_diff_files
+from openswe.github.pull_request_diff import build_pr_diff_files, fetch_file_versions
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
@@ -153,3 +154,30 @@ async def test_every_page_of_a_large_pr_is_loaded() -> None:
 
     assert [file["path"] for file in diff["files"]] == names
     assert diff["truncated"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malicious", ["../../../private/repo/issues/1", "/private", "a/../b"])
+async def test_hydration_rejects_traversal_before_network(malicious: str) -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        pytest.fail(f"unexpected request: {request.url}")
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
+        for path, original in [(malicious, "safe.py"), ("safe.py", malicious)]:
+            with pytest.raises(HTTPException) as exc:
+                await fetch_file_versions(client, "acme/app", path, original, "a" * 40, "b" * 40)
+            assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_hydration_reads_snapshot_and_keeps_unavailable_blob_null() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        ref = request.url.params["ref"]
+        assert ref in ("a" * 40, "b" * 40)
+        return httpx2.Response(200, text="before") if ref == "a" * 40 else httpx2.Response(503)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
+        contents = await fetch_file_versions(
+            client, "acme/app", "safe.py", "safe.py", "a" * 40, "b" * 40
+        )
+    assert contents == {"originalContent": "before", "modifiedContent": None}

@@ -20,6 +20,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -53,6 +54,7 @@ const RECORD: WorkspaceRecord = {
   setup_script: "make setup",
   update_script: "",
   base_snapshot_id: null,
+  snapshot_id: "snapshot-1",
   snapshot_status: "ready",
   refresh_status: "success",
   vcpus: 4,
@@ -64,6 +66,7 @@ const SETTINGS: WorkspaceSettings = {
   review_draft_prs: false,
   pr_summaries: true,
   review_trace_links: true,
+  fable_enabled: false,
 }
 
 const clients: Array<QueryClient> = []
@@ -109,6 +112,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     default_agent_subagent_model: "anthropic:claude-opus-5-5",
     default_agent_subagent_reasoning_effort: "medium",
   })
+  vi.spyOn(api, "getInstanceSettings").mockResolvedValue(SETTINGS)
   vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue({
     effective: SETTINGS,
     overrides: {},
@@ -128,6 +132,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     partial: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
+  vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 
@@ -146,13 +151,75 @@ function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
   )
 }
 
+/** What `InvalidationTab` does when the stream invalidates `workspaces`. */
+async function invalidateWorkspaces() {
+  await act(async () => {
+    await clients.at(-1)?.invalidateQueries({
+      predicate: (query) =>
+        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
+        false,
+    })
+    await vi.advanceTimersByTimeAsync(1)
+  })
+}
+
 describe("WorkspaceSettingsPanel", () => {
+  it("shows model labels before the dropdown opens and after it closes", async () => {
+    mockApis()
+    vi.mocked(api.options).mockResolvedValue({
+      models: [
+        {
+          id: "openai:gpt-6.1-sol",
+          label: "GPT-6.1 Sol",
+          supports_images: true,
+          efforts: ["medium"],
+          default_effort: "medium",
+        },
+      ],
+      default_agent_model: "openai:gpt-6.1-sol",
+      default_agent_reasoning_effort: "medium",
+      default_agent_subagent_model: "openai:gpt-6.1-sol",
+      default_agent_subagent_reasoning_effort: "medium",
+    })
+    vi.mocked(api.getWorkspaceSettings).mockResolvedValue({
+      effective: {
+        ...SETTINGS,
+        default_agent_model: "openai:gpt-6.1-sol",
+        default_agent_reasoning_effort: "medium",
+      },
+      overrides: {},
+    })
+    renderPage()
+
+    const trigger = (await screen.findByText("GPT-6.1 Sol")).closest("button")!
+    const models = screen
+      .getByRole("heading", { name: "Model defaults" })
+      .closest("section")!
+    expect(within(models).getByText("Inherit instance setting")).toBeTruthy()
+    expect(screen.queryByRole("listbox")).toBeNull()
+    fireEvent.click(trigger)
+    expect(
+      await screen.findByRole("option", { name: "GPT-6.1 Sol" })
+    ).toBeTruthy()
+    fireEvent.keyDown(trigger, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(within(trigger).getByText("GPT-6.1 Sol")).toBeTruthy()
+  })
+
   it("offers no way to delete the default workspace", async () => {
     mockApis({ ...RECORD, slug: "default", name: "Default" })
     renderPage(true, vi.fn(), "default")
 
     expect(await screen.findByRole("heading", { name: "General" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Delete Default" })).toBeNull()
+    const repository = screen.getByRole("link", { name: "acme/oss" })
+    expect(repository.getAttribute("href")).toBe("https://github.com/acme/oss")
+    expect(repository.getAttribute("target")).toBe("_blank")
+    const channel = await screen.findByRole("link", { name: "#oss-help" })
+    expect(channel.getAttribute("href")).toBe(
+      "https://slack.com/app_redirect?channel=C1"
+    )
+    expect(channel.getAttribute("target")).toBe("_blank")
   })
 
   it("confirms deletion, keeps failures retryable, and leaves the detail page on success", async () => {
@@ -271,7 +338,7 @@ describe("WorkspaceSettingsPanel", () => {
     ["refreshing", "unknown"],
     ["success", "unknown"],
   ] as const)(
-    "follows a repository rebuild from a %s save response through stale polls to %s",
+    "follows a repository rebuild from a %s save response through invalidations to %s",
     async (savedStatus, outcome) => {
       const initial = {
         ...RECORD,
@@ -335,9 +402,7 @@ describe("WorkspaceSettingsPanel", () => {
           .mocked(api.getWorkspace)
           .mockResolvedValue(saved)
         const reads = getWorkspace.mock.calls.length
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(getWorkspace.mock.calls.length).toBeGreaterThan(reads)
         expect(screen.getByRole("status").textContent).toContain(
           "rebuild queued"
@@ -347,6 +412,7 @@ describe("WorkspaceSettingsPanel", () => {
           ...saved,
           refresh_status: outcome === "unknown" ? "success" : "refreshing",
         })
+        await invalidateWorkspaces()
         await act(async () => {
           await vi.advanceTimersByTimeAsync(65_001)
         })
@@ -368,9 +434,7 @@ describe("WorkspaceSettingsPanel", () => {
               : "2026-01-01T00:01:00Z",
           refresh_error: outcome === "failed" ? "Setup script exited 1" : null,
         })
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(5001)
-        })
+        await invalidateWorkspaces()
         expect(
           within(general).getByRole(outcome === "success" ? "status" : "alert")
             .textContent
@@ -379,7 +443,7 @@ describe("WorkspaceSettingsPanel", () => {
             ? "image rebuild could not be confirmed"
             : outcome === "failed"
               ? "Image rebuild failed. Setup script exited 1"
-              : "Sandbox image rebuilt with the saved repositories."
+              : "Sandbox image built with the saved repositories."
         )
         expect(
           screen
@@ -414,11 +478,127 @@ describe("WorkspaceSettingsPanel", () => {
     )
   })
 
+  it("saves sandbox sizes in bytes and clears inherited sizes", async () => {
+    mockApis()
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue(RECORD)
+    renderPage()
+    fireEvent.change(await screen.findByLabelText("vCPUs"), {
+      target: { value: "8" },
+    })
+    fireEvent.change(screen.getByLabelText("Memory (GiB)"), {
+      target: { value: "32" },
+    })
+    fireEvent.change(screen.getByLabelText("Disk (GiB)"), {
+      target: { value: "256" },
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: 8,
+        mem_bytes: 32 * 1024 ** 3,
+        fs_capacity_bytes: 256 * 1024 ** 3,
+      })
+    )
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Save sandbox configuration" })
+          .hasAttribute("disabled")
+      ).toBe(false)
+    )
+    for (const label of ["vCPUs", "Memory (GiB)", "Disk (GiB)"])
+      fireEvent.change(screen.getByLabelText(label), { target: { value: "" } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save sandbox configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        vcpus: null,
+        mem_bytes: null,
+        fs_capacity_bytes: null,
+      })
+    )
+  })
+
+  it("edits proxy configuration without losing other sandbox create parameters", async () => {
+    const record = {
+      ...RECORD,
+      create_params: { _internal_runtime: "v2", proxy_config: { rules: [] } },
+    }
+    mockApis(record)
+    const proxy = {
+      rules: [
+        {
+          name: "service",
+          match_hosts: ["api.example.com"],
+          env_vars: { SERVICE_MODE: "example" },
+        },
+      ],
+    }
+    const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
+      ...record,
+      create_params: { ...record.create_params, proxy_config: proxy },
+    })
+    renderPage()
+    fireEvent.click(await screen.findByRole("tab", { name: "JSON" }))
+    const editor = await screen.findByLabelText("Proxy configuration (JSON)")
+    fireEvent.change(editor, { target: { value: "[]" } })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save proxy configuration" })
+    )
+    expect(
+      await screen.findByText("Proxy configuration must be a JSON object.")
+    ).toBeTruthy()
+    expect(update).not.toHaveBeenCalled()
+    fireEvent.change(editor, { target: { value: JSON.stringify(proxy) } })
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.change(screen.getByLabelText("Rule name"), {
+      target: { value: "updated-service" },
+    })
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }))
+    expect(
+      JSON.parse(
+        (
+          screen.getByLabelText(
+            "Proxy configuration (JSON)"
+          ) as HTMLTextAreaElement
+        ).value
+      ).rules[0].name
+    ).toBe("updated-service")
+    fireEvent.click(screen.getByRole("tab", { name: "Rules" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save proxy configuration" })
+    )
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("oss", {
+        create_params: {
+          _internal_runtime: "v2",
+          proxy_config: {
+            ...proxy,
+            rules: [{ ...proxy.rules[0], name: "updated-service" }],
+          },
+        },
+      })
+    )
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Save proxy configuration",
+          }) as HTMLButtonElement
+        ).disabled
+      ).toBe(true)
+    )
+  })
+
   it("saves the sandbox scripts and starts a rebuild", async () => {
     mockApis()
     const update = vi.spyOn(api, "updateWorkspace").mockResolvedValue({
       ...RECORD,
       setup_script: "make setup && make build",
+      update_script: "git pull --ff-only",
     })
     const refresh = vi
       .spyOn(api, "refreshWorkspace")
@@ -426,13 +606,16 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage()
 
     await screen.findByRole("button", { name: "Edit setup script" })
+    const sandbox = screen
+      .getByRole("button", { name: "Save scripts" })
+      .closest("section")!
+    expect(within(sandbox).queryByRole("button", { name: "Cancel" })).toBeNull()
     expect(screen.queryByLabelText("Setup script")).toBeNull()
-    expect(screen.getAllByText("OPENSWE_WORKSPACE_REPOS")).toHaveLength(2)
-    expect(screen.queryByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')).toBeNull()
-    for (const trigger of screen.getAllByRole("button", {
-      name: "OPENSWE_WORKSPACE_REPOS",
-    })) {
-      fireEvent.click(trigger)
+    for (const name of ["Edit setup script", "Edit update script"]) {
+      fireEvent.click(screen.getByRole("button", { name }))
+      fireEvent.click(
+        await screen.findByRole("button", { name: "OPENSWE_WORKSPACE_REPOS" })
+      )
       const popup = await screen.findByRole("dialog", {
         name: "Expanded value",
       })
@@ -440,12 +623,30 @@ describe("WorkspaceSettingsPanel", () => {
         within(popup).getByText('OPENSWE_WORKSPACE_REPOS="acme/oss"')
       ).toBeTruthy()
       fireEvent.keyDown(popup, { key: "Escape" })
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: "Expanded value" })
+        ).toBeNull()
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Done" }))
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     }
     fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
     const setup = await screen.findByRole("textbox", { name: "Setup script" })
     expect((setup as HTMLTextAreaElement).value).toBe("make setup")
-    fireEvent.change(setup, { target: { value: "make setup && make build" } })
+    fireEvent.change(setup, { target: { value: "Discard this" } })
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.click(within(sandbox).getByRole("button", { name: "Cancel" }))
+    expect(within(sandbox).queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Edit setup script" }))
+    const restoredSetup = await screen.findByRole("textbox", {
+      name: "Setup script",
+    })
+    expect((restoredSetup as HTMLTextAreaElement).value).toBe("make setup")
+    fireEvent.change(restoredSetup, {
+      target: { value: "make setup && make build" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(update).not.toHaveBeenCalled()
@@ -469,6 +670,9 @@ describe("WorkspaceSettingsPanel", () => {
     ).toBe("make setup && make build")
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.change(screen.getByLabelText("Workspace name"), {
+      target: { value: "Unsaved workspace name" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save scripts" }))
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith("oss", {
@@ -477,11 +681,33 @@ describe("WorkspaceSettingsPanel", () => {
       })
     )
 
+    await waitFor(() =>
+      expect(
+        within(
+          screen
+            .getByRole("button", { name: "Save scripts" })
+            .closest("section")!
+        ).queryByRole("button", { name: "Cancel" })
+      ).toBeNull()
+    )
+
+    expect(
+      (screen.getByLabelText("Workspace name") as HTMLInputElement).value
+    ).toBe("Unsaved workspace name")
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Save",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
+
     // Once started, the page re-reads the record and follows the run instead
     // of re-enabling the button on the start request alone.
     const getWorkspace = vi.spyOn(api, "getWorkspace").mockResolvedValue({
       ...RECORD,
       setup_script: "make setup && make build",
+      update_script: "git pull --ff-only",
       refresh_status: "refreshing",
     })
     const readsBefore = getWorkspace.mock.calls.length
@@ -509,8 +735,9 @@ describe("WorkspaceSettingsPanel", () => {
     vi.spyOn(api, "repos").mockResolvedValue({
       installations: [],
       repositories: [
-        { full_name: "acme/oss", private: false },
-        { full_name: "acme/api", private: true },
+        { full_name: "acme/oss", private: false, archived: false },
+        { full_name: "acme/api", private: true, archived: false },
+        { full_name: "acme/legacy", private: false, archived: true },
       ],
     })
     renderPage()
@@ -523,9 +750,16 @@ describe("WorkspaceSettingsPanel", () => {
     fireEvent.click(trigger)
 
     // Core prefers acme/api, and OSS can still default to it.
-    const option = await screen.findByRole("button", { name: "acme/api" })
+    const option = await screen.findByRole("button", {
+      name: /acme\/api\s*Private/,
+    })
     expect(option.closest("section")).toBeNull()
     expect(screen.getAllByText("acme/oss").length).toBeGreaterThan(1)
+    expect(screen.queryByText("acme/legacy")).toBeNull()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show archived" }))
+    expect(
+      screen.getByRole("button", { name: /acme\/legacy\s*Public\s*archive/ })
+    ).toBeTruthy()
   })
 
   it("turns an inherited setting into an override and resets it back", async () => {
@@ -540,26 +774,32 @@ describe("WorkspaceSettingsPanel", () => {
       })
     renderPage()
 
-    const fable = (
-      await screen.findByRole("heading", { name: "Fable" })
-    ).closest("section")
-    if (!fable) throw new Error("no Fable section")
-    const toggle = within(fable).getByRole("switch")
+    const row = (await screen.findByText("Review Draft PRs")).closest(
+      "label"
+    )!.parentElement!
+    const toggle = within(row).getByRole("switch")
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(false))
-    expect(within(fable).getByText("Inherited")).toBeTruthy()
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
 
     fireEvent.click(toggle)
     await waitFor(() =>
-      expect(save).toHaveBeenCalledWith("oss", { fable_enabled: true })
+      expect(save).toHaveBeenCalledWith("oss", { review_draft_prs: true })
     )
-    expect(await within(fable).findByText("Overridden")).toBeTruthy()
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
 
     fireEvent.click(
-      within(fable).getByRole("button", {
-        name: "Reset Allow Fable models to the instance value",
+      await screen.findByRole("button", {
+        name: "Reset Review Draft PRs to the instance value",
       })
     )
     await waitFor(() => expect(save).toHaveBeenLastCalledWith("oss", {}))
-    expect(await within(fable).findByText("Inherited")).toBeTruthy()
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe("false")
+    )
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset Review Draft PRs to the instance value",
+      })
+    ).toBeNull()
   })
 })

@@ -15,7 +15,7 @@ const ALLOWED_PERMISSIONS = new Set([
 const SESSION_COOKIE_NAME = "osw_session";
 const LOGIN_PATH = "/dashboard/api/auth/login";
 const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
-const CONNECT_PROVIDERS = new Set(["slack", "notion"]);
+const CONNECT_PROVIDERS = new Set(["slack", "langsmith"]);
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev");
@@ -136,12 +136,26 @@ function localCallbackUrl(navigationUrl, backendUrl) {
     if (
       !["http:", "https:"].includes(target.protocol) ||
       target.origin !== backend.origin ||
-      !/^\/dashboard\/api\/(?:auth|slack|notion)\/callback$/.test(
-        target.pathname,
-      )
+      !/^\/dashboard\/api\/(?:auth|slack)\/callback$/.test(target.pathname)
     ) {
       return null;
     }
+    return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+function desktopDeepLinkUrl(value, backendUrl) {
+  try {
+    const target = new URL(value);
+    const backend = new URL(backendUrl);
+    if (
+      target.protocol !== "https:" ||
+      target.origin !== backend.origin ||
+      !/^\/(?:agents(?:\/|$)|review(?:\/|$))/.test(target.pathname)
+    )
+      return null;
     return `${APP_URL}${target.pathname.slice(1)}${target.search}${target.hash}`;
   } catch {
     return null;
@@ -174,6 +188,7 @@ module.exports = {
   connectLoginUrl,
   desktopExchangeUrl,
   desktopLoginUrl,
+  desktopDeepLinkUrl,
   resolveAppRuntime,
   backendRequestUrl,
   isAppLoginUrl,

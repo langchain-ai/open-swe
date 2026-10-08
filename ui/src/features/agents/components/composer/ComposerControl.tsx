@@ -1,7 +1,6 @@
 import { ChevronDown } from "lucide-react"
 
 import type { ComponentProps } from "react"
-import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -22,18 +21,6 @@ export function ComposerControl({
       variant={variant}
       {...props}
     />
-  )
-}
-
-export function ComposerControlIcon({
-  className,
-  icon: Icon,
-}: {
-  className?: string
-  icon: LucideIcon
-}) {
-  return (
-    <Icon aria-hidden="true" className={cn("size-3.5 shrink-0", className)} />
   )
 }
 

@@ -1,21 +1,23 @@
-dataset_name = "openswe-reviewer-v1"
+dataset_name = "openswe-reviewer-v2"
 experiment_prefix = "openswe-review-confidence"
-max_concurrency = 5
+max_concurrency = 10
 
 # LangSmith tracing project for eval runs. Keeps eval traces out of the
 # deployment's production project.
 langsmith_project = "open-swe-evals"
+# Project the reviewer server traces into, read for per-PR cost. Blank uses
+# LANGSMITH_PROJECT from .env, which is what local `make dev` traces into.
+reviewer_langsmith_project = ""
 
 # Leave blank to use LANGGRAPH_URL or local dev.
 langgraph_url = ""
 assistant_id = "reviewer"
-# models: openai:gpt-5.6-sol, anthropic:claude-opus-5-5, google_genai:gemini-3.8-flash
-model_id = "google_genai:gemini-3.8-flash"
-reasoning_effort = "medium"
+# models: anthropic:claude-opus-5-5, openai:gpt-6.1-sol, google_genai:gemini-3.8-flash
+model_id = "anthropic:claude-opus-5-5"
+reasoning_effort = "high"
 
 # score_mode:
 # - "all_findings" — diagnostic mode for deduplicated add_finding calls.
 # - "surfaced_findings" — score the exact final eval publication snapshot.
 score_mode = "surfaced_findings"
 severity_threshold = "low"
-cap = 6

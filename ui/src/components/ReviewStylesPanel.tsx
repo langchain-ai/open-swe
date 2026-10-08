@@ -24,6 +24,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { api, isGithubReauthError, loginUrl } from "@/lib/api"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useRepos } from "@/lib/profile"
 import { normalizeRepoFullName } from "@/lib/repo"
@@ -58,12 +59,7 @@ export function ReviewStylesPanel() {
   const styles = useQuery({
     queryKey: ["reviewStyles"],
     queryFn: api.listReviewStyles,
-    refetchInterval: (q) => {
-      const hasRunning = (q.state.data ?? []).some(
-        (r) => r.status === "running"
-      )
-      return hasRunning ? 4000 : false
-    },
+    meta: { invalidatedBy: [invalidationTopic("review-styles")] },
   })
 
   const repos = useRepos()
@@ -72,7 +68,11 @@ export function ReviewStylesPanel() {
     queryKey: ["reviewStyle", selected],
     queryFn: () => api.getReviewStyle(selected!),
     enabled: !!selected,
-    refetchInterval: (q) => (q.state.data?.status === "running" ? 4000 : false),
+    meta: {
+      invalidatedBy: selected
+        ? [invalidationTopic("review-styles", selected)]
+        : [],
+    },
   })
 
   const loadedRepo = detail.data?.full_name
@@ -280,7 +280,9 @@ export function ReviewStylesPanel() {
                   <ComboboxEmpty>No matches</ComboboxEmpty>
                   {suggestedRepos.map((r) => (
                     <ComboboxItem key={r.full_name} value={r.full_name}>
-                      <span className="truncate">{r.full_name}</span>
+                      <span className="truncate" title={r.full_name}>
+                        {r.full_name}
+                      </span>
                       {r.private && (
                         <span className="ml-auto text-[10px] text-muted-foreground">
                           private

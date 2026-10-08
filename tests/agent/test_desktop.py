@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 from blockbuster import BlockBuster
 
-from agent.desktop import (
+from openswe.desktop import (
     create_desktop_backend,
     desktop_artifact_routes,
     resolve_desktop_project,
 )
-from agent.run_config import RunConfig
+from openswe.run_config import RunConfig
 
 
 @contextmanager
@@ -79,7 +79,7 @@ async def test_artifact_routes_stay_out_of_the_project(
 
     with detect_blocking_calls():
         routes = await desktop_artifact_routes("thread-1")
-    assert set(routes) == {"/large_tool_results/", "/conversation_history/"}
+    assert set(routes) == {"/large_tool_results/", "/conversation_history/", "/blobs/"}
     for prefix, backend in routes.items():
         root = Path(str(backend.cwd)).resolve()
         assert root.is_dir()

@@ -3,18 +3,29 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  Clock,
   GitPullRequest,
   MessageCircle,
   Wrench,
+  XCircle,
 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 
 import type {
   AgentPullRequest,
   AgentPullRequestHealth,
+  ThreadFixScope,
 } from "@/features/agents/lib/types"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+
+export type ThreadFix = (
+  pullRequest: AgentPullRequest,
+  scope: ThreadFixScope
+) => Promise<void> | void
 
 const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
   draft: "bg-muted text-muted-foreground",
@@ -96,6 +107,31 @@ function healthKey(repoFullName: string, number: number): string {
   return `${repoFullName}#${number}`
 }
 
+function HealthItem({
+  icon: Icon,
+  iconClassName,
+  count,
+  label,
+}: {
+  icon: LucideIcon
+  iconClassName: string
+  count?: number
+  label: string
+}) {
+  return (
+    <span className="flex items-center gap-1 whitespace-nowrap">
+      <Icon className={cn("size-3.5", iconClassName)} />
+      {count}
+      <span className="hidden @xl:inline">
+        {count === undefined ? label : ` ${label}`}
+      </span>
+    </span>
+  )
+}
+
+const plural = (count: number, noun: string) =>
+  `${noun}${count === 1 ? "" : "s"}`
+
 function HealthSummary({
   health,
 }: {
@@ -104,27 +140,39 @@ function HealthSummary({
   if (!health) return null
   const failingCount = health.failingChecks.length
   const commentCount = health.unresolvedReviewThreadCount ?? 0
+  const pendingCount = health.pendingCheckCount ?? 0
   return (
     <>
       {failingCount > 0 && (
-        <span className="rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
-          {failingCount} check{failingCount === 1 ? "" : "s"}
-        </span>
+        <HealthItem
+          icon={XCircle}
+          iconClassName="text-destructive"
+          count={failingCount}
+          label={plural(failingCount, "check")}
+        />
       )}
       {commentCount > 0 && (
-        <span className="rounded-full bg-warning/15 px-2 py-0.5 font-medium text-warning-foreground">
-          {commentCount} comment{commentCount === 1 ? "" : "s"}
-        </span>
+        <HealthItem
+          icon={MessageCircle}
+          iconClassName="text-warning-foreground"
+          count={commentCount}
+          label={plural(commentCount, "comment")}
+        />
       )}
       {health.mergeConflictState === "conflicting" && (
-        <span className="rounded-full bg-destructive/10 px-2 py-0.5 font-medium text-destructive">
-          Conflict
-        </span>
+        <HealthItem
+          icon={AlertTriangle}
+          iconClassName="text-destructive"
+          label="Conflict"
+        />
       )}
-      {(health.pendingCheckCount ?? 0) > 0 && (
-        <span className="rounded-full bg-warning/15 px-2 py-0.5 font-medium text-warning-foreground">
-          {health.pendingCheckCount} pending
-        </span>
+      {pendingCount > 0 && (
+        <HealthItem
+          icon={Clock}
+          iconClassName="text-warning-foreground"
+          count={pendingCount}
+          label="pending"
+        />
       )}
     </>
   )
@@ -317,29 +365,15 @@ function PullRequestLink({
   pullRequest: AgentPullRequest
   health: AgentPullRequestHealth | undefined
   healthUnavailable: boolean
-  onFix?: (pullRequest: AgentPullRequest) => Promise<void> | void
+  onFix?: ThreadFix
   fixDisabled: boolean
 }) {
-  const [fixing, setFixing] = useState(false)
-  const [fixFailed, setFixFailed] = useState(false)
   const state = pullRequestState(pullRequest, health)
   const tone = pullRequestTone(pullRequest, health)
-  const actionable = hasActionableIssues(pullRequest, health)
-  const handleFix = async () => {
-    if (!health || !onFix) return
-    setFixFailed(false)
-    setFixing(true)
-    try {
-      await onFix(pullRequest)
-    } catch {
-      setFixFailed(true)
-    } finally {
-      setFixing(false)
-    }
-  }
+  const scopes = onFix ? fixScopes(pullRequest, health) : []
 
   return (
-    <div className="flex min-w-0 items-stretch gap-1.5">
+    <div className="@container flex min-w-0 items-center gap-1 rounded-xl border border-foreground/20 bg-card p-1 text-xs text-muted-foreground shadow-sm dark:border-foreground/[0.06] dark:bg-[#222] dark:shadow-none">
       <Tooltip>
         <TooltipTrigger
           render={
@@ -350,27 +384,24 @@ function PullRequestLink({
               aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
               data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
               data-pr-tone={tone}
-              className="group flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border/70 bg-card/80 px-3 py-2 text-xs shadow-sm transition-colors hover:border-border hover:bg-accent/70"
+              className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg px-2 py-1 transition-colors hover:bg-muted dark:hover:bg-muted/50"
             />
           }
         >
-          <GitPullRequest className={cn("size-4 shrink-0", tone)} />
-          <span className={cn("shrink-0 font-medium", tone)}>
+          <GitPullRequest className={cn("size-3.5 shrink-0", tone)} />
+          <span className="shrink-0 font-medium text-foreground">
             #{pullRequest.number}
           </span>
-          <span className="min-w-0 truncate text-muted-foreground">
-            {pullRequest.repoFullName}
-          </span>
-          <span className="hidden min-w-0 truncate text-muted-foreground/70 sm:block">
-            {pullRequest.headRef}
-          </span>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate">{pullRequest.title}</span>
+          <span className="flex shrink-0 items-center gap-2 @xl:gap-3">
             <HealthSummary health={health} />
-            <span className="hidden text-success-foreground sm:inline">
-              +{pullRequest.diffStats.additions}
-            </span>
-            <span className="hidden text-destructive sm:inline">
-              -{pullRequest.diffStats.deletions}
+            <span className="hidden gap-1 @2xl:flex">
+              <span className="text-success-foreground">
+                +{pullRequest.diffStats.additions}
+              </span>
+              <span className="text-destructive">
+                -{pullRequest.diffStats.deletions}
+              </span>
             </span>
             <span
               className={cn(
@@ -396,19 +427,94 @@ function PullRequestLink({
           />
         </TooltipPopup>
       </Tooltip>
-      {actionable && onFix && (
-        <button
-          type="button"
-          aria-label={`Fix PR #${pullRequest.number} issues`}
-          disabled={fixDisabled || fixing}
-          onClick={() => void handleFix()}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/8 px-3 text-xs font-medium text-destructive transition-colors hover:bg-destructive/15 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Wrench className="size-3.5" />
-          {fixing ? "Starting…" : fixFailed ? "Retry" : "Fix"}
-        </button>
+      {onFix && scopes.length > 0 && (
+        <FixMenu
+          pullRequest={pullRequest}
+          scopes={scopes}
+          onFix={onFix}
+          disabled={fixDisabled}
+        />
       )}
     </div>
+  )
+}
+
+const FIX_LABELS: Record<ThreadFixScope, string> = {
+  conflicts: "Fix conflicts",
+  checks: "Fix checks",
+  comments: "Address comments",
+}
+
+/** One item per problem, so a fix never quietly takes on the others. */
+function fixScopes(
+  pullRequest: AgentPullRequest,
+  health: AgentPullRequestHealth | undefined
+): Array<ThreadFixScope> {
+  if (!health || !hasActionableIssues(pullRequest, health)) return []
+  return [
+    ...(health.mergeConflictState === "conflicting"
+      ? (["conflicts"] as const)
+      : []),
+    ...(health.failingChecks.length > 0 ? (["checks"] as const) : []),
+    ...((health.unresolvedReviewThreadCount ?? 0) > 0
+      ? (["comments"] as const)
+      : []),
+  ]
+}
+
+function FixMenu({
+  pullRequest,
+  scopes,
+  onFix,
+  disabled,
+}: {
+  pullRequest: AgentPullRequest
+  scopes: Array<ThreadFixScope>
+  onFix: ThreadFix
+  disabled: boolean
+}) {
+  const [fixing, setFixing] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const handleFix = async (scope: ThreadFixScope) => {
+    setFailed(false)
+    setFixing(true)
+    try {
+      await onFix(pullRequest, scope)
+    } catch (error) {
+      console.error("Could not start a pull request fix", { scope, error })
+      setFailed(true)
+    } finally {
+      setFixing(false)
+    }
+  }
+  return (
+    <Menu>
+      <MenuTrigger
+        disabled={disabled || fixing}
+        render={
+          <Button
+            variant="ghost"
+            aria-label={`Fix PR #${pullRequest.number}`}
+            className="text-foreground"
+          />
+        }
+      >
+        <Wrench />
+        {fixing ? "Starting…" : failed ? "Retry fix" : "Fix"}
+        <ChevronDown />
+      </MenuTrigger>
+      <MenuPopup align="end" side="top" sideOffset={6}>
+        {scopes.map((scope) => (
+          <MenuItem
+            key={scope}
+            aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
+            onClick={() => void handleFix(scope)}
+          >
+            {FIX_LABELS[scope]}
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
   )
 }
 
@@ -422,7 +528,7 @@ export function ThreadPullRequests({
   pullRequests: Array<AgentPullRequest>
   health?: Array<AgentPullRequestHealth>
   healthUnavailable?: boolean
-  onFix?: (pullRequest: AgentPullRequest) => Promise<void> | void
+  onFix?: ThreadFix
   fixDisabled?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)

@@ -3,8 +3,8 @@ from typing import Any
 
 import pytest
 
-from agent.slack import stop as slack_stop
-from agent.slack.stop import process_slack_stop_reaction
+from openswe.slack import stop as slack_stop
+from openswe.slack.stop import process_slack_stop_reaction
 
 
 class FakeStore:
@@ -67,6 +67,7 @@ class FakeClient:
         self.store = FakeStore()
         self.threads = FakeThreads()
         self.runs = FakeRuns()
+        self.cleared_queues: list[str] = []
 
 
 def _event(message_ts: str, *, user_id: str = "UOTHER") -> dict[str, Any]:
@@ -142,7 +143,13 @@ def _patch_handler(
         )
         return {"run_id": "run-summary"}
 
+    class FakeQueuedMessage:
+        @staticmethod
+        async def clear(thread_id: str) -> None:
+            client.cleared_queues.append(thread_id)
+
     monkeypatch.setattr(slack_stop, "get_client", lambda url: client)
+    monkeypatch.setattr(slack_stop, "QueuedMessage", FakeQueuedMessage)
     monkeypatch.setattr(slack_stop, "claim_slack_event", fake_claim)
     monkeypatch.setattr(slack_stop, "dispatch_agent_run", fake_dispatch)
     return dispatched, claimed
@@ -156,9 +163,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     _map_reply(client, "2.000")
     client.runs.by_status["pending"] = [{"run_id": "run-pending"}]
     client.runs.by_status["running"] = [{"run_id": "run-running"}]
-    client.store.items[(("queue", thread_id), "pending_messages")] = {
-        "value": {"messages": [{"content": "later"}]}
-    }
     client.store.items[(("autofix", thread_id), "pending_event")] = {"value": {"reason": "ci"}}
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
@@ -172,7 +176,7 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
             "action": "interrupt",
         }
     ]
-    assert (("queue", thread_id), "pending_messages") in client.store.deleted
+    assert client.cleared_queues == [thread_id]
     assert (("autofix", thread_id), "pending_event") in client.store.deleted
     assert client.threads.updates[0][1]["latest_run_status"] == "interrupted"
     assert len(dispatched) == 1

@@ -1,5 +1,12 @@
 import { Fragment, useMemo, useState } from "react"
-import { GlobeIcon, HashIcon, LockSimpleIcon } from "@phosphor-icons/react"
+import {
+  ArrowClockwiseIcon,
+  GlobeIcon,
+  HashIcon,
+  LockSimpleIcon,
+} from "@phosphor-icons/react"
+
+import { Button } from "@/components/ui/button"
 
 import {
   Combobox,
@@ -74,6 +81,28 @@ interface ChannelItems {
   filter: (id: string, query: string) => boolean
   setQuery: (query: string) => void
   emptyMessage: string
+  refresh: () => void
+  isRefreshing: boolean
+}
+
+export function RefreshSlackChannels({
+  refresh,
+  isRefreshing,
+}: Pick<ChannelItems, "refresh" | "isRefreshing">) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={isRefreshing}
+      onClick={() => refresh()}
+    >
+      <ArrowClockwiseIcon
+        className={isRefreshing ? "animate-spin" : undefined}
+      />
+      {isRefreshing ? "Refreshing channels…" : "Refresh channels"}
+    </Button>
+  )
 }
 
 function useChannelItems(
@@ -115,6 +144,8 @@ function useChannelItems(
     label,
     filter,
     setQuery,
+    refresh: directory.refresh,
+    isRefreshing: directory.isLoading || directory.isRefreshing,
     emptyMessage: directory.isLoading
       ? "Loading channels…"
       : directory.isError
@@ -172,6 +203,9 @@ export function SlackChannelCombobox({
             </ComboboxItem>
           )}
         </ComboboxList>
+        <div className="border-t p-1">
+          <RefreshSlackChannels {...channels} />
+        </div>
       </ComboboxContent>
     </Combobox>
   )
@@ -228,6 +262,9 @@ export function SlackChannelMultiCombobox({
             </ComboboxItem>
           )}
         </ComboboxList>
+        <div className="border-t p-1">
+          <RefreshSlackChannels {...channels} />
+        </div>
       </ComboboxContent>
     </Combobox>
   )

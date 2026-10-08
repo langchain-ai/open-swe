@@ -382,12 +382,10 @@ test("records every message the model is handed as people come and go", async ({
   await loginAs(page, OTHER_USER);
   await clearInstructions(page);
 
-  // Nothing about the Slack surface itself is a message any more: the rules are
-  // in the system prompt and the thread's own data is in the channel block.
   const everything = thread.turns
     .flatMap((turn) => [...turn.dispatch, ...turn.run])
     .join("\n");
-  expect(everything).not.toContain("system:slack-context");
+  expect(everything).toContain('kind="system" id="system:slack-context"');
   expect(everything).not.toContain("system:open-swe");
 
   const dump = normalize(renderDump(thread.turns), thread.threadId);

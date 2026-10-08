@@ -1,15 +1,15 @@
+from collections.abc import Callable
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.run_config import RunConfig
-from agent.tools import automations
+from openswe.run_config import RunConfig
+from openswe.tools import automations
 
 
 @pytest.fixture(autouse=True)
-def admin(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(automations, "require_admin", AsyncMock(return_value=None))
+def admin(monkeypatch, grant_tool_access: Callable[..., None]) -> None:  # noqa: ANN001
+    grant_tool_access(admin=True, admin_thread=True)
     monkeypatch.setattr(
         automations,
         "configurable",
@@ -29,8 +29,11 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
     result = await automations.create_automation(
         "Check open pull requests",
         workspace="default",
-        schedule="0 9 * * 1-5",
-        repo="langchain-ai/open-swe",
+        triggers=[
+            automations.schedules.GitHubTrigger(
+                repo="langchain-ai/open-swe", events=["pull_request.closed"]
+            )
+        ],
     )
 
     assert result["ok"] is True
@@ -40,19 +43,29 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
         "allow_admin_thread": True,
         "use_workspace_credentials": False,
     }
-    assert called["body"].repo == "langchain-ai/open-swe"
+    assert called["body"].triggers[0].repo == "langchain-ai/open-swe"
 
 
-async def test_automation_tools_recheck_admin(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(
-        automations,
-        "require_admin",
-        AsyncMock(return_value="Only workspace admins can manage automations."),
-    )
+async def test_automation_tools_recheck_admin(grant_tool_access: Callable[..., None]) -> None:
+    grant_tool_access()
 
     result = await automations.delete_automation("schedule-1")
 
-    assert result == {
-        "ok": False,
-        "error": "Only workspace admins can manage automations.",
-    }
+    assert result["ok"] is False
+    assert "not available in this thread" in str(result["error"])
+
+
+async def test_sole_writer_sees_only_an_acknowledgement(
+    monkeypatch,  # noqa: ANN001
+    grant_tool_access: Callable[..., None],
+) -> None:
+    grant_tool_access(admin=True, sole=True)
+
+    async def update(*_: Any, **__: Any) -> dict[str, Any]:
+        return {"id": "schedule-1", "prompt": "Secret workspace prompt", "repo": "x/y"}
+
+    monkeypatch.setattr(automations.schedules, "update_agent_schedule", update)
+
+    result = await automations.update_automation("schedule-1", prompt="New prompt")
+
+    assert result == {"ok": True, "automation": {"id": "schedule-1"}}

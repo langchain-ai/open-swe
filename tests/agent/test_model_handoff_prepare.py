@@ -10,17 +10,17 @@ from langchain_core.tracers.langchain import LangChainTracer
 from langsmith import trace, tracing_context
 from langsmith.run_trees import RunTree
 
-import agent.server as server
-from agent.dashboard.options import available_requested_models
-from agent.middleware.model_selection import (
+import openswe.server as server
+from openswe.dashboard.options import available_requested_models
+from openswe.middleware.model_selection import (
     ModelSelectionMiddleware,
     ModelSelectionState,
     SelectedRoute,
 )
-from agent.middleware.prepare_run import PrepareRunState
-from agent.model_request import ModelRequestIntent
-from agent.utils.jev import JevDecision
-from agent.utils.thread_settings import ThreadSettings
+from openswe.middleware.prepare_run import PrepareRunState
+from openswe.model_request import ModelRequestIntent
+from openswe.utils.jev import JevDecision
+from openswe.utils.thread_settings import ThreadSettings
 
 
 @dataclass
@@ -64,7 +64,6 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
     monkeypatch.setattr(server, "_thread_participant_identities", AsyncMock(return_value=[]))
-    monkeypatch.setattr(server, "_workspace_admin", AsyncMock(return_value=False))
     monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kw: "system prompt")
     monkeypatch.setattr(
         server,
@@ -110,7 +109,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         {"fast": MagicMock()},
         MagicMock(),
         routing_mode="fast",
-        requested_model_factory=lambda _: MagicMock(),
+        requested_model_factory=lambda _model, _effort: MagicMock(),
     )
     middleware._routing_defaults = {"fast": ("openai:gpt-6-luna", "low")}
     return Handoff(middleware, settings, store, record)
@@ -212,7 +211,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     assert selection is not None
     selection._routing_mode = "auto"
     classify = AsyncMock(return_value=fresh_route)
-    monkeypatch.setattr("agent.middleware.model_selection._select_jev_route", classify)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     state: ModelSelectionState = {
         "messages": [HumanMessage(content="Fix the typo")],
         "model_route": previous_route,
@@ -353,3 +352,43 @@ async def test_later_run_traces_saved_choice_without_classification(
     assert decision_span.outputs["classifier"]["outcome"] == "not_run"
     infer.assert_not_awaited()
     handoff.store.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("model", "effort", "invalid"),
+    [
+        ("anthropic:claude-opus-5-5", "max", False),
+        (None, "low", False),
+        ("openai:gpt-6.1-sol", "none", False),
+        ("openai:gpt-6.1-sol", "max", True),
+        (None, "max", True),
+    ],
+)
+async def test_requested_effort_is_validated_persisted_and_reused(
+    handoff: Handoff,
+    monkeypatch: pytest.MonkeyPatch,
+    model: str | None,
+    effort: str,
+    invalid: bool,
+) -> None:
+    monkeypatch.setattr(
+        server,
+        "infer_requested_model",
+        AsyncMock(return_value=ModelRequestIntent(requested_model=model, requested_effort=effort)),
+    )
+    if invalid:
+        with pytest.raises(ValueError, match="not supported"):
+            await handoff.prepare()
+        handoff.store.assert_not_awaited()
+        return
+    selected_model = model or "openai:gpt-6.1-sol"
+    for _ in range(2):
+        prepared = await handoff.prepare()
+        assert prepared["selected_model_id"] == selected_model
+        assert prepared["selected_effort"] == effort
+        assert prepared["requested_effort"] == effort
+    assert handoff.settings["model_id"] == selected_model
+    assert handoff.settings["effort"] == effort
+    assert handoff.settings["model_routing_enabled"] is False
+    assert handoff.record.call_args.kwargs["effort"] == effort
+    handoff.store.assert_awaited_once()

@@ -267,12 +267,22 @@ describe("WorkspacesSection", () => {
 
     renderSection(true)
 
+    const channel = await screen.findByRole("link", { name: "#commits" })
+    expect(channel.getAttribute("href")).toBe(
+      "https://slack.com/app_redirect?channel=C0000000001"
+    )
+    expect(channel.getAttribute("target")).toBe("_blank")
+
     fireEvent.click(
       await screen.findByRole("button", { name: "Add workspace" })
     )
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add workspace" }))
     fireEvent.change(screen.getByLabelText("Workspace name"), {
       target: { value: "Preview" },
     })
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy()
     const repositoryHelp = screen.getByRole("button", {
       name: "About workspace repositories",
     })
