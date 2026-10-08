@@ -131,9 +131,11 @@ ADMIN_USER = TEST_USERS[0]
 _DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(
     [
         *(user["login"] for user in TEST_USERS),
+        "carol",
         "octocat",
         "thread-tools-e2e",
         "threads-workspace-e2e",
+        "workspace-default-onboarding-e2e",
     ]
 )
 _DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
