@@ -175,10 +175,15 @@ def _failure(response: httpx.Response) -> ManagedToolsError:
 
 def _gateway(item: dict[str, object]) -> Gateway:
     tools = item.get("tools")
+    count = item.get("tool_count")
     return Gateway(
         id=str(item["id"]),
         name=str(item.get("name") or item["id"]),
-        tool_count=len(tools) if isinstance(tools, list) else 0,
+        tool_count=count
+        if isinstance(count, int)
+        else len(tools)
+        if isinstance(tools, list)
+        else 0,
     )
 
 
