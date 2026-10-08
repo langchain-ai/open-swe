@@ -67,7 +67,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
             "read_user_settings",
         }
     )
-    mcps.assert_awaited_once_with(None, ANY)
+    mcps.assert_awaited_once_with(None, ANY, None)
     from openswe.middleware import WorkspaceSkillsMiddleware
 
     middleware = cast(list[object], captured["middleware"])
