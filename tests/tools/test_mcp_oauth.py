@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import json
-import socket
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -9,11 +8,11 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 
-from agent.mcp import MCPConnectionUpdate, runtime
-from agent.mcp import oauth as mcp_oauth
-from agent.mcp import transport as mcp_transport
-from agent.mcp import workspace as settings
-from agent.tool_loaders import workspace_mcp as loader
+from openswe.mcp import MCPConnectionUpdate, runtime
+from openswe.mcp import oauth as mcp_oauth
+from openswe.mcp import transport as mcp_transport
+from openswe.mcp import workspace as settings
+from openswe.tool_loaders import workspace_mcp as loader
 
 
 @pytest.fixture
@@ -52,10 +51,8 @@ def oauth_remote(monkeypatch):
         mcp_transport,
         "resolve_and_validate",
         lambda url: (
-            True,
-            "",
             urlsplit(url).hostname,
-            [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+            ["93.184.216.34"],
         ),
     )
     return state
@@ -187,9 +184,11 @@ async def test_private_token_endpoint_is_blocked_before_credentials_are_sent(
     fake_store, oauth_remote, monkeypatch
 ):
     record = await oauth_record()
-    monkeypatch.setattr(
-        mcp_transport, "resolve_and_validate", lambda url: (False, "private", "auth.example", None)
-    )
+
+    def reject(url: str) -> tuple[str, list[str]]:
+        raise mcp_transport.UnsafeUrlError(url, "private")
+
+    monkeypatch.setattr(mcp_transport, "resolve_and_validate", reject)
     async with client_for(record) as client:
         with pytest.raises(ValueError, match="OAuth"):
             await client.post(record.url, json={})

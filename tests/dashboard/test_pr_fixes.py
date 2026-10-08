@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.threads import pr_fixes
+from openswe.threads import pr_fixes
 
 CAMEL_CASE_CONTEXT: dict[str, Any] = {
     "title": "Broken build",
@@ -129,7 +129,7 @@ async def test_linked_thread_the_caller_cannot_post_to_is_never_reused(setup, mo
     }
     FakeRegistry.thread_ids = ["admin", "private"]
 
-    assert await pr_fixes._find_pr_threads("acme", "app", 12, "alice", None) == []
+    assert await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None) == []
     assert await pr_fixes.pull_request_thread_running(
         "acme", "app", 12, "alice"
     ) == pr_fixes.PullRequestThreadStatus(running=False)
@@ -156,11 +156,11 @@ async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
     setup.threads["new"]["metadata"].update(metadata)
     FakeRegistry.thread_ids.append("new")
     assert [
-        t["thread_id"] for t in await pr_fixes._find_pr_threads("acme", "app", 12, "alice", None)
+        t["thread_id"] for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None)
     ] == ["existing"]
     assert [
         t["thread_id"]
-        for t in await pr_fixes._find_pr_threads("acme", "app", 12, "alice", None, unlisted=True)
+        for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None, unlisted=True)
     ] == ["new"]
 
 
@@ -192,7 +192,7 @@ async def test_single_comment_run_rejects_a_comment_from_another_pull_request(se
 
 
 async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypatch):
-    from agent.threads import runs
+    from openswe.threads import runs
 
     FakeRegistry.thread_ids = []
     await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)

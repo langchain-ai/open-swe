@@ -26,6 +26,7 @@ from e2e_env import (
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
 EPHEMERALS: list[dict[str, Any]] = []
+VIEWS: list[dict[str, Any]] = []
 CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
 _slack_epoch = int(time.time())
@@ -318,6 +319,26 @@ def resolve_ref(owner: str, repo: str, ref: str) -> str:
 
 def base_sha(pull: dict[str, Any]) -> str:
     return _branch_tip(pull["owner"], pull["repo"], pull["base"])
+
+
+def commit_author_emails(owner: str, repo: str, path: str, ref: str) -> list[str]:
+    """Author emails of the commits touching ``path`` at ``ref``, newest first."""
+    remote = _REMOTES.get((owner, repo))
+    if remote is None:
+        return []
+    try:
+        out = _git(
+            "--git-dir",
+            str(remote),
+            "log",
+            "--format=%ae",
+            resolve_ref(owner, repo, ref),
+            "--",
+            path,
+        )
+    except subprocess.CalledProcessError:
+        return []
+    return [line for line in out.splitlines() if line]
 
 
 def file_at_ref(owner: str, repo: str, path: str, ref: str) -> str | None:
@@ -971,6 +992,7 @@ def merge_pull(
 def reset() -> None:
     SLACK_MESSAGES.clear()
     EPHEMERALS.clear()
+    VIEWS.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
     REPO_MERGE_METHODS.clear()

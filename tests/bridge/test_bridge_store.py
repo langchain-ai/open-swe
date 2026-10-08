@@ -6,13 +6,14 @@ would not be testing the thing that has to hold.
 """
 
 import asyncio
+from datetime import date
 
 import pytest
 from sqlalchemy import text
 
-from agent.bridge.protocol import JsonObject
-from agent.bridge.store import Bridge, BridgeInUseError, BridgeStore
-from agent.database import postgres
+from openswe.bridge.protocol import JsonObject
+from openswe.bridge.store import Bridge, BridgeInUseError, BridgeStore
+from openswe.database import postgres
 
 OWNER = "test-user"
 OTHER = "someone-else"
@@ -190,3 +191,32 @@ async def test_pruning_closes_a_bridge_that_stopped_heartbeating(registry_db: No
     reloaded = await BridgeStore.load(live.bridge_id, owner_id=OWNER)
     assert reloaded is not None
     assert reloaded.is_alive
+
+
+async def _request_partitions() -> set[str]:
+    async with postgres.transaction() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid "
+                "WHERE i.inhparent = 'sandbox_bridge_request'::regclass"
+            )
+        )
+        return set(rows.scalars().all())
+
+
+async def test_rotation_drops_request_days_no_waiter_can_still_be_reading(
+    registry_db: None,
+) -> None:
+    # Past the days the migration partitioned, so those are dropped too.
+    await BridgeStore.rotate_partitions(date(2099, 9, 1))
+    assert await _request_partitions() == {
+        "sandbox_bridge_request_20990901",
+        "sandbox_bridge_request_20990902",
+    }
+
+    await BridgeStore.rotate_partitions(date(2099, 9, 3))
+    assert await _request_partitions() == {
+        "sandbox_bridge_request_20990902",
+        "sandbox_bridge_request_20990903",
+        "sandbox_bridge_request_20990904",
+    }

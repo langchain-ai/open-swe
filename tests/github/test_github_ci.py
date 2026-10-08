@@ -5,7 +5,7 @@ from typing import Any
 import httpx2
 import pytest
 
-from agent.github import ci as github_ci
+from openswe.github import ci as github_ci
 
 
 class _FakeResponse:

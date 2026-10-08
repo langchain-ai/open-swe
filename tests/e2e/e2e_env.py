@@ -116,13 +116,25 @@ TEST_USERS = [
         "email": "bob@example.com",
         "github_id": "1002",
     },
+    {
+        "name": "Dana",
+        "slack_id": "U_DANA",
+        "login": "dana",
+        "email": "dana@example.com",
+        "github_id": "1005",
+    },
 ]
 
 # Alice is the workspace admin (so admin threads + the workspaces dashboard are
 # reachable); Bob is a plain member, which is what the deny-side assertions use.
 ADMIN_USER = TEST_USERS[0]
 _DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(
-    [*(user["login"] for user in TEST_USERS), "thread-tools-e2e", "threads-workspace-e2e"]
+    [
+        *(user["login"] for user in TEST_USERS),
+        "octocat",
+        "thread-tools-e2e",
+        "threads-workspace-e2e",
+    ]
 )
 _DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]
 

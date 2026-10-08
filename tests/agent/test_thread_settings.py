@@ -1,4 +1,4 @@
-from agent.utils.thread_settings import normalize_thread_settings
+from openswe.utils.thread_settings import normalize_thread_settings
 
 
 def test_normalize_thread_settings_rejects_invalid_values() -> None:

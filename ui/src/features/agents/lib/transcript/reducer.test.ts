@@ -273,6 +273,42 @@ function completed(
 }
 
 describe("transcript events", () => {
+  it("projects task activity without exposing its model-only envelope", () => {
+    const taskEvent = {
+      version: 1,
+      task_id: "d505b040-c025-4b52-a27e-339803281cfb",
+      sender_thread_id: "86186b55-1999-52e2-bf4b-ca3de907043e",
+      sender_role: "worker",
+      sender_label: null,
+      kind: "message",
+      status: null,
+      content: 'Found "<blocked>" in `login()`',
+    }
+    const data = JSON.stringify(taskEvent)
+      .replaceAll("&", "&amp;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+    const state = fromSnapshot(
+      snapshot({
+        turns: [turn("turn-1", "2026-01-01T00:00:00Z")],
+        messages: [
+          messageRow({
+            message_id: "task-event",
+            turn_id: "turn-1",
+            role: "human",
+            text: `<input-message sender="system:event-subscription" kind="system" surface="automation" event_match="86186b55-1999-52e2-bf4b-ca3de907043e" task_event="${data}">\nModel-only warning\n</input-message>`,
+            created_at: "2026-01-01T00:00:00Z",
+          }),
+        ],
+      })
+    )
+
+    const [message] = toMessages(state)
+    expect(message?.taskEvent).toEqual(taskEvent)
+    expect(message?.chunks).toEqual([{ kind: "text", text: taskEvent.content }])
+  })
+
   it("concatenates fragments and then takes the completed text as canonical", () => {
     const base = fromSnapshot(twoTurnSnapshot())
     const streamed = applyEvent(
