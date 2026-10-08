@@ -30,6 +30,7 @@ import {
 } from "@/lib/api"
 import { MCPConnectionsSection } from "./MCPConnectionsSection"
 import { ExpeditedReviewSection } from "./ExpeditedReviewSection"
+import { ManagedToolsGatewaySection } from "./ManagedToolsGatewaySection"
 import { ReviewSettings } from "./ReviewSettings"
 import {
   slackChannelLabel,
@@ -48,6 +49,7 @@ import {
   ModelDefaultsSection,
 } from "./WorkspaceSettingsSections"
 import type { SettingsScope } from "@/features/settings/lib/settingsScope"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { useOptions, useRepos } from "@/lib/profile"
 
 export const workspaceRecordKey = (slug: string) => ["workspace", slug] as const
@@ -177,14 +179,7 @@ export function WorkspaceSettingsPanel({
   const record = useQuery({
     queryKey: workspaceRecordKey(slug),
     queryFn: () => api.getWorkspace(slug),
-    // A rebuild runs in the background; keep the image state and the rebuild
-    // button following it until it settles.
-    refetchInterval: (query) =>
-      query.state.data?.refresh_status === "refreshing" ||
-      (!repositoryRebuildTimedOut &&
-        awaitingRepositoryRebuild(query.state.data))
-        ? 5000
-        : false,
+    meta: { invalidatedBy: [invalidationTopic("workspaces")] },
   })
   const options = useWorkspaceOptions(true)
   const repositories = useRepos()
@@ -318,6 +313,7 @@ export function WorkspaceSettingsPanel({
       <LLMGatewaySection scope={scope} />
       <ReviewSettings scope={scope} canEdit={canEdit} />
       <ExpeditedReviewSection scope={scope} />
+      <ManagedToolsGatewaySection scope={scope} canEdit={canEdit} />
       <MCPConnectionsSection key={slug} scope="workspace" workspace={slug} />
       {canEdit && slug !== DEFAULT_WORKSPACE_SLUG && (
         <SettingsSection

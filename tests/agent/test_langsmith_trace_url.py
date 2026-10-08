@@ -1,6 +1,6 @@
 import pytest
 
-from agent.utils import langsmith as ls_utils
+from openswe.utils import langsmith as ls_utils
 
 _REAL_DISCOVER_TENANT_ID = ls_utils._discover_tenant_id
 

@@ -7,8 +7,8 @@ import pytest
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from agent.database import analytics as database
-from agent.database import postgres
+from openswe.database import analytics as database
+from openswe.database import postgres
 from tests.support.postgres import isolated_database
 
 

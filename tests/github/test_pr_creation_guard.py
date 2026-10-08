@@ -4,7 +4,7 @@ from typing import Any, cast
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 
-from agent.middleware.pr_creation_guard import (
+from openswe.middleware.pr_creation_guard import (
     PullRequestCreationGuardMiddleware,
     is_pr_creation_fallback_command,
 )

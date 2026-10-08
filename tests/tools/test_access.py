@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 import langgraph_sdk
 import pytest
 
-from agent.run_config import RunConfig
-from agent.tools import access as tool_access
-from agent.tools.access import Policy, ack, resolve_access
+from openswe.run_config import RunConfig
+from openswe.tools import access as tool_access
+from openswe.tools.access import Policy, ack, resolve_access
 
 _OWN = Policy(trusted="private", actor="owner", sole=ack("id"))
 _SLACK = {"channel_id": "C1", "thread_ts": "1.0"}

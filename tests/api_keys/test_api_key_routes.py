@@ -5,10 +5,10 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from agent.dashboard import oauth, routes
-from agent.database import postgres
-from agent.users.models import User
-from agent.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.dashboard import oauth, routes
+from openswe.database import postgres
+from openswe.users.models import User
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
 _USER_SESSION = {"sub": "intern", "email": "intern@example.com"}

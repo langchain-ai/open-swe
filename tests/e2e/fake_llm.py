@@ -82,6 +82,9 @@ HUMAN_REVIEW_DISMISS_MARKER = "E2E_HUMAN_REVIEW_DISMISS"
 HUMAN_REVIEW_DISMISS_REASON = "posted with the wrong summary"
 HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
+_DECLINED_MARKER = "declined the review of"
+_PICK_REQUEST = "reviewer for it"
+_SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
 
 # The seeded remote holds only a README, so the first turn writes the file. Two
 # added lines keeps the pull request inside the eligibility limit.
@@ -563,9 +566,13 @@ def _human_review_dismiss_step(messages: list[BaseMessage]) -> AIMessage:
 
 
 def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
-    """Nobody signed up: pick the reviewer the CODEOWNERS file names."""
-    humans = _script_humans(messages)
-    text = _text(humans[-1].content) if humans else ""
+    """Nobody signed up: take Open SWE's suggestion, else the reviewer CODEOWNERS names.
+
+    Notes queued for the thread can land after the pick request, so find the request itself.
+    """
+    texts = [_text(m.content) for m in messages if isinstance(m, HumanMessage)]
+    text = next((t for t in reversed(texts) if _PICK_REQUEST in t), texts[-1] if texts else "")
+    suggested = _SUGGESTED_REVIEWER.search(text)
     return AIMessage(
         content="Picking a reviewer from CODEOWNERS.",
         tool_calls=[
@@ -573,8 +580,10 @@ def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
                 "name": "assign_human_reviewer",
                 "args": {
                     "pr_url": _pr_url_in(text),
-                    "github_login": HUMAN_REVIEW_PICK,
-                    "reason": "They own greet.py in CODEOWNERS.",
+                    "github_login": suggested.group(1) if suggested else HUMAN_REVIEW_PICK,
+                    "reason": (
+                        suggested.group(2) if suggested else "They own greet.py in CODEOWNERS."
+                    ),
                 },
                 "id": f"call-human-review-assign-{len(messages)}",
             }
@@ -1185,7 +1194,15 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     # Woken because nobody signed up within 30 minutes.
     "human_review_assign": (
         _dynamic_step(_human_review_assign_step),
-        StepSpec(content="Assigned a reviewer from CODEOWNERS."),
+        _tool_step(
+            "The pick already tagged them in the thread.",
+            "slack_no_reply_needed",
+            {
+                "reason": "assign_human_reviewer already messaged the reviewer directly.",
+                "confirmation": "The user cannot see anything I do not send to Slack.",
+            },
+            "call-human-review-assign-done",
+        ),
     ),
     "multi_pr": (
         _tool_step(
@@ -1262,7 +1279,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "breakout": (
         _tool_step(
             "Starting a separate Slack thread for the breakout task.",
-            "slack_start_new_thread",
+            "slack_breakout_thread",
             {
                 "title": "Add greet() helper",
                 "instructions": "Please add a greet() helper and open a draft PR in the default repository. Use the current Slack request as context, and report progress in this new thread.",
@@ -1418,7 +1435,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         ),
     ),
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
-    ScriptRule("human_review_assign", lambda ctx: _UNCLAIMED_MARKER in ctx.last_text),
+    ScriptRule(
+        "human_review_assign",
+        lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.last_text,
+    ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(

@@ -7,8 +7,8 @@ import httpx
 import pytest
 from langsmith.utils import LangSmithError
 
-from agent import session_cost
-from agent.utils import langsmith as ls_utils
+from openswe import session_cost
+from openswe.utils import langsmith as ls_utils
 
 
 class _LangSmithThreads:
@@ -193,7 +193,7 @@ async def test_refresh_updates_exact_mapped_slack_message_in_place(
             }
         ),
     )
-    update = AsyncMock(return_value=(True, None))
+    update = AsyncMock(return_value=None)
     monkeypatch.setattr(session_cost, "update_slack_message", update)
 
     status, reason = await session_cost._refresh_once(_state(0), client)
