@@ -23,9 +23,15 @@ export const Route = createFileRoute("/agents/reviews/")({
 const REPO_STORAGE_KEY = "open-swe.reviews.repo"
 
 function readStoredRepos(): string[] | undefined {
-  return validateReviewsSearch({
-    repo: JSON.parse(window.localStorage.getItem(REPO_STORAGE_KEY) ?? "[]"),
-  }).repo
+  try {
+    return validateReviewsSearch({
+      repo: JSON.parse(window.localStorage.getItem(REPO_STORAGE_KEY) ?? "[]"),
+    }).repo
+  } catch (error) {
+    console.warn("Discarding invalid stored repository filter", error)
+    window.localStorage.removeItem(REPO_STORAGE_KEY)
+    return undefined
+  }
 }
 
 function storeRepos(repos: string[] | undefined) {
