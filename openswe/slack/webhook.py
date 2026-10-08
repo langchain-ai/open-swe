@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
+from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
     ChannelIdentity,
@@ -53,7 +54,12 @@ from openswe.slack.thinking import (
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User, persist_display_name
 from openswe.utils.json_types import as_json_object
-from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.langsmith import create_langsmith_feedback, get_langsmith_trace_url
+from openswe.utils.message_commands import (
+    PERFORMANCE_COMMAND,
+    find_message_command,
+    remove_message_command,
+)
 from openswe.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
@@ -975,6 +981,15 @@ async def _process_slack_mention_impl(
         ).strip()
         or "(no text in mention)"
     )
+    performance_command = (
+        find_message_command(PERFORMANCE_COMMAND, clean_text)
+        if not message_update and allowed_bot is None and not concierge_mode
+        else None
+    )
+    if performance_command:
+        clean_text = (
+            remove_message_command(clean_text, performance_command) or "(no text in mention)"
+        )
     is_first_mention = not await common.thread_exists(thread_id)
     # A `workspace:<name>` (or legacy `env:<name>`) tag on the message that opens
     # a thread is one input to which workspace its sandbox boots from — resolved
@@ -1051,6 +1066,15 @@ async def _process_slack_mention_impl(
         thread_workspace = await common.get_thread_workspace(thread_id)
 
     image_model_override: tuple[str, str] | None = None
+    if performance_command:
+        stored_settings = await load_thread_settings(langgraph_client, thread_id)
+        stored_performance = stored_settings.get("routing_models", {}).get("performance")
+        if stored_performance:
+            thread_model_choice = (stored_performance["model_id"], stored_performance["effort"])
+        else:
+            settings = await cached_workspace_settings(thread_workspace)
+            thread_model_choice = settings.agent_routing_models["performance"]
+
     if image_urls:
         resolved_model_id = thread_model_choice[0] if thread_model_choice else None
         if resolved_model_id is None:
@@ -1341,7 +1365,7 @@ async def _process_slack_mention_impl(
             and not request.kitchen_channel,
             code_channel=code_channel,
             message_update=message_update,
-            explicit_request=request.explicit_request,
+            explicit_request=request.explicit_request or performance_command is not None,
         )
     )
     visible_context_hashes, dispatched_timestamps = await _dispatched_slack_context(
@@ -1407,7 +1431,23 @@ async def _process_slack_mention_impl(
         common.run_id_for_logging(run),
         thread_id,
     )
+    if performance_command and thread_model_choice:
+        selected_model = image_model_override or thread_model_choice
+        await slack_utils.post_slack_ephemeral_message(
+            channel_id,
+            user_id,
+            f"Switched to {selected_model[0]} (reasoning effort: {selected_model[1] or 'default'}).",
+            thread_ts=reply_thread_ts or thread_ts,
+        )
     run_id = run.get("run_id")
+    if performance_command and thread_model_choice and isinstance(run_id, str) and run_id:
+        selected_model = image_model_override or thread_model_choice
+        await create_langsmith_feedback(
+            run_id,
+            "performance_model_switch_slack",
+            score=1,
+            source_info={"model_id": selected_model[0], "effort": selected_model[1]},
+        )
     if code_channel and isinstance(run_id, str) and run_id:
         stream_thread_ts = reply_thread_ts or thread_ts
         await stream_slack_thinking_steps(

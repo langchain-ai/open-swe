@@ -42,11 +42,10 @@ async def authenticated(app: FastAPI) -> None:
 async def test_local_trace_url_resolves_callers_project(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, preference: str | None
 ) -> None:
-    async def get_value(namespace: list[str], login: str) -> dict[str, object]:
-        assert namespace == user_preferences.USER_PREFERENCES_NAMESPACE
+    async def get(login: str) -> dict[str, object]:
         return {"local_tracing_project": preference if login == "alice" else "other-user"}
 
-    monkeypatch.setattr(user_preferences, "get_value", get_value)
+    monkeypatch.setattr(user_preferences.USER_PREFERENCES, "get", get)
     monkeypatch.setenv("LANGSMITH_PROJECT", "deployment-local")
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
     monkeypatch.setattr(langsmith, "resolve_tenant_id", AsyncMock(return_value="tenant-id"))

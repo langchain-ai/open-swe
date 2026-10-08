@@ -9,9 +9,8 @@ from openswe.dashboard.options import (
     model_supports_effort,
     provider_fallback_pair,
 )
-from openswe.dashboard.profiles import PROFILES_NAMESPACE
+from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.store import get_value
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -59,7 +58,7 @@ async def load_profile(login: str) -> dict[str, Any] | None:
     a failure use :func:`openswe.dashboard.profiles.get_profile` instead.
     """
     try:
-        return await get_value(PROFILES_NAMESPACE, login)
+        return await PROFILES.get(login)
     except Exception:
         logger.warning("profile lookup failed for %s", login, exc_info=True)
         return None

@@ -76,6 +76,7 @@ from langgraph_sdk import get_client  # noqa: E402
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from openswe.slack.client import lookup_slack_thread_id  # noqa: E402
+from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
@@ -769,19 +770,24 @@ async def slack_action(request: Request) -> JSONResponse:
     return JSONResponse(response.json(), status_code=response.status_code)
 
 
+async def _signed_in(login: str, email: str) -> User:
+    """The ``users`` row a real sign-in would give ``login``, created like the OAuth callback does."""
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", login)
+    if user is not None:
+        return user
+    github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
+    return await User.sign_in("github", github_id, login=login, email=email)
+
+
 @app.post("/control/login")
 async def control_login(request: Request) -> JSONResponse:
     """Simulate a signed-in dashboard user by minting the real session cookie."""
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = JSONResponse({"ok": True, "login": login, "email": email})
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -814,13 +820,8 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     if not email:
         match = next((u for u in TEST_USERS if u["login"] == login), None)
         email = match["email"] if match else f"{login}@example.com"
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -868,13 +869,8 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp

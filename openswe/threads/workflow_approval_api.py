@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from langgraph_sdk.schema import Run
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.dispatch import dispatch_agent_run
 from openswe.source_context import SourceContext
@@ -44,6 +45,7 @@ async def list_workflow_push_approvals(
 
 
 @workflow_approval_router.post("/{thread_id}/{fingerprint}/approve")
+@audit_endpoint
 async def approve_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
@@ -65,6 +67,7 @@ async def approve_workflow_push(
 
 
 @workflow_approval_router.post("/{thread_id}/{fingerprint}/reject")
+@audit_endpoint
 async def reject_workflow_push(
     thread_id: str, fingerprint: str, session: dict[str, Any] = _SESSION_DEP
 ) -> dict[str, Any]:
