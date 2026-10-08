@@ -50,6 +50,7 @@ _TOOL_MODULES = {
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
+    "request_rollout_check": ".request_rollout_check",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -132,6 +133,7 @@ __all__ = [
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
+    "request_rollout_check",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -227,6 +229,7 @@ if TYPE_CHECKING:
         get_human_review_status,
         request_human_review,
     )
+    from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
     from openswe.tools.save_plan import save_plan
     from openswe.tools.save_user_instructions import save_user_instructions
