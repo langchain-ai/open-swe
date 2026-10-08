@@ -27,7 +27,10 @@ import {
   isSilentSender,
   parseStructuredInput,
 } from "@/features/agents/lib/structuredInputMessages"
-import { contextTokensFromUsageMetadata } from "@/features/agents/lib/contextUsage"
+import {
+  type ContextUsage,
+  contextUsageFromUsageMetadata,
+} from "@/features/agents/lib/contextUsage"
 import { attachmentUrl, fetchToolOutput } from "./api"
 import type { StructuredEntity } from "@/features/agents/lib/structuredInputMessages"
 import type {
@@ -126,8 +129,8 @@ export interface TranscriptState {
    * turns have settled and can no longer change.
    */
   olderCursor: string | null
-  /** Context size the newest AI message reported, for the composer's meter. */
-  contextTokens: number | null
+  /** Context size and model the newest AI message reported, for the composer's meter. */
+  contextUsage: ContextUsage | null
   /** Sender entities parsed out of human message text, rebuilt only when that text changes. */
   entities: ReadonlyMap<string, StructuredEntity>
 }
@@ -298,7 +301,7 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
     // `snapshot.messages` is ordered by `created_at`, so the last root AI row
     // is the newest one, and its usage is what the composer's meter reads.
     // Subagents report their own context, which is not this conversation's.
-    contextTokens: contextTokensFromUsageMetadata(
+    contextUsage: contextUsageFromUsageMetadata(
       snapshot.messages.findLast(
         (message) => message.role === "ai" && message.namespace.length === 0
       )?.usage
@@ -335,7 +338,7 @@ export function applySnapshot(
   if (!continuous) {
     return {
       ...fresh,
-      contextTokens: fresh.contextTokens ?? state.contextTokens,
+      contextUsage: fresh.contextUsage ?? state.contextUsage,
     }
   }
   const messages = { ...state.messages, ...fresh.messages }
@@ -351,7 +354,7 @@ export function applySnapshot(
     olderCursor: state.olderCursor,
     // A window whose AI messages reported no usage leaves the last known
     // context size in place rather than blanking the composer's meter.
-    contextTokens: fresh.contextTokens ?? state.contextTokens,
+    contextUsage: fresh.contextUsage ?? state.contextUsage,
     entities: collectStructuredEntities(humanTexts(messages)),
   }
 }
@@ -699,9 +702,9 @@ export function applyEvent(
         // this conversation's, so it never moves the meter. A message the
         // provider reported no usage for leaves the last known size in place
         // rather than blanking the meter.
-        const tokens = contextTokensFromUsageMetadata(payload.usage)
-        if (tokens !== null)
-          draft.state = { ...draft.state, contextTokens: tokens }
+        const usage = contextUsageFromUsageMetadata(payload.usage)
+        if (usage !== null)
+          draft.state = { ...draft.state, contextUsage: usage }
       }
       break
     }

@@ -5,6 +5,13 @@ interface UsageMetadata {
   input_tokens?: unknown
   output_tokens?: unknown
   total_tokens?: unknown
+  model?: unknown
+}
+
+/** Context size and model of the newest AI message, for the composer's meter. */
+export interface ContextUsage {
+  tokens: number
+  model: string | null
 }
 
 function tokenValue(value: unknown): number {
@@ -13,29 +20,34 @@ function tokenValue(value: unknown): number {
     : 0
 }
 
-export function contextTokensFromUsageMetadata(usage: unknown): number | null {
+export function contextUsageFromUsageMetadata(
+  usage: unknown,
+  model?: unknown
+): ContextUsage | null {
   if (!usage || typeof usage !== "object") return null
   const metadata = usage as UsageMetadata
   const input = tokenValue(metadata.input_tokens)
   const output = tokenValue(metadata.output_tokens)
-  if (input || output) return input + output
-  const total = tokenValue(metadata.total_tokens)
-  return total || null
+  const tokens =
+    input || output ? input + output : tokenValue(metadata.total_tokens)
+  if (!tokens) return null
+  const name = model ?? metadata.model
+  return { tokens, model: typeof name === "string" && name ? name : null }
 }
 
-export function latestContextTokens(
+export function latestContextUsage(
   messages: ReadonlyArray<BaseMessage>
-): number | null {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i]
-    if (!message || !AIMessage.isInstance(message)) continue
-    const usage = (message as unknown as { usage_metadata?: unknown })
-      .usage_metadata
-    const tokens = contextTokensFromUsageMetadata(usage)
-    if (tokens != null) return tokens
-    return null
-  }
-  return null
+): ContextUsage | null {
+  const message = messages.findLast((m) => AIMessage.isInstance(m))
+  if (!message) return null
+  return contextUsageFromUsageMetadata(
+    (message as unknown as { usage_metadata?: unknown }).usage_metadata,
+    message.response_metadata?.model_name
+  )
+}
+
+export function formatCost(usd: number): string {
+  return usd > 0 && usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`
 }
 
 export function formatTokenCount(count: number): string {

@@ -8,7 +8,10 @@ import {
   ComposerPromptEditor,
   mentionReplacementText,
 } from "./ComposerPromptEditor"
-import { ContextWindowMeter } from "./ContextWindowMeter"
+import {
+  ContextWindowMeter,
+  type ContextWindowMeterProps,
+} from "./ContextWindowMeter"
 import { WorkspaceSelector } from "./WorkspaceSelector"
 import {
   LocalBranchSelector,
@@ -153,10 +156,7 @@ export interface ChatComposerProps {
   /** Paths offered by `@` autocomplete — in a thread, the files the agent has touched. */
   mentionPaths?: Array<string>
   skills?: Array<Skill>
-  contextUsage?: {
-    usedTokens?: number | null
-    contextWindow?: number | null
-  }
+  contextUsage?: ContextWindowMeterProps
   /** Route/model the Auto router picked for the current run. */
   routed?: { route?: string; modelId?: string | null } | null
 }
@@ -902,10 +902,7 @@ export const ChatComposer = memo(function ChatComposer({
           </div>
 
           <div className="flex items-center gap-1">
-            <ContextWindowMeter
-              contextWindow={contextUsage?.contextWindow}
-              usedTokens={contextUsage?.usedTokens}
-            />
+            <ContextWindowMeter {...contextUsage} />
           </div>
 
           <ComposerPrimaryActions

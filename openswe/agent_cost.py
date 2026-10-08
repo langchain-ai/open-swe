@@ -21,6 +21,7 @@ from openswe.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 _RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
+THREAD_COST_KEY = "session_cost_usd"
 
 
 class AgentCostRefresh(TypedDict, closed=True):
@@ -96,6 +97,26 @@ async def schedule_agent_cost_refresh(
     return True
 
 
+async def _store_thread_cost(payload: AgentCostRefresh, client: LangGraphClient) -> None:
+    """Save the thread's running LangSmith cost on its metadata for the dashboard."""
+    try:
+        snapshot = await get_langsmith_thread_cost(
+            payload["thread_id"],
+            payload["invocation_id"],
+            lookup_start=payload.get("invocation_started_at"),
+        )
+        if snapshot is not None:
+            await client.threads.update(
+                payload["thread_id"], metadata={THREAD_COST_KEY: snapshot.total_cost}
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not store thread cost",
+            extra={"usage_run_id": payload["invocation_id"]},
+            exc_info=True,
+        )
+
+
 async def run_agent_cost_refresh(
     state: Mapping[str, Any], *, client: LangGraphClient | None = None
 ) -> dict[str, Any]:
@@ -146,6 +167,7 @@ async def run_agent_cost_refresh(
             )
             snapshot = None
         else:
+            await _store_thread_cost(payload, client)
             return {"status": "updated"}
 
     next_attempt = attempt + 1

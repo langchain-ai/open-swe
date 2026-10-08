@@ -537,6 +537,8 @@ export interface AgentThread {
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
+  /** LangSmith cost of the thread's finished runs so far, in USD. */
+  costUsd?: number | null
   sourceUrl?: string | null
   sourceAppUrl?: string | null
   codeChannelUrl?: string | null

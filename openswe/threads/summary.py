@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
+from openswe.agent_cost import THREAD_COST_KEY
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
@@ -509,6 +510,12 @@ async def _thread_summary(
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
+        "costUsd": (
+            cost
+            if isinstance(cost := metadata.get(THREAD_COST_KEY), (int, float))
+            and not isinstance(cost, bool)
+            else None
+        ),
         "sourceUrl": thread_source_url(metadata),
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),

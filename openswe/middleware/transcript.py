@@ -329,7 +329,8 @@ def _usage(message: AIMessage) -> MessageUsage | None:
         for key in ("input_tokens", "output_tokens", "total_tokens")
         if isinstance(value := usage.get(key), int)
     }
-    return MessageUsage(**counts) if counts else None
+    model = _string(message.response_metadata.get("model_name"))
+    return MessageUsage(**counts, model=model) if counts else None
 
 
 def _image_bytes(block: Mapping[str, object]) -> tuple[str, bytes] | None:
