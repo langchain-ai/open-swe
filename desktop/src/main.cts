@@ -418,7 +418,7 @@ async function diffThread(threadId) {
   return (await threadRunning(threadId)) ? syncThreadBranch(thread) : thread;
 }
 
-/** Whether the backend has a run in flight on this thread. */
+/** Whether the backend has a run in flight on this thread's checkout here. */
 async function threadRunning(threadId) {
   if (legacyThreadStore.get(threadId)) {
     // A local backend that is booting or has crashed is running nothing.
@@ -437,7 +437,9 @@ async function threadRunning(threadId) {
   if (!response.ok)
     throw new Error(`Could not read the thread's status (${response.status})`);
   const thread = await response.json();
-  return thread?.status === "running";
+  return (
+    thread?.status === "running" && thread.sandboxBridgeClient === "desktop"
+  );
 }
 
 /**
