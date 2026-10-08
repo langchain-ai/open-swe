@@ -181,10 +181,10 @@ from openswe.sandboxes.state import (
 )
 from openswe.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
 from openswe.sandboxes.tool_runtime import ToolSurface, save_tool_context
-from openswe.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from openswe.threads.blobs import blob_namespace
+from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -231,6 +231,7 @@ from openswe.tools import (
     report_platform_issue,
     request_human_review,
     request_pr_review,
+    request_rollout_check,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -253,6 +254,7 @@ from openswe.tools import (
     start_thread,
     submit_thread_feedback,
     suggest_task,
+    switch_to_performance_model,
     trigger_automation,
     update_automation,
     web_search,
@@ -542,6 +544,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "get_human_review_status",
         "manage_baby_sit",
         "listen_events",
+        "request_rollout_check",
         "manage_thread",
         "link_pull_request",
         "open_pull_request",
@@ -621,6 +624,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "manage_incident",
         "list_threads",
         "listen_events",
+        "request_rollout_check",
         "manage_thread",
         "read_incident",
         "read_only_sql",
@@ -1724,6 +1728,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *([task_status, message_task_thread, control_worker] if task_coordination else []),
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
+        switch_to_performance_model,
         expedite_pr_approval,
         merge_expedited_pr,
         request_human_review,
@@ -1744,6 +1749,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
+        request_rollout_check,
         listen_events,
         list_event_types,
         manage_code_channel,
@@ -1886,20 +1892,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         # their repository. Keep the agent's scratch files out of it.
         skill_routes.update(await desktop_artifact_routes(thread_id))
     else:
-        skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
-        )
+        skill_routes[ORGANIZATION_SKILLS_ROUTE] = skills_backend(None)
         skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         if credential_login:
-            skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
-                StoreBackend(
-                    namespace=lambda _runtime, login=credential_login: (SKILLS_NAMESPACE, login)
-                )
-            )
+            skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
             skill_sources.insert(0, USER_SKILLS_ROUTE)
-        # Offloaded images live in the store so they can be read without the sandbox.
+        # Offloaded images live in PostgreSQL so they can be read without the sandbox.
         skill_routes[BLOBS_ROUTE] = StoreBackend(
-            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id)
+            store=ThreadBlobs(thread_id),
+            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
         )
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
@@ -1986,7 +1987,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             "default": model_id,
         },
         routing_mode=model_routing_mode,
-        requested_model_factory=requested_model_factory if requested_models else None,
+        requested_model_factory=requested_model_factory,
     )
     subagent_model = _make_model_or_defer(
         subagent_model_id,

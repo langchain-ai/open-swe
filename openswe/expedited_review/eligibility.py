@@ -8,13 +8,16 @@ tests that prove it.
 """
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 
 import httpx2
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
-from openswe.github.http import GITHUB_API_BASE, github_client, github_request
+from openswe.github.pull_request_status import PullRequestClient
+
+logger = logging.getLogger(__name__)
 
 MAX_CHANGED_LINES = 20
 # What is actually enforced. A change that lands a few lines over is no harder to
@@ -68,6 +71,19 @@ class ChangedFile(BaseModel):
     @classmethod
     def total_lines(cls, files: list[ChangedFile]) -> int:
         return sum(file.changed_lines for file in files)
+
+    @classmethod
+    async def of_pull(cls, pull: PullRequestClient) -> list[ChangedFile] | None:
+        """The PR's first ``MAX_FILES`` changed files, or ``None`` when GitHub could not say."""
+        try:
+            return _CHANGED_FILES.validate_python(await pull.files())
+        except httpx2.HTTPError, ValueError, ValidationError:
+            logger.warning(
+                "Could not read the pull request's changed files",
+                extra={"repo_full_name": pull.repo.full_name, "pr_number": pull.number},
+                exc_info=True,
+            )
+            return None
 
 
 _CHANGED_FILES = TypeAdapter(list[ChangedFile])
@@ -127,17 +143,3 @@ def assess_eligibility(files: list[ChangedFile]) -> EligibleDiff | Ineligible:
         test_lines=test_lines,
         fingerprint=diff_fingerprint(files),
     )
-
-
-async def fetch_changed_files(
-    *, owner: str, repo: str, pr_number: int, token: str
-) -> list[ChangedFile] | None:
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_number}/files"
-    try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "GET", url, params={"per_page": str(MAX_FILES)})
-            response.raise_for_status()
-            payload: object = response.json()
-        return _CHANGED_FILES.validate_python(payload)
-    except httpx2.HTTPError, ValueError, ValidationError:
-        return None

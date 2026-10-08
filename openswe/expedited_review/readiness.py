@@ -10,21 +10,14 @@ A failing check that GitHub does not require does not block the merge.
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 
-import httpx2
 from pydantic import BaseModel
 
 from openswe.baby_sit import aggregate_check_state
-from openswe.github.ci import (
-    fetch_pr,
-    fetch_required_checks,
-    list_check_runs,
-    list_commit_statuses,
-    unreported_required_checks,
-)
-from openswe.github.http import GitHubClient
-from openswe.github.pull_request_status import Mergeability
+from openswe.github.ci import CommitChecks, RequiredCheck
+from openswe.github.http import or_none
+from openswe.github.pull_request_status import Mergeability, PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 
 
@@ -92,6 +85,69 @@ class Readiness:
     def ready(self) -> bool:
         return not self.blockers
 
+    @classmethod
+    async def assess(cls, pull: PullRequestClient) -> Self | None:
+        """Fetch the PR and everything that gates a vote; ``None`` when GitHub was unavailable."""
+        pr = await or_none(pull.pull())
+        if pr is None:
+            return None
+        head = pr.get("head")
+        head_sha = head.get("sha") if isinstance(head, Mapping) else None
+        if not isinstance(head_sha, str) or not head_sha:
+            return None
+        user = pr.get("user")
+        author = user.get("login") if isinstance(user, Mapping) else None
+
+        checks = await CommitChecks.read(pull.repo, head_sha)
+        if checks is None:
+            return None
+        required = await RequiredCheck.for_branch(
+            pull.repo, PullRequestPayload.model_validate(pr).base_ref
+        )
+        if required is None:
+            return None
+        threads = await pull.unresolved_threads()
+        reviews = await or_none(pull.reviews())
+        mergeability = await pull.mergeability()
+        if threads is None or reviews is None:
+            return None
+        mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
+
+        check_state, failures = aggregate_check_state(checks.runs, checks.statuses)
+        author_login = author if isinstance(author, str) else ""
+        snapshot = PullRequestSnapshot(
+            state=str(pr.get("state") or ""),
+            merged=bool(pr.get("merged")) or isinstance(pr.get("merged_at"), str),
+            draft=bool(pr.get("draft")),
+            head_sha=head_sha,
+            title=str(pr.get("title") or ""),
+            author=author_login,
+            mergeable=mergeable,
+            mergeable_state=mergeable_state,
+            check_state=check_state,
+            unresolved_threads=len(threads),
+            failing_checks=sorted({str(failure["name"]) for failure in failures}),
+            unreported_required_checks=checks.unreported(required),
+            # GitHub says "unstable" when the pull request is mergeable and only
+            # checks it does not require are unhappy, and "blocked" when a required
+            # one is. Trusting it keeps us from having to read branch protection,
+            # which needs admin, and from guessing at ruleset precedence.
+            failures_are_required=mergeable_state != "unstable",
+            changes_requested_by=sorted(
+                login
+                for login, state in _latest_reviews_by_user(reviews, author_login).items()
+                if state == "CHANGES_REQUESTED"
+            ),
+            allowed_merge_methods=_merge_methods(pr),
+            approved_review_ids=frozenset(
+                parsed.id
+                for parsed in map(_ReviewState.model_validate, reviews)
+                if parsed.state == "APPROVED" and parsed.id is not None
+            ),
+            checks_finished_at=_checks_finished_at(checks.runs, checks.statuses),
+        )
+        return cls(snapshot=snapshot, blockers=readiness_blockers(snapshot))
+
 
 def _failed_check_blocker(snapshot: PullRequestSnapshot) -> str:
     if not snapshot.failing_checks:
@@ -141,11 +197,9 @@ def _latest_reviews_by_user(reviews: list[dict[str, Any]], author: str) -> dict[
     return latest
 
 
-async def review_authors(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int
-) -> set[str] | None:
+async def review_authors(pull: PullRequestClient) -> set[str] | None:
     """Lowercased logins of everyone who submitted a review, comment-only ones included."""
-    reviews = await GitHubClient(client).repo(owner, repo).pull_request(number).reviews()
+    reviews = await or_none(pull.reviews())
     if reviews is None:
         return None
     authors: set[str] = set()
@@ -157,11 +211,9 @@ async def review_authors(
     return authors
 
 
-async def latest_review_states(
-    client: httpx2.AsyncClient, owner: str, repo: str, number: int, author: str
-) -> dict[str, str] | None:
+async def latest_review_states(pull: PullRequestClient, author: str) -> dict[str, str] | None:
     """Each non-author reviewer's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state."""
-    reviews = await GitHubClient(client).repo(owner, repo).pull_request(number).reviews()
+    reviews = await or_none(pull.reviews())
     if reviews is None:
         return None
     return _latest_reviews_by_user(reviews, author)
@@ -194,71 +246,3 @@ def _merge_methods(pr: Mapping[str, Any]) -> list[str]:
         if base_repo.get(flag) is not False
     ]
     return methods
-
-
-async def assess_readiness(
-    *, owner: str, repo: str, pr_number: int, token: str
-) -> Readiness | None:
-    """Fetch the PR and everything that gates a vote; ``None`` when GitHub was unavailable."""
-    pr = await fetch_pr(owner=owner, repo=repo, pr_number=pr_number, token=token)
-    if pr is None:
-        return None
-    head = pr.get("head")
-    head_sha = head.get("sha") if isinstance(head, Mapping) else None
-    if not isinstance(head_sha, str) or not head_sha:
-        return None
-    user = pr.get("user")
-    author = user.get("login") if isinstance(user, Mapping) else None
-
-    check_runs = await list_check_runs(owner=owner, repo=repo, ref=head_sha, token=token)
-    statuses = await list_commit_statuses(owner=owner, repo=repo, ref=head_sha, token=token)
-    if check_runs is None or statuses is None:
-        return None
-    required = await fetch_required_checks(
-        owner=owner, repo=repo, branch=PullRequestPayload.model_validate(pr).base_ref, token=token
-    )
-    if required is None:
-        return None
-    async with GitHubClient.connect(token=token) as github:
-        pull_request = github.repo(owner, repo).pull_request(pr_number)
-        threads = await pull_request.unresolved_threads()
-        reviews = await pull_request.reviews()
-        mergeability = await pull_request.mergeability()
-    if threads is None or reviews is None:
-        return None
-    mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
-
-    check_state, failures = aggregate_check_state(check_runs, statuses)
-    author_login = author if isinstance(author, str) else ""
-    snapshot = PullRequestSnapshot(
-        state=str(pr.get("state") or ""),
-        merged=bool(pr.get("merged")) or isinstance(pr.get("merged_at"), str),
-        draft=bool(pr.get("draft")),
-        head_sha=head_sha,
-        title=str(pr.get("title") or ""),
-        author=author_login,
-        mergeable=mergeable,
-        mergeable_state=mergeable_state,
-        check_state=check_state,
-        unresolved_threads=len(threads),
-        failing_checks=sorted({str(failure["name"]) for failure in failures}),
-        unreported_required_checks=unreported_required_checks(required, check_runs, statuses),
-        # GitHub says "unstable" when the pull request is mergeable and only
-        # checks it does not require are unhappy, and "blocked" when a required
-        # one is. Trusting it keeps us from having to read branch protection,
-        # which needs admin, and from guessing at ruleset precedence.
-        failures_are_required=mergeable_state != "unstable",
-        changes_requested_by=sorted(
-            login
-            for login, state in _latest_reviews_by_user(reviews, author_login).items()
-            if state == "CHANGES_REQUESTED"
-        ),
-        allowed_merge_methods=_merge_methods(pr),
-        approved_review_ids=frozenset(
-            parsed.id
-            for parsed in map(_ReviewState.model_validate, reviews)
-            if parsed.state == "APPROVED" and parsed.id is not None
-        ),
-        checks_finished_at=_checks_finished_at(check_runs, statuses),
-    )
-    return Readiness(snapshot=snapshot, blockers=readiness_blockers(snapshot))

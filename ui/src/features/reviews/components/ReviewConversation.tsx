@@ -17,6 +17,7 @@ import { useCallback, useState } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { pullRequestTopic } from "@/features/reviews/lib/cache"
 import {
   getReviewConversation,
   postReviewConversationComment,
@@ -276,6 +277,9 @@ export function ReviewConversation({
   const query = useQuery({
     queryKey: reviewConversationQueryKey(owner, repo, number),
     queryFn: () => getReviewConversation(owner, repo, number),
+    meta: {
+      invalidatedBy: [pullRequestTopic({ repo: `${owner}/${repo}`, number })],
+    },
   })
   const transformImageUrl = useCallback(
     (src: string) => reviewImageProxyUrl(owner, repo, number, src),

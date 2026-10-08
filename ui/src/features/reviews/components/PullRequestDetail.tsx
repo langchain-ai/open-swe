@@ -20,7 +20,10 @@ import { PullRequestFiles } from "./PullRequestFiles"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { cn } from "@/lib/utils"
-import { pullRequestPreviewQuery } from "@/features/reviews/lib/cache"
+import {
+  PULL_REQUEST_STATUS,
+  pullRequestPreviewQuery,
+} from "@/features/reviews/lib/cache"
 import { useScrollAnchor } from "@/features/reviews/lib/scrollAnchor"
 import {
   useAgentBatch,
@@ -201,7 +204,7 @@ function useResolveThreads(target: PullRequestRef) {
     onError: (_error, _threadIds, context) => context?.undo(),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: previewKey })
-      void queryClient.invalidateQueries({ queryKey: ["my-pr-details"] })
+      void queryClient.invalidateQueries({ queryKey: [PULL_REQUEST_STATUS] })
       if (result.failed.length)
         toast.error(
           `Could not resolve ${result.failed.length} conversation${result.failed.length === 1 ? "" : "s"}`
