@@ -321,11 +321,6 @@ ENV.var(
 )
 ENV.var("CONFIGURED_ADMINS", "Comma-separated GitHub logins or emails with admin access.")
 ENV.var(
-    "NOTION_MCP_CLIENT_NAME",
-    "Client name registered with the Notion MCP OAuth server.",
-    default="Open SWE",
-)
-ENV.var(
     "LANGSMITH_CONNECTION_URL",
     "LangSmith API origin people connect their own accounts to (Sign in with LangSmith).",
     default="https://api.smith.langchain.com",
@@ -397,7 +392,6 @@ ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
 )
 ENV.var("DEFAULT_PROMPT_PATH", "Path to a default prompt file.")
-ENV.var("TOOL_LOADER_TIMEOUT_SECONDS", "Timeout for loading optional tool integrations.")
 ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
 
 # --- Sandboxes ---------------------------------------------------------------------------------

@@ -21,7 +21,6 @@ import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
-import { ServiceConnectionCard } from "@/features/agents/components/chat/ServiceConnectionCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
@@ -245,9 +244,6 @@ export function AgentTurn({
 
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
-
-      case "connection-item":
-        return <ServiceConnectionCard key={item.key} />
 
       case "iframe-item":
         return item.chunk.display ? (

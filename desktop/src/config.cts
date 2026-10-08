@@ -15,7 +15,7 @@ const ALLOWED_PERMISSIONS = new Set([
 const SESSION_COOKIE_NAME = "osw_session";
 const LOGIN_PATH = "/dashboard/api/auth/login";
 const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
-const CONNECT_PROVIDERS = new Set(["slack", "notion", "langsmith"]);
+const CONNECT_PROVIDERS = new Set(["slack", "langsmith"]);
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
   const isDevelopment = !isPackaged || argv.includes("--dev");
@@ -136,7 +136,7 @@ function localCallbackUrl(navigationUrl, backendUrl) {
     if (
       !["http:", "https:"].includes(target.protocol) ||
       target.origin !== backend.origin ||
-      !/^\/dashboard\/api\/(?:auth|slack|notion)\/callback$/.test(
+      !/^\/dashboard\/api\/(?:auth|slack)\/callback$/.test(
         target.pathname,
       )
     ) {

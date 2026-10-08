@@ -84,7 +84,6 @@ from openswe.dashboard.options import (
     model_supports_effort,
     model_supports_images,
 )
-from openswe.dashboard.user_credentials import get_notion_status
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.desktop import (
@@ -108,7 +107,6 @@ from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
-    IntegrationGroup,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
@@ -187,7 +185,6 @@ from openswe.threads.blobs import blob_namespace
 from openswe.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
-from openswe.tool_loaders.notion_mcp import load_notion_tools
 from openswe.tools import (
     assign_human_reviewer,
     auto_assign_human_reviewer,
@@ -229,7 +226,6 @@ from openswe.tools import (
     report_platform_issue,
     request_human_review,
     request_pr_review,
-    request_service_connection,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -308,7 +304,6 @@ from openswe.workspaces.store import (
 
 client = get_client()
 
-DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
@@ -359,21 +354,6 @@ def _registered_tool_name(value: Any) -> str:
     if not isinstance(name, str) or not name:
         raise TypeError(f"tool has no registered name: {value!r}")
     return name
-
-
-def _tool_loader_timeout_seconds() -> float:
-    raw_timeout = ENV.TOOL_LOADER_TIMEOUT_SECONDS.optional()
-    if not raw_timeout:
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    try:
-        timeout = float(raw_timeout)
-    except ValueError:
-        logger.warning("Invalid TOOL_LOADER_TIMEOUT_SECONDS=%r; using default", raw_timeout)
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    if timeout <= 0:
-        logger.warning("TOOL_LOADER_TIMEOUT_SECONDS must be positive; using default")
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    return timeout
 
 
 async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
@@ -629,7 +609,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
-        "request_service_connection",
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -737,37 +716,6 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
-async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
-    async def load_with_timeout() -> list[Any]:
-        return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
-
-    try:
-        return await ttl_cache.cached_stale_while_revalidate(key, ttl_seconds, load_with_timeout)
-    except TimeoutError:
-        logger.warning("Timed out loading cached tools for %s", key, exc_info=True)
-        return []
-    except Exception:
-        logger.warning("Failed to load cached tools for %s", key, exc_info=True)
-        return []
-
-
-async def _notion_tools_for(profile_login: str | None) -> list[Any]:
-    if not profile_login:
-        return []
-    try:
-        status = (await get_notion_status(profile_login))["notion"]
-    except Exception:
-        logger.warning("Could not read Notion connection status", exc_info=True)
-        return []
-    if not status.get("connected"):
-        return []
-    return await _cached_tool_loader(
-        f"tools:notion:{profile_login}:{status.get('updated_at')}",
-        300,
-        lambda: load_notion_tools(profile_login),
-    )
-
-
 async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
     """Load the run's MCPs by tier: instance, then workspace, then the user's own.
 
@@ -777,11 +725,6 @@ async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[A
     if credential_login:
         sources.append(user_mcp_source(credential_login))
     return await load_mcp_tools(*sources)
-
-
-async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
-    async with aphase(thread_id, name):
-        return await loader()
 
 
 async def _cached_profile(profile_login: str | None):
@@ -1706,22 +1649,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     cli_result_required = not stop_summary_mode and bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
     mcp_tools: list[Any] = []
-    notion_tools: list[Any] = []
     if not stop_summary_mode and not local_run and credential_scope_known:
-        mcp_tools, notion_tools = await asyncio.gather(
-            _phase_result(
-                thread_id,
-                "factory.mcp_tools",
-                lambda: _mcp_tools_for(
-                    credential_login, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
-                ),
-            ),
-            _phase_result(
-                thread_id,
-                "factory.notion_tools",
-                lambda: _notion_tools_for(credential_login),
-            ),
-        )
+        async with aphase(thread_id, "factory.mcp_tools"):
+            mcp_tools = await _mcp_tools_for(
+                credential_login, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+            )
 
     slack_tools = [
         manage_code_channel,
@@ -1776,7 +1708,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ),
         read_user_settings,
         request_pr_review,
-        request_service_connection,
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
@@ -1893,19 +1824,12 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
-    dynamic_tool_middleware: DynamicToolMiddleware | None = None
-    integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
-        "MCPs": mcp_tools,
-        "Notion": notion_tools,
-    }
-    if integration_tool_groups:
-        candidate = DynamicToolMiddleware(
-            integration_tool_groups,
-            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
-            model_visible=not prefer_tools_in_sandbox,
-        )
-        if candidate.has_groups:
-            dynamic_tool_middleware = candidate
+    integration_tools = DynamicToolMiddleware(
+        {"MCPs": mcp_tools},
+        reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
+        model_visible=not prefer_tools_in_sandbox,
+    )
+    dynamic_tool_middleware = integration_tools if integration_tools.has_groups else None
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
