@@ -43,6 +43,7 @@ from openswe.human_review.requests import (
     HumanReviewRequest,
     RequestState,
 )
+from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, block_payload, context, escape, section
 from openswe.slack.cards import origin_footer, repost_thread_card
@@ -173,9 +174,8 @@ async def post_card(approval: HumanReviewRequest, *, title: str, files: list[Cha
     """Post an expedited card and return its timestamp."""
     if approval.awaiting_ready:
         raise SlackRequestError("draft card is author-only")
-    location = approval.slack_location
-    if location is None:
-        raise SlackRequestError("no Slack thread")
+    if not approval.slack_channel_id:
+        raise SlackRequestError("no Slack channel")
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
     if not approval.slack_channel_choices:
         approval.slack_channel_choices = await channel_choices(approval)
@@ -188,9 +188,22 @@ async def post_card(approval: HumanReviewRequest, *, title: str, files: list[Cha
         choices=await _channel_choices(approval),
     )
     text, blocks = await _warn_target(approval, (text, blocks))
+    if not approval.slack_thread_ts:
+        channel = await SlackChannel.load(approval.slack_channel_id)
+        if channel is None:
+            raise SlackRequestError("channel_not_found")
+        pr = approval.pull_request
+        approval.slack_thread_ts = await channel.post(
+            prompt(
+                "slack/expedited-review-requested",
+                pr_url=pr.url,
+                label=f"{pr.owner}/{pr.repo}#{pr.number}",
+                title=escape(title),
+            )
+        )
     return await post_slack_thread_reply_with_ts(
-        location[0],
-        location[1],
+        approval.slack_channel_id,
+        approval.slack_thread_ts,
         text,
         blocks=block_payload(blocks),
         agent_thread_id=approval.thread_id or None,
