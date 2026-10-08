@@ -166,6 +166,7 @@ class InputBlock(TypedDict):
     label: PlainText
     element: PlainTextInput | ConversationsSelect | StaticSelect
     optional: NotRequired[bool]
+    hint: NotRequired[PlainText]
 
 
 type Block = (
