@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.agent_overrides import resolve_github_login
 from openswe.skill_store.store import (
     SkillCreate,
@@ -23,6 +24,7 @@ async def _login() -> str | None:
     return await resolve_github_login(as_json_object(get_config()))
 
 
+@audit_tool()
 @access(_OWN)
 async def save_user_skill(name: str, description: str, instructions: str = "") -> dict[str, Any]:
     """Implement the `save_user_skill` tool."""
@@ -42,6 +44,7 @@ async def save_user_skill(name: str, description: str, instructions: str = "") -
     return {"ok": True, "skill": skill}
 
 
+@audit_tool()
 @access(_OWN)
 async def delete_user_skill(name: str) -> dict[str, Any]:
     """Implement the `delete_user_skill` tool."""

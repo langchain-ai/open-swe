@@ -10,6 +10,7 @@ import httpx2
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.dashboard.repo_access import require_repo_access_for_user
@@ -256,6 +257,7 @@ async def api_get_review_conversation(
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/conversation/comments")
+@audit_endpoint
 async def api_post_review_conversation_comment(
     owner: str,
     repo: str,

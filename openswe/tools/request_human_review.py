@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import HTTPException
 from langgraph.config import get_config
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard import repo_access
 from openswe.github.token import resolve_github_token
 from openswe.human_review.lifecycle import dismiss_by
@@ -51,6 +52,7 @@ async def _repository_refusal(pr_ref: GitHubPrRef, thread_id: str) -> str | None
     return None
 
 
+@audit_tool()
 async def request_human_review(
     pr_url: str, inline_summary: str, channel: str = ""
 ) -> dict[str, Any]:
@@ -95,6 +97,7 @@ async def request_human_review(
     }
 
 
+@audit_tool()
 async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[str, Any]:
     """Implement the `dismiss_human_review_request` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -116,6 +119,7 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
     }
 
 
+@audit_tool()
 async def assign_human_reviewer(
     pr_url: str, github_login: str, reason: str = "", named_by_person: bool = False
 ) -> dict[str, Any]:
@@ -197,6 +201,7 @@ async def get_human_review_status(pr_url: str) -> dict[str, Any]:
     return {"success": True, "open_review_request": True, **status.model_dump(mode="json")}
 
 
+@audit_tool()
 async def auto_assign_human_reviewer(pr_url: str) -> dict[str, Any]:
     """Implement the `auto_assign_human_reviewer` tool."""
     pr_ref = parse_github_pr_url(pr_url)
