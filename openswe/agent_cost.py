@@ -14,7 +14,6 @@ from openswe.analytics.usage import (
     record_agent_invocation_cost,
 )
 from openswe.invocation import resolve_invocation_id
-from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from openswe.utils.run_usage import summarize_run_usage
 from openswe.utils.thread_ops import langgraph_client
@@ -22,7 +21,8 @@ from openswe.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 _RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
-RUN_COSTS_KEY = "run_costs_usd"
+# One key per run: metadata updates merge top-level keys, so concurrent refreshes never race.
+RUN_COST_KEY_PREFIX = "run_cost_usd:"
 
 
 class AgentCostRefresh(TypedDict, closed=True):
@@ -99,12 +99,12 @@ async def schedule_agent_cost_refresh(
 
 
 async def _store_run_cost(payload: AgentCostRefresh, cost: float, client: LangGraphClient) -> None:
-    """Add the run's cost to its thread's metadata for the dashboard."""
-    thread_id = payload["thread_id"]
+    """Record the run's cost on its thread's metadata for the dashboard."""
     try:
-        stored = thread_metadata(await client.threads.get(thread_id)).get(RUN_COSTS_KEY)
-        run_costs = {**(stored if isinstance(stored, dict) else {}), payload["invocation_id"]: cost}
-        await client.threads.update(thread_id, metadata={RUN_COSTS_KEY: run_costs})
+        await client.threads.update(
+            payload["thread_id"],
+            metadata={f"{RUN_COST_KEY_PREFIX}{payload['invocation_id']}": cost},
+        )
     except Exception:  # noqa: BLE001
         logger.warning(
             "Could not store run cost on thread",

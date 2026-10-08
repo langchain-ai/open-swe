@@ -975,7 +975,7 @@ interface AgentDraft {
   timestamp: string
   startedAt: string
   turnKey?: string
-  invocationId?: string
+  invocationIds: Array<string>
   chunks: Array<Chunk>
 }
 
@@ -1035,7 +1035,9 @@ function turnMessages(
       timestamp: agent.timestamp,
       startedAt: agent.startedAt,
       ...(agent.turnKey ? { turnKey: agent.turnKey } : {}),
-      ...(agent.invocationId ? { invocationId: agent.invocationId } : {}),
+      ...(agent.invocationIds.length
+        ? { invocationIds: agent.invocationIds }
+        : {}),
       chunks: mergeTextChunks(agent.chunks),
     })
     agent = null
@@ -1054,13 +1056,14 @@ function turnMessages(
         timestamp,
         startedAt: timestamp,
         turnKey,
-        invocationId,
+        invocationIds: invocationId ? [invocationId] : [],
         chunks: [...chunks],
       }
       return
     }
     agent.timestamp = timestamp
-    agent.invocationId ??= invocationId
+    if (invocationId && !agent.invocationIds.includes(invocationId))
+      agent.invocationIds.push(invocationId)
     agent.chunks.push(...chunks)
   }
 

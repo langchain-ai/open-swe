@@ -220,8 +220,8 @@ export interface Message {
   taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
-  /** Invocation an agent turn's model calls ran under; keys its cost in `AgentThread.runCosts`. */
-  invocationId?: string
+  /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */
+  invocationIds?: Array<string>
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
   timestampIsFallback?: boolean

@@ -5,7 +5,9 @@ import {
   contextUsageFromUsageMetadata,
   formatTokenCount,
   latestContextUsage,
+  turnCosts,
 } from "./contextUsage"
+import type { Message } from "./types"
 
 describe("context usage helpers", () => {
   it("prefers input plus output tokens", () => {
@@ -57,5 +59,23 @@ describe("context usage helpers", () => {
     expect(formatTokenCount(999)).toBe("999")
     expect(formatTokenCount(1_200)).toBe("1.2K")
     expect(formatTokenCount(1_200_000)).toBe("1.2M")
+  })
+
+  it("counts each run once, on the last turn it ran in", () => {
+    const turn = (id: string, invocationIds: Array<string>): Message => ({
+      id,
+      author: "agent",
+      timestamp: "",
+      chunks: [],
+      invocationIds,
+    })
+    const costs = turnCosts(
+      [turn("a", ["r1"]), turn("b", ["r1"]), turn("c", ["r2", "r3"])],
+      { r1: 1, r2: 2, r3: 3 }
+    )
+    expect([...costs]).toEqual([
+      ["b", 1],
+      ["c", 5],
+    ])
   })
 })

@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
-from openswe.agent_cost import RUN_COSTS_KEY
+from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
@@ -414,13 +414,12 @@ async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bo
 
 
 def _run_costs(metadata: Mapping[str, Any]) -> dict[str, float]:
-    stored = metadata.get(RUN_COSTS_KEY)
-    if not isinstance(stored, dict):
-        return {}
     return {
-        key: float(cost)
-        for key, cost in stored.items()
-        if isinstance(cost, (int, float)) and not isinstance(cost, bool)
+        key.removeprefix(RUN_COST_KEY_PREFIX): float(cost)
+        for key, cost in metadata.items()
+        if key.startswith(RUN_COST_KEY_PREFIX)
+        and isinstance(cost, (int, float))
+        and not isinstance(cost, bool)
     }
 
 

@@ -1,5 +1,6 @@
 import { AIMessage } from "@langchain/core/messages"
 import type { BaseMessage } from "@langchain/core/messages"
+import type { Message } from "@/features/agents/lib/types"
 
 interface UsageMetadata {
   input_tokens?: unknown
@@ -55,4 +56,20 @@ export function formatTokenCount(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`
   return String(Math.round(count))
+}
+
+/** Each run's cost, attributed to the last turn it ran in and summed per turn. */
+export function turnCosts(
+  messages: ReadonlyArray<Message>,
+  runCosts: Readonly<Record<string, number>> = {}
+): Map<string, number> {
+  const lastTurn = new Map<string, string>()
+  for (const message of messages)
+    for (const id of message.invocationIds ?? []) lastTurn.set(id, message.id)
+  const costs = new Map<string, number>()
+  for (const [id, turnId] of lastTurn) {
+    const cost = runCosts[id]
+    if (cost !== undefined) costs.set(turnId, (costs.get(turnId) ?? 0) + cost)
+  }
+  return costs
 }

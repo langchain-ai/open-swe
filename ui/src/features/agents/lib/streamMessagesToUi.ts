@@ -96,7 +96,7 @@ type AgentTurn = {
   author: Message["author"]
   timestamp: string
   turnKey?: string
-  invocationId?: string
+  invocationIds: Array<string>
   startedAt: string
   timestampIsFallback?: boolean
   chunks: Array<Chunk>
@@ -301,14 +301,15 @@ export function streamMessagesToUi(
         author: "agent",
         timestamp,
         turnKey,
-        invocationId,
+        invocationIds: invocationId ? [invocationId] : [],
         startedAt: timestamp,
         timestampIsFallback,
         chunks: [...chunks],
       }
     } else {
       agentTurn.timestamp = timestamp
-      agentTurn.invocationId ??= invocationId
+      if (invocationId && !agentTurn.invocationIds.includes(invocationId))
+        agentTurn.invocationIds.push(invocationId)
       agentTurn.timestampIsFallback =
         agentTurn.timestampIsFallback || timestampIsFallback
       agentTurn.chunks.push(...chunks)
