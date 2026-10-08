@@ -178,6 +178,17 @@ async def search_all_entries(
         offset += len(items)
 
 
+async def search_entries(
+    namespace: Namespace, *, limit: int = _DEFAULT_PAGE_SIZE
+) -> list[StoreEntry]:
+    """The first page of :func:`search_all_entries`, for callers that drain as they go."""
+    return [
+        StoreEntry(_item_namespace(item), value, _item_key(item))
+        for item in await _search_items(namespace, None, limit, 0)
+        if (value := _unwrap(item)) is not None
+    ]
+
+
 RecordT = TypeVar("RecordT", bound=BaseModel)
 
 
