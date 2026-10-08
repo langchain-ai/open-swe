@@ -45,6 +45,7 @@ export function useThreadActions(pr: PullRequestRef, thread: ReviewThread) {
       const previous = await snapshot()
       const optimistic: ThreadComment = {
         id: -Date.now(),
+        review_id: null,
         author: session.data
           ? {
               login: session.data.login,

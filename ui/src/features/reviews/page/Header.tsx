@@ -148,17 +148,32 @@ export function Header({
         </div>
         {detail ? (
           <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="shrink-0">
+            <a
+              href={`https://github.com/${pr.owner}/${pr.repo}`}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 hover:text-foreground hover:underline"
+            >
               {pr.owner}/{pr.repo}
-            </span>
+            </a>
             <span aria-hidden>·</span>
-            <span className="shrink-0 font-medium text-foreground/80">
+            <a
+              href={`https://github.com/${detail.pr.author?.login ?? ""}`}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 font-medium text-foreground/80 hover:text-foreground hover:underline"
+            >
               {detail.pr.author?.login ?? "unknown"}
-            </span>
+            </a>
             <span className="shrink-0">wants to merge into</span>
-            <code className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[11px]">
+            <a
+              href={`https://github.com/${pr.owner}/${pr.repo}/tree/${detail.pr.base_ref}`}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground"
+            >
               {detail.pr.base_ref}
-            </code>
+            </a>
             <span className="shrink-0">from</span>
             <button
               type="button"
@@ -173,19 +188,32 @@ export function Header({
               <span className="truncate">{detail.pr.head_ref}</span>
               <CopyIcon className="size-3 shrink-0 opacity-0 group-hover/branch:opacity-100" />
             </button>
-            <span className="hidden shrink-0 font-mono tabular-nums sm:inline">
+            <button
+              type="button"
+              title="Go to the changes"
+              onClick={() => {
+                const first = files[0]
+                if (first) jumpTo({ kind: "file", path: first.path })
+              }}
+              className="hidden shrink-0 rounded px-0.5 font-mono tabular-nums hover:bg-accent sm:inline"
+            >
               <span className="text-success-foreground">
                 +{detail.pr.additions}
               </span>{" "}
               <span className="text-destructive-foreground">
                 −{detail.pr.deletions}
               </span>
-            </span>
+            </button>
             {detail.pr.created_at && (
-              <span className="hidden shrink-0 md:inline">
+              <a
+                href={githubUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="hidden shrink-0 hover:text-foreground hover:underline md:inline"
+              >
                 · opened{" "}
                 {formatRelativeTime(new Date(detail.pr.created_at).getTime())}
-              </span>
+              </a>
             )}
           </p>
         ) : (

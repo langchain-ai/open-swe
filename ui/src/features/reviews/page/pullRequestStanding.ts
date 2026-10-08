@@ -22,10 +22,16 @@ export type NextStep =
   | { kind: "update-branch" }
   | { kind: "agent"; action: PullRequestThreadActionName }
 
+/** A supporting fact, and what clicking it opens. */
+export interface StandingDetail {
+  text: string
+  opens: "findings" | "conversations"
+}
+
 export interface Standing {
   tone: StandingTone
   headline: string
-  details: Array<string>
+  details: Array<StandingDetail>
   next: NextStep | null
 }
 
@@ -54,9 +60,21 @@ export function pullRequestStanding(
       details: [],
       next: null,
     }
-  const details: Array<string> = []
+  const details: Array<StandingDetail> = []
   const bugs = openBugCount(detail)
-  if (bugs > 0) details.push(`Open SWE flagged ${plural(bugs, "bug")}.`)
+  const flags = detail.findings.filter(
+    (finding) => finding.group !== "bug" && finding.status === "open"
+  ).length
+  if (bugs > 0)
+    details.push({
+      text: `Open SWE flagged ${plural(bugs, "bug")}`,
+      opens: "findings",
+    })
+  else if (flags > 0)
+    details.push({
+      text: `Open SWE flagged ${plural(flags, "thing")} to look into`,
+      opens: "findings",
+    })
   if (!status)
     return {
       tone: "unknown",
@@ -67,14 +85,17 @@ export function pullRequestStanding(
   const isAuthor =
     !!viewer && detail.pr.author?.login.toLowerCase() === viewer.toLowerCase()
   if (status.unresolvedThreads)
-    details.push(`${plural(status.unresolvedThreads, "unresolved thread")}.`)
+    details.push({
+      text: plural(status.unresolvedThreads, "unresolved conversation"),
+      opens: "conversations",
+    })
 
   if (status.draft)
     return {
       tone: "waiting",
       headline: "Still a draft.",
       details,
-      next: isAuthor ? { kind: "mark-ready" } : null,
+      next: { kind: "mark-ready" },
     }
   if (isConflicted(status))
     return {
@@ -106,13 +127,19 @@ export function pullRequestStanding(
       details,
       next: null,
     }
-  if (status.reviewRequired)
+  if (status.reviewRequired) {
+    const askedOfViewer = detail.pr.requested_reviewers.some(
+      (reviewer) => reviewer.login.toLowerCase() === viewer?.toLowerCase()
+    )
     return {
       tone: "waiting",
-      headline: "Waiting on a review.",
+      headline: askedOfViewer
+        ? "Waiting on your review."
+        : "Waiting on a review.",
       details,
       next: isAuthor ? { kind: "request-review" } : { kind: "review" },
     }
+  }
   if (status.ci === "pending")
     return {
       tone: "waiting",

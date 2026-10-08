@@ -14,6 +14,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
 import { reviewConversationQueryKey } from "@/features/reviews/lib/conversationApi"
 
 const VERDICTS: ReadonlyArray<{
@@ -59,7 +60,13 @@ export function SubmitReviewPopover({
   const pending = usePendingReview(owner, repo, number)
   const pendingCount = pending.comments.length
   const setOpen = onOpenChange
-  const [event, setEvent] = useState<PullRequestReviewEvent>(defaultVerdict)
+  // GitHub refuses an author's approval or change request on their own PR.
+  const isAuthor = useIsPullRequestAuthor(owner, repo, number)
+  const verdicts = isAuthor
+    ? VERDICTS.filter((verdict) => verdict.event === "COMMENT")
+    : VERDICTS
+  const [chosen, setEvent] = useState<PullRequestReviewEvent>(defaultVerdict)
+  const event: PullRequestReviewEvent = isAuthor ? "COMMENT" : chosen
   const [openedOn, setOpenedOn] = useState<PullRequestReviewEvent | null>(null)
   if (open && openedOn !== defaultVerdict) {
     setOpenedOn(defaultVerdict)
@@ -153,7 +160,7 @@ export function SubmitReviewPopover({
           />
           <fieldset className="mt-3 flex flex-col gap-2">
             <legend className="sr-only">Review verdict</legend>
-            {VERDICTS.map((verdict) => (
+            {verdicts.map((verdict) => (
               <label
                 key={verdict.event}
                 className="flex cursor-pointer items-start gap-2 text-xs"

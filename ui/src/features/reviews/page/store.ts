@@ -42,6 +42,10 @@ interface ReviewPageState {
   composer: CommentDraftTarget | null
   expandedFinding: string | null
   chatDraft: { key: number; text: string } | undefined
+  /** Bumped to bring the discussion's open conversations into view. */
+  openConversationsKey: number
+  /** Bumped to open Open SWE's findings in the status panel and bring them into view. */
+  findingsKey: number
   /** Files whose collapsed state the viewer flipped away from the default (viewed = collapsed). */
   collapsed: ReadonlySet<string>
 }
@@ -62,6 +66,8 @@ interface ReviewPageActions {
   setComposer: (target: CommentDraftTarget | null) => void
   setExpandedFinding: (id: string | null) => void
   askInChat: (text: string) => void
+  showOpenConversations: () => void
+  showFindings: () => void
   toggleCollapsed: (path: string) => void
 }
 
@@ -135,6 +141,8 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     composer: null,
     expandedFinding: null,
     chatDraft: undefined,
+    openConversationsKey: 0,
+    findingsKey: 0,
     collapsed: new Set(),
 
     open: (pr, headSha) => {
@@ -210,6 +218,16 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     },
     setComposer: (composer) => set({ composer }),
     setExpandedFinding: (expandedFinding) => set({ expandedFinding }),
+    showOpenConversations: () =>
+      set({
+        railTab: "discussion",
+        railOpen: true,
+        openConversationsKey: get().openConversationsKey + 1,
+      }),
+    showFindings: () => {
+      set({ findingsKey: get().findingsKey + 1 })
+      get().jumpTo({ kind: "top" })
+    },
     askInChat: (text) => {
       const key = (get().chatDraft?.key ?? 0) + 1
       set({ chatDraft: { key, text }, railTab: "chat", railOpen: true })

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   CaretRightIcon,
   CheckCircleIcon,
@@ -11,7 +11,6 @@ import {
 import {
   postReviewConversationComment,
   type Conversation,
-  type ConversationAuthor,
   type ConversationComment,
   type ConversationCommit,
   type ConversationItem,
@@ -24,18 +23,17 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { cn, formatRelativeTime } from "@/lib/utils"
 import { Avatar, Byline } from "./notes/Byline"
+import { ThreadCard, ThreadSummary } from "./notes/ThreadNote"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { useReviewPage } from "./store"
 import { plainFirstLine } from "./text"
 
+type Said = ConversationComment | ConversationReview
+
 type Block =
   | { kind: "commits"; key: string; commits: Array<ConversationCommit> }
-  | {
-      kind: "item"
-      key: string
-      item: ConversationComment | ConversationReview
-      repeats: number
-    }
+  /** `earlier` holds the same message, said before, by the same bot. */
+  | { kind: "item"; key: string; item: Said; earlier: Array<Said> }
 
 const stateWords: Record<ConversationReview["state"], string> = {
   APPROVED: "approved",
@@ -64,12 +62,16 @@ function toBlocks(items: ReadonlyArray<ConversationItem>): Array<Block> {
         block.item.kind === item.kind &&
         plainFirstLine(block.item.body) === plainFirstLine(item.body)
     )
-    const repeats =
+    const folded =
       index >= 0
         ? (blocks.splice(index, 1)[0] as Extract<Block, { kind: "item" }>)
-            .repeats + 1
-        : 0
-    blocks.push({ kind: "item", key: `${item.kind}-${item.id}`, item, repeats })
+        : null
+    blocks.push({
+      kind: "item",
+      key: `${item.kind}-${item.id}`,
+      item,
+      earlier: folded ? [...folded.earlier, folded.item] : [],
+    })
   }
   return blocks
 }
@@ -81,14 +83,25 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
     () => toBlocks(conversation.data?.items ?? []),
     [conversation.data?.items]
   )
+  const threads = conversation.data?.threads
+  // A reply is a review of its own on GitHub, so a review owns every thread it wrote in.
   const threadsByReview = useMemo(() => {
     const map = new Map<number, Array<ReviewThread>>()
-    for (const thread of conversation.data?.threads ?? []) {
-      if (thread.review_id === null) continue
-      map.set(thread.review_id, [...(map.get(thread.review_id) ?? []), thread])
+    for (const thread of threads ?? []) {
+      const reviews = new Set(
+        thread.comments.flatMap((comment) =>
+          comment.review_id === null ? [] : [comment.review_id]
+        )
+      )
+      for (const review of reviews)
+        map.set(review, [...(map.get(review) ?? []), thread])
     }
     return map
-  }, [conversation.data?.threads])
+  }, [threads])
+  const open = useMemo(
+    () => (threads ?? []).filter((thread) => !thread.resolved),
+    [threads]
+  )
 
   return (
     <section aria-label="Conversation" className="flex h-full min-h-0 flex-col">
@@ -106,33 +119,112 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
           <p className="text-xs text-destructive">
             Couldn&apos;t load the conversation: {conversation.error.message}
           </p>
-        ) : blocks.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            No one has commented yet.
-          </p>
         ) : (
-          <ol className="relative flex flex-col gap-3 before:absolute before:inset-y-2 before:left-[11px] before:w-px before:bg-border">
-            {blocks.map((block) =>
-              block.kind === "commits" ? (
-                <CommitsBlock key={block.key} commits={block.commits} />
-              ) : (
-                <ItemBlock
-                  key={block.key}
-                  item={block.item}
-                  repeats={block.repeats}
-                  threads={
-                    block.item.kind === "review"
-                      ? (threadsByReview.get(block.item.id) ?? [])
-                      : []
-                  }
-                />
-              )
+          <>
+            {open.length > 0 && <OpenConversations pr={pr} threads={open} />}
+            {blocks.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No one has commented yet.
+              </p>
+            ) : (
+              <ol className="relative flex flex-col gap-3 before:absolute before:inset-y-2 before:left-[11px] before:w-px before:bg-border">
+                {blocks.map((block) =>
+                  block.kind === "commits" ? (
+                    <CommitsBlock key={block.key} commits={block.commits} />
+                  ) : (
+                    <ItemBlock
+                      key={block.key}
+                      pr={pr}
+                      item={block.item}
+                      earlier={block.earlier}
+                      threads={
+                        block.item.kind === "review"
+                          ? (threadsByReview.get(block.item.id) ?? [])
+                          : []
+                      }
+                    />
+                  )
+                )}
+              </ol>
             )}
-          </ol>
+          </>
         )}
       </div>
       <CommentBox pr={pr} />
     </section>
+  )
+}
+
+/** Every thread still waiting on someone, at the top, each one open-able in place. */
+function OpenConversations({
+  pr,
+  threads,
+}: {
+  pr: PullRequestRef
+  threads: Array<ReviewThread>
+}) {
+  const focusKey = useReviewPage((state) => state.openConversationsKey)
+  const ref = useRef<HTMLDivElement>(null)
+  // Folding holds until something asks for the conversations again.
+  const [foldedAt, setFoldedAt] = useState<number | null>(null)
+  const folded = foldedAt === focusKey
+  useEffect(() => {
+    if (focusKey > 0)
+      ref.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+  }, [focusKey])
+  return (
+    <div ref={ref} className="mb-5 scroll-mt-2">
+      <button
+        type="button"
+        aria-expanded={!folded}
+        onClick={() => setFoldedAt(folded ? null : focusKey)}
+        className="mb-2 flex items-center gap-1.5 text-xs font-medium text-foreground"
+      >
+        <CaretRightIcon
+          className={cn("size-3 transition-transform", !folded && "rotate-90")}
+        />
+        Open conversations
+        <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums">
+          {threads.length}
+        </span>
+      </button>
+      {!folded && (
+        <ul className="flex flex-col gap-1.5">
+          {threads.map((thread) => (
+            <li key={thread.id}>
+              <ThreadRow pr={pr} thread={thread} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** A thread as one line that opens into the whole thread, with the code it was left on. */
+function ThreadRow({
+  pr,
+  thread,
+}: {
+  pr: PullRequestRef
+  thread: ReviewThread
+}) {
+  const [open, setOpen] = useState(false)
+  const line = thread.line ?? thread.original_line
+  const name = thread.path.split("/").pop() ?? thread.path
+  return open ? (
+    <ThreadCard
+      pr={pr}
+      thread={thread}
+      withContext
+      onCollapse={() => setOpen(false)}
+    />
+  ) : (
+    <ThreadSummary
+      thread={thread}
+      location={`${name}${line ? `:${line}` : ""}`}
+      onOpen={() => setOpen(true)}
+    />
   )
 }
 
@@ -156,30 +248,30 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
         </span>{" "}
         pushed {commits.length} commit{commits.length === 1 ? "" : "s"}{" "}
         {formatRelativeTime(new Date(commits.at(-1)!.created_at).getTime())}
-        {commits.length > 2 && (
-          <CaretRightIcon
-            className={cn(
-              "ml-1 inline size-3 align-[-2px] transition-transform",
-              open && "rotate-90"
-            )}
-          />
-        )}
+        <CaretRightIcon
+          className={cn(
+            "ml-1 inline size-3 align-[-2px] transition-transform",
+            open && "rotate-90"
+          )}
+        />
       </button>
       {open && (
         <ul className="mt-1 flex flex-col gap-0.5">
           {commits.map((commit) => (
-            <li key={commit.sha} className="flex items-center gap-2">
+            <li key={commit.sha}>
               <a
                 href={commit.html_url}
                 target="_blank"
                 rel="noreferrer"
-                className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+                className="group/commit flex items-center gap-2 text-muted-foreground hover:text-foreground"
               >
-                {commit.message.split("\n")[0]}
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] group-hover/commit:underline">
+                  {commit.message.split("\n")[0]}
+                </span>
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                  {commit.sha.slice(0, 7)}
+                </span>
               </a>
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                {commit.sha.slice(0, 7)}
-              </span>
             </li>
           ))}
         </ul>
@@ -197,116 +289,106 @@ function ReviewStateMark({ state }: { state: ConversationReview["state"] }) {
 }
 
 function ItemBlock({
+  pr,
   item,
-  repeats,
+  earlier,
   threads,
 }: {
-  item: ConversationComment | ConversationReview
-  repeats: number
+  pr: PullRequestRef
+  item: Said
+  earlier: Array<Said>
   threads: Array<ReviewThread>
 }) {
   const bot = Boolean(item.author?.bot)
-  const quiet = bot || (item.kind === "review" && !item.body.trim())
-  const [open, setOpen] = useState(!quiet)
-  const verb = item.kind === "review" ? stateWords[item.state] : "commented"
-  const firstLine = plainFirstLine(item.body)
+  const body = item.body.trim()
+  const [open, setOpen] = useState(!bot)
+  const [showEarlier, setShowEarlier] = useState(false)
+  // A review with no words of its own only replied in threads; say where.
+  const repliedOnly = item.kind === "review" && !body && threads.length > 0
+  const verb =
+    item.kind === "review"
+      ? repliedOnly
+        ? `replied in ${threads.length} thread${threads.length === 1 ? "" : "s"}`
+        : stateWords[item.state]
+      : "commented"
   return (
     <li className="relative pl-8">
       <Avatar
-        author={item.author as ConversationAuthor | null}
+        author={item.author}
         className="absolute top-0 left-0 size-6 ring-4 ring-background"
       />
       <div className="flex min-w-0 items-center gap-1.5">
-        {item.kind === "review" && <ReviewStateMark state={item.state} />}
+        {item.kind === "review" && !repliedOnly && (
+          <ReviewStateMark state={item.state} />
+        )}
         <Byline
           author={item.author}
           createdAt={item.created_at}
           href={item.html_url}
           verb={verb}
         />
-        {repeats > 0 && (
-          <span
-            className="shrink-0 text-[11px] text-muted-foreground"
-            title="The same message, posted again"
+        {earlier.length > 0 && (
+          <button
+            type="button"
+            aria-expanded={showEarlier}
+            onClick={() => setShowEarlier((value) => !value)}
+            className="shrink-0 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="Said the same thing before"
           >
-            ×{repeats + 1}
-          </span>
+            ×{earlier.length + 1}
+          </button>
         )}
       </div>
-      {quiet && !open
-        ? item.body.trim() && (
-            <button
-              type="button"
-              onClick={() => setOpen(true)}
-              className="mt-0.5 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
-            >
-              {firstLine}
-            </button>
-          )
-        : item.body.trim() && (
-            <div className="mt-1.5 rounded-lg border border-border bg-card px-3 py-2 text-[13px] leading-[1.6]">
-              <Markdown content={item.body} />
-            </div>
-          )}
-      {threads.length > 0 && <ReviewThreads threads={threads} />}
+      {showEarlier && (
+        <ul className="mt-1 flex flex-col gap-0.5 text-[11px] text-muted-foreground">
+          {earlier.map((said) => (
+            <li key={said.id}>
+              <a
+                href={said.html_url}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-foreground hover:underline"
+              >
+                Also {said.kind === "review" ? "reviewed" : "said"}{" "}
+                {formatRelativeTime(new Date(said.created_at).getTime())}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      {body &&
+        (open ? (
+          <div className="mt-1.5 rounded-lg border border-border bg-card px-3 py-2 text-[13px] leading-[1.6]">
+            <Markdown content={item.body} />
+            {bot && (
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="mt-1 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                Fold
+              </button>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="mt-0.5 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
+          >
+            {plainFirstLine(item.body)}
+          </button>
+        ))}
+      {threads.length > 0 && (
+        <ul className="mt-1.5 flex flex-col gap-1">
+          {threads.map((thread) => (
+            <li key={thread.id}>
+              <ThreadRow pr={pr} thread={thread} />
+            </li>
+          ))}
+        </ul>
+      )}
     </li>
-  )
-}
-
-function ReviewThreads({ threads }: { threads: Array<ReviewThread> }) {
-  const jumpTo = useReviewPage((state) => state.jumpTo)
-  return (
-    <ul className="mt-1.5 flex flex-col gap-0.5">
-      {threads.map((thread) => {
-        const line = thread.line ?? thread.original_line
-        const name = thread.path.split("/").pop()
-        return (
-          <li key={thread.id}>
-            <button
-              type="button"
-              disabled={thread.outdated || thread.line === null}
-              onClick={() =>
-                thread.line !== null &&
-                jumpTo({
-                  kind: "line",
-                  path: thread.path,
-                  line: thread.line,
-                  side: thread.side,
-                })
-              }
-              className={cn(
-                "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs hover:bg-accent disabled:hover:bg-transparent",
-                thread.resolved && "opacity-60"
-              )}
-              title={thread.path}
-            >
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                {name}
-                {line ? `:${line}` : ""}
-              </span>
-              <span className="min-w-0 flex-1 truncate">
-                {plainFirstLine(thread.comments[0]?.body ?? "")}
-              </span>
-              {thread.comments.length > 1 && (
-                <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
-                  {thread.comments.length}
-                </span>
-              )}
-              {thread.outdated && (
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  Outdated
-                </span>
-              )}
-              {thread.resolved && (
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  Resolved
-                </span>
-              )}
-            </button>
-          </li>
-        )
-      })}
-    </ul>
   )
 }
 

@@ -49,6 +49,8 @@ export type ConversationItem =
 
 export interface ThreadComment {
   id: number
+  /** The review this comment was submitted with; a reply is its own review on GitHub. */
+  review_id: number | null
   author: ConversationAuthor | null
   created_at: string
   body: string

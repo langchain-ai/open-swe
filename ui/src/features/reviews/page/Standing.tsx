@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import type { ReactNode } from "react"
 import {
@@ -20,7 +21,8 @@ import type {
 } from "@/lib/api"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+import { cn, formatRelativeTime } from "@/lib/utils"
+import type { ConversationReview } from "@/features/reviews/lib/conversationApi"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -71,6 +73,10 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr)).data
   const open = detail?.pr.state === "open"
   const status = useQuery({ ...reviewQueries.status(pr), enabled: open }).data
+  const showFindings = useReviewPage((state) => state.showFindings)
+  const showOpenConversations = useReviewPage(
+    (state) => state.showOpenConversations
+  )
   if (!detail) return null
   const standing = pullRequestStanding(detail, status, session.data?.login)
   const login = session.data?.login ?? ""
@@ -98,8 +104,21 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
               {standing.headline}
             </p>
             {standing.details.length > 0 && (
-              <p className="mt-0.5 text-[12.5px] leading-5 text-muted-foreground">
-                {standing.details.join(" ")}
+              <p className="mt-0.5 flex flex-wrap gap-x-3 text-[12.5px] leading-5">
+                {standing.details.map((fact) => (
+                  <button
+                    key={fact.text}
+                    type="button"
+                    onClick={
+                      fact.opens === "findings"
+                        ? showFindings
+                        : showOpenConversations
+                    }
+                    className="text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground hover:decoration-foreground"
+                  >
+                    {fact.text}
+                  </button>
+                ))}
               </p>
             )}
           </div>
@@ -397,6 +416,29 @@ function ReviewsRow({
   status: OpenPullRequest
   login: string
 }) {
+  const showOpenConversations = useReviewPage(
+    (state) => state.showOpenConversations
+  )
+  const [expanded, setExpanded] = useState(false)
+  const conversation = useQuery(
+    reviewQueries.conversation({
+      owner: detail.owner,
+      repo: detail.repo,
+      number: detail.number,
+    })
+  ).data
+  // Each reviewer's standing review, as GitHub's sidebar lists them: a later
+  // comment never replaces an approval or a change request.
+  const verdicts = new Map<string, ConversationReview>()
+  for (const item of conversation?.items ?? []) {
+    if (item.kind !== "review" || !item.author) continue
+    const standing = verdicts.get(item.author.login)
+    const decisive = (state: ConversationReview["state"]) =>
+      state === "APPROVED" || state === "CHANGES_REQUESTED"
+    if (item.state === "COMMENTED" && standing && decisive(standing.state))
+      continue
+    verdicts.set(item.author.login, item)
+  }
   const requested = detail.pr.requested_reviewers.map((r) => `@${r.login}`)
   const decision =
     status.reviewDecision === "approved"
@@ -406,47 +448,105 @@ function ReviewsRow({
         : status.reviewRequired
           ? "An approving review is required"
           : "No reviews required"
-  const threads =
-    status.unresolvedThreads === null
-      ? null
-      : status.unresolvedThreads > 0
-        ? `${status.unresolvedThreads} unresolved`
-        : null
+  const unresolved = status.unresolvedThreads ?? 0
   return (
-    <Row
-      icon={
-        status.reviewDecision === "approved"
-          ? passIcon
-          : status.reviewDecision === "changes_requested"
-            ? failIcon
-            : status.reviewRequired
-              ? warnIcon
-              : passIcon
-      }
-      label="Reviews"
-      action={
-        <>
-          {hasUnresolvedConversations(status) &&
-            status.unresolvedThreads !== 0 && (
-              <PullRequestThreadAction
-                pr={status}
-                login={login}
-                action="address-comments"
-              />
+    <div>
+      <Row
+        expandable={verdicts.size > 0 || requested.length > 0}
+        expanded={expanded}
+        onToggle={() => setExpanded((value) => !value)}
+        icon={
+          status.reviewDecision === "approved"
+            ? passIcon
+            : status.reviewDecision === "changes_requested"
+              ? failIcon
+              : status.reviewRequired
+                ? warnIcon
+                : passIcon
+        }
+        label="Reviews"
+        action={
+          <>
+            {unresolved > 0 && (
+              <button
+                type="button"
+                onClick={showOpenConversations}
+                className="text-xs text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground"
+              >
+                {unresolved} unresolved
+              </button>
             )}
-          {status.draft === false && <RequestHumanReview pr={status} />}
-        </>
-      }
-    >
-      {[
-        decision,
-        threads,
-        requested.length ? `requested ${requested.join(", ")}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")}
-    </Row>
+            {hasUnresolvedConversations(status) &&
+              status.unresolvedThreads !== 0 && (
+                <PullRequestThreadAction
+                  pr={status}
+                  login={login}
+                  action="address-comments"
+                />
+              )}
+            {status.draft === false && <RequestHumanReview pr={status} />}
+          </>
+        }
+      >
+        {decision}
+      </Row>
+      {expanded && (
+        <ul className="flex flex-col gap-1 pr-4 pb-3 pl-11 text-xs">
+          {[...verdicts.values()].map((review) => (
+            <li key={review.id} className="flex items-center gap-2">
+              <ReviewVerdictMark state={review.state} />
+              <a
+                href={`https://github.com/${review.author?.login ?? ""}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium hover:underline"
+              >
+                {review.author?.login.replace(/\[bot\]$/, "")}
+              </a>
+              <a
+                href={review.html_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-muted-foreground hover:text-foreground hover:underline"
+              >
+                {reviewVerdictWords[review.state]}{" "}
+                {formatRelativeTime(new Date(review.created_at).getTime())}
+              </a>
+            </li>
+          ))}
+          {detail.pr.requested_reviewers.map((reviewer) => (
+            <li key={reviewer.login} className="flex items-center gap-2">
+              <CircleDashedIcon className="size-3.5 text-warning" />
+              <a
+                href={`https://github.com/${reviewer.login}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium hover:underline"
+              >
+                {reviewer.login}
+              </a>
+              <span className="text-muted-foreground">review requested</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
+}
+
+const reviewVerdictWords: Record<ConversationReview["state"], string> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "requested changes",
+  COMMENTED: "commented",
+  DISMISSED: "was dismissed",
+}
+
+function ReviewVerdictMark({ state }: { state: ConversationReview["state"] }) {
+  if (state === "APPROVED")
+    return <CheckCircleIcon weight="fill" className="size-3.5 text-success" />
+  if (state === "CHANGES_REQUESTED")
+    return <XCircleIcon weight="fill" className="size-3.5 text-destructive" />
+  return <ChatCircleTextIcon className="size-3.5 text-muted-foreground" />
 }
 
 function BranchRow({
@@ -570,11 +670,18 @@ function OpenSweRow({
   const flags = detail.findings.filter(
     (f) => f.group !== "bug" && f.status === "open"
   ).length
-  // Open while there is something to look at, until the person folds it.
-  const [folded, setFolded] = useState<boolean | null>(null)
-  const expanded = folded === null ? bugs + flags > 0 : !folded
+  // Open while there is something to look at, until the person folds it; a
+  // link elsewhere that names the findings opens it again.
+  const findingsKey = useReviewPage((state) => state.findingsKey)
+  const [folded, setFolded] = useState<{ value: boolean; key: number } | null>(
+    null
+  )
+  const expanded =
+    folded === null || folded.key !== findingsKey
+      ? bugs + flags > 0 || findingsKey > 0
+      : !folded.value
   const setExpanded = (change: (value: boolean) => boolean) =>
-    setFolded(!change(expanded))
+    setFolded({ value: !change(expanded), key: findingsKey })
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
     meta: { errorTitle: "Couldn't start the Open SWE review" },
@@ -631,16 +738,27 @@ function OpenSweRow({
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
         action={
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={running}
-            onClick={() => reReview.mutate()}
-            className="text-muted-foreground"
-          >
-            <ArrowClockwiseIcon />
-            {detail.status === "none" ? "Review" : "Re-review"}
-          </Button>
+          <>
+            {detail.thread_id && (
+              <Link
+                to="/agents/$threadId"
+                params={{ threadId: detail.thread_id }}
+                className="text-xs text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground"
+              >
+                {running ? "Watch it work" : "See how it reviewed"}
+              </Link>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={running}
+              onClick={() => reReview.mutate()}
+              className="text-muted-foreground"
+            >
+              <ArrowClockwiseIcon />
+              {detail.status === "none" ? "Review" : "Re-review"}
+            </Button>
+          </>
         }
       >
         {summary}

@@ -7,17 +7,17 @@ import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { AgentMark } from "../AgentMark"
+import { AgentMark } from "@/features/reviews/page/AgentMark"
 import {
   askAboutFinding,
   findingGroupColor,
   findingGroupLabel,
   fixFinding,
-} from "../findings"
-import { InlineCode } from "../inlineCode"
-import type { PullRequestRef } from "../queries"
-import { useReviewPage } from "../store"
-import { useThreadActions } from "../useThreadActions"
+} from "@/features/reviews/page/findings"
+import { InlineCode } from "@/features/reviews/page/inlineCode"
+import type { PullRequestRef } from "@/features/reviews/page/queries"
+import { useReviewPage } from "@/features/reviews/page/store"
+import { useThreadActions } from "@/features/reviews/page/useThreadActions"
 import { Avatar, Byline } from "./Byline"
 import { NoteFrame } from "./NoteFrame"
 import { ReplyBox } from "./ReplyBox"
@@ -178,33 +178,34 @@ function FindingReplies({
           </div>
         </div>
       ))}
-      {showReply || replies.length > 0 ? (
+      {(showReply || replies.length > 0) && (
         <ReplyBox
           pending={reply.isPending}
           onSend={(body) => reply.mutate(body)}
           placeholder="Reply on GitHub…"
         />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setShowReply(true)}
-          className="self-start text-muted-foreground hover:text-foreground"
-        >
-          Reply on GitHub
-        </button>
       )}
-      {thread.node_id && (
-        <button
-          type="button"
-          disabled={resolve.isPending}
-          onClick={() => resolve.mutate(!thread.resolved)}
-          className="self-start text-muted-foreground hover:text-foreground"
-        >
-          {thread.resolved
-            ? "Unresolve the conversation"
-            : "Resolve the conversation"}
-        </button>
-      )}
+      <div className="flex items-center gap-1">
+        {!showReply && replies.length === 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowReply(true)}
+          >
+            Reply
+          </Button>
+        )}
+        {thread.node_id && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={resolve.isPending}
+            onClick={() => resolve.mutate(!thread.resolved)}
+          >
+            {thread.resolved ? "Unresolve" : "Resolve conversation"}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

@@ -33,6 +33,8 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
   const toggleViewed = useReviewPage((state) => state.toggleViewed)
   const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const askInChat = useReviewPage((state) => state.askInChat)
+  const jumpTo = useReviewPage((state) => state.jumpTo)
+  const setExpandedFinding = useReviewPage((state) => state.setExpandedFinding)
   const detail = useQuery(reviewQueries.detail(pr)).data
   const conversation = useQuery(reviewQueries.conversation(pr)).data
   if (!entry) return null
@@ -43,9 +45,14 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
     (finding) =>
       finding.file === path && finding.status === "open" && isAnchored(finding)
   )
-  const threads = (conversation?.threads ?? []).filter(
-    (thread) => thread.path === path && !thread.resolved && !thread.outdated
-  ).length
+  const openThreads = (conversation?.threads ?? []).filter(
+    (thread) =>
+      thread.path === path &&
+      !thread.resolved &&
+      !thread.outdated &&
+      thread.line !== null
+  )
+  const threads = openThreads.length
   const slash = path.lastIndexOf("/")
   const dir = slash >= 0 ? path.slice(0, slash + 1) : ""
   const name = path.slice(slash + 1)
@@ -139,23 +146,44 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         )}
       </span>
       {worst && (
-        <span
-          className="flex shrink-0 items-center gap-1 text-[11px]"
+        <button
+          type="button"
+          onClick={() => {
+            setExpandedFinding(worst.id)
+            jumpTo({
+              kind: "line",
+              path,
+              line: worst.end_line ?? 1,
+              side: worst.side,
+            })
+          }}
+          className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] hover:bg-accent"
           style={{ color: findingGroupColor[worst.group] }}
-          title={`${findings.length} open finding${findings.length === 1 ? "" : "s"} from Open SWE`}
+          title={`${findings.length} open finding${findings.length === 1 ? "" : "s"} from Open SWE; go to the first`}
         >
           <AgentMark className="size-3" />
           {findings.length}
-        </span>
+        </button>
       )}
       {threads > 0 && (
-        <span
-          className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
-          title={`${threads} open conversation${threads === 1 ? "" : "s"}`}
+        <button
+          type="button"
+          onClick={() => {
+            const first = openThreads[0]
+            if (first?.line != null)
+              jumpTo({
+                kind: "line",
+                path,
+                line: first.line,
+                side: first.side,
+              })
+          }}
+          className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          title={`${threads} open conversation${threads === 1 ? "" : "s"}; go to the first`}
         >
           <ChatCircleIcon className="size-3" />
           {threads}
-        </span>
+        </button>
       )}
       {!renderable && (
         <span className="truncate text-muted-foreground">

@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
 import { reviewConversationQueryKey } from "@/features/reviews/lib/conversationApi"
 import { Button } from "@/components/ui/button"
 import {
@@ -45,11 +46,16 @@ export function ProposedReviewCard({
   const draft = drafts?.reviews.find((item) => item.proposal.id === id)
   const pending = usePendingReview(owner, repo, number)
   const pendingCount = pending.comments.length
+  // GitHub refuses an author's approval or change request on their own PR.
+  const isAuthor = useIsPullRequestAuthor(owner, repo, number)
+  const events = isAuthor
+    ? EVENTS.filter(([value]) => value === "COMMENT")
+    : EVENTS
   const submit = useMutation({
     mutationFn: async () => {
       if (!draft) throw new Error("The draft is no longer available")
       return api.submitPullRequestReview(owner, repo, number, {
-        event: draft.event,
+        event: isAuthor ? "COMMENT" : draft.event,
         body: draft.body.trim(),
       })
     },
@@ -67,7 +73,8 @@ export function ProposedReviewCard({
   })
   if (!drafts || !draft) return null
 
-  const { outcome, body, event } = draft
+  const { outcome, body } = draft
+  const event: ReviewEvent = isAuthor ? "COMMENT" : draft.event
   const needsBody = event !== "APPROVE" && pendingCount === 0
   return (
     <Card size="sm" className="w-full shrink-0" data-testid="proposed-review">
@@ -93,7 +100,7 @@ export function ProposedReviewCard({
             aria-label="Review verdict"
             className="flex gap-1"
           >
-            {EVENTS.map(([value, label]) => (
+            {events.map(([value, label]) => (
               <Button
                 key={value}
                 size="sm"

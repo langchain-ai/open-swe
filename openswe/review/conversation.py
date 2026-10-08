@@ -170,6 +170,8 @@ ConversationItem = Annotated[
 
 class ThreadComment(BaseModel):
     id: int
+    # The review this comment was submitted with; a reply is its own review on GitHub.
+    review_id: int | None
     author: ConversationAuthor | None
     created_at: datetime
     body: str
@@ -260,6 +262,7 @@ def _comment_item(comment: _GitHubIssueComment) -> ConversationComment:
 def _thread_comment(comment: _GitHubReviewComment) -> ThreadComment:
     return ThreadComment(
         id=comment.id,
+        review_id=comment.pull_request_review_id,
         author=_author(comment.user),
         created_at=comment.created_at,
         body=_display_body(comment.body),

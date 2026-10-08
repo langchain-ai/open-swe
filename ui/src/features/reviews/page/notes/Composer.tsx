@@ -9,10 +9,10 @@ import {
   commentRangeLabel,
 } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { AgentMark } from "../AgentMark"
-import type { PullRequestRef } from "../queries"
-import { useReviewPage } from "../store"
-import { useAskAboutLines } from "../askAboutLines"
+import { AgentMark } from "@/features/reviews/page/AgentMark"
+import type { PullRequestRef } from "@/features/reviews/page/queries"
+import { useReviewPage } from "@/features/reviews/page/store"
+import { useAskAboutLines } from "@/features/reviews/page/askAboutLines"
 import { NoteFrame } from "./NoteFrame"
 
 /**

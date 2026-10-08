@@ -98,13 +98,23 @@ function Description({
             loading="lazy"
           />
         )}
-        <span className="font-medium text-foreground">
+        <a
+          href={`https://github.com/${author ?? ""}`}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-foreground hover:underline"
+        >
           {author ?? "Unknown"}
-        </span>
-        <span>
+        </a>
+        <a
+          href={`https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`}
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-foreground hover:underline"
+        >
           opened this{" "}
           {createdAt ? formatRelativeTime(new Date(createdAt).getTime()) : ""}
-        </span>
+        </a>
         <span className="ml-auto">{labels}</span>
       </header>
       <div
