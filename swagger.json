@@ -496,6 +496,39 @@
             ],
             "title": "Actor Login"
           },
+          "approved_by_slack_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By Slack User Id"
+          },
+          "channel_memory_patch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Memory Patch"
+          },
+          "channel_memory_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Memory Revision"
+          },
           "delegated_from_sandbox_id": {
             "anyOf": [
               {
@@ -506,6 +539,17 @@
               }
             ],
             "title": "Delegated From Sandbox Id"
+          },
+          "proposed_by_slack_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed By Slack User Id"
           },
           "request_method": {
             "anyOf": [

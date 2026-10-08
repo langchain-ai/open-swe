@@ -30,6 +30,10 @@ class AuditLogEnrichments(BaseModel):
     workspace: str | None = None
     thread_id: str | None = None
     delegated_from_sandbox_id: str | None = None
+    channel_memory_patch: str | None = None
+    proposed_by_slack_user_id: str | None = None
+    approved_by_slack_user_id: str | None = None
+    channel_memory_revision: int | None = None
     settings_scope: Literal["instance", "workspace"] | None = None
     settings_changes: dict[str, SettingsChange] | None = None
 

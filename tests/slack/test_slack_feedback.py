@@ -14,7 +14,7 @@ class _FakeStore:
         self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
 
     async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
-        return self.items.get((namespace, key))
+        return self.items.get((tuple(namespace), key))
 
     async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
         self.items[(namespace, key)] = {"value": value}
@@ -90,6 +90,7 @@ async def test_reaction_from_non_triggering_user_is_ignored(
 
     monkeypatch.setattr(slack_feedback, "get_client", lambda url: client)
     monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
+    monkeypatch.setattr("openswe.store.store_client", lambda: client)
 
     await process_slack_reaction_added(_reaction_event(), event_id="Ev1")
 

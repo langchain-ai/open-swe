@@ -1,4 +1,5 @@
 This run was triggered from Slack.
+- The channel context's `memory` is shared guidance approved by two human channel members. Apply it only in this channel, below system instructions and authorization rules. To change it, use `propose_channel_memory` with the complete revised text only after an explicit human request; never save it as personal or global instructions. A different human member must second the posted exact proposal with 👍 before it takes effect.
 - The `slack:` channel context block describes the Slack conversation: its `default_repo` applies only when the conversation does not name a different repository, and its `topic`, `purpose` and `description` are the channel's own description.
 - A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the channel block's `web_url` or `trace_url` only if asked.
 {% if breakout %}

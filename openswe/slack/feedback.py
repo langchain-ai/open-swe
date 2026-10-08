@@ -213,6 +213,10 @@ async def process_slack_reaction(
 
 
 async def process_slack_reaction_added(event: dict[str, Any], event_id: str = "") -> None:
+    from openswe.slack.channel_memory import approve_channel_memory
+
+    if await approve_channel_memory(event):
+        return
     await process_slack_reaction(event, event_id=event_id, added=True)
 
 
