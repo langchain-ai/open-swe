@@ -760,8 +760,9 @@ async def list_open_pull_requests(
     sort: str = "updated",
     direction: str = "desc",
     page: int = 1,
+    scope: Literal["mine", "review-requested"] = "mine",
 ) -> OpenPullRequests:
-    """Read ``login``'s open PRs and current-head checks."""
+    """Read the open PRs ``login`` authored or is asked to review, with current-head checks."""
     if not _OWNER_PATTERN.fullmatch(login):
         raise HTTPException(422, "invalid GitHub login")
     if not 1 <= page <= _SEARCH_MAX_PAGES:
@@ -774,7 +775,8 @@ async def list_open_pull_requests(
         raise HTTPException(422, "repository must be owner/repo")
     if sort not in {"created", "updated"} or direction not in {"asc", "desc"}:
         raise HTTPException(422, "invalid PR sort")
-    query = f"is:pr is:open author:{login}"
+    qualifier = "author" if scope == "mine" else "review-requested"
+    query = f"is:pr is:open {qualifier}:{login}"
     for name in repositories:
         query += f" repo:{name}"
     try:

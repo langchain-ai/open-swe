@@ -8,6 +8,8 @@ _TOOL_MODULES = {
     "auto_assign_human_reviewer": ".request_human_review",
     "background_execute": ".background_execute",
     "background_task": ".background_task",
+    "code_channel_set_view": ".code_channel_set_view",
+    "connect_managed_tools": ".connect_managed_tools",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
@@ -17,6 +19,7 @@ _TOOL_MODULES = {
     "expose_port": ".expose_port",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
+    "get_human_review_status": ".request_human_review",
     "get_thread": ".threads",
     "http_request": ".http_request",
     "list_automations": ".automations",
@@ -46,7 +49,6 @@ _TOOL_MODULES = {
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
-    "request_service_connection": ".request_service_connection",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -72,6 +74,7 @@ _TOOL_MODULES = {
     "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_reply": "openswe.slack.tools.reply",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
+    "slack_start_review_channel": "openswe.slack.tools.start_review_channel",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
     "trigger_automation": ".automations",
@@ -86,6 +89,8 @@ __all__ = [
     "auto_assign_human_reviewer",
     "background_execute",
     "background_task",
+    "code_channel_set_view",
+    "connect_managed_tools",
     "create_automation",
     "create_sandbox_file_download_url",
     "delete_automation",
@@ -95,6 +100,7 @@ __all__ = [
     "expose_port",
     "fetch_review_diff",
     "fetch_url",
+    "get_human_review_status",
     "get_thread",
     "http_request",
     "list_automations",
@@ -124,7 +130,6 @@ __all__ = [
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
-    "request_service_connection",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -150,6 +155,7 @@ __all__ = [
     "slack_read_thread_messages",
     "slack_reply",
     "slack_breakout_thread",
+    "slack_start_review_channel",
     "submit_thread_feedback",
     "suggest_task",
     "trigger_automation",
@@ -177,6 +183,7 @@ if TYPE_CHECKING:
     from openswe.slack.tools.reply import slack_reply
     from openswe.slack.tools.request_pr_review import request_pr_review
     from openswe.slack.tools.start_new_thread import slack_breakout_thread
+    from openswe.slack.tools.start_review_channel import slack_start_review_channel
     from openswe.tools.add_finding import add_finding
     from openswe.tools.automations import (
         create_automation,
@@ -187,6 +194,8 @@ if TYPE_CHECKING:
     )
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
+    from openswe.tools.code_channel_set_view import code_channel_set_view
+    from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
@@ -213,9 +222,9 @@ if TYPE_CHECKING:
         assign_human_reviewer,
         auto_assign_human_reviewer,
         dismiss_human_review_request,
+        get_human_review_status,
         request_human_review,
     )
-    from openswe.tools.request_service_connection import request_service_connection
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
     from openswe.tools.save_plan import save_plan
     from openswe.tools.save_user_instructions import save_user_instructions

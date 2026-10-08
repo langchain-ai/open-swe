@@ -12,6 +12,7 @@ import asyncio
 import logging
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -92,6 +93,9 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
+    # The LangSmith Managed Tools gateway private threads load with the owner's own
+    # LangSmith connection; unset means none.
+    managed_tools_gateway_id: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -112,6 +116,16 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
+
+    @field_validator("managed_tools_gateway_id", mode="before")
+    @classmethod
+    def _gateway_id(cls, v: object) -> str | None:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        try:
+            return str(UUID(str(v).strip()))
+        except ValueError:
+            raise ValueError("managed tools gateway must be a gateway id") from None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -331,6 +345,7 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
+        "managed_tools_gateway_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -757,6 +772,12 @@ class WorkspaceSettings(Mapping[str, Any]):
     def sandbox_openai_enabled(self) -> bool:
         """Whether sandbox clients may use the experimental Responses API."""
         return self.get("sandbox_openai_enabled") is True
+
+    @property
+    def managed_tools_gateway_id(self) -> str | None:
+        """The LangSmith Managed Tools gateway this workspace's private threads load."""
+        value = self.get("managed_tools_gateway_id")
+        return value if isinstance(value, str) and value else None
 
     @property
     def org_review_guidelines(self) -> str | None:
