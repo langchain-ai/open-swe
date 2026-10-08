@@ -8,7 +8,7 @@ Local setup: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 Before making any change, first till the soil: refactor the surrounding code so the change slots in naturally and the result reads as if it had always been designed that way. Spend real effort here rather than bolting features onto whatever shape the code happens to be in.
 
-With `REVIEWER_RUNTIME_URL` set, reviewer runs go to the Managed Deep Agents project in `mda/reviewer/` instead of the `reviewer` graph. It keeps only the model loop and calls back to `openswe/remote_runtime/`, which serves the reviewer's tools and run hooks over MCP at `/remote-runtime/mcp` behind a run token that dispatch signs.
+`request_pr_review(use_mda=True)` runs that review on the Managed Deep Agents project in `mda/reviewer/` (deployed at `REVIEWER_RUNTIME_URL`) instead of the `reviewer` graph. It owns the model loop and the sandbox and calls back to `openswe/remote_runtime/`, which serves the reviewer's tools over MCP at `/remote-runtime/mcp` and its run hooks at `/remote-runtime/hooks/{hook}`, behind a run token that dispatch signs.
 
 ## Conventions
 
