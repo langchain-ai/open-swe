@@ -260,6 +260,7 @@ from openswe.tools.admin_gate import (
 )
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
+from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
@@ -1751,6 +1752,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         read_store_item,
         manage_feature_flags,
         manage_review_approval_mode,
+        manage_review_repos,
     ]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
