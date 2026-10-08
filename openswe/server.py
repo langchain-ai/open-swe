@@ -101,6 +101,7 @@ from openswe.input_messages import (
 )
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.instance import instance_mcp_source
+from openswe.mcp.managed import managed_mcp_source
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
@@ -719,11 +720,14 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
 async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
     """Load the run's MCPs by tier: instance, then workspace, then the user's own.
 
-    A later tier's connection replaces a same-named one from the tier before.
+    A later tier's connection replaces a same-named one from the tier before. The
+    workspace's LangSmith Managed Tools gateway comes last, used as the private owner.
     """
     sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
+        if gateway := (await cached_workspace_settings(workspace)).managed_tools_gateway_id:
+            sources.append(managed_mcp_source(credential_login, gateway))
     return await load_mcp_tools(*sources)
 
 

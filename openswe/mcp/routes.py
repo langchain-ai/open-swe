@@ -1,9 +1,11 @@
 """Dashboard API for instance-wide, workspace, and per-user MCP connections."""
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.mcp.instance import (
@@ -12,6 +14,17 @@ from openswe.mcp.instance import (
     get_instance_mcp,
     list_instance_mcps,
     save_instance_mcp,
+)
+from openswe.mcp.managed import (
+    Gateway,
+    GatewayStatus,
+    LangSmithNotConnected,
+    ManagedToolsError,
+    connect_url,
+    gateway_id,
+    gateway_status,
+    list_gateways,
+    managed_tools_configured,
 )
 from openswe.mcp.models import (
     MCPConnection,
@@ -35,6 +48,8 @@ from openswe.mcp.workspace import (
 )
 from openswe.tool_loaders.workspace_mcp import discover_workspace_mcp
 from openswe.workspaces.store import slugify
+
+logger = logging.getLogger(__name__)
 
 
 def _reveal_mcp_headers(record: MCPConnection | None) -> JSONResponse:
@@ -195,7 +210,84 @@ async def api_discover_my_mcp(
         raise HTTPException(400, str(exc)) from None
 
 
+class ManagedToolsView(BaseModel):
+    """The managed tools gateways the caller's workspaces use, and what each still needs."""
+
+    configured: bool
+    langsmith_connected: bool = False
+    gateways: list[GatewayStatus]
+
+
+class ManagedConnectResponse(BaseModel):
+    connected: bool
+    url: str | None = None
+
+
+async def _gateway_workspaces() -> dict[str, list[str]]:
+    """Each gateway an admin picked, with the workspaces that load it."""
+    from openswe.dashboard.workspace_settings import get_workspace_settings
+    from openswe.workspaces.store import list_workspace_options
+
+    by_gateway: dict[str, list[str]] = {}
+    for option in await list_workspace_options():
+        slug = str(option["slug"])
+        if gateway := (await get_workspace_settings(slug)).managed_tools_gateway_id:
+            by_gateway.setdefault(gateway, []).append(slug)
+    return by_gateway
+
+
+managed_mcp_router = APIRouter(route_class=MCPRoute)
+
+
+@managed_mcp_router.get("/managed-tools/gateways", response_model=list[Gateway])
+async def api_list_managed_tools_gateways(admin: dict[str, Any] = ADMIN_DEP) -> list[Gateway]:
+    """Gateways an admin can pick for a workspace, read with the admin's own LangSmith login."""
+    try:
+        return await list_gateways(admin["sub"])
+    except LangSmithNotConnected as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ManagedToolsError as exc:
+        raise HTTPException(502, str(exc)) from None
+
+
+@managed_mcp_router.get("/my-managed-tools", response_model=ManagedToolsView)
+async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> ManagedToolsView:
+    if not managed_tools_configured():
+        return ManagedToolsView(configured=False, gateways=[])
+    gateways = await _gateway_workspaces()
+    statuses: list[GatewayStatus] = []
+    for gateway, workspaces in gateways.items():
+        try:
+            statuses.append(await gateway_status(session["sub"], gateway, workspaces))
+        except LangSmithNotConnected:
+            return ManagedToolsView(configured=True, gateways=[])
+        except ManagedToolsError:
+            # One deleted or unreachable gateway must not hide the others.
+            logger.warning(
+                "Managed tools gateway status unavailable",
+                extra={"gateway": gateway, "workspaces": workspaces},
+                exc_info=True,
+            )
+    return ManagedToolsView(configured=True, langsmith_connected=True, gateways=statuses)
+
+
+@managed_mcp_router.post(
+    "/my-managed-tools/{gateway}/connect/{slug}", response_model=ManagedConnectResponse
+)
+async def api_connect_managed_tool(
+    gateway: str, slug: str, session: dict[str, Any] = SESSION_DEP
+) -> ManagedConnectResponse:
+    try:
+        if gateway_id(gateway) not in await _gateway_workspaces():
+            raise HTTPException(404, "No workspace uses this gateway")
+        url = await connect_url(session["sub"], gateway, slug)
+    except ManagedToolsError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return ManagedConnectResponse(connected=url is None, url=url)
+
+
 router = APIRouter()
 router.include_router(instance_mcp_router)
 router.include_router(workspace_mcp_router)
 router.include_router(user_mcp_router)
+router.include_router(managed_mcp_router)
