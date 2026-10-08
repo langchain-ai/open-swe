@@ -35,6 +35,7 @@ _MODEL_DEFAULTS = {
 
 @pytest.fixture(autouse=True)
 def saved_thread_scope(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-token")
     metadata = {"visibility": "private", "owner_login": "octocat"}
     monkeypatch.setattr(
         langgraph_sdk,
@@ -496,6 +497,7 @@ SLACK_TOOL_NAMES = {
     "slack_read_thread_messages",
     "slack_breakout_thread",
     "slack_reply",
+    "slack_send_dm",
 }
 
 
@@ -527,11 +529,12 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() -> None:
+@pytest.mark.parametrize("source", ["schedule", "dashboard", "github"])
+async def test_non_slack_run_keeps_independent_messaging_tools(source: str) -> None:
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
-    configurable.update({"source": "schedule", "slack_thread": None})
+    configurable.update({"source": source, "slack_thread": None})
 
     captured = await _capture_create_deep_agent_kwargs(config)
     tools = captured["tools"]
@@ -539,7 +542,12 @@ async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() 
 
     tool_names = {getattr(tool, "name", None) or getattr(tool, "__name__", None) for tool in tools}
     # A prompt can ask it to report somewhere; the thread-bound tools stay out.
-    assert tool_names & SLACK_TOOL_NAMES == {"slack_list_channels", "slack_post_message"}
+    assert tool_names & SLACK_TOOL_NAMES == {
+        "slack_list_channels",
+        "slack_list_channel_members",
+        "slack_post_message",
+        "slack_send_dm",
+    }
 
 
 @pytest.mark.asyncio
@@ -572,6 +580,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "slack_list_channels",
         "slack_move_thread",
         "slack_post_message",
+        "slack_send_dm",
         "slack_read_thread_messages",
         "slack_breakout_thread",
         "slack_reply",
@@ -886,3 +895,15 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model() ->
     assert handler.call_args.args[0].model is not captured["model"]
     assert handler.call_args.args[0].messages == messages
     assert await store.aget(namespace, "pending_messages") is None
+
+
+@pytest.mark.parametrize("local", [False, True])
+async def test_slack_messaging_tools_are_unavailable_without_hosted_integration(
+    monkeypatch: pytest.MonkeyPatch, local: bool
+) -> None:
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "test-token" if local else "")
+    config = _base_config()
+    monkeypatch.setattr("openswe.server.is_desktop_run", lambda cfg: local)
+    captured = await _capture_create_deep_agent_kwargs(config)
+    names = {_registered_tool_name(tool) for tool in captured["tools"]}
+    assert not names.intersection(SLACK_TOOL_NAMES)

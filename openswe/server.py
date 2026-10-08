@@ -247,6 +247,7 @@ from openswe.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
+    slack_send_dm,
     start_thread,
     submit_thread_feedback,
     suggest_task,
@@ -555,6 +556,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_user_skill",
         "slack_move_thread",
         "slack_post_message",
+        "slack_send_dm",
         "slack_breakout_thread",
         "publish_workspace",
         "refresh_workspace_start",
@@ -1721,16 +1723,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ),
         )
 
-    slack_tools = [
+    slack_conversation_tools = [
         manage_code_channel,
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
-        slack_list_channel_members,
-        slack_list_channels,
         slack_move_thread,
         slack_no_reply_needed,
-        slack_post_message,
+        slack_read_channel_messages,
         slack_read_thread_messages,
         slack_reply,
         slack_breakout_thread,
@@ -1788,6 +1788,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_move_thread,
         slack_no_reply_needed,
         slack_post_message,
+        slack_send_dm,
         slack_read_channel_messages,
         slack_read_thread_messages,
         slack_reply,
@@ -1807,10 +1808,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     ]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
-        # An automation run has no Slack thread, but its prompt may ask it to
-        # report to a channel.
-        kept = (slack_list_channels, slack_post_message) if cfg.source == "schedule" else ()
-        static_tools = [tool for tool in static_tools if tool not in slack_tools or tool in kept]
+        static_tools = [tool for tool in static_tools if tool not in slack_conversation_tools]
     elif _slack_concierge_run(cfg):
         static_tools = [
             tool for tool in static_tools if _registered_tool_name(tool) not in DM_EXCLUDED_TOOLS
@@ -1821,6 +1819,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             for tool in static_tools
             if tool
             not in (
+                *slack_conversation_tools,
+                slack_list_channel_members,
+                slack_list_channels,
+                slack_post_message,
+                slack_send_dm,
                 request_human_review,
                 assign_human_reviewer,
                 auto_assign_human_reviewer,

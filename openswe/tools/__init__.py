@@ -71,6 +71,7 @@ _TOOL_MODULES = {
     "slack_read_channel_messages": "openswe.slack.tools.read_channel_messages",
     "slack_read_thread_messages": "openswe.slack.tools.read_thread_messages",
     "slack_reply": "openswe.slack.tools.reply",
+    "slack_send_dm": "openswe.slack.tools.channels",
     "slack_breakout_thread": "openswe.slack.tools.start_new_thread",
     "submit_thread_feedback": ".submit_thread_feedback",
     "suggest_task": ".suggest_task",
@@ -149,6 +150,7 @@ __all__ = [
     "slack_read_channel_messages",
     "slack_read_thread_messages",
     "slack_reply",
+    "slack_send_dm",
     "slack_breakout_thread",
     "submit_thread_feedback",
     "suggest_task",
@@ -168,6 +170,7 @@ if TYPE_CHECKING:
         slack_list_channel_members,
         slack_list_channels,
         slack_post_message,
+        slack_send_dm,
     )
     from openswe.slack.tools.manage_code_channel import manage_code_channel
     from openswe.slack.tools.move_thread import slack_move_thread

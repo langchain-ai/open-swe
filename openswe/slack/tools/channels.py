@@ -13,7 +13,14 @@ from openswe.slack.client import (
     get_slack_user_names,
     post_slack_top_level_message_with_ts,
 )
-from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
+from openswe.slack.dm import send_dm_with_location
+from openswe.slack.http import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    SlackRequestError,
+    slack_error,
+    slack_identity,
+)
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from openswe.slack.payloads import SlackChannelPayload
 from openswe.tools.sandbox_preference import sandbox_only
@@ -212,3 +219,49 @@ async def slack_post_message(
     except SlackRequestError as exc:
         return {"success": False, "error": exc.code or "post_failed"}
     return {"success": True, "channel_id": channel_id, "message_ts": message_ts}
+
+
+async def slack_send_dm(user_id: str, message: str) -> SlackMessageReceipt | SlackChannelError:
+    """Send a bot DM to an active, linked Open SWE member of the bot's Slack workspace."""
+    user_id = user_id.strip()
+    if not SLACK_USER_ID_RE.fullmatch(user_id):
+        return {"success": False, "error": "user_id must be a Slack user ID"}
+    if not message.strip():
+        return {"success": False, "error": "message is required"}
+    message = convert_mentions_to_slack_format(message)
+    if len(message) > 40_000:
+        return {"success": False, "error": "msg_too_long"}
+    if not await User.login_for_slack(user_id):
+        return {"success": False, "error": "recipient must be a linked Open SWE user"}
+    try:
+        async with SlackClient.bot() as client:
+            identity = await slack_identity(client)
+            response = await client.users_info(user=user_id)
+            user: object = response.get("user")
+            if (
+                not isinstance(user, dict)
+                or user.get("id") != user_id
+                or user.get("team_id") != identity["team_id"]
+                or any(
+                    user.get(flag) is not False
+                    for flag in ("deleted", "is_bot", "is_restricted", "is_ultra_restricted")
+                )
+                or user.get("is_app_user") is True
+            ):
+                return {"success": False, "error": "recipient must be an active workspace member"}
+        blocks = markdown_blocks(message)
+        location = await send_dm_with_location(
+            user_id,
+            markdown_to_mrkdwn(message),
+            blocks=block_payload(blocks) if blocks else None,
+        )
+    except HTTPException:
+        logger.warning("Slack DM failed", extra={"slack_error": "slack_unavailable"})
+        return {"success": False, "error": "slack_unavailable"}
+    except SLACK_REQUEST_ERRORS as exc:
+        error = slack_error(exc)
+        logger.warning("Slack DM failed", extra={"slack_error": error})
+        return {"success": False, "error": error}
+    if location is None:
+        return {"success": False, "error": "dm_failed"}
+    return {"success": True, "channel_id": location[0], "message_ts": location[1]}
