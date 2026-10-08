@@ -288,30 +288,10 @@ def apply() -> None:
     # mapping still run.
     repo_access.assert_repo_access = _fake_assert_repo_access
 
-    # Every other module that captured the REST base at import time: PR and
-    # check reads (``ci``), the check-run writes, and the expedited-review
-    # eligibility, readiness, review and merge calls.
-    from openswe.expedited_review import eligibility, readiness
+    # The check-run writes captured the REST base at import time.
     from openswe.github import checks as github_checks
-    from openswe.github import ci as github_ci
 
-    github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    from openswe.github import repo_files
-    from openswe.human_review import standard
-    from openswe.threads import session_upload
-
-    for module in (
-        eligibility,
-        readiness,
-        reviews,
-        merge,
-        merging,
-        standard,
-        repo_files,
-        session_upload,
-    ):
-        module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox
     # provider, so there is nothing to capture from — record the request in the

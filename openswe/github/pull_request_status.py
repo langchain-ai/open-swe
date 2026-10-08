@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import AsyncIterator, Collection, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Self
@@ -14,7 +15,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
-from openswe.github.ci import read_required_checks, unreported_required_checks
+from openswe.github.ci import RequiredCheck, unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 
 logger = logging.getLogger(__name__)
@@ -404,6 +405,16 @@ class PullRequestClient:
     number: int
 
     @classmethod
+    @asynccontextmanager
+    async def as_app(cls, owner: str, repo: str, number: int) -> AsyncIterator[Self]:
+        """This pull request as the Open SWE GitHub App's installation on ``owner/repo`` reads it.
+
+        Raises ``GitHubAppUnavailable`` when no installation token can be minted.
+        """
+        async with GitHubClient.as_app(owner, repo) as github:
+            yield cls(github.repo(owner, repo), number)
+
+    @classmethod
     def of(cls, github: GitHubClient, record: object) -> Self | None:
         """The client for a ``repo_full_name`` and ``number``, or for a search hit's ``repository_url``."""
         if not isinstance(record, Mapping):
@@ -517,6 +528,28 @@ class PullRequestClient:
         await self.repo.github.graphql(
             _UPDATE_REVIEW_COMMENT_MUTATION,
             {"input": {"pullRequestReviewCommentId": comment_node_id, "body": body}},
+        )
+
+    async def dismiss_review(self, review_id: int, message: str) -> None:
+        await self.repo.github.request(
+            "PUT",
+            f"repos/{self.repo.full_name}/pulls/{self.number}/reviews/{review_id}/dismissals",
+            json={"message": message, "event": "DISMISS"},
+        )
+
+    async def request_reviewers(self, logins: list[str]) -> None:
+        await self.repo.post(f"pulls/{self.number}/requested_reviewers", {"reviewers": logins})
+
+    async def remove_requested_reviewers(self, logins: list[str]) -> None:
+        await self.repo.delete(f"pulls/{self.number}/requested_reviewers", {"reviewers": logins})
+
+    async def merge(self, *, sha: str, method: str, commit_message: str | None = None) -> None:
+        """Merge ``sha`` with ``method``; GitHub refusing it raises ``GitHubError``."""
+        payload: dict[str, object] = {"sha": sha, "merge_method": method}
+        if commit_message is not None:
+            payload["commit_message"] = commit_message
+        await self.repo.github.request(
+            "PUT", f"repos/{self.repo.full_name}/pulls/{self.number}/merge", json=payload
         )
 
     async def mergeable_pull(self) -> dict[str, Any] | None:
@@ -805,9 +838,7 @@ class PullRequestClient:
         base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
         # A check gated on `needs:` has no run until its upstream jobs finish.
         if base_ref is not None and result.merge_state == "blocked" and not pending:
-            required = await read_required_checks(
-                self.repo.github.http, owner=self.repo.owner, repo=self.repo.name, branch=base_ref
-            )
+            required = await RequiredCheck.for_branch(self.repo, base_ref)
             if required is not None:
                 result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
