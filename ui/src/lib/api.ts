@@ -364,6 +364,8 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
+  /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
+  managed_tools_gateway_id?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -435,6 +437,38 @@ export interface LangSmithConnectionStatus {
   connected: boolean
   email?: string | null
   updated_at?: string | null
+}
+
+export interface ManagedToolsGateway {
+  id: string
+  name: string
+  tool_count: number
+}
+
+export interface ManagedToolsMissingCredential {
+  slug: string
+  display_name: string
+  kind: "oauth" | "secret"
+}
+
+export interface ManagedToolsGatewayStatus {
+  gateway: ManagedToolsGateway
+  workspaces: string[]
+  ready: boolean
+  tool_count?: number | null
+  missing: ManagedToolsMissingCredential[]
+}
+
+/** The card the agent offered in a thread, identified by its tool call. */
+export interface ManagedToolsConnectCard {
+  threadId: string
+  cardId: string
+}
+
+export interface ManagedToolsView {
+  configured: boolean
+  langsmith_connected: boolean
+  gateways: ManagedToolsGatewayStatus[]
 }
 
 export interface NotionCredentialStatus {
@@ -1727,6 +1761,23 @@ export const api = {
     request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
       method: "DELETE",
     }),
+  listManagedToolsGateways: () =>
+    request<ManagedToolsGateway[]>("/managed-tools/gateways"),
+  getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
+  /** With a thread's connect card, the thread continues once every service is connected. */
+  connectManagedTool: (
+    gatewayId: string,
+    slug: string,
+    card?: ManagedToolsConnectCard
+  ) =>
+    request<{ connected: boolean; url?: string | null }>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/connect/${encodeURIComponent(slug)}${
+        card
+          ? `?${new URLSearchParams({ thread_id: card.threadId, card: card.cardId })}`
+          : ""
+      }`,
+      { method: "POST" }
+    ),
   getMyNotionStatus: () =>
     request<NotionCredentialStatus>("/my-credentials/notion"),
   disconnectNotion: () =>
@@ -1891,6 +1942,32 @@ export const api = {
     request<ReviewAssessmentFeedback>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
+    ),
+  getPullRequestLabels: (owner: string, repo: string, number: number) =>
+    request<{
+      available: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+      selected: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+    }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`
+    ),
+  changePullRequestLabel: (
+    owner: string,
+    repo: string,
+    number: number,
+    name: string,
+    selected: boolean
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`,
+      { method: "PATCH", body: JSON.stringify({ name, selected }) }
     ),
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(

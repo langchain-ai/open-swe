@@ -164,7 +164,7 @@ class InputBlock(TypedDict):
     type: Literal["input"]
     block_id: str
     label: PlainText
-    element: PlainTextInput | ConversationsSelect
+    element: PlainTextInput | ConversationsSelect | StaticSelect
     optional: NotRequired[bool]
 
 

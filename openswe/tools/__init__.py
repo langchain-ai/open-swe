@@ -9,6 +9,7 @@ _TOOL_MODULES = {
     "background_execute": ".background_execute",
     "background_task": ".background_task",
     "code_channel_set_view": ".code_channel_set_view",
+    "connect_managed_tools": ".connect_managed_tools",
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
@@ -18,6 +19,7 @@ _TOOL_MODULES = {
     "expose_port": ".expose_port",
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
+    "get_human_review_status": ".request_human_review",
     "get_thread": ".threads",
     "http_request": ".http_request",
     "list_automations": ".automations",
@@ -89,6 +91,7 @@ __all__ = [
     "background_execute",
     "background_task",
     "code_channel_set_view",
+    "connect_managed_tools",
     "create_automation",
     "create_sandbox_file_download_url",
     "delete_automation",
@@ -98,6 +101,7 @@ __all__ = [
     "expose_port",
     "fetch_review_diff",
     "fetch_url",
+    "get_human_review_status",
     "get_thread",
     "http_request",
     "list_automations",
@@ -193,6 +197,7 @@ if TYPE_CHECKING:
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
     from openswe.tools.code_channel_set_view import code_channel_set_view
+    from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
     from openswe.tools.expose_port import expose_port
@@ -219,6 +224,7 @@ if TYPE_CHECKING:
         assign_human_reviewer,
         auto_assign_human_reviewer,
         dismiss_human_review_request,
+        get_human_review_status,
         request_human_review,
     )
     from openswe.tools.request_service_connection import request_service_connection

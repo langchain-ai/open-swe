@@ -64,6 +64,7 @@ export type AcpToolKind =
   | "linear"
   | "sql"
   | "service-connection"
+  | "managed-tools"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"

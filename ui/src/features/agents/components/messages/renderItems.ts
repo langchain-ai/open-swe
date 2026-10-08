@@ -1,4 +1,8 @@
 import { parseSqlResult } from "../chat/SqlResultTable"
+import {
+  parseManagedToolsCard,
+  type ManagedToolsCardOffer,
+} from "@/features/agents/lib/managedToolsCard"
 import type { Chunk, ToolExecutionChunk } from "@/features/agents/lib/types"
 
 export type RenderItem =
@@ -24,6 +28,12 @@ export type RenderItem =
   | { type: "shell-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "reply-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "connection-item"; key: string; chunk: ToolExecutionChunk }
+  | {
+      type: "managed-tools-item"
+      key: string
+      chunk: ToolExecutionChunk
+      offer: ManagedToolsCardOffer
+    }
   | { type: "iframe-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "sql-item"; key: string; chunk: ToolExecutionChunk }
   | { type: "tool-item"; key: string; chunk: ToolExecutionChunk }
@@ -32,6 +42,7 @@ const REPLY_ITEM_TYPES = new Set<RenderItem["type"]>([
   "text-chunk",
   "reply-item",
   "connection-item",
+  "managed-tools-item",
   "iframe-item",
 ])
 
@@ -52,6 +63,7 @@ export function splitWorkAndReply(items: Array<RenderItem>): {
     if (
       item.type === "reply-item" ||
       item.type === "connection-item" ||
+      item.type === "managed-tools-item" ||
       item.type === "iframe-item" ||
       index >= trailingReplyIndex
     ) {
@@ -266,6 +278,10 @@ export function buildRenderItems(
       }
 
       flushGroups()
+      const offer =
+        chunk.toolKind === "managed-tools"
+          ? parseManagedToolsCard(chunk.output)
+          : null
 
       if (isEditTool(chunk)) {
         items.push({
@@ -293,6 +309,13 @@ export function buildRenderItems(
           type: "connection-item",
           key: `tool-${chunk.toolCallId}`,
           chunk,
+        })
+      } else if (offer) {
+        items.push({
+          type: "managed-tools-item",
+          key: `tool-${chunk.toolCallId}`,
+          chunk,
+          offer,
         })
       } else if (isReplyTool(chunk)) {
         items.push({

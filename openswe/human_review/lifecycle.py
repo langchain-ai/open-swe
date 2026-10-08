@@ -228,10 +228,14 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         diff_image_id=approval.slack_diff_file_id or None,
     )
     text, blocks = await _warn_target(approval, (text, blocks))
+    origin = approval.dm_origin
     dm_location = await send_dm_with_location(
         author.slack_user_id,
         text,
-        blocks=block_payload([*blocks, *await origin_footer(approval.thread_id)]),
+        blocks=block_payload(
+            [*blocks, *await origin_footer(approval.thread_id, origin.location if origin else None)]
+        ),
+        origin=origin,
     )
     if dm_location is None:
         return "Slack could not deliver the author-only prompt; ask the author to mark it ready on GitHub."
@@ -793,10 +797,19 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
                 f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
                 "Open SWE removed you as a reviewer."
             )
+            origin = request.dm_origin
             await send_dm(
                 reviewer.user.slack_user_id,
                 text,
-                blocks=block_payload([section(text), *await origin_footer(request.thread_id)]),
+                blocks=block_payload(
+                    [
+                        section(text),
+                        *await origin_footer(
+                            request.thread_id, origin.location if origin else None
+                        ),
+                    ]
+                ),
+                origin=origin,
             )
     return await HumanReviewRequest.get(request.id) or current
 
@@ -833,10 +846,19 @@ async def drop_picks(
         if token is not None:
             await _unrequest_github_review(request, pick.github_login, token)
         if pick.user.slack_user_id:
+            origin = request.dm_origin
             await send_dm(
                 pick.user.slack_user_id,
                 message,
-                blocks=block_payload([section(message), *await origin_footer(request.thread_id)]),
+                blocks=block_payload(
+                    [
+                        section(message),
+                        *await origin_footer(
+                            request.thread_id, origin.location if origin else None
+                        ),
+                    ]
+                ),
+                origin=origin,
             )
     if token is None:
         logger.warning(
