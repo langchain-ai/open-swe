@@ -1,10 +1,15 @@
 import { Popover, PopoverPopup, PopoverTrigger } from "@/components/ui/popover"
-import { formatTokenCount } from "@/features/agents/lib/contextUsage"
+import {
+  formatCost,
+  formatTokenCount,
+} from "@/features/agents/lib/contextUsage"
 import { cn } from "@/lib/utils"
 
 export interface ContextWindowMeterProps {
   usedTokens?: number | null
   contextWindow?: number | null
+  model?: string | null
+  costUsd?: number | null
 }
 
 const RADIUS = 9.75
@@ -27,6 +32,8 @@ function formatPercentage(value: number): string {
 export function ContextWindowMeter({
   usedTokens,
   contextWindow,
+  model,
+  costUsd,
 }: ContextWindowMeterProps) {
   const used = cleanTokenCount(usedTokens)
   const limit = cleanTokenCount(contextWindow)
@@ -138,6 +145,16 @@ export function ContextWindowMeter({
             <p className="text-[11px] leading-4 text-muted-foreground/70">
               The context window for this model was not reported.
             </p>
+          )}
+          {(model || costUsd != null) && (
+            <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground/70">
+              <span className="truncate">{model}</span>
+              {costUsd != null && (
+                <span className="tabular-nums">
+                  {formatCost(costUsd)} total
+                </span>
+              )}
+            </div>
           )}
           {isOverloaded && (
             <p className="text-[11px] leading-4 font-medium text-destructive">
