@@ -31,14 +31,28 @@ export function useDiffKeys({
   scrollTo: (target: DiffTarget) => void
 }) {
   const queryClient = useQueryClient()
-  const live = useRef({ entries, selection, clearSelection, askAboutLines, scrollTo })
+  const live = useRef({
+    entries,
+    selection,
+    clearSelection,
+    askAboutLines,
+    scrollTo,
+  })
   useLayoutEffect(() => {
-    live.current = { entries, selection, clearSelection, askAboutLines, scrollTo }
+    live.current = {
+      entries,
+      selection,
+      clearSelection,
+      askAboutLines,
+      scrollTo,
+    }
   })
   const stopIndex = useRef(-1)
 
   const commands = useMemo<Array<AppCommand>>(() => {
-    const paths = () => [...new Set(live.current.entries.map((entry) => entry.file.path))]
+    const paths = () => [
+      ...new Set(live.current.entries.map((entry) => entry.file.path)),
+    ]
     const moveFile = (delta: 1 | -1) => {
       const all = paths()
       if (all.length === 0) return
@@ -52,7 +66,9 @@ export function useDiffKeys({
       const { pr } = useReviewPage.getState()
       if (!pr) return []
       const detail = queryClient.getQueryData(reviewQueries.detail(pr).queryKey)
-      const conversation = queryClient.getQueryData(reviewQueries.conversation(pr).queryKey)
+      const conversation = queryClient.getQueryData(
+        reviewQueries.conversation(pr).queryKey
+      )
       const order = new Map(paths().map((path, i) => [path, i]))
       const list: Array<Stop> = [
         ...(detail?.findings ?? [])
@@ -64,7 +80,10 @@ export function useDiffKeys({
             finding: finding.id,
           })),
         ...(conversation?.threads ?? [])
-          .filter((thread) => !thread.resolved && !thread.outdated && thread.line !== null)
+          .filter(
+            (thread) =>
+              !thread.resolved && !thread.outdated && thread.line !== null
+          )
           .map((thread) => ({
             path: thread.path,
             line: thread.line as number,
@@ -74,7 +93,9 @@ export function useDiffKeys({
       ]
       return list
         .filter((stop) => order.has(stop.path))
-        .sort((a, b) => order.get(a.path)! - order.get(b.path)! || a.line - b.line)
+        .sort(
+          (a, b) => order.get(a.path)! - order.get(b.path)! || a.line - b.line
+        )
     }
     const moveStop = (delta: 1 | -1) => {
       const all = stops()
@@ -83,11 +104,28 @@ export function useDiffKeys({
       const stop = all[stopIndex.current]!
       const { setExpandedFinding, jumpTo } = useReviewPage.getState()
       if (stop.finding) setExpandedFinding(stop.finding)
-      jumpTo({ kind: "line", path: stop.path, line: stop.line, side: stop.side })
+      jumpTo({
+        kind: "line",
+        path: stop.path,
+        line: stop.line,
+        side: stop.side,
+      })
     }
     return [
-      { id: "review-next-file", label: "Next file", shortcuts: ["j"], group: "Pull request", run: () => moveFile(1) },
-      { id: "review-previous-file", label: "Previous file", shortcuts: ["k"], group: "Pull request", run: () => moveFile(-1) },
+      {
+        id: "review-next-file",
+        label: "Next file",
+        shortcuts: ["j"],
+        group: "Pull request",
+        run: () => moveFile(1),
+      },
+      {
+        id: "review-previous-file",
+        label: "Previous file",
+        shortcuts: ["k"],
+        group: "Pull request",
+        run: () => moveFile(-1),
+      },
       {
         id: "review-next-note",
         label: "Next finding or open conversation",
@@ -108,7 +146,8 @@ export function useDiffKeys({
         shortcuts: ["v"],
         group: "Pull request",
         run: () => {
-          const { activePath, toggleViewed, viewed, jumpTo } = useReviewPage.getState()
+          const { activePath, toggleViewed, viewed, jumpTo } =
+            useReviewPage.getState()
           if (!activePath) return
           if (!toggleViewed(activePath)) return
           const all = paths()

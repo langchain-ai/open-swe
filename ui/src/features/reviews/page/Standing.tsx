@@ -22,6 +22,7 @@ import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
@@ -77,21 +78,35 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   return (
     <section
       aria-label="Pull request status"
-      className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_1px_0_0_var(--border)]"
-      style={{ borderLeft: `3px solid ${toneColor[standing.tone]}` }}
+      className="overflow-hidden rounded-xl border border-border bg-card"
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5">
-        <div className="min-w-0 flex-1">
-          <p className="text-[15px] leading-6 font-semibold tracking-[-0.01em] text-foreground">
-            {standing.headline}
-          </p>
-          {standing.details.length > 0 && (
-            <p className="text-xs leading-5 text-muted-foreground">
-              {standing.details.join(" ")}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-4">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <span
+            aria-hidden
+            className={cn(
+              "mt-[7px] size-2.5 shrink-0 rounded-full",
+              standing.tone === "waiting" && "animate-status-pulse"
+            )}
+            style={{
+              background: toneColor[standing.tone],
+              boxShadow: `0 0 0 4px color-mix(in oklab, ${toneColor[standing.tone]} 18%, transparent)`,
+            }}
+          />
+          <div className="min-w-0">
+            <p className="text-[17px] leading-6 font-semibold tracking-[-0.015em] text-foreground">
+              {standing.headline}
             </p>
-          )}
+            {standing.details.length > 0 && (
+              <p className="mt-0.5 text-[12.5px] leading-5 text-muted-foreground">
+                {standing.details.join(" ")}
+              </p>
+            )}
+          </div>
         </div>
-        {status && <NextStepAction standing={standing} status={status} login={login} />}
+        {status && (
+          <NextStepAction standing={standing} status={status} login={login} />
+        )}
       </div>
       {open && status && (
         <div className="divide-y divide-border border-t border-border">
@@ -105,7 +120,17 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
         </div>
       )}
       {(!open || !status) && (
-        <div className="border-t border-border">
+        <div className="divide-y divide-border border-t border-border">
+          {open &&
+            ["Checks", "Reviews"].map((label) => (
+              <Row
+                key={label}
+                icon={<span className="size-3.5 rounded-full bg-muted" />}
+                label={label}
+              >
+                <Skeleton className="h-3 w-40" />
+              </Row>
+            ))}
           <OpenSweRow pr={pr} detail={detail} />
         </div>
       )}
@@ -136,7 +161,13 @@ function NextStepAction({
         </Button>
       )
     case "agent":
-      return <PullRequestThreadAction pr={status} login={login} action={next.action} />
+      return (
+        <PullRequestThreadAction
+          pr={status}
+          login={login}
+          action={next.action}
+        />
+      )
     case "mark-ready":
       return <MarkPullRequestReady pr={status} onReady={refresh} />
     case "request-review":
@@ -167,7 +198,9 @@ function Row({
 }) {
   const body = (
     <>
-      <span className="flex size-4 shrink-0 items-center justify-center">{icon}</span>
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        {icon}
+      </span>
       <span className="w-[5.5rem] shrink-0 text-xs font-medium text-foreground">
         {label}
       </span>
@@ -198,21 +231,42 @@ function Row({
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-3">{body}</div>
       )}
-      {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
+      {action && (
+        <div className="flex shrink-0 items-center gap-2">{action}</div>
+      )}
     </div>
   )
 }
 
-const passIcon = <CheckCircleIcon weight="fill" className="size-4 text-success" />
-const failIcon = <XCircleIcon weight="fill" className="size-4 text-destructive" />
-const warnIcon = <WarningCircleIcon weight="fill" className="size-4 text-warning" />
-const pendingIcon = <CircleDashedIcon className="size-4 animate-spin text-warning [animation-duration:3s]" />
+const passIcon = (
+  <CheckCircleIcon weight="fill" className="size-4 text-success" />
+)
+const failIcon = (
+  <XCircleIcon weight="fill" className="size-4 text-destructive" />
+)
+const warnIcon = (
+  <WarningCircleIcon weight="fill" className="size-4 text-warning" />
+)
+const pendingIcon = (
+  <CircleDashedIcon className="size-4 animate-spin text-warning [animation-duration:3s]" />
+)
 
-function checkState(check: ReviewCheckRun): "fail" | "pending" | "pass" | "skip" {
+function checkState(
+  check: ReviewCheckRun
+): "fail" | "pending" | "pass" | "skip" {
   if (check.status !== "completed") return "pending"
-  if (["failure", "timed_out", "cancelled", "action_required", "startup_failure"].includes(check.conclusion ?? ""))
+  if (
+    [
+      "failure",
+      "timed_out",
+      "cancelled",
+      "action_required",
+      "startup_failure",
+    ].includes(check.conclusion ?? "")
+  )
     return "fail"
-  if (["skipped", "neutral", "stale"].includes(check.conclusion ?? "")) return "skip"
+  if (["skipped", "neutral", "stale"].includes(check.conclusion ?? ""))
+    return "skip"
   return "pass"
 }
 
@@ -255,31 +309,50 @@ function ChecksRow({
   return (
     <div>
       <Row
-        icon={failed ? failIcon : pending || status.ci === "pending" ? pendingIcon : passIcon}
+        icon={
+          failed
+            ? failIcon
+            : pending || status.ci === "pending"
+              ? pendingIcon
+              : passIcon
+        }
         label="Checks"
         expandable={checks.length > 0}
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
         action={
           status.ci === "failing" ? (
-            <PullRequestThreadAction pr={status} login={login} action="fix-checks" />
+            <PullRequestThreadAction
+              pr={status}
+              login={login}
+              action="fix-checks"
+            />
           ) : null
         }
       >
         {summary}
       </Row>
       {expanded && (
-        <ul className="max-h-64 overflow-y-auto pb-2 pl-11 pr-4">
+        <ul className="max-h-64 overflow-y-auto pr-4 pb-2 pl-11">
           {sorted.map(({ check, state }) => (
-            <li key={check.name} className="group flex h-7 items-center gap-2 text-xs">
+            <li
+              key={check.name}
+              className="group flex h-7 items-center gap-2 text-xs"
+            >
               {state === "fail" ? (
-                <XCircleIcon weight="fill" className="size-3.5 text-destructive" />
+                <XCircleIcon
+                  weight="fill"
+                  className="size-3.5 text-destructive"
+                />
               ) : state === "pending" ? (
                 <CircleDashedIcon className="size-3.5 text-warning" />
               ) : (
                 <CheckCircleIcon
                   weight="fill"
-                  className={cn("size-3.5", state === "skip" ? "text-muted-foreground" : "text-success")}
+                  className={cn(
+                    "size-3.5",
+                    state === "skip" ? "text-muted-foreground" : "text-success"
+                  )}
                 />
               )}
               {check.url ? (
@@ -297,7 +370,11 @@ function ChecksRow({
               {state === "fail" && (
                 <button
                   type="button"
-                  onClick={() => askInChat(`Why is the \`${check.name}\` check failing on this pull request?`)}
+                  onClick={() =>
+                    askInChat(
+                      `Why is the \`${check.name}\` check failing on this pull request?`
+                    )
+                  }
                   className="ml-auto text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"
                 >
                   Ask why
@@ -349,14 +426,23 @@ function ReviewsRow({
       label="Reviews"
       action={
         <>
-          {hasUnresolvedConversations(status) && status.unresolvedThreads !== 0 && (
-            <PullRequestThreadAction pr={status} login={login} action="address-comments" />
-          )}
+          {hasUnresolvedConversations(status) &&
+            status.unresolvedThreads !== 0 && (
+              <PullRequestThreadAction
+                pr={status}
+                login={login}
+                action="address-comments"
+              />
+            )}
           {status.draft === false && <RequestHumanReview pr={status} />}
         </>
       }
     >
-      {[decision, threads, requested.length ? `requested ${requested.join(", ")}` : null]
+      {[
+        decision,
+        threads,
+        requested.length ? `requested ${requested.join(", ")}` : null,
+      ]
         .filter(Boolean)
         .join(" · ")}
     </Row>
@@ -378,7 +464,13 @@ function BranchRow({
       <Row
         icon={failIcon}
         label="Branch"
-        action={<PullRequestThreadAction pr={status} login={login} action="fix-conflicts" />}
+        action={
+          <PullRequestThreadAction
+            pr={status}
+            login={login}
+            action="fix-conflicts"
+          />
+        }
       >
         Conflicts with {detail.pr.base_ref} must be resolved
       </Row>
@@ -391,7 +483,11 @@ function BranchRow({
         action={
           <MarkPullRequestReady
             pr={status}
-            onReady={() => void queryClient.invalidateQueries({ queryKey: ["review-page-pr"] })}
+            onReady={() =>
+              void queryClient.invalidateQueries({
+                queryKey: ["review-page-pr"],
+              })
+            }
           />
         }
       >
@@ -406,7 +502,11 @@ function BranchRow({
         action={
           <UpdatePullRequestBranch
             pr={status}
-            onUpdated={() => void queryClient.invalidateQueries({ queryKey: ["review-page-pr"] })}
+            onUpdated={() =>
+              void queryClient.invalidateQueries({
+                queryKey: ["review-page-pr"],
+              })
+            }
           />
         }
       >
@@ -439,7 +539,9 @@ function MergeRow({
             return () => setMerged(false)
           }}
           onMerged={() => {
-            void queryClient.invalidateQueries({ queryKey: reviewQueries.detail(pr).queryKey })
+            void queryClient.invalidateQueries({
+              queryKey: reviewQueries.detail(pr).queryKey,
+            })
             void queryClient.invalidateQueries({ queryKey: ["review-page-pr"] })
           }}
         />
@@ -454,11 +556,25 @@ function MergeRow({
   )
 }
 
-function OpenSweRow({ pr, detail }: { pr: PullRequestRef; detail: ReviewDetail }) {
+function OpenSweRow({
+  pr,
+  detail,
+}: {
+  pr: PullRequestRef
+  detail: ReviewDetail
+}) {
   const queryClient = useQueryClient()
-  const bugs = detail.findings.filter((f) => f.group === "bug" && f.status === "open").length
-  const flags = detail.findings.filter((f) => f.group !== "bug" && f.status === "open").length
-  const [expanded, setExpanded] = useState(bugs > 0)
+  const bugs = detail.findings.filter(
+    (f) => f.group === "bug" && f.status === "open"
+  ).length
+  const flags = detail.findings.filter(
+    (f) => f.group !== "bug" && f.status === "open"
+  ).length
+  // Open while there is something to look at, until the person folds it.
+  const [folded, setFolded] = useState<boolean | null>(null)
+  const expanded = folded === null ? bugs + flags > 0 : !folded
+  const setExpanded = (change: (value: boolean) => boolean) =>
+    setFolded(!change(expanded))
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
     meta: { errorTitle: "Couldn't start the Open SWE review" },
@@ -466,7 +582,9 @@ function OpenSweRow({ pr, detail }: { pr: PullRequestRef; detail: ReviewDetail }
       queryClient.setQueryData(reviewQueries.detail(pr).queryKey, (old) =>
         old ? { ...old, status: "running" as const } : old
       )
-      void queryClient.invalidateQueries({ queryKey: reviewQueries.detail(pr).queryKey })
+      void queryClient.invalidateQueries({
+        queryKey: reviewQueries.detail(pr).queryKey,
+      })
     },
   })
   const running = detail.status === "running" || reReview.isPending
@@ -487,7 +605,10 @@ function OpenSweRow({ pr, detail }: { pr: PullRequestRef; detail: ReviewDetail }
                   : "needs human review"
               : null,
             bugs || flags
-              ? [bugs && `${bugs} bug${bugs === 1 ? "" : "s"}`, flags && `${flags} flag${flags === 1 ? "" : "s"}`]
+              ? [
+                  bugs && `${bugs} bug${bugs === 1 ? "" : "s"}`,
+                  flags && `${flags} flag${flags === 1 ? "" : "s"}`,
+                ]
                   .filter(Boolean)
                   .join(", ")
               : "no open findings",
@@ -498,7 +619,13 @@ function OpenSweRow({ pr, detail }: { pr: PullRequestRef; detail: ReviewDetail }
   return (
     <div>
       <Row
-        icon={running ? <Spinner className="size-4 text-primary" /> : <AgentMark className="size-4" />}
+        icon={
+          running ? (
+            <Spinner className="size-4 text-primary" />
+          ) : (
+            <AgentMark className="size-4" />
+          )
+        }
         label="Open SWE"
         expandable={canExpand}
         expanded={expanded}
@@ -519,8 +646,10 @@ function OpenSweRow({ pr, detail }: { pr: PullRequestRef; detail: ReviewDetail }
         {summary}
       </Row>
       {expanded && canExpand && (
-        <div className="pb-3 pl-11 pr-4">
-          {detail.findings.length > 0 && <FindingQueue findings={detail.findings} />}
+        <div className="pr-4 pb-3 pl-11">
+          {detail.findings.length > 0 && (
+            <FindingQueue findings={detail.findings} />
+          )}
           {assessment && (
             <div className="mt-2 [&>section]:mt-0 [&>section]:border-dashed [&>section]:bg-transparent [&>section]:p-3 [&>section]:text-xs">
               <ReviewAssessmentCard
@@ -552,11 +681,17 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
         return (
           <li
             key={finding.id}
-            className={cn("group relative border-l-2 py-1.5 pl-3", settled && "opacity-55")}
+            className={cn(
+              "group relative border-l-2 py-1.5 pl-3",
+              settled && "opacity-55"
+            )}
             style={{ borderLeftColor: findingGroupColor[finding.group] }}
           >
             <div className="flex items-baseline gap-2 text-xs">
-              <span className="shrink-0 font-medium" style={{ color: findingGroupColor[finding.group] }}>
+              <span
+                className="shrink-0 font-medium"
+                style={{ color: findingGroupColor[finding.group] }}
+              >
                 {findingGroupLabel[finding.group]}
               </span>
               <button
@@ -587,11 +722,19 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 {findingLocation(finding)}
               </button>
               <span className="flex shrink-0 gap-2 text-[11px] text-muted-foreground">
-                <button type="button" className="hover:text-foreground" onClick={() => askInChat(askAboutFinding(finding))}>
+                <button
+                  type="button"
+                  className="hover:text-foreground"
+                  onClick={() => askInChat(askAboutFinding(finding))}
+                >
                   Ask
                 </button>
                 {!settled && (
-                  <button type="button" className="hover:text-foreground" onClick={() => askInChat(fixFinding(finding))}>
+                  <button
+                    type="button"
+                    className="hover:text-foreground"
+                    onClick={() => askInChat(fixFinding(finding))}
+                  >
                     Fix
                   </button>
                 )}

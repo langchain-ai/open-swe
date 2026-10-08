@@ -131,7 +131,9 @@ export function pullRequestStanding(
     return {
       tone: "ready",
       headline:
-        status.reviewDecision === "approved" ? "Approved and ready to merge." : "Ready to merge.",
+        status.reviewDecision === "approved"
+          ? "Approved and ready to merge."
+          : "Ready to merge.",
       details,
       next: { kind: "merge" },
     }

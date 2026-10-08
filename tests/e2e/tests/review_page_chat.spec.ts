@@ -114,7 +114,7 @@ function diffColumn(page: Page): Locator {
 }
 
 async function openChatTab(page: Page) {
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await page.getByRole("tab", { name: "Chat", exact: true }).click();
   await expect(page.getByTestId("composer-editor")).toBeVisible();
 }
 
@@ -193,7 +193,7 @@ test.describe("review page", () => {
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
   });
 
-  test("renders human input between the description and the changes", async ({
+  test("renders human input above the description and the changes", async ({
     page,
   }) => {
     const seeded = await page.request.post("/control/walkthrough", {
@@ -219,8 +219,10 @@ test.describe("review page", () => {
       .getByRole("heading", { name: "Changes", exact: true })
       .boundingBox();
     expect(description && card && changes).toBeTruthy();
-    expect(description!.y + description!.height).toBeLessThanOrEqual(card!.y);
-    expect(card!.y + card!.height).toBeLessThanOrEqual(changes!.y);
+    expect(card!.y + card!.height).toBeLessThanOrEqual(description!.y);
+    expect(description!.y + description!.height).toBeLessThanOrEqual(
+      changes!.y,
+    );
   });
 
   test("dismissing a walkthrough reports whether there was one", async ({
@@ -483,15 +485,14 @@ test.describe("review page", () => {
     page,
   }) => {
     await openReview(page, pr);
+    await page.getByRole("tab", { name: /Discussion/ }).click();
     const conversation = page.getByRole("region", { name: "Conversation" });
     await expect(conversation).toBeVisible();
 
     const comment = "Thanks, taking a look now.";
-    await expect(conversation.getByRole("textbox")).toHaveCount(0);
     await conversation
-      .getByRole("button", { name: "Comment", exact: true })
-      .click();
-    await conversation.getByRole("textbox").fill(comment);
+      .getByRole("textbox", { name: "Comment on this pull request" })
+      .fill(comment);
     await conversation
       .getByRole("button", { name: "Comment", exact: true })
       .click();
@@ -504,7 +505,7 @@ test.describe("review page", () => {
     await page.getByRole("button", { name: "Submit review" }).click();
     await expect(conversation.getByText(verdict)).toBeVisible();
     await expect(
-      conversation.getByText("Approved", { exact: true }),
+      conversation.getByText("approved", { exact: true }),
     ).toBeVisible();
 
     const fake = await fakePull(page, pr);
@@ -558,12 +559,10 @@ test.describe("review page", () => {
     expect((await fakePull(page, pr)).standalone_comment_posts).toEqual([]);
   });
 
-  test("opens info and chat as a sheet on a narrow window", async ({
-    page,
-  }) => {
+  test("opens the chat as a sheet on a narrow window", async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 800 });
     await openReview(page, pr);
-    const open = page.getByRole("button", { name: "Info & chat" });
+    const open = page.getByRole("button", { name: "Chat", exact: true });
     await expect(open).toBeVisible();
     await expect(page.getByTestId("composer-editor")).toBeHidden();
 

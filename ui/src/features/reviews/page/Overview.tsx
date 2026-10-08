@@ -19,7 +19,7 @@ const CLAMP_PX = 320
 export function Overview({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr)).data
   return (
-    <div className="mx-auto flex w-full max-w-[880px] flex-col gap-4 px-6 pt-6 pb-8">
+    <div className="flex w-full max-w-[920px] flex-col gap-4 px-4 pt-5 pb-8">
       <StandingPanel pr={pr} />
       {detail && detail.walkthrough?.human_input && (
         <section
@@ -91,11 +91,19 @@ function Description({
     <article aria-label="Description" className="group/description">
       <header className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
         {avatar && (
-          <img src={avatar} alt="" className="size-5 rounded-full" loading="lazy" />
+          <img
+            src={avatar}
+            alt=""
+            className="size-5 rounded-full"
+            loading="lazy"
+          />
         )}
-        <span className="font-medium text-foreground">{author ?? "Unknown"}</span>
+        <span className="font-medium text-foreground">
+          {author ?? "Unknown"}
+        </span>
         <span>
-          opened this {createdAt ? formatRelativeTime(new Date(createdAt).getTime()) : ""}
+          opened this{" "}
+          {createdAt ? formatRelativeTime(new Date(createdAt).getTime()) : ""}
         </span>
         <span className="ml-auto">{labels}</span>
       </header>
@@ -126,7 +134,12 @@ function Description({
           onClick={() => setExpanded((value) => !value)}
           className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
         >
-          <CaretDownIcon className={cn("size-3 transition-transform", expanded && "rotate-180")} />
+          <CaretDownIcon
+            className={cn(
+              "size-3 transition-transform",
+              expanded && "rotate-180"
+            )}
+          />
           {expanded ? "Show less" : "Show the whole description"}
         </button>
       )}

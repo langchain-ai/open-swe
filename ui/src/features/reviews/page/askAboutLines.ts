@@ -24,7 +24,12 @@ export function useAskAboutLines(pr: PullRequestRef) {
         return
       }
       try {
-        const contents = await loadReviewFileContents(pr.owner, pr.repo, pr.number, file)
+        const contents = await loadReviewFileContents(
+          pr.owner,
+          pr.repo,
+          pr.number,
+          file
+        )
         const blocks = selectionExcerpts(path, contents, range).map(
           (excerpt) =>
             `\`${excerpt.path}:${excerpt.lineLabel}\`\n\`\`\`${excerpt.language}\n${excerpt.snippet}\n\`\`\``
@@ -32,7 +37,9 @@ export function useAskAboutLines(pr: PullRequestRef) {
         askInChat(`${blocks.join("\n\n")}\n\n${question}`)
       } catch (error) {
         console.warn("Could not load the lines for the chat", error)
-        toast.error("Couldn't load those lines; the chat has their location instead")
+        toast.error(
+          "Couldn't load those lines; the chat has their location instead"
+        )
         askInChat(`${label}\n\n${question}`)
       }
     },

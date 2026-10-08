@@ -13,6 +13,7 @@ import { AgentMark } from "../AgentMark"
 import type { PullRequestRef } from "../queries"
 import { useReviewPage } from "../store"
 import { useAskAboutLines } from "../askAboutLines"
+import { NoteFrame } from "./NoteFrame"
 
 /**
  * The comment box on a line range. The same words can go to the author, as
@@ -44,16 +45,17 @@ export function Composer({
     close()
   }
   return (
-    <div className="px-3 py-1.5 font-sans">
+    <NoteFrame>
       <form
-        className="max-w-[760px] rounded-lg border border-ring/50 bg-card p-2.5 text-xs shadow-sm"
+        className="rounded-lg border border-ring/50 bg-card p-2.5 text-xs shadow-sm"
         onSubmit={(event) => {
           event.preventDefault()
           addToReview()
         }}
       >
         <p className="mb-1.5 text-muted-foreground">
-          Comment on <span className="font-mono">{commentRangeLabel(range)}</span>
+          Comment on{" "}
+          <span className="font-mono">{commentRangeLabel(range)}</span>
         </p>
         <Textarea
           aria-label="Comment body"
@@ -90,12 +92,18 @@ export function Composer({
           <Button type="button" size="sm" variant="ghost" onClick={close}>
             Cancel
           </Button>
-          <Button type="submit" size="sm" disabled={!body.trim() || pending.add.isPending}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!body.trim() || pending.add.isPending}
+          >
             {pending.add.isPending ? "Adding…" : "Add review comment"}
-            <Kbd className="bg-primary-foreground/15 text-primary-foreground">⌘↩</Kbd>
+            <Kbd className="bg-primary-foreground/15 text-primary-foreground">
+              ⌘↩
+            </Kbd>
           </Button>
         </div>
       </form>
-    </div>
+    </NoteFrame>
   )
 }

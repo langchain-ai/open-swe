@@ -9,7 +9,10 @@ import type {
 } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import type { ProposedComment } from "@/features/reviews/lib/chatDiffActions"
-import { rangeLineCount, walkthroughFileDiff } from "@/features/reviews/lib/walkthroughDiff"
+import {
+  rangeLineCount,
+  walkthroughFileDiff,
+} from "@/features/reviews/lib/walkthroughDiff"
 import { isAnchored } from "./findings"
 import type { CommentDraftTarget, DiffOrder } from "./store"
 
@@ -86,7 +89,11 @@ export function buildEntries(
   order: DiffOrder
 ): Array<DiffEntry> {
   const sorted = [...files].sort((a, b) => compareTreePaths(a.path, b.path))
-  const whole = (file: ReviewDiffFile, step: EntryStep | null, idPrefix = ""): DiffEntry => ({
+  const whole = (
+    file: ReviewDiffFile,
+    step: EntryStep | null,
+    idPrefix = ""
+  ): DiffEntry => ({
     id: `${idPrefix}${file.path}`,
     file,
     fileDiff: wholeFileDiff(file),
@@ -99,7 +106,11 @@ export function buildEntries(
 
   const byPath = new Map(sorted.map((file) => [file.path, file]))
   const seen = new Set<string>()
-  const groups: Array<{ title: string; summary: string; entries: Array<Omit<DiffEntry, "step" | "id">> }> = []
+  const groups: Array<{
+    title: string
+    summary: string
+    entries: Array<Omit<DiffEntry, "step" | "id">>
+  }> = []
   let other: (typeof groups)[number] | null = null
   for (const step of walkthrough.steps) {
     const entries: Array<Omit<DiffEntry, "step" | "id">> = []
@@ -108,7 +119,8 @@ export function buildEntries(
       if (!file) continue
       seen.add(file.path)
       const hasLines = lines.added.length > 0 || lines.deleted.length > 0
-      const sliced = hasLines && isRenderable(file) ? walkthroughFileDiff(file, lines) : null
+      const sliced =
+        hasLines && isRenderable(file) ? walkthroughFileDiff(file, lines) : null
       entries.push({
         file,
         fileDiff: sliced ?? wholeFileDiff(file),
@@ -117,7 +129,11 @@ export function buildEntries(
       })
     }
     if (entries.length === 0) continue
-    const group = { title: step.title, summary: step.other ? "" : step.summary, entries }
+    const group = {
+      title: step.title,
+      summary: step.other ? "" : step.summary,
+      entries,
+    }
     if (step.other) other = group
     groups.push(group)
   }
@@ -131,7 +147,8 @@ export function buildEntries(
     }))
   if (leftover.length > 0) {
     if (other) other.entries.push(...leftover)
-    else groups.push({ title: "Everything else", summary: "", entries: leftover })
+    else
+      groups.push({ title: "Everything else", summary: "", entries: leftover })
   }
   return groups.flatMap((group, groupIndex) =>
     group.entries.map((entry, i) => ({
@@ -148,15 +165,22 @@ export function buildEntries(
   )
 }
 
-function lineInDiff(diff: FileDiffMetadata, line: number, side: "LEFT" | "RIGHT"): boolean {
+function lineInDiff(
+  diff: FileDiffMetadata,
+  line: number,
+  side: "LEFT" | "RIGHT"
+): boolean {
   return diff.hunks.some((hunk) =>
     side === "LEFT"
-      ? line >= hunk.deletionStart && line < hunk.deletionStart + hunk.deletionCount
-      : line >= hunk.additionStart && line < hunk.additionStart + hunk.additionCount
+      ? line >= hunk.deletionStart &&
+        line < hunk.deletionStart + hunk.deletionCount
+      : line >= hunk.additionStart &&
+        line < hunk.additionStart + hunk.additionCount
   )
 }
 
-const toSide = (side: "LEFT" | "RIGHT") => (side === "LEFT" ? "deletions" : "additions")
+const toSide = (side: "LEFT" | "RIGHT") =>
+  side === "LEFT" ? "deletions" : "additions"
 
 export interface NoteSources {
   findings: ReadonlyArray<ReviewFinding>
@@ -167,7 +191,10 @@ export interface NoteSources {
 }
 
 /** Every note on one entry's lines. A line in two guide slices gets its note in the slice that shows it. */
-export function entryNotes(entry: DiffEntry, sources: NoteSources): Array<NoteAnnotation> {
+export function entryNotes(
+  entry: DiffEntry,
+  sources: NoteSources
+): Array<NoteAnnotation> {
   const path = entry.file.path
   const notes: Array<NoteAnnotation> = []
   const shows = (line: number, side: "LEFT" | "RIGHT") =>
@@ -177,25 +204,48 @@ export function entryNotes(entry: DiffEntry, sources: NoteSources): Array<NoteAn
   const findingThreads = new Set<number>()
   for (const finding of sources.findings) {
     if (finding.file !== path || !isAnchored(finding)) continue
-    if (finding.github_review_comment_id !== null) findingThreads.add(finding.github_review_comment_id)
+    if (finding.github_review_comment_id !== null)
+      findingThreads.add(finding.github_review_comment_id)
     const line = finding.end_line as number
     if (!shows(line, finding.side)) continue
-    notes.push({ side: toSide(finding.side), lineNumber: line, metadata: { kind: "finding", id: finding.id } })
+    notes.push({
+      side: toSide(finding.side),
+      lineNumber: line,
+      metadata: { kind: "finding", id: finding.id },
+    })
   }
   for (const thread of sources.threads) {
-    if (thread.path !== path || thread.outdated || thread.line === null) continue
-    if (findingThreads.has(thread.id) || !shows(thread.line, thread.side)) continue
-    notes.push({ side: toSide(thread.side), lineNumber: thread.line, metadata: { kind: "thread", id: thread.id } })
+    if (thread.path !== path || thread.outdated || thread.line === null)
+      continue
+    if (findingThreads.has(thread.id) || !shows(thread.line, thread.side))
+      continue
+    notes.push({
+      side: toSide(thread.side),
+      lineNumber: thread.line,
+      metadata: { kind: "thread", id: thread.id },
+    })
   }
   for (const comment of sources.pending) {
     if (comment.path !== path || comment.line === null) continue
     const side = comment.side ?? "RIGHT"
     if (!shows(comment.line, side)) continue
-    notes.push({ side: toSide(side), lineNumber: comment.line, metadata: { kind: "pending", id: comment.id } })
+    notes.push({
+      side: toSide(side),
+      lineNumber: comment.line,
+      metadata: { kind: "pending", id: comment.id },
+    })
   }
   for (const draft of sources.drafts) {
-    if (draft.range.file !== path || !shows(draft.range.endLine, draft.range.side)) continue
-    notes.push({ side: toSide(draft.range.side), lineNumber: draft.range.endLine, metadata: { kind: "draft", id: draft.id } })
+    if (
+      draft.range.file !== path ||
+      !shows(draft.range.endLine, draft.range.side)
+    )
+      continue
+    notes.push({
+      side: toSide(draft.range.side),
+      lineNumber: draft.range.endLine,
+      metadata: { kind: "draft", id: draft.id },
+    })
   }
   if (sources.composer?.path === path) {
     const { range } = sources.composer

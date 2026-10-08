@@ -10,6 +10,7 @@ import type { PullRequestRef } from "../queries"
 import { plainFirstLine } from "../text"
 import { useThreadActions } from "../useThreadActions"
 import { Avatar, Byline } from "./Byline"
+import { NoteFrame } from "./NoteFrame"
 import { ReplyBox } from "./ReplyBox"
 
 export function threadQuote(thread: ReviewThread): string {
@@ -35,16 +36,20 @@ export function ThreadNote({
 
   if (!open)
     return (
-      <div className="px-3 py-1 font-sans">
+      <NoteFrame className="py-1">
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex w-full max-w-[760px] items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-left text-xs hover:bg-accent"
+          className="flex w-full items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-left text-xs hover:bg-accent"
         >
           <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />
           <span className="flex -space-x-1">
             {thread.comments.slice(0, 3).map((comment) => (
-              <Avatar key={comment.id} author={comment.author} className="size-4 ring-2 ring-card" />
+              <Avatar
+                key={comment.id}
+                author={comment.author}
+                className="size-4 ring-2 ring-card"
+              />
             ))}
           </span>
           <span className="shrink-0 font-medium">
@@ -64,14 +69,14 @@ export function ThreadNote({
             </span>
           )}
         </button>
-      </div>
+      </NoteFrame>
     )
 
   return (
-    <div className="px-3 py-1.5 font-sans">
+    <NoteFrame>
       <div
         className={cn(
-          "max-w-[760px] overflow-hidden rounded-lg border border-border bg-card text-xs shadow-xs",
+          "overflow-hidden rounded-lg border border-border bg-card text-xs shadow-xs",
           thread.resolved && "opacity-80"
         )}
       >
@@ -80,7 +85,11 @@ export function ThreadNote({
             <li key={comment.id} className="flex gap-2.5 px-3 py-2.5">
               <Avatar author={comment.author} className="mt-px" />
               <div className="min-w-0 flex-1">
-                <Byline author={comment.author} createdAt={comment.created_at} href={comment.html_url || undefined} />
+                <Byline
+                  author={comment.author}
+                  createdAt={comment.created_at}
+                  href={comment.html_url || undefined}
+                />
                 <div className="mt-1 text-[13px] leading-[1.6] [&_.markdown-body]:text-[13px]">
                   <Markdown content={comment.body} />
                 </div>
@@ -89,7 +98,10 @@ export function ThreadNote({
           ))}
         </ol>
         <div className="flex flex-col gap-2 border-t border-border bg-muted/40 px-3 py-2">
-          <ReplyBox pending={reply.isPending} onSend={(body) => reply.mutate(body)} />
+          <ReplyBox
+            pending={reply.isPending}
+            onSend={(body) => reply.mutate(body)}
+          />
           <div className="flex items-center gap-1">
             {thread.node_id && (
               <Button
@@ -105,7 +117,11 @@ export function ThreadNote({
                 {thread.resolved ? "Unresolve" : "Resolve conversation"}
               </Button>
             )}
-            <Button size="sm" variant="ghost" onClick={() => askInChat(threadQuote(thread))}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => askInChat(threadQuote(thread))}
+            >
               Ask Open SWE
             </Button>
             <button
@@ -118,6 +134,6 @@ export function ThreadNote({
           </div>
         </div>
       </div>
-    </div>
+    </NoteFrame>
   )
 }

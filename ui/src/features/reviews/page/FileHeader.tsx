@@ -40,7 +40,8 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
   const renderable = isRenderable(file)
   const collapsed = !renderable || viewed !== flipped
   const findings = (detail?.findings ?? []).filter(
-    (finding) => finding.file === path && finding.status === "open" && isAnchored(finding)
+    (finding) =>
+      finding.file === path && finding.status === "open" && isAnchored(finding)
   )
   const threads = (conversation?.threads ?? []).filter(
     (thread) => thread.path === path && !thread.resolved && !thread.outdated
@@ -56,12 +57,14 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       data-file-header={path}
       onPointerEnter={() => {
         if (renderable)
-          loadReviewFileContents(pr.owner, pr.repo, pr.number, file).catch((error: unknown) =>
-            console.warn("Could not prefetch file contents", { path, error })
+          loadReviewFileContents(pr.owner, pr.repo, pr.number, file).catch(
+            (error: unknown) =>
+              console.warn("Could not prefetch file contents", { path, error })
           )
       }}
       onClick={(event) => {
-        if (event.target === event.currentTarget && renderable) toggleCollapsed(path)
+        if (event.target === event.currentTarget && renderable)
+          toggleCollapsed(path)
       }}
       style={{ height: FILE_HEADER_HEIGHT }}
       className={cn(
@@ -77,7 +80,12 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         onClick={() => toggleCollapsed(path)}
         className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
       >
-        <CaretDownIcon className={cn("size-3.5 transition-transform", collapsed && "-rotate-90")} />
+        <CaretDownIcon
+          className={cn(
+            "size-3.5 transition-transform",
+            collapsed && "-rotate-90"
+          )}
+        />
       </button>
       {entry.step && (
         <span
@@ -87,11 +95,19 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
           {entry.step.index}
         </span>
       )}
-      <span className="flex min-w-0 items-baseline font-mono text-[12px]" title={path}>
+      <span
+        className="flex min-w-0 items-baseline font-mono text-[12px]"
+        title={path}
+      >
         <span className="truncate text-left text-muted-foreground [direction:rtl]">
           <bdi>{dir}</bdi>
         </span>
-        <span className={cn("shrink-0 font-medium text-foreground", viewed && "text-muted-foreground")}>
+        <span
+          className={cn(
+            "min-w-[6ch] shrink-[0.01] truncate font-medium text-foreground",
+            viewed && "text-muted-foreground"
+          )}
+        >
           {name}
         </span>
       </span>
@@ -99,9 +115,11 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         type="button"
         aria-label={`Copy ${path}`}
         onClick={() =>
-          void navigator.clipboard.writeText(path).then(() => toast.success("Copied the path"))
+          void navigator.clipboard
+            .writeText(path)
+            .then(() => toast.success("Copied the path"))
         }
-        className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground group-hover/header:flex"
+        className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/header:flex hover:text-foreground"
       >
         <CopyIcon className="size-3" />
       </button>
@@ -111,8 +129,14 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         </span>
       )}
       <span className="flex shrink-0 gap-1.5 font-mono text-[11px] tabular-nums">
-        {entry.additions > 0 && <span className="text-success-foreground">+{entry.additions}</span>}
-        {entry.deletions > 0 && <span className="text-destructive-foreground">−{entry.deletions}</span>}
+        {entry.additions > 0 && (
+          <span className="text-success-foreground">+{entry.additions}</span>
+        )}
+        {entry.deletions > 0 && (
+          <span className="text-destructive-foreground">
+            −{entry.deletions}
+          </span>
+        )}
       </span>
       {worst && (
         <span
@@ -134,13 +158,18 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         </span>
       )}
       {!renderable && (
-        <span className="truncate text-muted-foreground">Binary or too large to show</span>
+        <span className="truncate text-muted-foreground">
+          Binary or too large to show
+        </span>
       )}
-      <span className="flex-1" onClick={() => renderable && toggleCollapsed(path)} />
+      <span
+        className="flex-1"
+        onClick={() => renderable && toggleCollapsed(path)}
+      />
       <button
         type="button"
         onClick={() => askInChat(`About \`${path}\` in this pull request: `)}
-        className="hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground group-hover/header:flex"
+        className="hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground group-hover/header:flex hover:bg-accent hover:text-foreground"
       >
         <AgentMark className="size-3" />
         Ask
@@ -150,7 +179,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         target="_blank"
         rel="noreferrer"
         aria-label={`View ${path} on GitHub`}
-        className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground group-hover/header:flex"
+        className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground group-hover/header:flex hover:bg-accent hover:text-foreground"
       >
         <ArrowSquareOutIcon className="size-3.5" />
       </a>
@@ -169,7 +198,9 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         <span
           className={cn(
             "flex size-3 items-center justify-center rounded-[3px] border",
-            viewed ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/60"
+            viewed
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-muted-foreground/60"
           )}
         >
           {viewed && <CheckIcon weight="bold" className="size-2.5" />}

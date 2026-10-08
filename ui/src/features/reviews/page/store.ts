@@ -25,10 +25,12 @@ interface ReviewPageState {
   railTab: RailTab
   /** Below the wide breakpoint the rail is an overlay; on wide screens it is the focus-mode toggle. */
   railOpen: boolean
+  /** Whether the file list sits beside the diff, where there is room for it. */
   navigatorOpen: boolean
+  /** The file list over the page, where there is no room beside the diff. */
+  navigatorOverlay: boolean
   reviewOpen: boolean
   reviewVerdict: PullRequestReviewEvent
-  helpOpen: boolean
   order: DiffOrder
   diffStyle: DiffStyle
   viewed: ReadonlySet<string>
@@ -37,8 +39,6 @@ interface ReviewPageState {
   activeEntry: string | null
   /** Bumped per request so asking for the same target twice still scrolls. */
   jump: { key: number; target: DiffTarget } | null
-  /** The line range being flashed after a jump from the chat or a finding. */
-  flash: { path: string; range: SelectedLineRange; key: number } | null
   composer: CommentDraftTarget | null
   expandedFinding: string | null
   chatDraft: { key: number; text: string } | undefined
@@ -51,15 +51,14 @@ interface ReviewPageActions {
   setRailTab: (tab: RailTab) => void
   setRailOpen: (open: boolean) => void
   toggleNavigator: () => void
+  setNavigatorOverlay: (open: boolean) => void
   openReview: (verdict?: PullRequestReviewEvent) => void
   setReviewOpen: (open: boolean) => void
-  setHelpOpen: (open: boolean) => void
   setOrder: (order: DiffOrder) => void
   setDiffStyle: (style: DiffStyle) => void
   toggleViewed: (path: string) => boolean
   setActive: (entry: { id: string; path: string } | null) => void
   jumpTo: (target: DiffTarget) => void
-  flashRange: (path: string, range: SelectedLineRange) => void
   setComposer: (target: CommentDraftTarget | null) => void
   setExpandedFinding: (id: string | null) => void
   askInChat: (text: string) => void
@@ -69,6 +68,8 @@ interface ReviewPageActions {
 const ORDER_KEY = "open-swe.review.view"
 const DIFF_STYLE_KEY = "open-swe.review.diffStyle"
 const NAVIGATOR_KEY = "open-swe.review.navigator"
+/** Wide enough for the file list, the diff and the chat side by side. */
+export const NAVIGATOR_INLINE_QUERY = "(min-width: 1360px)"
 
 function read(key: string): string | null {
   try {
@@ -92,7 +93,9 @@ function viewedKey(pr: PullRequestRef, headSha: string | null): string {
 }
 
 function samePullRequest(a: PullRequestRef | null, b: PullRequestRef): boolean {
-  return !!a && a.owner === b.owner && a.repo === b.repo && a.number === b.number
+  return (
+    !!a && a.owner === b.owner && a.repo === b.repo && a.number === b.number
+  )
 }
 
 function readViewed(pr: PullRequestRef, headSha: string | null): Set<string> {
@@ -120,16 +123,15 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     railTab: "chat",
     railOpen: false,
     navigatorOpen: true,
+    navigatorOverlay: false,
     reviewOpen: false,
     reviewVerdict: "COMMENT",
-    helpOpen: false,
     order: "files",
     diffStyle: "unified",
     viewed: new Set(),
     activePath: null,
     activeEntry: null,
     jump: null,
-    flash: null,
     composer: null,
     expandedFinding: null,
     chatDraft: undefined,
@@ -151,7 +153,6 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
               activePath: null,
               activeEntry: null,
               jump: null,
-              flash: null,
               composer: null,
               expandedFinding: null,
               chatDraft: undefined,
@@ -166,14 +167,18 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     setRailTab: (railTab) => set({ railTab, railOpen: true }),
     setRailOpen: (railOpen) => set({ railOpen }),
     toggleNavigator: () => {
+      if (!window.matchMedia(NAVIGATOR_INLINE_QUERY).matches) {
+        set({ navigatorOverlay: !get().navigatorOverlay })
+        return
+      }
       const navigatorOpen = !get().navigatorOpen
       write(NAVIGATOR_KEY, navigatorOpen ? "open" : "closed")
       set({ navigatorOpen })
     },
+    setNavigatorOverlay: (navigatorOverlay) => set({ navigatorOverlay }),
     openReview: (verdict = "COMMENT") =>
       set({ reviewOpen: true, reviewVerdict: verdict }),
     setReviewOpen: (reviewOpen) => set({ reviewOpen }),
-    setHelpOpen: (helpOpen) => set({ helpOpen }),
     setOrder: (order) => {
       write(ORDER_KEY, order)
       set({ order })
@@ -201,11 +206,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     },
     jumpTo: (target) => {
       jumpKey += 1
-      set({ jump: { key: jumpKey, target } })
-    },
-    flashRange: (path, range) => {
-      jumpKey += 1
-      set({ flash: { path, range, key: jumpKey } })
+      set({ jump: { key: jumpKey, target }, navigatorOverlay: false })
     },
     setComposer: (composer) => set({ composer }),
     setExpandedFinding: (expandedFinding) => set({ expandedFinding }),

@@ -30,7 +30,12 @@ import { plainFirstLine } from "./text"
 
 type Block =
   | { kind: "commits"; key: string; commits: Array<ConversationCommit> }
-  | { kind: "item"; key: string; item: ConversationComment | ConversationReview; repeats: number }
+  | {
+      kind: "item"
+      key: string
+      item: ConversationComment | ConversationReview
+      repeats: number
+    }
 
 const stateWords: Record<ConversationReview["state"], string> = {
   APPROVED: "approved",
@@ -46,7 +51,8 @@ function toBlocks(items: ReadonlyArray<ConversationItem>): Array<Block> {
     const last = blocks.at(-1)
     if (item.kind === "commit") {
       if (last?.kind === "commits") last.commits.push(item)
-      else blocks.push({ kind: "commits", key: `c-${item.sha}`, commits: [item] })
+      else
+        blocks.push({ kind: "commits", key: `c-${item.sha}`, commits: [item] })
       continue
     }
     // The repeat moves to where it was last said, so the timeline keeps reading forward.
@@ -58,7 +64,11 @@ function toBlocks(items: ReadonlyArray<ConversationItem>): Array<Block> {
         block.item.kind === item.kind &&
         plainFirstLine(block.item.body) === plainFirstLine(item.body)
     )
-    const repeats = index >= 0 ? (blocks.splice(index, 1)[0] as Extract<Block, { kind: "item" }>).repeats + 1 : 0
+    const repeats =
+      index >= 0
+        ? (blocks.splice(index, 1)[0] as Extract<Block, { kind: "item" }>)
+            .repeats + 1
+        : 0
     blocks.push({ kind: "item", key: `${item.kind}-${item.id}`, item, repeats })
   }
   return blocks
@@ -67,7 +77,10 @@ function toBlocks(items: ReadonlyArray<ConversationItem>): Array<Block> {
 /** GitHub's conversation, with people at full volume and bots folded to a line each. */
 export function Discussion({ pr }: { pr: PullRequestRef }) {
   const conversation = useQuery(reviewQueries.conversation(pr))
-  const blocks = useMemo(() => toBlocks(conversation.data?.items ?? []), [conversation.data?.items])
+  const blocks = useMemo(
+    () => toBlocks(conversation.data?.items ?? []),
+    [conversation.data?.items]
+  )
   const threadsByReview = useMemo(() => {
     const map = new Map<number, Array<ReviewThread>>()
     for (const thread of conversation.data?.threads ?? []) {
@@ -90,9 +103,13 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
             ))}
           </div>
         ) : conversation.isError ? (
-          <p className="text-xs text-destructive">Couldn&apos;t load the conversation: {conversation.error.message}</p>
+          <p className="text-xs text-destructive">
+            Couldn&apos;t load the conversation: {conversation.error.message}
+          </p>
         ) : blocks.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No one has commented yet.</p>
+          <p className="text-xs text-muted-foreground">
+            No one has commented yet.
+          </p>
         ) : (
           <ol className="relative flex flex-col gap-3 before:absolute before:inset-y-2 before:left-[11px] before:w-px before:bg-border">
             {blocks.map((block) =>
@@ -103,7 +120,11 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
                   key={block.key}
                   item={block.item}
                   repeats={block.repeats}
-                  threads={block.item.kind === "review" ? (threadsByReview.get(block.item.id) ?? []) : []}
+                  threads={
+                    block.item.kind === "review"
+                      ? (threadsByReview.get(block.item.id) ?? [])
+                      : []
+                  }
                 />
               )
             )}
@@ -117,7 +138,9 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
 
 function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
   const [open, setOpen] = useState(commits.length <= 2)
-  const authors = [...new Set(commits.map((commit) => commit.author?.login ?? "someone"))]
+  const authors = [
+    ...new Set(commits.map((commit) => commit.author?.login ?? "someone")),
+  ]
   return (
     <li className="relative pl-8 text-xs">
       <span className="absolute top-0.5 left-[5px] flex size-[13px] items-center justify-center rounded-full bg-background text-muted-foreground ring-4 ring-background">
@@ -128,11 +151,18 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
         onClick={() => setOpen((value) => !value)}
         className="text-left text-muted-foreground hover:text-foreground"
       >
-        <span className="font-medium text-foreground/80">{authors.join(", ")}</span> pushed{" "}
-        {commits.length} commit{commits.length === 1 ? "" : "s"}{" "}
+        <span className="font-medium text-foreground/80">
+          {authors.join(", ")}
+        </span>{" "}
+        pushed {commits.length} commit{commits.length === 1 ? "" : "s"}{" "}
         {formatRelativeTime(new Date(commits.at(-1)!.created_at).getTime())}
         {commits.length > 2 && (
-          <CaretRightIcon className={cn("ml-1 inline size-3 align-[-2px] transition-transform", open && "rotate-90")} />
+          <CaretRightIcon
+            className={cn(
+              "ml-1 inline size-3 align-[-2px] transition-transform",
+              open && "rotate-90"
+            )}
+          />
         )}
       </button>
       {open && (
@@ -147,7 +177,9 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
               >
                 {commit.message.split("\n")[0]}
               </a>
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">{commit.sha.slice(0, 7)}</span>
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                {commit.sha.slice(0, 7)}
+              </span>
             </li>
           ))}
         </ul>
@@ -157,8 +189,10 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
 }
 
 function ReviewStateMark({ state }: { state: ConversationReview["state"] }) {
-  if (state === "APPROVED") return <CheckCircleIcon weight="fill" className="size-3.5 text-success" />
-  if (state === "CHANGES_REQUESTED") return <XCircleIcon weight="fill" className="size-3.5 text-destructive" />
+  if (state === "APPROVED")
+    return <CheckCircleIcon weight="fill" className="size-3.5 text-success" />
+  if (state === "CHANGES_REQUESTED")
+    return <XCircleIcon weight="fill" className="size-3.5 text-destructive" />
   return <ChatCircleIcon className="size-3.5 text-muted-foreground" />
 }
 
@@ -178,33 +212,42 @@ function ItemBlock({
   const firstLine = plainFirstLine(item.body)
   return (
     <li className="relative pl-8">
-      <Avatar author={item.author as ConversationAuthor | null} className="absolute top-0 left-0 size-6 ring-4 ring-background" />
+      <Avatar
+        author={item.author as ConversationAuthor | null}
+        className="absolute top-0 left-0 size-6 ring-4 ring-background"
+      />
       <div className="flex min-w-0 items-center gap-1.5">
         {item.kind === "review" && <ReviewStateMark state={item.state} />}
-        <Byline author={item.author} createdAt={item.created_at} href={item.html_url} verb={verb} />
+        <Byline
+          author={item.author}
+          createdAt={item.created_at}
+          href={item.html_url}
+          verb={verb}
+        />
         {repeats > 0 && (
-          <span className="shrink-0 text-[11px] text-muted-foreground" title="The same message, posted again">
+          <span
+            className="shrink-0 text-[11px] text-muted-foreground"
+            title="The same message, posted again"
+          >
             ×{repeats + 1}
           </span>
         )}
       </div>
-      {quiet && !open ? (
-        item.body.trim() && (
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="mt-0.5 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
-          >
-            {firstLine}
-          </button>
-        )
-      ) : (
-        item.body.trim() && (
-          <div className="mt-1.5 rounded-lg border border-border bg-card px-3 py-2 text-[13px] leading-[1.6]">
-            <Markdown content={item.body} />
-          </div>
-        )
-      )}
+      {quiet && !open
+        ? item.body.trim() && (
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="mt-0.5 block w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
+            >
+              {firstLine}
+            </button>
+          )
+        : item.body.trim() && (
+            <div className="mt-1.5 rounded-lg border border-border bg-card px-3 py-2 text-[13px] leading-[1.6]">
+              <Markdown content={item.body} />
+            </div>
+          )}
       {threads.length > 0 && <ReviewThreads threads={threads} />}
     </li>
   )
@@ -223,7 +266,13 @@ function ReviewThreads({ threads }: { threads: Array<ReviewThread> }) {
               type="button"
               disabled={thread.outdated || thread.line === null}
               onClick={() =>
-                thread.line !== null && jumpTo({ kind: "line", path: thread.path, line: thread.line, side: thread.side })
+                thread.line !== null &&
+                jumpTo({
+                  kind: "line",
+                  path: thread.path,
+                  line: thread.line,
+                  side: thread.side,
+                })
               }
               className={cn(
                 "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs hover:bg-accent disabled:hover:bg-transparent",
@@ -235,12 +284,24 @@ function ReviewThreads({ threads }: { threads: Array<ReviewThread> }) {
                 {name}
                 {line ? `:${line}` : ""}
               </span>
-              <span className="min-w-0 flex-1 truncate">{plainFirstLine(thread.comments[0]?.body ?? "")}</span>
+              <span className="min-w-0 flex-1 truncate">
+                {plainFirstLine(thread.comments[0]?.body ?? "")}
+              </span>
               {thread.comments.length > 1 && (
-                <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{thread.comments.length}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                  {thread.comments.length}
+                </span>
               )}
-              {thread.outdated && <span className="shrink-0 text-[10px] text-muted-foreground">Outdated</span>}
-              {thread.resolved && <span className="shrink-0 text-[10px] text-muted-foreground">Resolved</span>}
+              {thread.outdated && (
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  Outdated
+                </span>
+              )}
+              {thread.resolved && (
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  Resolved
+                </span>
+              )}
             </button>
           </li>
         )
@@ -254,7 +315,8 @@ function CommentBox({ pr }: { pr: PullRequestRef }) {
   const [body, setBody] = useState("")
   const key = reviewQueries.conversation(pr).queryKey
   const post = useMutation({
-    mutationFn: (text: string) => postReviewConversationComment(pr.owner, pr.repo, pr.number, text),
+    mutationFn: (text: string) =>
+      postReviewConversationComment(pr.owner, pr.repo, pr.number, text),
     meta: { errorTitle: "Couldn't post the comment", silent: true },
     onSuccess: (comment) => {
       queryClient.setQueryData<Conversation | undefined>(key, (old) =>
@@ -284,9 +346,17 @@ function CommentBox({ pr }: { pr: PullRequestRef }) {
         }}
         className="max-h-48 resize-none text-xs"
       />
-      {post.error && <p role="alert" className="mt-1 text-xs text-destructive">{post.error.message}</p>}
+      {post.error && (
+        <p role="alert" className="mt-1 text-xs text-destructive">
+          {post.error.message}
+        </p>
+      )}
       <div className="mt-2 flex justify-end">
-        <Button size="sm" disabled={!body.trim() || post.isPending} onClick={send}>
+        <Button
+          size="sm"
+          disabled={!body.trim() || post.isPending}
+          onClick={send}
+        >
           {post.isPending ? "Commenting…" : "Comment"}
         </Button>
       </div>

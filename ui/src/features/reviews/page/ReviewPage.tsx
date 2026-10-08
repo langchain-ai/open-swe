@@ -1,10 +1,15 @@
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react"
 
 import { useIsHydrated } from "@/lib/hydration"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { pageTitle } from "@/lib/pageTitle"
-import { cn } from "@/lib/utils"
 import { Sheet, SheetPopup } from "@/components/ui/sheet"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import {
@@ -20,7 +25,7 @@ import { Header } from "./Header"
 import { Navigator } from "./Navigator"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
-import { useReviewPage } from "./store"
+import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 
 const RAIL_WIDTH_KEY = "open-swe.review-panel.width"
 const RAIL_MIN = 340
@@ -31,7 +36,9 @@ function readRailWidth(): number {
   if (typeof window === "undefined") return RAIL_DEFAULT
   try {
     const stored = Number(window.localStorage.getItem(RAIL_WIDTH_KEY))
-    return Number.isFinite(stored) && stored >= RAIL_MIN ? Math.min(stored, RAIL_MAX) : RAIL_DEFAULT
+    return Number.isFinite(stored) && stored >= RAIL_MIN
+      ? Math.min(stored, RAIL_MAX)
+      : RAIL_DEFAULT
   } catch (error) {
     console.warn("Could not read the chat width", error)
     return RAIL_DEFAULT
@@ -51,13 +58,16 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   }).data
   const open = useReviewPage((state) => state.open)
   const navigatorOpen = useReviewPage((state) => state.navigatorOpen)
-  const toggleNavigator = useReviewPage((state) => state.toggleNavigator)
+  const navigatorOverlay = useReviewPage((state) => state.navigatorOverlay)
+  const setNavigatorOverlay = useReviewPage(
+    (state) => state.setNavigatorOverlay
+  )
   const railOpen = useReviewPage((state) => state.railOpen)
   const setRailOpen = useReviewPage((state) => state.setRailOpen)
   // The server and the first client render assume a desktop window, so hydration matches.
   const hydrated = useIsHydrated()
   const wideQuery = useMediaQuery("(min-width: 1100px)")
-  const navigatorQuery = useMediaQuery("(min-width: 1360px)")
+  const navigatorQuery = useMediaQuery(NAVIGATOR_INLINE_QUERY)
   const wide = !hydrated || wideQuery
   const roomForNavigator = !hydrated || navigatorQuery
   const headSha = detail.data?.head_sha ?? null
@@ -68,11 +78,15 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const seenSha = useRef(headSha)
   useEffect(() => {
     if (headSha && seenSha.current && headSha !== seenSha.current)
-      void queryClient.invalidateQueries({ queryKey: reviewQueries.diff(pr).queryKey })
+      void queryClient.invalidateQueries({
+        queryKey: reviewQueries.diff(pr).queryKey,
+      })
     if (headSha) seenSha.current = headSha
   }, [headSha, queryClient, pr])
 
-  const title = pageTitle(detail.data?.pr.title ?? `${pr.owner}/${pr.repo} #${pr.number}`)
+  const title = pageTitle(
+    detail.data?.pr.title ?? `${pr.owner}/${pr.repo} #${pr.number}`
+  )
   useEffect(() => {
     document.title = title
   }, [title, chatTitle])
@@ -85,8 +99,13 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
 
   useCollapseAppSidebar(pr)
   const sidebar = useSidebarControls()
-  const isDesktop = typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const leftInset = sidebar?.collapsed ? (isDesktop ? "pl-32" : "pl-14") : "pl-3"
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const leftInset = sidebar?.collapsed
+    ? isDesktop
+      ? "pl-32"
+      : "pl-14"
+    : "pl-3"
 
   const [draggedWidth, setRailWidth] = useState<number | null>(null)
   const railWidth = draggedWidth ?? (hydrated ? readRailWidth() : RAIL_DEFAULT)
@@ -99,7 +118,9 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
         <Header pr={pr} leftInset={leftInset} compactRail={!wide} />
         {detail.isError ? (
-          <div className="p-6 text-xs text-destructive">{detail.error.message}</div>
+          <div className="p-6 text-xs text-destructive">
+            {detail.error.message}
+          </div>
         ) : (
           <div className="flex min-h-0 flex-1">
             {navigatorInline && (
@@ -130,14 +151,23 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
         )}
         {!wide && (
           <Sheet open={railOpen} onOpenChange={setRailOpen}>
-            <SheetPopup side="right" keepMounted showCloseButton={false} className="max-w-[440px] p-0">
+            <SheetPopup
+              side="right"
+              keepMounted
+              showCloseButton={false}
+              className="max-w-[440px] p-0"
+            >
               <Rail pr={pr} onClose={() => setRailOpen(false)} />
             </SheetPopup>
           </Sheet>
         )}
-        {navigatorOpen && !roomForNavigator && (
-          <Sheet open onOpenChange={(next) => !next && toggleNavigator()}>
-            <SheetPopup side="left" showCloseButton={false} className={cn("max-w-[300px] p-0")}>
+        {!roomForNavigator && (
+          <Sheet open={navigatorOverlay} onOpenChange={setNavigatorOverlay}>
+            <SheetPopup
+              side="left"
+              showCloseButton={false}
+              className="max-w-[300px] p-0"
+            >
               <Navigator pr={pr} />
             </SheetPopup>
           </Sheet>
@@ -155,7 +185,10 @@ function useResize(width: number, setWidth: (width: number) => void) {
       const startWidth = width
       let latest = width
       const move = (moveEvent: PointerEvent) => {
-        latest = Math.min(RAIL_MAX, Math.max(RAIL_MIN, startWidth + startX - moveEvent.clientX))
+        latest = Math.min(
+          RAIL_MAX,
+          Math.max(RAIL_MIN, startWidth + startX - moveEvent.clientX)
+        )
         setWidth(latest)
       }
       const up = () => {

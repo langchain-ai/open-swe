@@ -1,12 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { CodeView, WorkerPoolContextProvider } from "@pierre/diffs/react"
 import type {
@@ -29,7 +22,10 @@ import {
   fileContentsCacheKey,
   useDiffOverflow,
 } from "@/features/agents/utils/diffUtils"
-import { readDiffSelection, selectedRangeFromDiff } from "@/features/agents/utils/diffSelection"
+import {
+  readDiffSelection,
+  selectedRangeFromDiff,
+} from "@/features/agents/utils/diffSelection"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
@@ -52,6 +48,7 @@ import { EntriesContext, FILE_HEADER_HEIGHT, useEntry } from "./entries"
 import { FileHeader } from "./FileHeader"
 import { InlineCode } from "./inlineCode"
 import { FindingNote } from "./notes/FindingNote"
+import { NoteFrame } from "./notes/NoteFrame"
 import { Composer } from "./notes/Composer"
 import { ThreadNote } from "./notes/ThreadNote"
 import { Overview } from "./Overview"
@@ -89,9 +86,13 @@ function useCodeViewItems(
       entries.map((entry) => {
         const annotations = entryNotes(entry, sources)
         const path = entry.file.path
-        const collapsed = !isRenderable(entry.file) || viewed.has(path) !== flipped.has(path)
+        const collapsed =
+          !isRenderable(entry.file) || viewed.has(path) !== flipped.has(path)
         const hunks = entry.fileDiff.hunks
-          .map((hunk) => `${hunk.additionStart},${hunk.additionCount},${hunk.deletionStart},${hunk.deletionCount}`)
+          .map(
+            (hunk) =>
+              `${hunk.additionStart},${hunk.additionCount},${hunk.deletionStart},${hunk.deletionCount}`
+          )
           .join(";")
         return {
           id: entry.id,
@@ -112,11 +113,17 @@ function toPierreSide(side: "LEFT" | "RIGHT") {
   return side === "LEFT" ? "deletions" : "additions"
 }
 
-function containsLine(diff: FileDiffMetadata, line: number, side: "LEFT" | "RIGHT"): boolean {
+function containsLine(
+  diff: FileDiffMetadata,
+  line: number,
+  side: "LEFT" | "RIGHT"
+): boolean {
   return diff.hunks.some((hunk) =>
     side === "LEFT"
-      ? line >= hunk.deletionStart && line < hunk.deletionStart + hunk.deletionCount
-      : line >= hunk.additionStart && line < hunk.additionStart + hunk.additionCount
+      ? line >= hunk.deletionStart &&
+        line < hunk.deletionStart + hunk.deletionCount
+      : line >= hunk.additionStart &&
+        line < hunk.additionStart + hunk.additionCount
   )
 }
 
@@ -145,17 +152,28 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     () => (diff.data ? buildEntries(diff.data.files, walkthrough, order) : []),
     [diff.data, walkthrough, order]
   )
-  const entryMap = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries])
+  const entryMap = useMemo(
+    () => new Map(entries.map((entry) => [entry.id, entry])),
+    [entries]
+  )
   const draftComments = drafts?.comments
   const sources = useMemo<NoteSources>(
     () => ({
       findings: detail?.findings ?? [],
       threads: conversation?.threads ?? [],
       pending: pending.comments,
-      drafts: (draftComments ?? []).filter((draft) => !draft.outcome).map((draft) => draft.proposal),
+      drafts: (draftComments ?? [])
+        .filter((draft) => !draft.outcome)
+        .map((draft) => draft.proposal),
       composer,
     }),
-    [detail?.findings, conversation?.threads, pending.comments, draftComments, composer]
+    [
+      detail?.findings,
+      conversation?.threads,
+      pending.comments,
+      draftComments,
+      composer,
+    ]
   )
   const items = useCodeViewItems(entries, sources, viewed, flipped)
 
@@ -163,13 +181,22 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     () => new Map((diff.data?.files ?? []).map((file) => [file.path, file])),
     [diff.data]
   )
-  const pathOf = useCallback((id: string) => entryMap.get(id)?.file.path ?? id, [entryMap])
+  const pathOf = useCallback(
+    (id: string) => entryMap.get(id)?.file.path ?? id,
+    [entryMap]
+  )
 
   const loadDiffFiles = useCallback(
     async (fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
       const file = filesByName.get(fileDiff.name)
-      if (!file) throw new Error(`No file named ${fileDiff.name} in this pull request`)
-      const contents = await loadReviewFileContents(pr.owner, pr.repo, pr.number, file)
+      if (!file)
+        throw new Error(`No file named ${fileDiff.name} in this pull request`)
+      const contents = await loadReviewFileContents(
+        pr.owner,
+        pr.repo,
+        pr.number,
+        file
+      )
       const original = contents.originalContent ?? ""
       const modified = contents.modifiedContent ?? ""
       return {
@@ -188,10 +215,9 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     [filesByName, pr]
   )
 
-  const options = useMemo<CodeViewReactOptions<Note>>(
-    () => {
-      const base = buildDiffOptions(diffStyle, overflow, theme)
-      return {
+  const options = useMemo<CodeViewReactOptions<Note>>(() => {
+    const base = buildDiffOptions(diffStyle, overflow, theme)
+    return {
       ...base,
       // FileHeader draws its own rule. Rows are pinned to the height the
       // gutter paints, so what CodeView measures is what it laid out.
@@ -215,16 +241,19 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       enableLineSelection: true,
       enableGutterUtility: true,
       lineHoverHighlight: "number",
-      onGutterUtilityClick: (range: SelectedLineRange, context: { item: { id: string } }) =>
-        setComposer({ path: pathOf(context.item.id), range }),
-      onLineSelectionEnd: (range: SelectedLineRange | null, context: { item: { id: string } }) => {
+      onGutterUtilityClick: (
+        range: SelectedLineRange,
+        context: { item: { id: string } }
+      ) => setComposer({ path: pathOf(context.item.id), range }),
+      onLineSelectionEnd: (
+        range: SelectedLineRange | null,
+        context: { item: { id: string } }
+      ) => {
         if (range && range.start !== range.end)
           setComposer({ path: pathOf(context.item.id), range })
       },
-      }
-    },
-    [diffStyle, overflow, theme, loadDiffFiles, setComposer, pathOf]
-  )
+    }
+  }, [diffStyle, overflow, theme, loadDiffFiles, setComposer, pathOf])
 
   const renderHeader = useCallback(
     () => (
@@ -235,7 +264,10 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     ),
     [pr]
   )
-  const renderCustomHeader = useCallback((item: Item) => <FileHeader pr={pr} id={item.id} />, [pr])
+  const renderCustomHeader = useCallback(
+    (item: Item) => <FileHeader pr={pr} id={item.id} />,
+    [pr]
+  )
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<Note>, item: Item) => (
       <NoteView pr={pr} note={annotation.metadata} entryId={item.id} />
@@ -260,16 +292,25 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
                   candidate.file.path === target.path &&
                   (candidate.step === null ||
                     containsLine(candidate.fileDiff, target.line, target.side))
-              ) ?? entries.find((candidate) => candidate.file.path === target.path))
+              ) ??
+              entries.find((candidate) => candidate.file.path === target.path))
             : entries.find((candidate) => candidate.file.path === target.path)
       if (!entry) return
       const state = useReviewPage.getState()
       const path = entry.file.path
-      if (isRenderable(entry.file) && state.viewed.has(path) !== state.collapsed.has(path))
+      if (
+        isRenderable(entry.file) &&
+        state.viewed.has(path) !== state.collapsed.has(path)
+      )
         toggleCollapsed(path)
       requestAnimationFrame(() => {
         if (target.kind === "file" || target.kind === "entry") {
-          view.scrollTo({ type: "item", id: entry.id, align: "start", behavior: "instant" })
+          view.scrollTo({
+            type: "item",
+            id: entry.id,
+            align: "start",
+            behavior: "instant",
+          })
           return
         }
         const side = toPierreSide(target.side)
@@ -281,10 +322,14 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           align: "center",
           behavior: "smooth",
         })
-        view.setSelectedLines({ id: entry.id, range: { start: target.line, end: target.line, side } })
+        view.setSelectedLines({
+          id: entry.id,
+          range: { start: target.line, end: target.line, side },
+        })
         window.setTimeout(() => {
           const current = view.getSelectedLines()
-          if (current?.id === entry.id && current.range.start === target.line) view.clearSelectedLines()
+          if (current?.id === entry.id && current.range.start === target.line)
+            view.clearSelectedLines()
         }, 1800)
       })
     },
@@ -294,7 +339,8 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   useEffect(
     () =>
       useReviewPage.subscribe((state, previous) => {
-        if (state.jump && state.jump !== previous.jump) scrollTo(state.jump.target)
+        if (state.jump && state.jump !== previous.jump)
+          scrollTo(state.jump.target)
       }),
     [scrollTo]
   )
@@ -326,17 +372,42 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
 
   const [selection, setSelection] = useState<TextSelection | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  // Notes size themselves to the visible pane, not to the widest code line.
+  useEffect(() => {
+    const node = containerRef.current
+    if (!node) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry)
+        node.style.setProperty(
+          "--review-pane-width",
+          `${Math.round(entry.contentRect.width)}px`
+        )
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
   const onMouseUp = useCallback(
     (event: React.MouseEvent) => {
       const host = event.nativeEvent
         .composedPath()
-        .find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === "DIFFS-CONTAINER")
+        .find(
+          (node): node is HTMLElement =>
+            node instanceof HTMLElement && node.tagName === "DIFFS-CONTAINER"
+        )
       const instance = handle.current?.getInstance()
       if (!host || !instance) return
-      const rendered = instance.getRenderedItems().find((item) => item.element === host)
+      const rendered = instance
+        .getRenderedItems()
+        .find((item) => item.element === host)
       const range = selectedRangeFromDiff(host)
       if (!rendered || !range) return
-      setSelection({ path: pathOf(rendered.id), range, x: event.clientX, y: event.clientY, host })
+      setSelection({
+        path: pathOf(rendered.id),
+        range,
+        x: event.clientX,
+        y: event.clientY,
+        host,
+      })
     },
     [pathOf]
   )
@@ -365,14 +436,19 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
             ref={handle}
             items={items}
             options={options}
-            className="review-code-view h-full overflow-y-auto"
+            // Each file is a card on the page's gutter, as on GitHub. The
+            // outline is a shadow, so it adds nothing CodeView must measure.
+            className="review-code-view h-full overflow-y-auto [&_diffs-container]:mx-4 [&_diffs-container]:overflow-clip [&_diffs-container]:rounded-lg [&_diffs-container]:shadow-[0_0_0_1px_var(--border)]"
             renderCodeViewHeader={renderHeader}
             renderCustomHeader={renderCustomHeader}
             renderAnnotation={renderAnnotation}
             onScroll={onScroll}
           />
           {diff.isError && (
-            <p role="alert" className="absolute inset-x-0 bottom-6 mx-auto w-fit rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <p
+              role="alert"
+              className="absolute inset-x-0 bottom-6 mx-auto w-fit rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
               Couldn&apos;t load the changes: {diff.error.message}
             </p>
           )}
@@ -412,32 +488,52 @@ function NoteView({
     case "step":
       return <StepIntro entryId={entryId} />
     case "finding": {
-      const finding = detail?.findings.find((candidate) => candidate.id === note.id)
+      const finding = detail?.findings.find(
+        (candidate) => candidate.id === note.id
+      )
       if (!finding) return null
       const thread =
-        conversation?.threads.find((candidate) => candidate.id === finding.github_review_comment_id) ?? null
+        conversation?.threads.find(
+          (candidate) => candidate.id === finding.github_review_comment_id
+        ) ?? null
       return <FindingNote pr={pr} finding={finding} thread={thread} />
     }
     case "thread": {
-      const thread = conversation?.threads.find((candidate) => candidate.id === note.id)
+      const thread = conversation?.threads.find(
+        (candidate) => candidate.id === note.id
+      )
       return thread ? <ThreadNote pr={pr} thread={thread} /> : null
     }
     case "pending": {
-      const comment = pending.comments.find((candidate) => candidate.id === note.id)
+      const comment = pending.comments.find(
+        (candidate) => candidate.id === note.id
+      )
       return comment ? (
-        <div className="max-w-[784px]">
-          <PendingReviewCommentCard owner={pr.owner} repo={pr.repo} number={pr.number} comment={comment} />
-        </div>
+        <NoteFrame className="px-1 py-0">
+          <PendingReviewCommentCard
+            owner={pr.owner}
+            repo={pr.repo}
+            number={pr.number}
+            comment={comment}
+          />
+        </NoteFrame>
       ) : null
     }
     case "draft":
       return (
-        <div className="max-w-[784px] px-3 py-1.5 font-sans">
-          <ProposedCommentCard owner={pr.owner} repo={pr.repo} number={pr.number} id={note.id} />
-        </div>
+        <NoteFrame>
+          <ProposedCommentCard
+            owner={pr.owner}
+            repo={pr.repo}
+            number={pr.number}
+            id={note.id}
+          />
+        </NoteFrame>
       )
     case "composer":
-      return composer ? <Composer pr={pr} path={composer.path} range={composer.range} /> : null
+      return composer ? (
+        <Composer pr={pr} path={composer.path} range={composer.range} />
+      ) : null
   }
 }
 
@@ -446,7 +542,7 @@ function StepIntro({ entryId }: { entryId: string }) {
   const step = entry?.step
   if (!step) return null
   return (
-    <div className="border-b border-border bg-primary/[0.04] px-4 py-3 font-sans">
+    <NoteFrame className="py-3">
       <p className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
         <AgentMark className="size-3" />
         Step {step.index} of {step.count}
@@ -455,10 +551,10 @@ function StepIntro({ entryId }: { entryId: string }) {
         <InlineCode text={step.title} />
       </p>
       {step.summary && (
-        <div className="mt-1 max-w-[72ch] text-xs leading-5 text-muted-foreground">
+        <div className="mt-1 max-w-[72ch] text-muted-foreground [&_li]:text-[12.5px] [&_li]:leading-5 [&_p]:text-[12.5px] [&_p]:leading-5">
           <Markdown content={step.summary} />
         </div>
       )}
-    </div>
+    </NoteFrame>
   )
 }

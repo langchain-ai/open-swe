@@ -71,6 +71,7 @@ export function warmReviewPage(queryClient: QueryClient, pr: PullRequestRef) {
   if (typeof window === "undefined" || !Number.isFinite(pr.number)) return
   void queryClient.prefetchQuery(reviewQueries.detail(pr))
   void queryClient.prefetchQuery(reviewQueries.diff(pr))
+  void queryClient.prefetchQuery(reviewQueries.status(pr))
   reviewWorkerPool()
     .initialize()
     .catch((error: unknown) =>

@@ -11,7 +11,13 @@ import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { reviewQueries, type PullRequestRef } from "./queries"
 
 /** Runs the review scout alone, so a reading order exists without a full review. */
-export function WalkthroughCallout({ pr, detail }: { pr: PullRequestRef; detail: ReviewDetail }) {
+export function WalkthroughCallout({
+  pr,
+  detail,
+}: {
+  pr: PullRequestRef
+  detail: ReviewDetail
+}) {
   const queryClient = useQueryClient()
   const key = reviewQueries.detail(pr).queryKey
   const scout = useMutation({
@@ -19,7 +25,9 @@ export function WalkthroughCallout({ pr, detail }: { pr: PullRequestRef; detail:
     meta: { errorTitle: "Couldn't build walkthrough" },
     onSuccess: ({ started }) => {
       if (started)
-        queryClient.setQueryData(key, (old) => (old ? { ...old, walkthrough_running: true } : old))
+        queryClient.setQueryData(key, (old) =>
+          old ? { ...old, walkthrough_running: true } : old
+        )
       void queryClient.invalidateQueries({ queryKey: agentThreadKeys.lists })
       void queryClient.invalidateQueries({ queryKey: key })
     },
@@ -60,9 +68,13 @@ export function WalkthroughCallout({ pr, detail }: { pr: PullRequestRef; detail:
             ? "Open SWE is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "Open SWE orders the changes into narrated steps and moves mechanical edits to the end."}
         </p>
-        {running && detail.walkthrough_progress && <ScoutProgressPreview progress={detail.walkthrough_progress} />}
+        {running && detail.walkthrough_progress && (
+          <ScoutProgressPreview progress={detail.walkthrough_progress} />
+        )}
         {failureSummary && (
-          <p className="mt-1.5 break-words text-destructive">Last attempt failed: {failureSummary}</p>
+          <p className="mt-1.5 break-words text-destructive">
+            Last attempt failed: {failureSummary}
+          </p>
         )}
         {(running || failure) && detail.walkthrough_scout_thread_id && (
           <Link
@@ -74,8 +86,17 @@ export function WalkthroughCallout({ pr, detail }: { pr: PullRequestRef; detail:
           </Link>
         )}
       </div>
-      <Button size="sm" variant="outline" onClick={() => scout.mutate()} disabled={running}>
-        {running ? <CircleNotchIcon className="animate-spin" /> : <ListNumbersIcon />}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => scout.mutate()}
+        disabled={running}
+      >
+        {running ? (
+          <CircleNotchIcon className="animate-spin" />
+        ) : (
+          <ListNumbersIcon />
+        )}
         {running ? "Building…" : "Build walkthrough"}
       </Button>
     </div>
@@ -94,12 +115,24 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
           {recent.map((action, index) => {
             const current = progress.running && index === recent.length - 1
             return (
-              <li key={index} className={cn("flex min-w-0 gap-2", current && "text-foreground")}>
+              <li
+                key={index}
+                className={cn(
+                  "flex min-w-0 gap-2",
+                  current && "text-foreground"
+                )}
+              >
                 <span className="shrink-0">
-                  {current ? <CircleNotchIcon className="inline size-3 animate-spin" /> : "·"}
+                  {current ? (
+                    <CircleNotchIcon className="inline size-3 animate-spin" />
+                  ) : (
+                    "·"
+                  )}
                 </span>
                 <span className="shrink-0">{action.tool}</span>
-                {action.target && <span className="min-w-0 truncate">{action.target}</span>}
+                {action.target && (
+                  <span className="min-w-0 truncate">{action.target}</span>
+                )}
               </li>
             )
           })}

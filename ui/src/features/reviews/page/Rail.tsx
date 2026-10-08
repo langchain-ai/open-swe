@@ -16,25 +16,51 @@ import { reviewQueries, type PullRequestRef } from "./queries"
 import { useReviewPage, type RailTab } from "./store"
 
 /** The right column: the agent you can talk to about this PR, and the people who already did. */
-export function Rail({ pr, onClose }: { pr: PullRequestRef; onClose?: () => void }) {
+export function Rail({
+  pr,
+  onClose,
+}: {
+  pr: PullRequestRef
+  onClose?: () => void
+}) {
   const tab = useReviewPage((state) => state.railTab)
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const conversation = useQuery(reviewQueries.conversation(pr)).data
   const chat = useQuery(reviewChatQuery(pr)).data
-  const people = conversation?.items.filter((item) => item.kind !== "commit").length
+  const people = conversation?.items.filter(
+    (item) => item.kind !== "commit"
+  ).length
 
   return (
-    <aside data-review-rail aria-label="Chat and discussion" className="flex h-full min-h-0 flex-col bg-background">
+    <aside
+      data-review-rail
+      aria-label="Chat and discussion"
+      className="flex h-full min-h-0 flex-col bg-background"
+    >
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
-        <div role="tablist" aria-label="Rail" className="flex items-center gap-1">
-          <RailTabButton tab="chat" active={tab === "chat"} onSelect={setRailTab}>
+        <div
+          role="tablist"
+          aria-label="Rail"
+          className="flex items-center gap-1"
+        >
+          <RailTabButton
+            tab="chat"
+            active={tab === "chat"}
+            onSelect={setRailTab}
+          >
             <AgentMark />
             Chat
           </RailTabButton>
-          <RailTabButton tab="discussion" active={tab === "discussion"} onSelect={setRailTab}>
+          <RailTabButton
+            tab="discussion"
+            active={tab === "discussion"}
+            onSelect={setRailTab}
+          >
             Discussion
             {people !== undefined && people > 0 && (
-              <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums">{people}</span>
+              <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums">
+                {people}
+              </span>
             )}
           </RailTabButton>
         </div>
@@ -102,14 +128,23 @@ function RailTabButton({
 /** Ways into an empty chat, picked from where this PR stands. They fill the composer; nothing sends unseen. */
 function ChatStarters({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr)).data
-  const status = useQuery({ ...reviewQueries.status(pr), enabled: detail?.pr.state === "open" }).data
+  const status = useQuery({
+    ...reviewQueries.status(pr),
+    enabled: detail?.pr.state === "open",
+  }).data
   const askInChat = useReviewPage((state) => state.askInChat)
   const bugs = detail ? openBugCount(detail) : 0
   const starters = [
     "Walk me through this pull request: what changed, and why?",
-    status?.ci === "failing" ? "Why are the checks failing, and what would fix them?" : null,
-    bugs > 0 ? "Which of Open SWE's findings matter most, and are any false alarms?" : null,
-    status?.unresolvedThreads ? "Summarize the unresolved review comments and what each one asks for." : null,
+    status?.ci === "failing"
+      ? "Why are the checks failing, and what would fix them?"
+      : null,
+    bugs > 0
+      ? "Which of Open SWE's findings matter most, and are any false alarms?"
+      : null,
+    status?.unresolvedThreads
+      ? "Summarize the unresolved review comments and what each one asks for."
+      : null,
     "What's the riskiest part of this change? Where should I look first?",
     "Is anything here untested?",
   ].filter((text): text is string => text !== null)
@@ -149,7 +184,12 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       repo: pr.repo,
       number: pr.number,
       showInDiff: (range: DiffRange) =>
-        jumpTo({ kind: "line", path: range.file, line: range.endLine, side: range.side }),
+        jumpTo({
+          kind: "line",
+          path: range.file,
+          line: range.endLine,
+          side: range.side,
+        }),
       emptyState: <ChatStarters pr={pr} />,
     }),
     [pr, jumpTo]
@@ -171,7 +211,10 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
   return (
     <ReviewChatActionsContext.Provider value={actions}>
       <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
-        <AgentThreadPage threadId={meta.data.thread_id} composerDraft={chatDraft} />
+        <AgentThreadPage
+          threadId={meta.data.thread_id}
+          composerDraft={chatDraft}
+        />
       </div>
     </ReviewChatActionsContext.Provider>
   )

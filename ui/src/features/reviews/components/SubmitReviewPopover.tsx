@@ -108,7 +108,7 @@ export function SubmitReviewPopover({
       <PopoverTrigger
         render={
           <Button size="sm">
-            Review changes
+            Review<span className="max-sm:hidden"> changes</span>
             {pendingCount > 0 && (
               <span
                 aria-label={`${pendingCount} pending comments`}

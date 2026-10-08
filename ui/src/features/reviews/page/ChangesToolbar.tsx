@@ -19,7 +19,11 @@ function Segmented<T extends string>({
   onChange: (value: T) => void
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex rounded-md border border-border p-0.5">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="flex rounded-md border border-border p-0.5"
+    >
       {options.map((option) => (
         <button
           key={option.value}
@@ -58,8 +62,8 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
   const open = detail?.pr.state === "open"
 
   return (
-    <div className="mx-auto w-full max-w-[880px] px-6 pb-3">
-      {detail && !hasWalkthrough && open && files.length > 2 && (
+    <div className="w-full px-4 pb-3">
+      {detail && !hasWalkthrough && open && files.length > 0 && (
         <div className="mb-4">
           <WalkthroughCallout pr={pr} detail={detail} />
         </div>
@@ -69,11 +73,15 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
         {diff.data ? (
           <span className="text-xs text-muted-foreground tabular-nums">
             {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
-            {linesLeft === 0 ? "all lines reviewed" : `${linesLeft.toLocaleString()} lines left`}
+            {linesLeft === 0
+              ? "all lines reviewed"
+              : `${linesLeft.toLocaleString()} lines left`}
             {viewedCount > 0 && ` · ${viewedCount} viewed`}
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">{diff.isError ? "Unavailable" : "Loading…"}</span>
+          <span className="text-xs text-muted-foreground">
+            {diff.isError ? "Unavailable" : "Loading…"}
+          </span>
         )}
         <span className="flex-1" />
         {hasWalkthrough && (
@@ -82,8 +90,16 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
             value={order}
             onChange={setOrder}
             options={[
-              { value: "guide", label: "Walkthrough", title: "Open SWE's reading order" },
-              { value: "files", label: "Files", title: "Every file in tree order" },
+              {
+                value: "guide",
+                label: "Walkthrough",
+                title: "Open SWE's reading order",
+              },
+              {
+                value: "files",
+                label: "Files",
+                title: "Every file in tree order",
+              },
             ]}
           />
         )}
@@ -92,8 +108,16 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
           value={diffStyle}
           onChange={setDiffStyle}
           options={[
-            { value: "unified", label: <RowsIcon className="size-3.5" />, title: "Unified" },
-            { value: "split", label: <ColumnsIcon className="size-3.5" />, title: "Split" },
+            {
+              value: "unified",
+              label: <RowsIcon className="size-3.5" />,
+              title: "Unified",
+            },
+            {
+              value: "split",
+              label: <ColumnsIcon className="size-3.5" />,
+              title: "Split",
+            },
           ]}
         />
         <DiffWrapToggle />
