@@ -25,6 +25,20 @@ MAX_CHANGED_LINES = 20
 # slack costs the voters; the agent is told 20 so it aims there.
 ACCEPTED_CHANGED_LINES = 25
 MAX_FILES = 100
+# The voter's approval covers everything excluded, so the hidden share stays bounded.
+MAX_EXCLUDED_LINES = 500
+
+# Kinds of change that must be read, so no APPROVALS.md guideline can hide them.
+_UNEXCLUDABLE_PATH = re.compile(
+    r"(?:^|/)\.github/"
+    r"|(?:^|/)(?:migrations|alembic)/"
+    r"|(?:^|/)(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|uv\.lock"
+    r"|poetry\.lock|Pipfile(?:\.lock)?|requirements[^/]*\.txt|go\.(?:mod|sum)"
+    r"|Cargo\.(?:toml|lock)|Gemfile(?:\.lock)?|composer\.(?:json|lock))$"
+    r"|(?:^|/)\.env(?:\.[^/]*)?$"
+    r"|(?:^|/)[^/]*(?:auth|credential|secret|password|token)[^/]*(?:/|$)",
+    re.IGNORECASE,
+)
 
 _TEST_PATH = re.compile(
     r"(?:^|/)(?:tests?|__tests__|testdata|e2e)/"
@@ -75,7 +89,6 @@ class ChangedFile(BaseModel):
     deletions: int = 0
     patch: str | None = None
     previous_filename: str | None = None
-    sha: str = ""
 
     @property
     def hunks(self) -> list[Hunk]:
@@ -92,11 +105,6 @@ class ChangedFile(BaseModel):
         if header:
             hunks.append(Hunk(header, tuple(body)))
         return hunks
-
-    @property
-    def whole_digest(self) -> str:
-        """Identity of a file GitHub shows no patch for."""
-        return f"file:{self.status}:{self.previous_filename or ''}:{self.sha}"
 
     def keeping(self, hunks: list[Hunk]) -> ChangedFile:
         return self.model_copy(
@@ -137,7 +145,7 @@ _CHANGED_FILES = TypeAdapter(list[ChangedFile])
 
 
 class ExcludedHunk(TypedDict):
-    """A hunk, or a whole patchless file when ``header`` is empty, left off the card."""
+    """A hunk left off the card."""
 
     path: str
     digest: str
@@ -166,22 +174,17 @@ class Exclusion(BaseModel):
             raise ValueError(f"`{self.path}` is not changed by the pull request")
         if file.is_test:
             return []
+        if any(
+            _UNEXCLUDABLE_PATH.search(name)
+            for name in (file.filename, file.previous_filename or "")
+        ):
+            raise ValueError(
+                f"`{self.path}` cannot be excluded: CI workflows, migrations, dependency "
+                "manifests, environment files, and auth, credential, secret or token code "
+                "must always be read"
+            )
         if file.patch is None:
-            if self.hunks:
-                raise ValueError(
-                    f"`{self.path}` has no text diff; omit `hunks` to exclude the whole file"
-                )
-            return [
-                ExcludedHunk(
-                    path=self.path,
-                    digest=file.whole_digest,
-                    header="",
-                    additions=file.additions,
-                    deletions=file.deletions,
-                    guideline=guideline,
-                    reason=reason,
-                )
-            ]
+            raise ValueError(f"`{self.path}` has no text diff, so it cannot be excluded")
         by_start = {hunk.new_start: hunk for hunk in file.hunks}
         missing = [start for start in self.hunks if start not in by_start]
         if missing:
@@ -223,14 +226,8 @@ class ExpeditedDiff:
         partial: set[str] = set()
         for file in reviewed:
             wanted = list(by_path.get(file.filename, ()))
-            if not wanted:
+            if not wanted or file.patch is None:
                 self.shown.append(file)
-                continue
-            if file.patch is None:
-                if any(entry["digest"] == file.whole_digest for entry in wanted):
-                    self.excluded.append(wanted[0])
-                else:
-                    self.shown.append(file)
                 continue
             hunks = file.hunks
             hits = self._match(hunks, wanted)
@@ -293,7 +290,7 @@ def diff_fingerprint(files: list[ChangedFile]) -> str:
     for file in sorted(ChangedFile.split(files)[0], key=lambda f: f.filename):
         digest.update(file.filename.encode())
         digest.update(b"\0")
-        digest.update((file.whole_digest if file.patch is None else file.patch).encode())
+        digest.update((file.patch or "").encode())
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -325,6 +322,10 @@ def assess_eligibility(
     test_lines = ChangedFile.total_lines(diff.tests)
     if changed + test_lines + diff.excluded_lines < 1:
         return Ineligible("the pull request changes no lines")
+    if diff.excluded_lines > MAX_EXCLUDED_LINES:
+        return Ineligible(
+            f"{diff.excluded_lines} lines are excluded; at most {MAX_EXCLUDED_LINES} can be"
+        )
     if changed > ACCEPTED_CHANGED_LINES:
         outside = "tests and exclusions" if diff.excluded else "tests"
         return Ineligible(

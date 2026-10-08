@@ -1,6 +1,9 @@
+import pytest
+
 from openswe.expedited_review.eligibility import (
     ACCEPTED_CHANGED_LINES,
     MAX_CHANGED_LINES,
+    MAX_EXCLUDED_LINES,
     ChangedFile,
     EligibleDiff,
     Exclusion,
@@ -103,3 +106,28 @@ def test_one_exclusion_hides_only_the_hunk_it_named_among_identical_bodies() -> 
     diff = ExpeditedDiff([file], exclusions)
     assert diff.excluded_lines == 1
     assert diff.shown[0].patch == f"@@ -1,1 +1,2 @@\n{body}"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".github/workflows/ci.yml", "db/migrations/0001.py", "uv.lock", "src/auth/session.py", ".env"],
+)
+def test_sensitive_paths_cannot_be_excluded(path: str) -> None:
+    file = ChangedFile(filename=path, additions=1, patch="@@ -1 +1,2 @@\n a\n+b")
+
+    with pytest.raises(ValueError, match="cannot be excluded"):
+        Exclusion(path=path, guideline="g", reason="r").resolve([file])
+
+
+def test_exclusions_past_the_cap_are_refused() -> None:
+    lines = MAX_EXCLUDED_LINES + 1
+    notes = ChangedFile(
+        filename="CHANGELOG.md",
+        additions=lines,
+        patch="@@ -1 +1,502 @@\n a\n" + "\n".join("+x" for _ in range(lines)),
+    )
+    excluded = Exclusion(path="CHANGELOG.md", guideline="g", reason="r").resolve([notes])
+
+    verdict = assess_eligibility([notes], excluded)
+    assert isinstance(verdict, Ineligible)
+    assert f"at most {MAX_EXCLUDED_LINES}" in verdict.reason

@@ -38,17 +38,20 @@ are already in the Slack thread.
   arrive without a patch. CI judges tests, and counting them would price a small fix
   out of shipping with its tests.
 - Hunks that qualify under the target repository's `.open-swe/APPROVALS.md` (read at
-  the PR's base commit) sit outside both gates too, so a PR of any size qualifies when
-  all but a small part of it would be auto-approved. The agent names them in
-  `excluded` (path, hunk start lines or the whole file, the guideline, and why); the
-  backend trusts that judgment. Each call that excludes something writes every
+  the PR's base commit) sit outside both gates too, so a larger PR qualifies when all
+  but a small part of it would be auto-approved. The agent names them in `excluded`
+  (path, hunk start lines or the whole file, the guideline, and why); the backend
+  trusts that judgment within fixed bounds: at most 500 excluded lines, every excluded
+  file must have a text diff, and CI workflows, migrations, dependency manifests and
+  lockfiles, environment files, and paths naming auth, credentials, secrets or tokens
+  can never be excluded. Each call that excludes something writes every
   excluded hunk, its guideline and reason, the base and head SHAs, and a hash of
   APPROVALS.md to the audit log. The card lists exclusions by guideline with line
   counts, and a PR whose drawn, excluded and test lines do not add up to its total is
   refused, so no change is ever neither drawn nor listed. Each exclusion hides exactly
-  one hunk, so identical hunk bodies elsewhere in the file stay drawn. They stay in the fingerprint: a commit that changes an excluded hunk is a
-  diff change, and the changed hunk no longer matches its exclusion, so the card draws
-  it.
+  one hunk, so identical hunk bodies elsewhere in the file stay drawn. Exclusions stay
+  in the fingerprint: a commit that changes an excluded hunk is a diff change, and the
+  changed hunk no longer matches its exclusion, so the card draws it.
 - The card draws the source diff. It draws the test diff too when the change is
   test-only or test lines are the majority, because otherwise there would be nothing
   to look at; when tests are the minority of a mostly-source change it names them
@@ -59,7 +62,8 @@ are already in the Slack thread.
   Calling the tool again retries this private prompt. If Slack delivery fails or the
   author is not linked, the tool reports that they must mark it ready on GitHub;
   calling the tool again after that opens the existing card for approval.
-- No path is refused for being sensitive. A denylist is incomplete by construction,
+- No path on the card is refused for being sensitive (exclusions are, above, because
+  nobody reads them). A denylist is incomplete by construction,
   so it stops nobody deliberate, while matching path segments blocks unrelated files
   that merely contain a word like `token`. The controls that hold are a diff small
   enough to read in full, a reviewer who is not the author, real GitHub reviews, and
