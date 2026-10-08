@@ -748,6 +748,45 @@ test.describe("Human review in Slack", () => {
       .toContain("picked by Open SWE");
     await shootCard(page, "assigned");
 
+    await loginAs(page, BOB);
+    const githubOnly = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "GitHub-only review request",
+      author: ALICE.login,
+    });
+    await request.post(
+      `/fake-gh/repos/${REPO.owner}/${REPO.repo}/pulls/${githubOnly.number}/requested_reviewers`,
+      { data: { reviewers: [BOB.login] } },
+    );
+    await page.goto("/agents/reviews?tab=to-review");
+    await expect(
+      page.getByRole("button", { name: "Greet by name", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "GitHub-only review request",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Show my GitHub review requests" })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "GitHub-only review request",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Back to Open SWE assignments" })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "GitHub-only review request",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+
     // 4. Bob is the only reviewer, so his approval merges it at once.
     await approveOnGitHub(request, seeded.number, BOB.login);
     await expect

@@ -1177,14 +1177,18 @@ async def gh_search_issues(
     sort: str = "updated",
     order: str = "desc",
 ) -> JSONResponse:
-    """The PR search ``list_open_pull_requests`` drives the "Mine" dashboard with.
-
-    Only the qualifiers that code sends are honoured: ``is:pr``, ``is:open``,
-    ``author:<login>`` and any number of ``repo:<owner>/<name>`` (OR'd, as GitHub
-    does)."""
+    """Search authored or awaiting-review PRs for the dashboard."""
     terms = q.split()
     author = next(
         (term.removeprefix("author:") for term in terms if term.startswith("author:")), ""
+    )
+    reviewer = next(
+        (
+            term.removeprefix("review-requested:")
+            for term in terms
+            if term.startswith("review-requested:")
+        ),
+        "",
     )
     repositories = {
         term.removeprefix("repo:").lower() for term in terms if term.startswith("repo:")
@@ -1194,6 +1198,10 @@ async def gh_search_issues(
         pull
         for pull in fakes.pulls()
         if (not author or pull["author"].lower() == author.lower())
+        and (
+            not reviewer
+            or reviewer.lower() in {login.lower() for login in pull["requested_reviewers"]}
+        )
         and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
         and (not open_only or (pull["state"] == "open" and not pull["merged"]))
     ]

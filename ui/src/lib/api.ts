@@ -1819,14 +1819,15 @@ export const api = {
     request<PullRequestSearchResults>(
       `/pull-requests/search?q=${encodeURIComponent(query)}&offset=${offset}`
     ),
-  myPullRequests: (
+  openPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",
     direction: "asc" | "desc" = "desc",
-    page = 1
+    page = 1,
+    scope: "mine" | "review-assigned" | "review-requested" = "mine"
   ) =>
     request<OpenPullRequestsPayload>(
-      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=mine`
+      `${scope === "review-assigned" ? "/review-assignments" : "/pull-requests"}?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=${scope}`
     ),
   myPullRequestDetails: (repo: string, number: number) =>
     loadPrDetails(repo, number),

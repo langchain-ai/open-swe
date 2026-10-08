@@ -11957,8 +11957,11 @@
             "name": "scope",
             "required": false,
             "schema": {
-              "const": "mine",
               "default": "mine",
+              "enum": [
+                "mine",
+                "review-requested"
+              ],
               "title": "Scope",
               "type": "string"
             }
@@ -12828,6 +12831,94 @@
         "tags": [
           "dashboard",
           "pull-requests"
+        ]
+      }
+    },
+    "/dashboard/api/review-assignments": {
+      "get": {
+        "operationId": "api_review_assignments_dashboard_api_review_assignments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "updated",
+              "enum": [
+                "created",
+                "updated"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenPullRequests"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Review Assignments",
+        "tags": [
+          "dashboard",
+          "human-review"
         ]
       }
     },

@@ -403,3 +403,71 @@ async def test_repo_settings_fall_back_to_the_default_branch() -> None:
 async def test_missing_or_invalid_settings_have_no_review_channel(status: int, text: str) -> None:
     with patch("openswe.github.repo_files.github_request", _github(status, text)):
         assert (await RepoSettings.fetch("o", "r", token="t")).review_channel == ""
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_reviews(
+    monkeypatch,
+):
+    from fastapi import HTTPException
+
+    from openswe.github.pull_requests import PullRequest
+    from openswe.human_review.requests import (
+        HumanReviewParticipant,
+        HumanReviewRequest,
+        RequestKind,
+        RequestState,
+    )
+    from openswe.human_review.routes import api_review_assignments
+    from openswe.users import User
+
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada,grace")
+    ada = await User.sign_in("github", "1", login="ada")
+    grace = await User.sign_in("github", "2", login="grace")
+    cases: list[tuple[int, User, bool, RequestState, RequestKind]] = [
+        (1, ada, True, "open", "standard"),
+        (2, ada, False, "open", "standard"),
+        (3, grace, True, "open", "standard"),
+        (4, ada, True, "cancelled", "standard"),
+        (5, ada, True, "open", "posted"),
+        (6, ada, True, "open", "standard"),
+    ]
+    for number, user, assigned, state, kind in cases:
+        pr = await PullRequest(
+            owner="o", repo="hidden" if number == 6 else "r", number=number, title=f"PR {number}"
+        ).save()
+        await HumanReviewRequest(
+            pull_request_id=pr.id,
+            head_sha="abc",
+            kind=kind,
+            state=state,
+            participants=[
+                HumanReviewParticipant(
+                    user_id=user.id, decision="review", assigned_by_agent=assigned
+                )
+            ],
+        ).save()
+
+    @asynccontextmanager
+    async def client(**kwargs):
+        yield object()
+
+    async def access(repo, token):
+        if repo == "o/hidden":
+            raise HTTPException(404, "repository not found")
+        return repo
+
+    async def states(client, owner, repo, number, author):
+        return {"ada": "APPROVED"} if number == 5 else {}
+
+    with (
+        patch("openswe.human_review.routes.github_client", client),
+        patch(
+            "openswe.human_review.routes.profiles.get_valid_access_token",
+            AsyncMock(return_value="token"),
+        ),
+        patch("openswe.human_review.routes.repo_access.assert_repo_access", access),
+        patch("openswe.human_review.routes.latest_review_states", states),
+    ):
+        result = await api_review_assignments(page=1, session={"sub": "ada"})
+    assert [row.number for row in result.pull_requests] == [1]

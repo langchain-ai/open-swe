@@ -243,6 +243,25 @@ class HumanReviewRequest(Base):
             )
 
     @classmethod
+    async def assigned_to(cls, user_id: UUID) -> list[Self]:
+        """Open review requests for which Open SWE explicitly picked this person."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .join(cls.participants)
+                .where(
+                    cls.state == "open",
+                    cls.kind.in_(("standard", "posted")),
+                    PullRequest.state == "open",
+                    HumanReviewParticipant.user_id == user_id,
+                    HumanReviewParticipant.decision == "review",
+                    HumanReviewParticipant.assigned_by_agent.is_(True),
+                )
+            )
+            return list(rows)
+
+    @classmethod
     async def is_expedited_approver(cls, owner: str, repo: str, number: int, login: str) -> bool:
         """Whether ``login`` approved the PR through its open expedited card."""
         request = await cls.active_for(owner, repo, number)

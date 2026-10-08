@@ -38,12 +38,14 @@ function chunked(refs: { repo: string; number: number }[]) {
   )
 }
 
-export function MyPullRequests({
+export function OpenPullRequests({
   login,
+  scope,
   filters,
   onFiltersChange,
 }: {
   login: string
+  scope: "mine" | "review-assigned" | "review-requested"
   filters: ReviewsSearch
   onFiltersChange: (changes: Partial<ReviewsSearch>, replace?: boolean) => void
 }) {
@@ -61,7 +63,7 @@ export function MyPullRequests({
       direction: sort === next && direction === "asc" ? "desc" : "asc",
     })
   const queryClient = useQueryClient()
-  const query = useOpenPullRequests(login, repo, sort, direction)
+  const query = useOpenPullRequests(login, repo, sort, direction, scope)
   const knownRepos = useRepos()
   const descriptionSearch = usePullRequestSearch(search)
   const descriptionMatches = new Set(
@@ -187,6 +189,23 @@ export function MyPullRequests({
       void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
   }, [queryClient, nextRow])
 
+  const githubLink =
+    scope === "review-assigned" &&
+    latest &&
+    !query.hasNextPage &&
+    !query.isFetching &&
+    !detailsLoading &&
+    visible.length === filtered.length ? (
+      <div className="py-4 text-center">
+        <Button
+          variant="link"
+          onClick={() => onFiltersChange({ github: true, pr: undefined })}
+        >
+          Show my GitHub review requests
+        </Button>
+      </div>
+    ) : null
+
   const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
     return (
@@ -227,8 +246,32 @@ export function MyPullRequests({
       >
         <section
           className="mt-4 flex min-h-0 flex-1 flex-col gap-3"
-          aria-label="My open pull requests"
+          aria-label={
+            scope === "mine"
+              ? "My open pull requests"
+              : "Pull requests to review"
+          }
         >
+          {scope !== "mine" && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                {scope === "review-assigned"
+                  ? "Assigned to you by Open SWE"
+                  : "GitHub review requests"}
+              </span>
+              {scope === "review-requested" && (
+                <Button
+                  size="sm"
+                  variant="link"
+                  onClick={() =>
+                    onFiltersChange({ github: undefined, pr: undefined })
+                  }
+                >
+                  Back to Open SWE assignments
+                </Button>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <MultiSelect
               label="Filter by repository"
@@ -298,7 +341,9 @@ export function MyPullRequests({
                   ? "Refreshing from GitHub…"
                   : latest
                     ? `Refreshed ${dateLabel(latest.updatedAt)}`
-                    : "Live open pull requests from GitHub"}
+                    : scope === "review-assigned"
+                      ? "Open SWE review assignments"
+                      : "Live open pull requests from GitHub"}
               </span>
             )}
             <Button
@@ -364,20 +409,26 @@ export function MyPullRequests({
             latest && (
               <>
                 {visible.length === 0 ? (
-                  <p className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
+                  <div className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
                     {detailsLoading ||
                     query.isFetchingNextPage ||
                     descriptionSearch.isSearching
                       ? "Loading matching PRs…"
                       : all.length
                         ? "No PRs match these filters."
-                        : "No open PRs found."}
-                  </p>
+                        : scope === "mine"
+                          ? "No open PRs found."
+                          : scope === "review-assigned"
+                            ? "No Open SWE assignments. You’re all caught up."
+                            : "No pending GitHub review requests."}
+                    {githubLink}
+                  </div>
                 ) : (
                   <PullRequestList
                     rows={visible}
                     available={matchingRows.length}
                     compact={railed}
+                    footer={githubLink}
                     // Unclamped: asking for more rows than are loaded is what
                     // makes the next GitHub page arrive, and reaching the end
                     // again is the only other thing that would grow it.
