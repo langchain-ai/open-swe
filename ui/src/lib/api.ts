@@ -471,12 +471,6 @@ export interface ManagedToolsView {
   gateways: ManagedToolsGatewayStatus[]
 }
 
-export interface NotionCredentialStatus {
-  connected: boolean
-  token_expires_at?: string | null
-  updated_at?: string | null
-}
-
 export interface AdminUser {
   user_id: string
   github_login: string
@@ -1778,12 +1772,6 @@ export const api = {
       }`,
       { method: "POST" }
     ),
-  getMyNotionStatus: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion"),
-  disconnectNotion: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion", {
-      method: "DELETE",
-    }),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
@@ -2117,21 +2105,17 @@ export function loginUrl(redirectTo?: string): string {
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "notion" | "langsmith",
-  redirectTo?: string,
-  target: "_self" | "_blank" = "_self"
+  provider: "slack" | "langsmith",
+  redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
     const query = redirectTo
       ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
       : ""
-    const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
-    if (target === "_blank") {
-      window.open(url, "_blank", "noopener,noreferrer")
-    } else {
-      window.location.assign(url)
-    }
+    window.location.assign(
+      `${API_BASE}/dashboard/api/${provider}/login${query}`
+    )
   }
   return pending
 }

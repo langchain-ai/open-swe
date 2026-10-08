@@ -315,10 +315,12 @@ async def connect_managed_tool_from_card(
 ) -> RedirectResponse:
     """A Slack card button: mint the consent link here, for the signed-in owner only."""
     try:
-        link = await (await _card(thread_id, card, session["sub"], gateway)).connect(slug)
+        offered = await _card(thread_id, card, session["sub"], gateway)
+        link = await offered.connect(slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None
-    target = link.url if link else dashboard_thread_url(thread_id) or frontend_base_url()
+    # Built from the stored card, so no request value chooses where this redirects.
+    target = link.url if link else dashboard_thread_url(offered.thread_id) or frontend_base_url()
     return RedirectResponse(target, status_code=302)
 
 

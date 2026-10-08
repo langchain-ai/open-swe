@@ -267,3 +267,37 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
     )
     assert parse_qs(parsed.query) == {"thread_id": ["t"], "card": ["call-1"]}
     assert await cards.ConnectCard.load("t", "call-1") is not None
+    assert result["continues_automatically"] is True
+
+    # The Slack call ends the turn, so "already connected" must still reach the person.
+    tool.gateway_status.return_value = tool.gateway_status.return_value.model_copy(
+        update={"ready": True, "missing": []}
+    )
+    post.reset_mock()
+    assert (await tool.connect_managed_tools({"reply_surface": "slack"}, "call-2"))[
+        "status"
+    ] == "connected"
+    assert post.await_args.args[1] == "final"
+
+
+async def test_consent_wait_never_busy_polls(monkeypatch):
+    statuses = iter(["pending", "pending", "completed", "pending", "weird"])
+    pauses: list[float] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": next(statuses)})
+
+    monkeypatch.setattr(
+        managed,
+        "mcp_http_client",
+        lambda url, timeout: httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+    )
+
+    async def pause(seconds):
+        pauses.append(seconds)
+
+    monkeypatch.setattr(managed.asyncio, "sleep", pause)
+    assert await managed.consent_outcome("alice", "auth-1") == "completed"
+    assert pauses == [1, 1]
+    with pytest.raises(managed.ManagedToolsError):
+        await managed.consent_outcome("alice", "auth-2")
