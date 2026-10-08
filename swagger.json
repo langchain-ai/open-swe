@@ -1984,6 +1984,24 @@
         "type": "string"
       },
       "JsonValue": {},
+      "LabelChange": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "selected"
+        ],
+        "title": "LabelChange",
+        "type": "object"
+      },
       "LineComment": {
         "description": "A comment on diff lines that lives only in the agent's prompt, not on GitHub.",
         "properties": {
@@ -3951,6 +3969,59 @@
           "reviewDecision"
         ],
         "title": "PullRequestFixContext",
+        "type": "object"
+      },
+      "PullRequestLabel": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "title": "PullRequestLabel",
+        "type": "object"
+      },
+      "PullRequestLabels": {
+        "properties": {
+          "available": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestLabel"
+            },
+            "title": "Available",
+            "type": "array"
+          },
+          "selected": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestLabel"
+            },
+            "title": "Selected",
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "selected"
+        ],
+        "title": "PullRequestLabels",
         "type": "object"
       },
       "PullRequestPreview": {
@@ -14523,6 +14594,139 @@
         ]
       }
     },
+    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/labels": {
+      "get": {
+        "operationId": "api_get_pull_request_labels_dashboard_api_reviews__owner___repo___pr_number__labels_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestLabels"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Pull Request Labels",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      },
+      "patch": {
+        "operationId": "api_change_pull_request_label_dashboard_api_reviews__owner___repo___pr_number__labels_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pr_number",
+            "required": true,
+            "schema": {
+              "title": "Pr Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Change Pull Request Label",
+        "tags": [
+          "dashboard",
+          "review"
+        ]
+      }
+    },
     "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/patches": {
       "get": {
         "operationId": "api_get_review_patches_dashboard_api_reviews__owner___repo___pr_number__patches_get",
@@ -17175,6 +17379,16 @@
           },
           {
             "in": "query",
+            "name": "owned",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Owned",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -17338,6 +17552,16 @@
             "schema": {
               "default": false,
               "title": "Include Automations",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owned",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Owned",
               "type": "boolean"
             }
           },

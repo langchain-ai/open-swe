@@ -100,6 +100,7 @@ import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { HumanInputCard } from "@/features/reviews/components/HumanInputCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
+import { PullRequestLabels } from "@/features/reviews/components/PullRequestLabels"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
   rangeLineCount,
@@ -3088,20 +3089,11 @@ function SidePanel({
             <PeopleSection title="Assignees" people={detail.pr.assignees} />
             <section className="px-3 py-3">
               <h3 className="mb-2 text-xs font-medium">Labels</h3>
-              {detail.pr.labels.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">None</p>
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {detail.pr.labels.map((label) => (
-                    <span
-                      key={label.name}
-                      className="rounded-full border border-border px-2 py-0.5 text-[11px]"
-                    >
-                      {label.name}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <PullRequestLabels
+                owner={detail.owner}
+                repo={detail.repo}
+                number={detail.number}
+              />
             </section>
           </div>
         )}

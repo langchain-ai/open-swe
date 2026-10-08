@@ -28,6 +28,7 @@ from e2e_env import (
 # (channel, thread_ts) -> list of {user, text, ts, blocks, is_bot}
 SLACK_MESSAGES: dict[tuple[str, str], list[dict[str, Any]]] = {}
 EPHEMERALS: list[dict[str, Any]] = []
+VIEWS: list[dict[str, Any]] = []
 CODE_CHANNELS: dict[str, dict[str, Any]] = {}
 _slack_seq = [1]
 _slack_epoch = int(time.time())
@@ -1017,6 +1018,7 @@ def merge_pull(
 def reset() -> None:
     SLACK_MESSAGES.clear()
     EPHEMERALS.clear()
+    VIEWS.clear()
     CODE_CHANNELS.clear()
     PULLS.clear()
     REPO_MERGE_METHODS.clear()
