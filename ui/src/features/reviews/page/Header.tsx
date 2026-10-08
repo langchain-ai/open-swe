@@ -28,6 +28,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
 import { reviewQueries, type PullRequestRef } from "./queries"
+import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
 import { useReviewPage } from "./store"
 
 type PillState = "open" | "draft" | "merged" | "closed"
@@ -83,6 +84,10 @@ export function Header({
   const githubUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`
   const state = detail ? pillState(detail, status?.draft) : null
   const files = diff?.files ?? []
+  const current = usePullRequestStanding(pr)
+  const standingInView = useReviewPage((page) => page.standingInView)
+  // Once the status card scrolls away, the header carries its sentence and next step.
+  const carrying = !standingInView && current !== null
 
   return (
     <header
@@ -150,87 +155,127 @@ export function Header({
           </h1>
         </div>
         {detail ? (
-          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground max-sm:hidden">
-            <a
-              href={`https://github.com/${pr.owner}/${pr.repo}`}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 hover:text-foreground hover:underline max-lg:hidden"
+          // The meta line and the status sentence share one slot and cross-fade.
+          <div className="mt-0.5 grid min-w-0 max-sm:hidden">
+            <p
+              inert={carrying}
+              className={cn(
+                "col-start-1 row-start-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground transition-[opacity,translate] duration-200 ease-out motion-reduce:transition-none",
+                carrying && "-translate-y-1 opacity-0"
+              )}
             >
-              {pr.owner}/{pr.repo}
-            </a>
-            <span aria-hidden className="max-lg:hidden">
-              ·
-            </span>
-            <a
-              href={`https://github.com/${detail.pr.author?.login ?? ""}`}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 font-medium text-foreground/80 hover:text-foreground hover:underline"
-            >
-              {detail.pr.author?.login ?? "unknown"}
-            </a>
-            <span className="shrink-0">
-              {state === "merged"
-                ? "merged into"
-                : state === "closed"
-                  ? "wanted to merge into"
-                  : "wants to merge into"}
-            </span>
-            <a
-              href={`https://github.com/${pr.owner}/${pr.repo}/tree/${detail.pr.base_ref}`}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground"
-            >
-              {detail.pr.base_ref}
-            </a>
-            <span className="shrink-0 max-xl:hidden">from</span>
-            <button
-              type="button"
-              title={`Copy ${detail.pr.head_ref}`}
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(detail.pr.head_ref)
-                  .then(() => toast.success("Copied the branch name"))
-              }
-              className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-1 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground max-xl:hidden"
-            >
-              <span className="truncate">{detail.pr.head_ref}</span>
-              <CopyIcon className="size-3 shrink-0 opacity-0 group-hover/branch:opacity-100" />
-            </button>
-            <button
-              type="button"
-              title="Go to the changes"
-              onClick={() =>
-                jumpTo({ kind: "entry", id: entryOrder[0]?.id ?? "" })
-              }
-              className="hidden shrink-0 rounded px-0.5 font-mono tabular-nums hover:bg-accent lg:inline"
-            >
-              <span className="text-success-foreground">
-                +{detail.pr.additions}
-              </span>{" "}
-              <span className="text-destructive-foreground">
-                −{detail.pr.deletions}
-              </span>
-            </button>
-            {detail.pr.created_at && (
               <a
-                href={githubUrl}
+                href={`https://github.com/${pr.owner}/${pr.repo}`}
                 target="_blank"
                 rel="noreferrer"
-                className="hidden shrink-0 hover:text-foreground hover:underline xl:inline"
+                className="shrink-0 hover:text-foreground hover:underline max-lg:hidden"
               >
-                · opened{" "}
-                {formatRelativeTime(new Date(detail.pr.created_at).getTime())}
+                {pr.owner}/{pr.repo}
               </a>
+              <span aria-hidden className="max-lg:hidden">
+                ·
+              </span>
+              <a
+                href={`https://github.com/${detail.pr.author?.login ?? ""}`}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 font-medium text-foreground/80 hover:text-foreground hover:underline"
+              >
+                {detail.pr.author?.login ?? "unknown"}
+              </a>
+              <span className="shrink-0">
+                {state === "merged"
+                  ? "merged into"
+                  : state === "closed"
+                    ? "wanted to merge into"
+                    : "wants to merge into"}
+              </span>
+              <a
+                href={`https://github.com/${pr.owner}/${pr.repo}/tree/${detail.pr.base_ref}`}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground"
+              >
+                {detail.pr.base_ref}
+              </a>
+              <span className="shrink-0 max-xl:hidden">from</span>
+              <button
+                type="button"
+                title={`Copy ${detail.pr.head_ref}`}
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(detail.pr.head_ref)
+                    .then(() => toast.success("Copied the branch name"))
+                }
+                className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-1 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground max-xl:hidden"
+              >
+                <span className="truncate">{detail.pr.head_ref}</span>
+                <CopyIcon className="size-3 shrink-0 opacity-0 group-hover/branch:opacity-100" />
+              </button>
+              <button
+                type="button"
+                title="Go to the changes"
+                onClick={() =>
+                  jumpTo({ kind: "entry", id: entryOrder[0]?.id ?? "" })
+                }
+                className="hidden shrink-0 rounded px-0.5 font-mono tabular-nums hover:bg-accent lg:inline"
+              >
+                <span className="text-success-foreground">
+                  +{detail.pr.additions}
+                </span>{" "}
+                <span className="text-destructive-foreground">
+                  −{detail.pr.deletions}
+                </span>
+              </button>
+              {detail.pr.created_at && (
+                <a
+                  href={githubUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hidden shrink-0 hover:text-foreground hover:underline xl:inline"
+                >
+                  · opened{" "}
+                  {formatRelativeTime(new Date(detail.pr.created_at).getTime())}
+                </a>
+              )}
+            </p>
+            {current && (
+              <button
+                type="button"
+                inert={!carrying}
+                onClick={() => jumpTo({ kind: "top" })}
+                title="Back to the status"
+                className={cn(
+                  "col-start-1 row-start-1 flex min-w-0 items-center gap-2 justify-self-start rounded px-0.5 text-left text-xs transition-[opacity,translate] duration-200 ease-out hover:bg-accent motion-reduce:transition-none",
+                  !carrying && "translate-y-1 opacity-0"
+                )}
+              >
+                <StandingDot
+                  tone={current.standing.tone}
+                  className="size-2 animate-none shadow-none!"
+                />
+                <span className="truncate font-medium text-foreground">
+                  {current.standing.headline}
+                </span>
+              </button>
             )}
-          </p>
+          </div>
         ) : (
           <Skeleton className="mt-1 h-3.5 w-80 max-w-full max-sm:hidden" />
         )}
       </div>
       <div className="flex h-7 shrink-0 items-center gap-3">
+        {carrying && current?.status && (
+          <div className="max-lg:hidden">
+            <NextStepAction
+              pr={pr}
+              standing={current.standing}
+              status={current.status}
+              login={current.login}
+              inHeader
+            />
+          </div>
+        )}
         {files.length > 0 && (
           <button
             type="button"

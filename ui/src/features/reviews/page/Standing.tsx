@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import {
   ArrowClockwiseIcon,
@@ -72,44 +72,81 @@ const toneColor: Record<StandingTone, string> = {
   unknown: "var(--border)",
 }
 
-/** Where the PR stands, in one sentence, with the single next step beside it. */
-export function StandingPanel({ pr }: { pr: PullRequestRef }) {
+/** The PR's standing sentence and what feeds it; the card and the header read the same one. */
+export function usePullRequestStanding(pr: PullRequestRef) {
   const session = useSession()
   const detail = useQuery(reviewQueries.detail(pr)).data
-  const open = detail?.pr.state === "open"
   const status = useQuery(reviewQueries.status(pr)).data
   const threads = useQuery(reviewQueries.conversation(pr)).data?.threads
+  if (!detail) return null
+  return {
+    detail,
+    status,
+    login: session.data?.login ?? "",
+    standing: pullRequestStanding(detail, status, session.data?.login, threads),
+  }
+}
+
+/** The tone of where the PR stands, as a dot with a soft halo. */
+export function StandingDot({
+  tone,
+  className,
+}: {
+  tone: StandingTone
+  className?: string
+}) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "size-2.5 shrink-0 rounded-full",
+        tone === "waiting" && "animate-status-pulse",
+        className
+      )}
+      style={{
+        background: toneColor[tone],
+        boxShadow: `0 0 0 4px color-mix(in oklab, ${toneColor[tone]} 18%, transparent)`,
+      }}
+    />
+  )
+}
+
+/** Where the PR stands, in one sentence, with the single next step beside it. */
+export function StandingPanel({ pr }: { pr: PullRequestRef }) {
+  const current = usePullRequestStanding(pr)
   const showFindings = useReviewPage((state) => state.showFindings)
   const showOpenConversations = useReviewPage(
     (state) => state.showOpenConversations
   )
-  if (!detail) return null
-  const standing = pullRequestStanding(
-    detail,
-    status,
-    session.data?.login,
-    threads
-  )
-  const login = session.data?.login ?? ""
+  const setStandingInView = useReviewPage((state) => state.setStandingInView)
+  // Watching the card itself, so the header knows when to carry its sentence.
+  const ref = useRef<HTMLElement>(null)
+  const ready = current !== null
+  useEffect(() => {
+    const node = ref.current
+    if (!node) return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry) setStandingInView(entry.isIntersecting)
+    })
+    observer.observe(node)
+    return () => {
+      observer.disconnect()
+      setStandingInView(false)
+    }
+  }, [setStandingInView, ready])
+  if (!current) return null
+  const { detail, status, login, standing } = current
+  const open = detail.pr.state === "open"
 
   return (
     <section
+      ref={ref}
       aria-label="Pull request status"
       className="overflow-hidden rounded-xl border border-border bg-card"
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-4">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <span
-            aria-hidden
-            className={cn(
-              "mt-[7px] size-2.5 shrink-0 rounded-full",
-              standing.tone === "waiting" && "animate-status-pulse"
-            )}
-            style={{
-              background: toneColor[standing.tone],
-              boxShadow: `0 0 0 4px color-mix(in oklab, ${toneColor[standing.tone]} 18%, transparent)`,
-            }}
-          />
+          <StandingDot tone={standing.tone} className="mt-[7px]" />
           <div className="min-w-0">
             <p className="text-[17px] leading-6 font-semibold tracking-[-0.015em] text-foreground">
               {standing.headline}
@@ -135,7 +172,12 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
           </div>
         </div>
         {status && (
-          <NextStepAction standing={standing} status={status} login={login} />
+          <NextStepAction
+            pr={pr}
+            standing={standing}
+            status={status}
+            login={login}
+          />
         )}
       </div>
       {open && status && (
@@ -168,14 +210,23 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   )
 }
 
-function NextStepAction({
+/**
+ * The one thing to do next. In the card a merge lives in its own row, so it
+ * appears here only `inHeader`, where the header's own Review button already
+ * covers a review.
+ */
+export function NextStepAction({
+  pr,
   standing,
   status,
   login,
+  inHeader = false,
 }: {
+  pr: PullRequestRef
   standing: Standing
   status: OpenPullRequest
   login: string
+  inHeader?: boolean
 }) {
   const openReview = useReviewPage((state) => state.openReview)
   const queryClient = useQueryClient()
@@ -185,7 +236,7 @@ function NextStepAction({
   if (!next) return null
   switch (next.kind) {
     case "review":
-      return (
+      return inHeader ? null : (
         <Button size="lg" onClick={() => openReview()}>
           Review changes
         </Button>
@@ -205,7 +256,18 @@ function NextStepAction({
     case "update-branch":
       return <UpdatePullRequestBranch pr={status} onUpdated={refresh} />
     case "merge":
-      return null
+      return inHeader ? (
+        <MergePullRequest
+          pr={status}
+          apply={() => () => {}}
+          onMerged={() => {
+            void queryClient.invalidateQueries({
+              queryKey: reviewQueries.detail(pr).queryKey,
+            })
+            refresh()
+          }}
+        />
+      ) : null
   }
 }
 
