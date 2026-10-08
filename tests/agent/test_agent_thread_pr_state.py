@@ -442,7 +442,9 @@ async def test_merged_pr_subscribes_the_thread_to_that_commit() -> None:
         patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
         patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
-        patch("openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock) as subscribe,
+        patch(
+            "openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock
+        ) as subscribe,
     ):
         await webhook_common.update_agent_thread_pr_state(
             _pr_payload(state="closed", merged=True, merge_sha=_MERGE_SHA)
@@ -467,7 +469,9 @@ async def test_merged_pr_without_a_merge_commit_does_not_subscribe() -> None:
         patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
         patch("openswe.webhooks.common._record_pr_merge_feedback", new_callable=AsyncMock),
-        patch("openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock) as subscribe,
+        patch(
+            "openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock
+        ) as subscribe,
     ):
         await webhook_common.update_agent_thread_pr_state(_pr_payload(state="closed", merged=True))
     subscribe.assert_not_awaited()
@@ -479,7 +483,9 @@ async def test_reviewer_thread_does_not_subscribe_when_a_pr_merges() -> None:
     with (
         patch("openswe.webhooks.common.get_client", return_value=_merging_client(metadata)),
         patch("openswe.webhooks.common.agent_thread_pr_state_lock", _unlocked),
-        patch("openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock) as subscribe,
+        patch(
+            "openswe.rollout_events.subscribe_merged_thread", new_callable=AsyncMock
+        ) as subscribe,
     ):
         await webhook_common.update_agent_thread_pr_state(
             _pr_payload(state="closed", merged=True, merge_sha=_MERGE_SHA)

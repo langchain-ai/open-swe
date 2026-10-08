@@ -147,10 +147,6 @@ def _run_config(
     config["pr_number"] = number
     config["workspace"] = workspace
     return config
-    config["repo"] = {"owner": owner, "name": repo}
-    config["pr_number"] = number
-    config["workspace"] = workspace
-    return config
 
 
 def _already_listening(subscriptions: list[EventSubscription], sha: str) -> bool:
