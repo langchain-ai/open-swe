@@ -6,6 +6,7 @@ deployment reaches it with the run token Open SWE puts in each run's context.
 """
 
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
+from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from managed_deepagents import (
     DeepAgentDefinition,
@@ -22,7 +23,7 @@ from pydantic import BaseModel
 _MODEL_CALL_LIMIT = 5_000
 # Callable from code mode, so large results can be filtered or written to files without
 # passing through the model.
-_PTC_TOOLS = [
+_PTC_TOOLS: list[str | BaseTool] = [
     "read_file",
     "write_file",
     f"{MCP_SERVER_NAME}_web_search",
