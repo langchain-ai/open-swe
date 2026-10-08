@@ -14,6 +14,7 @@ from openswe.analytics.usage import (
     record_agent_invocation_cost,
 )
 from openswe.invocation import resolve_invocation_id
+from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from openswe.utils.run_usage import summarize_run_usage
 from openswe.utils.thread_ops import langgraph_client
@@ -21,7 +22,7 @@ from openswe.utils.thread_ops import langgraph_client
 logger = logging.getLogger(__name__)
 
 _RETRY_DELAYS_SECONDS = (15, 30, 60, 120, 240)
-THREAD_COST_KEY = "session_cost_usd"
+RUN_COSTS_KEY = "run_costs_usd"
 
 
 class AgentCostRefresh(TypedDict, closed=True):
@@ -97,21 +98,16 @@ async def schedule_agent_cost_refresh(
     return True
 
 
-async def _store_thread_cost(payload: AgentCostRefresh, client: LangGraphClient) -> None:
-    """Save the thread's running LangSmith cost on its metadata for the dashboard."""
+async def _store_run_cost(payload: AgentCostRefresh, cost: float, client: LangGraphClient) -> None:
+    """Add the run's cost to its thread's metadata for the dashboard."""
+    thread_id = payload["thread_id"]
     try:
-        snapshot = await get_langsmith_thread_cost(
-            payload["thread_id"],
-            payload["invocation_id"],
-            lookup_start=payload.get("invocation_started_at"),
-        )
-        if snapshot is not None:
-            await client.threads.update(
-                payload["thread_id"], metadata={THREAD_COST_KEY: snapshot.total_cost}
-            )
+        stored = thread_metadata(await client.threads.get(thread_id)).get(RUN_COSTS_KEY)
+        run_costs = {**(stored if isinstance(stored, dict) else {}), payload["invocation_id"]: cost}
+        await client.threads.update(thread_id, metadata={RUN_COSTS_KEY: run_costs})
     except Exception:  # noqa: BLE001
         logger.warning(
-            "Could not store thread cost",
+            "Could not store run cost on thread",
             extra={"usage_run_id": payload["invocation_id"]},
             exc_info=True,
         )
@@ -167,7 +163,7 @@ async def run_agent_cost_refresh(
             )
             snapshot = None
         else:
-            await _store_thread_cost(payload, client)
+            await _store_run_cost(payload, snapshot.total_cost, client)
             return {"status": "updated"}
 
     next_attempt = attempt + 1

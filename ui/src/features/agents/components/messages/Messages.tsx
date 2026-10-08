@@ -105,6 +105,7 @@ export const Messages = memo(function MessagesComponent({
   threadId,
   scrollKey,
   showPlanArtifact = false,
+  runCosts,
   emptyState,
   footer,
   pollWorkflowApprovalsWhileActive = false,
@@ -221,6 +222,11 @@ export const Messages = memo(function MessagesComponent({
                   isMarkdownLive={messageIsMarkdownLive}
                   repoPath={repoPath}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
+                  costUsd={
+                    message.invocationId
+                      ? runCosts?.[message.invocationId]
+                      : undefined
+                  }
                   onApprove={onApprove}
                   onReject={onReject}
                   onAutoApprove={onAutoApprove}

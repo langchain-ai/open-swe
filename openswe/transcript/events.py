@@ -85,6 +85,7 @@ class MessageUsage(BaseModel):
     output_tokens: int | None = None
     total_tokens: int | None = None
     model: str | None = None
+    invocation_id: str | None = None
 
 
 class ThreadCreated(_Body):

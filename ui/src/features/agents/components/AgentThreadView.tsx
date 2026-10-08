@@ -873,6 +873,7 @@ export function AgentThreadView({
                   threadId={thread.id}
                   scrollKey={thread.id}
                   showPlanArtifact={Boolean(thread.planStatus)}
+                  runCosts={thread.runCosts}
                   emptyState={
                     <div className="flex min-h-60 items-center justify-center">
                       {hydrationFailed ? (

@@ -54,6 +54,7 @@ export interface TranscriptUsage {
   output_tokens?: number | null
   total_tokens?: number | null
   model?: string | null
+  invocation_id?: string | null
 }
 
 /** A subagent's position in the run tree: `[]` at the root, `[task_tool_call_id, …]` below it. */

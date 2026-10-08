@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
-from openswe.agent_cost import THREAD_COST_KEY
+from openswe.agent_cost import RUN_COSTS_KEY
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
@@ -413,6 +413,17 @@ async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bo
         return False
 
 
+def _run_costs(metadata: Mapping[str, Any]) -> dict[str, float]:
+    stored = metadata.get(RUN_COSTS_KEY)
+    if not isinstance(stored, dict):
+        return {}
+    return {
+        key: float(cost)
+        for key, cost in stored.items()
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool)
+    }
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -459,6 +470,7 @@ async def _thread_summary(
         else None
     )
 
+    run_costs = _run_costs(metadata)
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
@@ -510,12 +522,8 @@ async def _thread_summary(
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
-        "costUsd": (
-            cost
-            if isinstance(cost := metadata.get(THREAD_COST_KEY), (int, float))
-            and not isinstance(cost, bool)
-            else None
-        ),
+        "costUsd": sum(run_costs.values()) if run_costs else None,
+        "runCosts": run_costs,
         "sourceUrl": thread_source_url(metadata),
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),

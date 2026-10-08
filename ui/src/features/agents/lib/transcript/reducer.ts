@@ -66,6 +66,8 @@ export interface TranscriptMessageState {
   attachments: ReadonlyArray<TranscriptAttachment>
   /** The GitHub login of a human message's sender, when the server knows it. */
   senderLogin: string | null
+  /** Invocation an AI message ran under, when the provider reported usage. */
+  invocationId?: string
   createdAt: string
 }
 
@@ -182,6 +184,7 @@ function indexMessages(
       namespace: row.namespace,
       attachments: row.attachments ?? [],
       senderLogin: row.sender?.login ?? null,
+      invocationId: row.usage?.invocation_id ?? undefined,
       createdAt: row.created_at,
     }
   }
@@ -694,6 +697,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
         senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
+        invocationId: payload.usage?.invocation_id ?? undefined,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
       if (payload.role === "ai" && payload.namespace.length === 0) {
@@ -971,6 +975,7 @@ interface AgentDraft {
   timestamp: string
   startedAt: string
   turnKey?: string
+  invocationId?: string
   chunks: Array<Chunk>
 }
 
@@ -1030,12 +1035,18 @@ function turnMessages(
       timestamp: agent.timestamp,
       startedAt: agent.startedAt,
       ...(agent.turnKey ? { turnKey: agent.turnKey } : {}),
+      ...(agent.invocationId ? { invocationId: agent.invocationId } : {}),
       chunks: mergeTextChunks(agent.chunks),
     })
     agent = null
   }
 
-  const append = (id: string, timestamp: string, chunks: Array<Chunk>) => {
+  const append = (
+    id: string,
+    timestamp: string,
+    chunks: Array<Chunk>,
+    invocationId?: string
+  ) => {
     if (!chunks.length) return
     if (!agent) {
       agent = {
@@ -1043,11 +1054,13 @@ function turnMessages(
         timestamp,
         startedAt: timestamp,
         turnKey,
+        invocationId,
         chunks: [...chunks],
       }
       return
     }
     agent.timestamp = timestamp
+    agent.invocationId ??= invocationId
     agent.chunks.push(...chunks)
   }
 
@@ -1069,7 +1082,7 @@ function turnMessages(
       chunks.push(...imageChunks(state.threadId, row.attachments))
       const text = row.text.trim()
       if (text) chunks.push({ kind: "text", text })
-      append(row.messageId, row.createdAt, chunks)
+      append(row.messageId, row.createdAt, chunks, row.invocationId)
       continue
     }
     const call = state.toolCalls[item.id]

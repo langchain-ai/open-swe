@@ -96,6 +96,7 @@ type AgentTurn = {
   author: Message["author"]
   timestamp: string
   turnKey?: string
+  invocationId?: string
   startedAt: string
   timestampIsFallback?: boolean
   chunks: Array<Chunk>
@@ -291,7 +292,8 @@ export function streamMessagesToUi(
     msgId: string,
     timestamp: string,
     timestampIsFallback: boolean,
-    chunks: Array<Chunk>
+    chunks: Array<Chunk>,
+    invocationId?: string
   ) => {
     if (!agentTurn) {
       agentTurn = {
@@ -299,12 +301,14 @@ export function streamMessagesToUi(
         author: "agent",
         timestamp,
         turnKey,
+        invocationId,
         startedAt: timestamp,
         timestampIsFallback,
         chunks: [...chunks],
       }
     } else {
       agentTurn.timestamp = timestamp
+      agentTurn.invocationId ??= invocationId
       agentTurn.timestampIsFallback =
         agentTurn.timestampIsFallback || timestampIsFallback
       agentTurn.chunks.push(...chunks)
@@ -396,7 +400,14 @@ export function streamMessagesToUi(
       }
 
       if (chunks.length) {
-        appendAgentChunks(msgId, timestamp, timestampIsFallback, chunks)
+        const invocationId = raw.response_metadata?.open_swe_invocation_id
+        appendAgentChunks(
+          msgId,
+          timestamp,
+          timestampIsFallback,
+          chunks,
+          typeof invocationId === "string" ? invocationId : undefined
+        )
       }
     }
 
