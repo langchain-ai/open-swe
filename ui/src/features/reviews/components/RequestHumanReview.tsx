@@ -9,8 +9,12 @@ import { PullRequestActionButton } from "./PullRequestActionButton"
 function refusal(pr: OpenPullRequest): string | null {
   if (pr.mergeable === false || pr.mergeState === "dirty")
     return "Resolve the merge conflicts first"
-  if (pr.ci === "failing" && pr.mergeState !== "unstable")
-    return "Fix the failing required checks first"
+  if (pr.ci === "failing" && pr.mergeState !== "unstable") {
+    const checks = pr.failingChecks.join(", ")
+    return checks
+      ? `Review blocked by failing checks: ${checks}`
+      : "Fix the failing required checks first"
+  }
   return null
 }
 
@@ -59,7 +63,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         ? "Retry review request"
         : "Request review in Slack"
   return (
-    <span title={blocked ?? undefined}>
+    <span className="inline-flex flex-wrap items-center gap-2">
       <PullRequestActionButton
         label={label}
         disabled={
@@ -67,6 +71,14 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         }
         onClick={() => requestReview.mutate()}
       />
+      {blocked && (
+        <span
+          role="status"
+          className="text-xs text-amber-700 dark:text-amber-400"
+        >
+          {blocked}
+        </span>
+      )}
     </span>
   )
 }

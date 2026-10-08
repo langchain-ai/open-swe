@@ -358,6 +358,44 @@ test.describe("Human review in Slack", () => {
     });
   });
 
+  test("dashboard shows the checks blocking a review request", async ({
+    page,
+  }) => {
+    await loginAs(page, ALICE);
+    await setReviewChannel(page.request);
+    const seeded = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "Synthetic fixture: blocked review request",
+      author: ALICE.login,
+      mergeable_state: "blocked",
+      check_runs: [
+        {
+          name: "unit tests",
+          status: "completed",
+          conclusion: "failure",
+          required: true,
+        },
+        {
+          name: "browser tests",
+          status: "completed",
+          conclusion: "timed_out",
+          required: true,
+        },
+      ],
+    });
+    await page.goto(
+      `/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
+    );
+    await expect(
+      page.getByRole("button", { name: "Request review in Slack" }),
+    ).toBeDisabled();
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: "Review blocked by failing checks:" }),
+    ).toHaveText("Review blocked by failing checks: unit tests, browser tests");
+  });
+
   test("the agent posts a card in the review channel; two sign up; it merges two hours after one approval", async ({
     page,
     request,
