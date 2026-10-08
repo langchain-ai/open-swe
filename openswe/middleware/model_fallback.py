@@ -20,9 +20,10 @@ and vice versa. The middleware itself is provider-agnostic — it inspects the
 exception type/status code to decide whether an attempt is retryable.
 
 If every attempt fails, the middleware either raises the last error or (by
-default) returns a terminal ``AIMessage`` explaining the outage, so the run
+default) returns a marked terminal ``AIMessage`` explaining the outage, so the run
 ends with a visible message in Slack/GitHub instead of an abrupt crash. The
-turn's progress is checkpointed, so the user can retrigger to continue.
+turn's progress is checkpointed, so the user can retrigger to continue. Scheduled
+runs raise ``ModelOutageError`` so completion handling records and retries the fire.
 """
 
 import asyncio
@@ -34,13 +35,16 @@ from typing import Any
 import anthropic
 import httpx2
 import openai
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.exceptions import ModelError
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
+from langgraph.config import get_config
+from langgraph.runtime import Runtime
 from langsmith import trace
 
 from openswe.middleware.trace import OpenSWEMiddleware
+from openswe.run_config import RunConfig
 from openswe.utils.errors import classify_exception, error_tracking_fields, exception_fields
 
 logger = logging.getLogger(__name__)
@@ -77,6 +81,14 @@ MODEL_OUTAGE_MESSAGE = (
     "problem with your task. My progress so far has been saved — please retrigger "
     "the run in a few minutes to continue."
 )
+
+
+class ModelOutageError(RuntimeError):
+    pass
+
+
+def is_model_outage(message: BaseMessage) -> bool:
+    return isinstance(message, AIMessage) and message.response_metadata.get("model_outage") is True
 
 
 def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
@@ -187,7 +199,7 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> Any:
+    ) -> ModelResponse | AIMessage:
         fallback_model = next(
             (
                 fallback
@@ -293,5 +305,11 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
             },
         )
         if self._surface_outage_message:
-            return AIMessage(content=MODEL_OUTAGE_MESSAGE)
+            return AIMessage(content=MODEL_OUTAGE_MESSAGE, response_metadata={"model_outage": True})
         raise last_exc
+
+    async def aafter_model(self, state: AgentState, runtime: Runtime) -> None:
+        messages = state.get("messages") or []
+        if messages and is_model_outage(messages[-1]):
+            if RunConfig.from_config(get_config()).source == "schedule":
+                raise ModelOutageError(MODEL_OUTAGE_MESSAGE)

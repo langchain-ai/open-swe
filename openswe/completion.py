@@ -25,6 +25,7 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
+from openswe.middleware.model_fallback import ModelOutageError
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.publish import settle_review_check_run
 from openswe.session_cost import schedule_session_cost_refresh
@@ -523,6 +524,23 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             )
             raise
     payload_metadata = payload.get("metadata")
+    if isinstance(payload_metadata, dict) and run_id and payload_metadata.get("schedule_id"):
+        error = payload.get("error")
+        outage = (
+            status == "error"
+            and isinstance(error, dict)
+            and error.get("error") == ModelOutageError.__name__
+        )
+        if outage or (
+            status == "success" and payload_metadata.get("schedule_outage_retry") is True
+        ):
+            from openswe.schedules.store import handle_schedule_model_outage
+
+            result = await handle_schedule_model_outage(
+                thread_id, run_id, str(status), payload_metadata
+            )
+            if outage:
+                return result
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
