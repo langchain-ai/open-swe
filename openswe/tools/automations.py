@@ -44,8 +44,8 @@ async def list_automations() -> dict[str, Any]:
     return {"ok": True, "automations": await schedules.list_agent_schedules()}
 
 
-@audit_tool()
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def create_automation(
     prompt: str,
@@ -82,8 +82,8 @@ async def create_automation(
     return {"ok": True, "automation": record}
 
 
-@audit_tool()
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def update_automation(
     automation_id: str,
@@ -125,8 +125,8 @@ async def update_automation(
     return {"ok": True, "automation": record}
 
 
-@audit_tool()
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def trigger_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `trigger_automation` tool."""
@@ -137,8 +137,8 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
     return {"ok": True, **result}
 
 
-@audit_tool()
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def delete_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `delete_automation` tool."""

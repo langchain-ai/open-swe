@@ -231,8 +231,8 @@ async def publish_workspace(
     return {"ok": True, "workspace": _summary(record), "created": existing is None}
 
 
-@audit_tool()
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def refresh_workspace_start(name: str) -> dict[str, Any]:
     """Implement the `refresh_workspace_start` tool."""
@@ -243,8 +243,8 @@ async def refresh_workspace_start(name: str) -> dict[str, Any]:
     return await _start_refresh(slug, name)
 
 
-@audit_tool()
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def delete_workspace(name: str) -> dict[str, Any]:
     """Implement the `delete_workspace` tool."""
@@ -264,8 +264,8 @@ async def delete_workspace(name: str) -> dict[str, Any]:
     return {"ok": True, "deleted": True}
 
 
-@audit_tool()
 @expose_mcp(access="admin")
+@audit_tool()
 @access(_WRITE)
 async def configure_repository(
     workspace: str,
