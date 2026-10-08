@@ -1580,7 +1580,7 @@
       },
       "ExcludedHunk": {
         "additionalProperties": false,
-        "description": "A hunk, or a whole patchless file when ``header`` is empty, left off the card.",
+        "description": "A hunk left off the card.",
         "properties": {
           "additions": {
             "title": "Additions",
