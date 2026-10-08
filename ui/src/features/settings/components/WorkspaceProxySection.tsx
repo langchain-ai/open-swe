@@ -21,7 +21,7 @@ function FieldHelp({
       <TooltipTrigger
         render={<span role="button" tabIndex={0} />}
         aria-label={`About ${label.toLowerCase()}`}
-        className="ml-1 inline-flex align-middle text-muted-foreground hover:text-foreground"
+        className="ml-1 inline-flex align-middle text-secondary hover:text-primary"
         onClick={(event) => event.preventDefault()}
       >
         <InfoIcon aria-hidden="true" className="size-3.5" />
@@ -138,7 +138,7 @@ export function WorkspaceProxySection({
               />
             </>
           ) : parseError ? (
-            <p role="alert" className="text-xs text-destructive">
+            <p role="alert" className="text-xs text-error-secondary">
               {parseError} Fix the configuration in the JSON tab to use the
               form.
             </p>
@@ -148,7 +148,7 @@ export function WorkspaceProxySection({
               className="space-y-4"
             >
               {rules.length === 0 && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-secondary">
                   No custom proxy rules configured.
                 </p>
               )}
@@ -175,7 +175,7 @@ export function WorkspaceProxySection({
                 return (
                   <div
                     key={index}
-                    className="space-y-3 rounded-md border border-border p-3"
+                    className="space-y-3 rounded-md border border-default p-3"
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">
@@ -299,7 +299,7 @@ export function WorkspaceProxySection({
                               description="Plaintext values are stored and returned as-is by the sandbox API. Opaque values are encrypted and write-only there, but Open SWE still persists this workspace configuration: opaque is not a way to store secrets here."
                             />
                             <select
-                              className="block h-9 rounded-md border border-input bg-background px-2"
+                              className="block h-9 rounded-md border border-default bg-surface-level-1 px-2"
                               value={
                                 typeof header.type === "string"
                                   ? header.type
@@ -443,7 +443,7 @@ export function WorkspaceProxySection({
             </fieldset>
           )}
         </div>
-        <p id="workspace-proxy-help" className="text-xs text-muted-foreground">
+        <p id="workspace-proxy-help" className="text-xs text-secondary">
           Use rules with name, match_hosts, headers (name, type, value), and
           env_vars. Headers match hosts; environment variables are sandbox-wide.
           Do not enter secrets or authentication credentials. Authorization,
@@ -451,9 +451,9 @@ export function WorkspaceProxySection({
           {" {} "}to clear custom proxy settings; other sandbox create
           parameters are preserved.
         </p>
-        <details className="text-xs text-muted-foreground">
+        <details className="text-xs text-secondary">
           <summary className="cursor-pointer">Example configuration</summary>
-          <pre className="mt-2 overflow-auto rounded-md bg-muted p-3">
+          <pre className="mt-2 overflow-auto rounded-md bg-surface-level-2 p-3">
             {JSON.stringify(
               {
                 rules: [
@@ -477,7 +477,7 @@ export function WorkspaceProxySection({
           </pre>
         </details>
         {save.error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-error-secondary">
             {save.error.message}
           </p>
         )}

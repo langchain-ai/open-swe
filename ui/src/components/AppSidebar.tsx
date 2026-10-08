@@ -127,10 +127,10 @@ function isActive(item: NavItem, pathname: string): boolean {
 }
 
 const LINK_CLASS =
-  "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+  "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs/relaxed text-secondary transition-colors hover:bg-surface-level-2-hover hover:text-primary"
 
 const ACTIVE_LINK_PROPS = {
-  className: "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+  className: "bg-surface-level-2-hover text-primary font-medium",
 }
 
 function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
@@ -138,7 +138,7 @@ function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
   const workspaces = options.data?.workspaces ?? []
   if (workspaces.length === 0) return null
   return (
-    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-border pl-2">
+    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-default pl-2">
       {workspaces.map((workspace) => (
         <Link
           key={workspace.slug}
@@ -165,7 +165,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
   return (
     <SidebarFrame
       {...layout}
-      className="border-r border-border bg-sidebar text-sidebar-foreground"
+      className="border-r border-default bg-surface-level-2 text-primary"
     >
       <div
         className={cn(
@@ -188,7 +188,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         {NAV.filter((group) => !group.adminOnly || user.is_admin).map(
           (group) => (
             <div key={group.heading} className="flex flex-col gap-0.5">
-              <span className="px-2.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+              <span className="px-2.5 pb-1 text-[10px] font-medium tracking-wide text-tertiary uppercase">
                 {group.heading}
               </span>
               {group.items.map((item) => {

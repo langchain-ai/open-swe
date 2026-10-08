@@ -145,7 +145,7 @@ export function MCPImport({
       }}
     >
       <p className="text-sm font-medium">Import MCP JSON</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-secondary">
         Paste a Claude-style mcpServers configuration. Review each connection
         before saving. New connections preselect all tools after discovery.
       </p>
@@ -161,7 +161,7 @@ export function MCPImport({
         }
       />
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-error-secondary">
           {error}
         </p>
       )}

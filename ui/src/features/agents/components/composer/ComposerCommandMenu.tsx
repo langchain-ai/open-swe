@@ -90,8 +90,8 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
               className={cn(
                 "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs/relaxed select-none",
                 activeItemId === item.id
-                  ? "bg-accent text-accent-foreground"
-                  : "text-foreground"
+                  ? "bg-surface-level-1-hover text-primary"
+                  : "text-primary"
               )}
               data-composer-item-id={item.id}
               key={item.id}
@@ -106,21 +106,21 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu({
               type="button"
             >
               {item.type === "path" ? (
-                <FileIcon className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <FileIcon className="size-3.5 shrink-0 text-tertiary" />
               ) : item.type === "slack-channel" ? (
-                <Hash className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <Hash className="size-3.5 shrink-0 text-tertiary" />
               ) : (
-                <Bot className="size-3.5 shrink-0 text-muted-foreground/80" />
+                <Bot className="size-3.5 shrink-0 text-tertiary" />
               )}
               <span className="shrink-0 font-medium">{item.label}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+              <span className="min-w-0 flex-1 truncate text-tertiary">
                 {item.description}
               </span>
             </button>
           ))}
         </div>
       ) : (
-        <p className="px-4 py-3 text-xs text-muted-foreground/70">
+        <p className="px-4 py-3 text-xs text-tertiary">
           {emptyStateText ??
             (triggerKind === "path"
               ? "No matching files."

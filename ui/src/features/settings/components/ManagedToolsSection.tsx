@@ -90,7 +90,7 @@ export function MissingRow({
     <li className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
       <span className="text-sm">{credential.display_name}</span>
       {credential.kind === "secret" ? (
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-secondary">
           Set its API key in LangSmith
         </span>
       ) : (
@@ -125,7 +125,7 @@ function GatewayStatus({
       <div className="flex flex-wrap items-center justify-between gap-3 p-3">
         <div className="min-w-0">
           <p className="text-sm font-medium">{status.gateway.name}</p>
-          <p className="text-xs text-muted-foreground">Used in {workspaces}</p>
+          <p className="text-xs text-secondary">Used in {workspaces}</p>
         </div>
         {status.ready ? (
           <Badge variant="outline">
@@ -139,11 +139,11 @@ function GatewayStatus({
       </div>
       {status.ready ? null : (
         <>
-          <p className="px-3 pb-2 text-xs text-muted-foreground">
+          <p className="px-3 pb-2 text-xs text-secondary">
             LangSmith offers this gateway&apos;s tools only after every service
             in it is connected to your account.
           </p>
-          <ul className="divide-y divide-border border-t">
+          <ul className="divide-y divide-default border-t">
             {status.missing.map((credential) => (
               <MissingRow
                 key={credential.slug}
@@ -177,9 +177,9 @@ export function ManagedToolsSection() {
       description="Tools your workspace admins picked from LangSmith Managed Tools. They load in your private threads and run with your own connections; provider tokens stay in LangSmith."
     >
       {view.isLoading ? (
-        <p className="p-4 text-xs text-muted-foreground">Loading…</p>
+        <p className="p-4 text-xs text-secondary">Loading…</p>
       ) : view.isError ? (
-        <p role="alert" className="p-4 text-xs text-destructive">
+        <p role="alert" className="p-4 text-xs text-error-secondary">
           {view.error.message}
         </p>
       ) : !view.data?.langsmith_connected ? (
@@ -189,7 +189,7 @@ export function ManagedToolsSection() {
           control={<ConnectLangSmithButton />}
         />
       ) : view.data.gateways.length === 0 ? (
-        <p className="p-4 text-xs text-muted-foreground">
+        <p className="p-4 text-xs text-secondary">
           No workspace has picked a managed tools gateway yet.
         </p>
       ) : (

@@ -43,7 +43,7 @@ export function RunTargetSelector({
   const Icon = value === "local" ? Laptop : Cloud
   return (
     <Menu>
-      <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
+      <MenuTrigger className="flex items-center gap-1 text-secondary transition-opacity hover:opacity-80">
         <Icon className="size-3.5 shrink-0" />
         <span>{value === "local" ? "This Mac" : "Cloud"}</span>
         <ComposerControlChevron />
@@ -89,7 +89,7 @@ export function LocalRepoSelector({
     <Menu>
       <MenuTrigger
         className={cn(
-          "flex max-w-[260px] items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80",
+          "flex max-w-[260px] items-center gap-1 text-secondary transition-opacity hover:opacity-80",
           triggerClassName
         )}
         title={selectedRepo?.cwd}
@@ -166,14 +166,14 @@ export function LocalWorkspaceSelector({
   const label = value === "worktree" ? worktreeLabel : "Current checkout"
   if (!onChange)
     return (
-      <span className="flex items-center gap-1 text-muted-foreground">
+      <span className="flex items-center gap-1 text-secondary">
         <Icon className="size-3.5 shrink-0" />
         {label}
       </span>
     )
   return (
     <Menu>
-      <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
+      <MenuTrigger className="flex items-center gap-1 text-secondary transition-opacity hover:opacity-80">
         <Icon className="size-3.5 shrink-0" />
         <span>{label}</span>
         <ComposerControlChevron />
@@ -249,26 +249,26 @@ export function LocalBranchSelector({
           if (!open) onRefresh()
           setOpen((value) => !value)
         }}
-        className="flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
+        className="flex max-w-[260px] cursor-pointer items-center gap-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
       >
         <GitBranch className="size-3.5 shrink-0" />
         <span className="truncate">{selectedBranch ?? "No branch"}</span>
         <ComposerControlChevron />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded-lg bg-popover text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10">
-          <div className="border-b border-border">
+        <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded-lg bg-elevated text-xs text-primary shadow-md ring-1 ring-[color:var(--text-primary)]">
+          <div className="border-b border-default">
             <input
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search refs..."
-              className="w-full bg-transparent px-3 py-2 text-foreground outline-none placeholder:text-muted-foreground"
+              className="w-full bg-transparent px-3 py-2 text-primary outline-none placeholder:text-secondary"
             />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-1">
             {filtered.length === 0 ? (
-              <div className="px-2 py-1.5 text-muted-foreground">
+              <div className="px-2 py-1.5 text-secondary">
                 No refs found.
               </div>
             ) : (
@@ -278,15 +278,15 @@ export function LocalBranchSelector({
                   type="button"
                   onClick={() => select(ref.name)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-level-1-hover hover:text-primary",
                     ref.name === selectedBranch
-                      ? "text-foreground"
-                      : "text-muted-foreground"
+                      ? "text-primary"
+                      : "text-secondary"
                   )}
                 >
                   <span className="min-w-0 flex-1 truncate">{ref.name}</span>
                   {badge(ref) && (
-                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                    <span className="shrink-0 text-[10px] text-tertiary">
                       {badge(ref)}
                     </span>
                   )}

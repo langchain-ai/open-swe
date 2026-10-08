@@ -5,7 +5,7 @@ import { cn, formatRelativeTime } from "@/lib/utils"
 
 const STATE_STYLES: Record<string, string> = {
   open: "border-emerald-600/40 text-emerald-500",
-  draft: "border-border text-muted-foreground",
+  draft: "border-default text-secondary",
   merged: "border-purple-600/40 text-purple-500",
   closed: "border-red-600/40 text-red-500",
 }
@@ -73,23 +73,23 @@ export function PrHeader({
           >
             <IoLogoGithub
               aria-label="GitHub"
-              className="mr-1.5 inline size-4 align-[-2px] text-muted-foreground"
+              className="mr-1.5 inline size-4 align-[-2px] text-secondary"
             />
             {title}
             {number != null && (
-              <span className="text-muted-foreground"> #{number}</span>
+              <span className="text-secondary"> #{number}</span>
             )}
           </a>
         </h1>
       </div>
       <div
         className={cn(
-          "flex items-center gap-2 text-xs text-muted-foreground",
+          "flex items-center gap-2 text-xs text-secondary",
           compact ? "mt-1.5 min-w-0 overflow-hidden" : "mt-2 flex-wrap"
         )}
       >
         {author && (
-          <span className="shrink-0 font-medium text-foreground">{author}</span>
+          <span className="shrink-0 font-medium text-primary">{author}</span>
         )}
         {compact ? (
           <>
@@ -103,11 +103,11 @@ export function PrHeader({
           </>
         ) : (
           <>
-            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="rounded border border-default px-1.5 py-0.5 font-mono text-[11px]">
               {baseRef}
             </span>
             <span>←</span>
-            <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">
+            <span className="rounded border border-default px-1.5 py-0.5 font-mono text-[11px]">
               {headRef}
             </span>
           </>
@@ -125,7 +125,7 @@ export function PrHeader({
         )}
       </div>
       {(createdAt || mergedAt) && (
-        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-secondary">
           {(
             [
               ["Opened", createdAt],

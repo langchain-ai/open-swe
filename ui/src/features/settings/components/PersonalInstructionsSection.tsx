@@ -61,7 +61,7 @@ export function PersonalInstructionsSection() {
           <Skeleton className="h-40 w-full" />
         ) : instructions.isError ? (
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs text-destructive">
+            <p className="text-xs text-error-secondary">
               Could not load your instructions:{" "}
               {instructions.error instanceof Error
                 ? instructions.error.message
@@ -93,7 +93,7 @@ export function PersonalInstructionsSection() {
                 Save instructions
               </Button>
               {dirty && (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-secondary">
                   Unsaved changes
                 </span>
               )}
@@ -107,7 +107,7 @@ export function PersonalInstructionsSection() {
                 Clear
               </Button>
             </div>
-            {error && <p className="text-xs text-destructive">{error}</p>}
+            {error && <p className="text-xs text-error-secondary">{error}</p>}
           </>
         )}
       </SettingsPanel>

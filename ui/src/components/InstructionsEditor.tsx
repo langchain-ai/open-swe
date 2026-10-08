@@ -31,7 +31,7 @@ export function InstructionsEditor({
   }
 
   return (
-    <div className="overflow-hidden rounded-md border border-border">
+    <div className="overflow-hidden rounded-md border border-default">
       <Editor
         height="360px"
         language="markdown"

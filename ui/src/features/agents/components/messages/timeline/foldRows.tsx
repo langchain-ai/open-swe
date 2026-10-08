@@ -20,12 +20,12 @@ export function TurnFoldRow({
   const Icon = expanded ? ChevronDown : ChevronRight
 
   return (
-    <div className={cn("pt-1 pb-2", !active && "border-b border-border/60")}>
+    <div className={cn("pt-1 pb-2", !active && "border-b border-subtle")}>
       <button
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
-        className="flex cursor-pointer items-center gap-1 rounded-md px-1 text-[13px] text-muted-foreground tabular-nums transition-colors select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none focus-visible:ring-inset"
+        className="flex cursor-pointer items-center gap-1 rounded-md px-1 text-[13px] text-secondary tabular-nums transition-colors select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       >
         <span className={active ? "shimmer-text" : undefined}>{label}</span>
         <Icon className="size-3.5" />
@@ -54,9 +54,9 @@ export function WorkGroupToggleRow({
       type="button"
       aria-expanded={expanded}
       onClick={onToggle}
-      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none focus-visible:ring-inset"
+      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-surface-level-1-hover/20 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
     >
-      <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground/65">
+      <span className="flex size-5 shrink-0 items-center justify-center text-tertiary">
         <ChevronDown
           className={cn(
             "size-3.5 shrink-0 opacity-70 transition-transform duration-200",
@@ -65,7 +65,7 @@ export function WorkGroupToggleRow({
           aria-hidden
         />
       </span>
-      <span className="font-medium text-foreground/82">
+      <span className="font-medium text-primary">
         {expanded ? `Show fewer ${noun}` : `+${hiddenCount} previous ${noun}`}
       </span>
     </button>

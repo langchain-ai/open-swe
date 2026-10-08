@@ -121,7 +121,7 @@ export function WorkspaceSandboxSection({
         label="Image"
         description={record.status_message ?? record.snapshot_name ?? undefined}
         control={
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-secondary">
             {record.inherit_default_sandbox
               ? "Inherited from default"
               : SNAPSHOT_LABEL[status]}
@@ -132,13 +132,13 @@ export function WorkspaceSandboxSection({
         label="Base snapshot"
         description="Set when the image is published from an admin thread."
         control={
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="font-mono text-xs text-secondary">
             {record.base_snapshot_id ?? "instance default"}
           </span>
         }
       />
-      <div className="space-y-3 border-b border-border px-4 py-3.5">
-        <p className="text-xs text-muted-foreground">
+      <div className="space-y-3 border-b border-default px-4 py-3.5">
+        <p className="text-xs text-secondary">
           Applies to new sandboxes and image builders, not existing threads.
           Leave sizes blank to inherit deployment defaults. If only CPU or
           memory is set, the sandbox service chooses the other.
@@ -169,7 +169,7 @@ export function WorkspaceSandboxSection({
           ))}
         </div>
         {configuration.error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-error-secondary">
             {configuration.error.message}
           </p>
         )}
@@ -201,7 +201,7 @@ export function WorkspaceSandboxSection({
       <div className="space-y-3 px-4 py-3.5">
         <div className="text-sm">
           <div>Setup script</div>
-          <span className="mt-0.5 block text-xs text-muted-foreground">
+          <span className="mt-0.5 block text-xs text-secondary">
             Runs on the base snapshot to build the image.
           </span>
           <WorkspaceScriptEditor
@@ -213,7 +213,7 @@ export function WorkspaceSandboxSection({
         </div>
         <div className="text-sm">
           <div>Update script</div>
-          <span className="mt-0.5 block text-xs text-muted-foreground">
+          <span className="mt-0.5 block text-xs text-secondary">
             Runs on the current image to bring it up to date.
           </span>
           <WorkspaceScriptEditor
@@ -224,12 +224,12 @@ export function WorkspaceSandboxSection({
           />
         </div>
         {save.error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-error-secondary">
             {save.error.message}
           </p>
         )}
         {rebuild.isSuccess && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             {buildAction} started; the image state above follows its progress.
           </p>
         )}

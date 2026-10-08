@@ -35,7 +35,7 @@ export function SidebarSectionHeader({
         type={onToggleCollapsed ? "button" : undefined}
         onClick={onToggleCollapsed}
         aria-expanded={onToggleCollapsed ? !collapsed : undefined}
-        className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left text-[13px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+        className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left text-[13px] font-medium text-tertiary transition-colors hover:text-primary"
       >
         <span className="min-w-0 truncate">{label}</span>
         <Caret
@@ -69,7 +69,7 @@ export function SidebarSectionMenu({
       <MenuTrigger
         aria-label={label}
         title={label}
-        className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground data-popup-open:opacity-100"
+        className="flex size-5 items-center justify-center rounded text-tertiary opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-surface-level-2-hover hover:text-primary data-popup-open:opacity-100"
       >
         <DotsThreeIcon className="size-4" />
       </MenuTrigger>
@@ -95,7 +95,7 @@ export function SidebarSectionAction({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground"
+      className="flex size-5 items-center justify-center rounded text-tertiary opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-surface-level-2-hover hover:text-primary"
     >
       {icon}
     </button>

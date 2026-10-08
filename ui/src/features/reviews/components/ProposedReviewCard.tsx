@@ -82,7 +82,7 @@ export function ProposedReviewCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {!outcome && pendingCount > 0 && (
-          <p className="text-muted-foreground">
+          <p className="text-secondary">
             Includes your {pendingCount} pending comment
             {pendingCount === 1 ? "" : "s"}.
           </p>
@@ -103,7 +103,7 @@ export function ProposedReviewCard({
                 className={cn(
                   event === value &&
                     value === "REQUEST_CHANGES" &&
-                    "text-destructive"
+                    "text-error-secondary"
                 )}
                 disabled={submit.isPending}
                 onClick={() => drafts.edit(id, { event: value })}
@@ -115,7 +115,7 @@ export function ProposedReviewCard({
         )}
         {outcome ? (
           body && (
-            <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+            <p className="line-clamp-3 whitespace-pre-wrap text-secondary">
               {body}
             </p>
           )

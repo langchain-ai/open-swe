@@ -373,7 +373,7 @@ function sumStats(files: Array<ResolvedGroupFile>) {
 }
 
 const GROUP_STYLES = {
-  bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
+  bug: { label: "Bug", className: "text-error-secondary", Icon: BugBeetleIcon },
   investigate: {
     label: "Investigate",
     className: "text-amber-500",
@@ -381,7 +381,7 @@ const GROUP_STYLES = {
   },
   informational: {
     label: "Informational",
-    className: "text-muted-foreground",
+    className: "text-secondary",
     Icon: InfoIcon,
   },
 } as const
@@ -1362,17 +1362,17 @@ function ReviewBodyInner({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="relative flex min-h-0 min-w-0 flex-1">
           {!embedded && (
-            <div className="hidden w-72 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
+            <div className="hidden w-72 shrink-0 flex-col border-r border-default bg-surface-level-2 lg:flex">
               <ReviewSidebarPanel data={sidebarData} />
             </div>
           )}
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {embedded && (
-              <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-3">
+              <div className="flex h-9 shrink-0 items-center justify-end border-b border-default px-3">
                 <button
                   type="button"
                   onClick={onExpand}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-default px-2 py-1 text-[11px] text-secondary transition-colors hover:text-primary"
                 >
                   <ArrowSquareOutIcon className="size-3" />
                   Open full review
@@ -1434,8 +1434,8 @@ function ReviewBodyInner({
                 )}
                 <div
                   className={cn(
-                    "mt-4 rounded-lg border border-border p-4",
-                    embedded ? "bg-card" : "bg-card"
+                    "mt-4 rounded-lg border border-default p-4",
+                    embedded ? "bg-surface-level-1" : "bg-surface-level-1"
                   )}
                 >
                   {detail.pr.body ? (
@@ -1445,7 +1445,7 @@ function ReviewBodyInner({
                       enlargeImages
                     />
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-secondary">
                       This PR has no description.
                     </p>
                   )}
@@ -1473,7 +1473,7 @@ function ReviewBodyInner({
                         />
                       )}
                       {linesLeft !== null && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-secondary">
                           {linesLeft === 0
                             ? "All lines reviewed"
                             : `${linesLeft} lines left`}
@@ -1491,14 +1491,14 @@ function ReviewBodyInner({
                     </div>
                   </div>
                   {diffFiles && diffFiles.length < detail.pr.changed_files && (
-                    <p className="mb-2 text-xs text-muted-foreground">
+                    <p className="mb-2 text-xs text-secondary">
                       Showing {diffFiles.length} of {detail.pr.changed_files}{" "}
                       changed files.{" "}
                       <a
                         href={`${detail.url}/files`}
                         target="_blank"
                         rel="noreferrer"
-                        className="underline underline-offset-2 hover:text-foreground"
+                        className="underline underline-offset-2 hover:text-primary"
                       >
                         See every file on GitHub
                       </a>
@@ -1507,7 +1507,7 @@ function ReviewBodyInner({
                   {!diffFiles ? (
                     <Skeleton className="h-64 w-full" />
                   ) : diffFiles.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-secondary">
                       No diff available.
                     </p>
                   ) : view === "ai" && groupedView ? (
@@ -1569,7 +1569,7 @@ function ReviewBodyInner({
 function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   const { recent } = progress
   return (
-    <div className="mt-2 text-xs text-muted-foreground">
+    <div className="mt-2 text-xs text-secondary">
       <p>
         {progress.steps} step{progress.steps === 1 ? "" : "s"} committed
       </p>
@@ -1582,7 +1582,7 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
                 key={index}
                 className={cn(
                   "flex min-w-0 gap-2",
-                  current && "text-foreground"
+                  current && "text-primary"
                 )}
               >
                 <span className="shrink-0">
@@ -1618,7 +1618,7 @@ function ScoutThreadLink({
       to="/agents/$threadId"
       params={{ threadId }}
       className={cn(
-        "inline-block text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline",
+        "inline-block text-xs text-secondary underline-offset-2 hover:text-primary hover:underline",
         className
       )}
     >
@@ -1677,13 +1677,13 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
     detail.walkthrough_scout_thread_id,
   ])
   return (
-    <div className="mt-4 flex items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
-      <ListNumbersIcon className="size-6 shrink-0 text-primary" />
+    <div className="mt-4 flex items-center gap-4 rounded-lg border border-brand-subtle bg-brand/5 p-4">
+      <ListNumbersIcon className="size-6 shrink-0 text-brand-primary" />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">
           {running ? "Building the walkthrough…" : "Read this PR step by step"}
         </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p className="mt-0.5 text-xs text-secondary">
           {running
             ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
@@ -1692,7 +1692,7 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
           <ScoutProgressPreview progress={detail.walkthrough_progress} />
         )}
         {failureSummary && (
-          <p className="mt-1.5 text-xs break-words text-destructive">
+          <p className="mt-1.5 text-xs break-words text-error-secondary">
             Last attempt failed: {failureSummary}
           </p>
         )}
@@ -1723,7 +1723,7 @@ function DiffStyleToggle({
   onChange: (value: DiffStyle) => void
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+    <div className="flex items-center gap-0.5 rounded-md border border-default p-0.5">
       <DiffStyleButton
         active={value === "unified"}
         label="Unified view"
@@ -1761,8 +1761,8 @@ function DiffStyleButton({
       aria-pressed={active}
       title={label}
       className={cn(
-        "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
-        active ? "bg-muted text-foreground" : "hover:text-foreground"
+        "flex size-5 items-center justify-center rounded text-secondary transition-colors",
+        active ? "bg-surface-level-2 text-primary" : "hover:text-primary"
       )}
     >
       {children}
@@ -1797,8 +1797,8 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
   )
   return (
     <>
-      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-border bg-background">
-        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-accent text-[11px] font-medium text-muted-foreground">
+      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-default bg-surface-level-1">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-surface-level-1-hover text-[11px] font-medium text-secondary">
           {group.index}
         </span>
         <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
@@ -1812,7 +1812,7 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
         </span>
       </div>
       {summary && (
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-secondary">
           <Markdown content={summary} />
         </div>
       )}
@@ -2092,12 +2092,12 @@ const FileDiffCard = memo(function FileDiffCard({
   return (
     <div
       ref={sectionRef}
-      className="-mx-3 scroll-mt-4 overflow-clip border-y border-border sm:mx-0 sm:rounded-lg sm:border"
+      className="-mx-3 scroll-mt-4 overflow-clip border-y border-default sm:mx-0 sm:rounded-lg sm:border"
     >
       <div
         className={cn(
           // accent is translucent; the background underlay keeps code from showing through.
-          "sticky z-[5] flex items-center gap-2 bg-[linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--background),var(--background))] px-3 py-2 text-xs",
+          "sticky z-[5] flex items-center gap-2 bg-[linear-gradient(var(--bg-surface-level-1-hover),var(--bg-surface-level-1-hover)),linear-gradient(var(--bg-surface-level-1),var(--bg-surface-level-1))] px-3 py-2 text-xs",
           belowStepHeader ? "top-9" : "top-0"
         )}
       >
@@ -2124,7 +2124,7 @@ const FileDiffCard = memo(function FileDiffCard({
             {findings.length}
           </span>
         )}
-        <label className="ml-auto inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+        <label className="ml-auto inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-secondary">
           <span className="sr-only sm:not-sr-only">Mark as viewed</span>
           <button
             type="button"
@@ -2132,8 +2132,8 @@ const FileDiffCard = memo(function FileDiffCard({
             aria-checked={viewed}
             onClick={() => onToggleViewed(file.path)}
             className={cn(
-              "flex size-4 items-center justify-center rounded border border-border",
-              viewed && "bg-foreground text-background"
+              "flex size-4 items-center justify-center rounded border border-default",
+              viewed && "bg-[color:var(--text-primary)] text-background"
             )}
           >
             {viewed && <CheckIcon className="size-3" />}
@@ -2142,13 +2142,13 @@ const FileDiffCard = memo(function FileDiffCard({
       </div>
       {expanded &&
         (file.unrenderable || file.patch === null ? (
-          <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
+          <div className="bg-surface-level-1 p-4 text-center text-xs text-tertiary">
             Binary or large file — diff not shown.
           </div>
         ) : (
           <div
             {...lineSelection.wrapperProps}
-            className="overflow-x-auto bg-card font-mono text-[11px] leading-5"
+            className="overflow-x-auto bg-surface-level-1 font-mono text-[11px] leading-5"
           >
             {fileDiff ? (
               <FileDiff<ReviewAnnotation>
@@ -2188,7 +2188,7 @@ const FileDiffCard = memo(function FileDiffCard({
           className="inline-flex items-center gap-1.5 px-2 py-1 font-sans text-[11px] font-medium"
         >
           Add to Chat
-          <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
+          <kbd className="rounded border border-default px-1 text-[10px] text-secondary">
             ⌘L
           </kbd>
         </button>
@@ -2359,14 +2359,14 @@ function CommentComposer({
     cn(
       "rounded px-2 py-0.5 text-[11px]",
       active
-        ? "bg-accent font-medium text-foreground"
-        : "text-muted-foreground hover:text-foreground"
+        ? "bg-surface-level-1-hover font-medium text-primary"
+        : "text-secondary hover:text-primary"
     )
   return (
     <div className="px-2 py-1 font-sans">
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
-          <ChatCircleIcon className="size-3 text-muted-foreground" />
+      <div className="overflow-hidden rounded-md border border-default bg-surface-level-1">
+        <div className="flex items-center gap-1.5 border-b border-default px-2 py-1 text-[11px]">
+          <ChatCircleIcon className="size-3 text-secondary" />
           <span className="font-medium">
             Add a comment on line {commentRangeLabel(range)}
           </span>
@@ -2383,7 +2383,7 @@ function CommentComposer({
         </div>
         {
           <>
-            <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
+            <div className="flex items-center gap-1 border-b border-default px-1.5 py-1">
               <button
                 type="button"
                 onClick={() => setMode("write")}
@@ -2405,7 +2405,7 @@ function CommentComposer({
                   {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
                     <Fragment key={group[0]?.action ?? groupIndex}>
                       {groupIndex > 0 && (
-                        <span className="mx-0.5 h-4 w-px bg-border" />
+                        <span className="mx-0.5 h-4 w-px bg-[color:var(--border-default)]" />
                       )}
                       {group.map(({ action, label, Icon }) => (
                         <IconButton
@@ -2449,18 +2449,18 @@ function CommentComposer({
                   className="resize-y text-xs"
                 />
               ) : (
-                <div className="min-h-16 rounded-md border border-input bg-input/20 px-2 py-2 text-xs">
+                <div className="min-h-16 rounded-md border border-default bg-surface-level-2/20 px-2 py-2 text-xs">
                   {value.trim() ? (
                     <Markdown content={value} />
                   ) : (
-                    <span className="text-muted-foreground">
+                    <span className="text-secondary">
                       Nothing to preview
                     </span>
                   )}
                 </div>
               )}
               {mutation.isError && (
-                <p className="mt-1.5 text-[11px] text-destructive">
+                <p className="mt-1.5 text-[11px] text-error-secondary">
                   {mutation.error instanceof Error
                     ? mutation.error.message
                     : "Failed to add the comment"}
@@ -2470,7 +2470,7 @@ function CommentComposer({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  className="rounded border border-default px-2 py-1 text-[11px] text-secondary hover:text-primary"
                 >
                   Cancel
                 </button>
@@ -2478,7 +2478,7 @@ function CommentComposer({
                   type="button"
                   onClick={submit}
                   disabled={!value.trim() || mutation.isPending}
-                  className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+                  className="rounded bg-[color:var(--text-primary)] px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
                 >
                   {mutation.isPending ? "Adding…" : "Add review comment"}
                 </button>
@@ -2574,8 +2574,8 @@ function InlineComment({
       ref={(node) => registerAnnotation(`comment:${comment.id}`, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
+      <div className="overflow-hidden rounded-md border border-default bg-surface-level-1">
+        <div className="flex items-center gap-1.5 border-b border-default px-2 py-1 text-[11px]">
           {comment.author_avatar_url ? (
             <img
               src={comment.author_avatar_url}
@@ -2583,11 +2583,11 @@ function InlineComment({
               className="size-4 shrink-0 rounded-full"
             />
           ) : (
-            <span className="size-4 shrink-0 rounded-full bg-muted" />
+            <span className="size-4 shrink-0 rounded-full bg-surface-level-2" />
           )}
           <span className="font-medium">{comment.author}</span>
           {comment.line !== null && (
-            <span className="font-mono text-muted-foreground">
+            <span className="font-mono text-secondary">
               {sideLabel}
               {comment.line}
             </span>
@@ -2610,7 +2610,7 @@ function InlineComment({
               rel="noreferrer"
               aria-label="View on GitHub"
               title="View on GitHub"
-              className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+              className="inline-flex size-5 items-center justify-center rounded-sm text-secondary hover:text-primary"
             >
               <IoLogoGithub className="size-3" />
             </a>
@@ -2647,7 +2647,7 @@ function InlineComment({
               <button
                 type="button"
                 onClick={cancel}
-                className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                className="rounded border border-default px-2 py-1 text-[11px] text-secondary hover:text-primary"
               >
                 Cancel
               </button>
@@ -2657,14 +2657,14 @@ function InlineComment({
                 disabled={
                   !draft.trim() || draft.trim() === body || mutation.isPending
                 }
-                className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
+                className="rounded bg-[color:var(--text-primary)] px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
               >
                 {mutation.isPending ? "Saving…" : "Save"}
               </button>
             </div>
           </div>
         ) : (
-          <div className="px-3 py-2.5 text-xs text-muted-foreground">
+          <div className="px-3 py-2.5 text-xs text-secondary">
             <Markdown content={body} />
           </div>
         )}
@@ -2688,7 +2688,7 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
       ref={(node) => registerAnnotation(finding.id, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-border bg-card">
+      <div className="overflow-hidden rounded-md border border-default bg-surface-level-1">
         <button
           type="button"
           onClick={() => toggle(finding)}
@@ -2700,14 +2700,14 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
           <span className={cn("font-medium", style.className)}>
             {style.label}
           </span>
-          <span className="min-w-0 flex-1 truncate text-foreground">
+          <span className="min-w-0 flex-1 truncate text-primary">
             {finding.title}
           </span>
           {finding.outdated && <Badgeish>Outdated</Badgeish>}
           {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
           <CaretDownIcon
             className={cn(
-              "size-3 shrink-0 text-muted-foreground transition-transform",
+              "size-3 shrink-0 text-secondary transition-transform",
               !expanded && "-rotate-90"
             )}
           />
@@ -2743,12 +2743,12 @@ function FindingDetails({
   }
 
   return (
-    <div className="border-t border-border px-3 py-2.5 font-sans">
-      <div className="text-xs text-muted-foreground">
+    <div className="border-t border-default px-3 py-2.5 font-sans">
+      <div className="text-xs text-secondary">
         <Markdown content={finding.description} />
       </div>
       {finding.resolution_note && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        <p className="mt-2 text-[11px] text-secondary">
           Resolution: {finding.resolution_note}
         </p>
       )}
@@ -2756,7 +2756,7 @@ function FindingDetails({
         <button
           type="button"
           onClick={copy}
-          className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1.5 rounded border border-default px-2 py-1 text-[11px] text-secondary hover:text-primary"
         >
           <CopyIcon className="size-3" />
           {copied ? "Copied" : "Copy"}
@@ -2766,7 +2766,7 @@ function FindingDetails({
             href={githubUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded border border-default px-2 py-1 text-[11px] text-secondary hover:text-primary"
           >
             <IoLogoGithub className="size-3" />
             View on GitHub
@@ -2779,7 +2779,7 @@ function FindingDetails({
 
 function Badgeish({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground capitalize">
+    <span className="rounded border border-default px-1.5 py-0.5 text-[10px] text-secondary capitalize">
       {children}
     </span>
   )
@@ -2866,8 +2866,8 @@ function ReviewPanelResizeHandle({
       className={cn(
         "absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize touch-none select-none",
         "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
-        "hover:after:bg-border",
-        dragging && "after:bg-border"
+        "hover:after:bg-[color:var(--border-default)]",
+        dragging && "after:bg-[color:var(--border-default)]"
       )}
     />
   )
@@ -2947,10 +2947,10 @@ function SidePanel({
       <aside
         className={cn(
           "flex h-full w-full flex-col overflow-y-auto",
-          layout === "inline" && "border-l border-border"
+          layout === "inline" && "border-l border-default"
         )}
       >
-        <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-1 border-b border-default px-3 py-2">
           {(
             [
               ["info", "Info"],
@@ -2964,8 +2964,8 @@ function SidePanel({
               className={cn(
                 "rounded-md px-2.5 py-1 text-xs transition-colors",
                 tab === id
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-muted/50"
+                  ? "bg-surface-level-2 font-medium text-primary"
+                  : "text-secondary hover:bg-surface-level-2/50"
               )}
             >
               {label}
@@ -2981,7 +2981,7 @@ function SidePanel({
             reviewed={detail.status === "idle"}
           />
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-default">
             <section className="px-3 py-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium">
@@ -2997,13 +2997,13 @@ function SidePanel({
                   type="button"
                   onClick={() => reReview.mutate(detail)}
                   disabled={reReview.isPending || detail.status === "running"}
-                  className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded border border-default px-1.5 py-0.5 text-[11px] text-secondary hover:text-primary disabled:opacity-50"
                 >
                   <ArrowClockwiseIcon className="size-3" />
                   {detail.status === "none" ? "Review" : "Re-review"}
                 </button>
               </div>
-              <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+              <div className="mt-2 space-y-1 text-[11px] text-secondary">
                 <div>
                   {detail.status === "none"
                     ? "Head commit"
@@ -3012,7 +3012,7 @@ function SidePanel({
                 </div>
                 {detail.watch && <div>Watching for new pushes</div>}
                 {detail.status === "error" && detail.review_error && (
-                  <div className="break-words text-destructive">
+                  <div className="break-words text-error-secondary">
                     {detail.review_error}
                   </div>
                 )}
@@ -3052,7 +3052,7 @@ function SidePanel({
                   <button
                     type="button"
                     onClick={onMarkAllRead}
-                    className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                    className="rounded border border-default px-1.5 py-0.5 text-[11px] text-secondary hover:text-primary"
                   >
                     Mark all as read
                   </button>
@@ -3115,7 +3115,7 @@ function FindingSection({
           {label}
           <CaretDownIcon
             className={cn(
-              "size-3 text-muted-foreground transition-transform",
+              "size-3 text-secondary transition-transform",
               collapsed && "-rotate-90"
             )}
           />
@@ -3124,7 +3124,7 @@ function FindingSection({
       </div>
       {!collapsed &&
         (findings.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">{emptyLabel}</p>
+          <p className="text-[11px] text-secondary">{emptyLabel}</p>
         ) : (
           <div className="space-y-0.5">
             {findings.map((finding) => {
@@ -3138,8 +3138,8 @@ function FindingSection({
                 <div
                   key={finding.id}
                   className={cn(
-                    "rounded-md border border-transparent transition-colors hover:border-border hover:bg-muted/40",
-                    expanded && "border-border bg-muted/40",
+                    "rounded-md border border-transparent transition-colors hover:border-default hover:bg-surface-level-2/40",
+                    expanded && "border-default bg-surface-level-2/40",
                     muted && !expanded && "opacity-50"
                   )}
                 >
@@ -3157,10 +3157,10 @@ function FindingSection({
                         )}
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="line-clamp-1 font-medium text-foreground">
+                        <span className="line-clamp-1 font-medium text-primary">
                           {finding.title || finding.description}
                         </span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
                           <span className={style.className}>{style.label}</span>
                           <span className="truncate font-mono">
                             {findingAnchorLabel(finding)}
@@ -3177,7 +3177,7 @@ function FindingSection({
                       {!anchored && (
                         <CaretDownIcon
                           className={cn(
-                            "mt-0.5 size-3 shrink-0 text-muted-foreground transition-transform",
+                            "mt-0.5 size-3 shrink-0 text-secondary transition-transform",
                             !expanded && "-rotate-90"
                           )}
                         />
@@ -3201,7 +3201,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
     <section className="px-3 py-3">
       <h3 className="mb-2 text-xs font-medium">Checks</h3>
       {checks.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">No checks reported.</p>
+        <p className="text-[11px] text-secondary">No checks reported.</p>
       ) : (
         <div className="max-h-56 space-y-1 overflow-y-auto">
           {checks.map((check, index) =>
@@ -3211,7 +3211,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
                 href={check.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                className="flex items-center gap-1.5 text-[11px] text-secondary hover:text-primary"
               >
                 <CheckStatusIcon check={check} />
                 <span className="truncate">{check.name}</span>
@@ -3219,7 +3219,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
             ) : (
               <span
                 key={`${check.name}-${index}`}
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                className="flex items-center gap-1.5 text-[11px] text-secondary"
               >
                 <CheckStatusIcon check={check} />
                 <span className="truncate">{check.name}</span>
@@ -3242,7 +3242,7 @@ function CheckStatusIcon({ check }: { check: ReviewCheckRun }) {
     return <CheckCircleIcon className="size-3.5 shrink-0 text-emerald-500" />
   }
   if (check.conclusion === "skipped") {
-    return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
+    return <CircleIcon className="size-3.5 shrink-0 text-secondary" />
   }
   return <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
 }
@@ -3258,7 +3258,7 @@ function PeopleSection({
     <section className="px-3 py-3">
       <h3 className="mb-2 text-xs font-medium">{title}</h3>
       {people.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">None</p>
+        <p className="text-[11px] text-secondary">None</p>
       ) : (
         <div className="space-y-1">
           {people.map((person) => (
@@ -3273,7 +3273,7 @@ function PeopleSection({
                   className="size-4 rounded-full"
                 />
               ) : (
-                <span className="size-4 rounded-full bg-muted" />
+                <span className="size-4 rounded-full bg-surface-level-2" />
               )}
               {person.login}
             </div>

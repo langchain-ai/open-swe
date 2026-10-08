@@ -222,7 +222,7 @@ export function AgentGitPanel({
                 title={recoveryError ?? "Download recovery patch"}
                 disabled={recoveringPatch}
                 onClick={() => void downloadRecoveryPatch()}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                className="flex size-7 items-center justify-center rounded-md text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary disabled:opacity-50"
               >
                 <DownloadIcon className="size-3.5" />
               </button>

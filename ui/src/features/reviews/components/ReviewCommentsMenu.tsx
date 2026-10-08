@@ -79,46 +79,46 @@ export function ReviewCommentsMenu({
         aria-label="PR comments"
         aria-expanded={open}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground",
-          open && "text-foreground"
+          "inline-flex items-center gap-1.5 rounded-md border border-default px-2 py-1 text-xs text-secondary hover:text-primary",
+          open && "text-primary"
         )}
       >
         <ChatCircleIcon className="size-3.5" />
         <span>Comments</span>
         {count > 0 && (
-          <span className="rounded bg-muted px-1 text-[10px] font-medium text-foreground">
+          <span className="rounded bg-surface-level-2 px-1 text-[10px] font-medium text-primary">
             {count}
           </span>
         )}
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-1 w-96 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md">
-          <div className="flex items-center gap-1.5 border-b border-border px-2 py-1.5">
-            <MagnifyingGlassIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <div className="absolute top-full right-0 z-50 mt-1 w-96 overflow-hidden rounded-md border border-default bg-elevated text-primary shadow-md">
+          <div className="flex items-center gap-1.5 border-b border-default px-2 py-1.5">
+            <MagnifyingGlassIcon className="size-3.5 shrink-0 text-secondary" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search comments"
-              className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+              className="w-full bg-transparent text-xs outline-none placeholder:text-secondary"
             />
           </div>
           <div className="max-h-96 overflow-y-auto">
             {comments.isLoading ? (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+              <p className="px-3 py-4 text-center text-xs text-secondary">
                 Loading…
               </p>
             ) : comments.isError ? (
-              <p className="px-3 py-4 text-center text-xs text-destructive">
+              <p className="px-3 py-4 text-center text-xs text-error-secondary">
                 Failed to load comments
               </p>
             ) : filtered.length === 0 ? (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+              <p className="px-3 py-4 text-center text-xs text-secondary">
                 {otherComments.length === 0
                   ? "No comments yet"
                   : "No matching comments"}
               </p>
             ) : (
-              <ul className="divide-y divide-border">
+              <ul className="divide-y divide-default">
                 {filtered.map((comment) => (
                   <li key={comment.id}>
                     <button
@@ -127,7 +127,7 @@ export function ReviewCommentsMenu({
                         onSelect(comment)
                         setOpen(false)
                       }}
-                      className="flex w-full gap-2 px-3 py-2 text-left hover:bg-muted/50"
+                      className="flex w-full gap-2 px-3 py-2 text-left hover:bg-surface-level-2/50"
                     >
                       {comment.author_avatar_url ? (
                         <img
@@ -136,21 +136,21 @@ export function ReviewCommentsMenu({
                           className="mt-0.5 size-4 shrink-0 rounded-full"
                         />
                       ) : (
-                        <span className="mt-0.5 size-4 shrink-0 rounded-full bg-muted" />
+                        <span className="mt-0.5 size-4 shrink-0 rounded-full bg-surface-level-2" />
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 text-[11px]">
-                          <span className="font-medium text-foreground">
+                          <span className="font-medium text-primary">
                             {comment.author}
                           </span>
                           {comment.path && (
-                            <span className="truncate font-mono text-muted-foreground">
+                            <span className="truncate font-mono text-secondary">
                               {basename(comment.path)}
                               {comment.line !== null ? `:${comment.line}` : ""}
                             </span>
                           )}
                         </div>
-                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                        <p className="mt-0.5 line-clamp-2 text-xs text-secondary">
                           {comment.body}
                         </p>
                       </div>

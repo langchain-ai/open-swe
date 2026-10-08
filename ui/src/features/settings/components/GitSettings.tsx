@@ -115,7 +115,7 @@ export function GitSettings() {
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
                 disabled={!ready}
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-2/20 px-2 py-1.5 text-xs/relaxed text-primary transition-colors hover:opacity-100 dark:bg-surface-level-2/30"
                 dropdownClassName="w-56"
               />
             </div>

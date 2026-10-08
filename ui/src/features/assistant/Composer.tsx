@@ -27,7 +27,7 @@ function Attachment() {
   )
   const image = attachment.content?.find((part) => part.type === "image")
   return (
-    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-xl border border-border p-2 text-xs">
+    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-xl border border-default p-2 text-xs">
       {(file || image?.image) && (
         <img
           ref={previewRef}
@@ -98,7 +98,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
 
   return (
     <ComposerPrimitive.Root className="w-full">
-      <ComposerPrimitive.AttachmentDropzone className="rounded-3xl border border-border bg-card p-3 shadow-xs focus-within:border-muted-foreground/40 data-[dragging=true]:border-primary">
+      <ComposerPrimitive.AttachmentDropzone className="rounded-3xl border border-default bg-surface-level-1 p-3 shadow-xs focus-within:border-strong data-[dragging=true]:border-brand">
         <div className="flex flex-wrap gap-2 empty:hidden">
           <ComposerPrimitive.Attachments>
             {() => <Attachment />}
@@ -119,7 +119,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
         <div className="flex flex-wrap items-center gap-2">
           <ComposerPrimitive.AddAttachment
             aria-label="Attach images"
-            className="rounded-full p-2 hover:bg-muted"
+            className="rounded-full p-2 hover:bg-surface-level-2"
           >
             <Plus className="size-4" />
           </ComposerPrimitive.AddAttachment>
@@ -137,7 +137,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             }
             disabled={disabled}
             requireImageSupport={hasAttachments}
-            triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+            triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-xs text-secondary hover:bg-surface-level-2"
           />
           {!thread && (
             <>
@@ -188,14 +188,14 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             {running ? (
               <ComposerPrimitive.Cancel
                 aria-label="Stop run"
-                className="rounded-full bg-primary p-2.5 text-primary-foreground disabled:opacity-40"
+                className="rounded-full bg-brand p-2.5 text-brand-on-fill disabled:opacity-40"
               >
                 <Square className="size-3.5 fill-current" />
               </ComposerPrimitive.Cancel>
             ) : (
               <ComposerPrimitive.Send
                 aria-label="Send message"
-                className="rounded-full bg-primary p-2.5 text-primary-foreground disabled:opacity-30"
+                className="rounded-full bg-brand p-2.5 text-brand-on-fill disabled:opacity-30"
               >
                 <ArrowUp className="size-4" />
               </ComposerPrimitive.Send>

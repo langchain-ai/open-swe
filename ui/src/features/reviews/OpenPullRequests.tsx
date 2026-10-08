@@ -253,7 +253,7 @@ export function OpenPullRequests({
           }
         >
           {scope !== "mine" && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-secondary">
               <span>
                 {scope === "review-assigned"
                   ? "Assigned to you by Open SWE"
@@ -309,7 +309,7 @@ export function OpenPullRequests({
               }
             />
             {!railed && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1 text-xs text-secondary">
                 Sort
                 {sortOptions.map(([label, key]) => (
                   <button
@@ -320,8 +320,8 @@ export function OpenPullRequests({
                     className={cn(
                       "inline-flex items-center gap-1 rounded-md border px-2 py-1",
                       sort === key
-                        ? "border-border bg-muted text-foreground"
-                        : "border-transparent hover:text-foreground"
+                        ? "border-default bg-surface-level-2 text-primary"
+                        : "border-transparent hover:text-primary"
                     )}
                   >
                     {label}
@@ -335,7 +335,7 @@ export function OpenPullRequests({
             {!railed && (
               <span
                 aria-live="polite"
-                className="text-xs whitespace-nowrap text-muted-foreground"
+                className="text-xs whitespace-nowrap text-secondary"
               >
                 {refreshing
                   ? "Refreshing from GitHub…"
@@ -380,7 +380,7 @@ export function OpenPullRequests({
             </Button>
           </div>
           {query.error && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-sm text-error-secondary">
               {latest &&
                 (query.isFetchNextPageError
                   ? "Could not load more PRs; showing the pages loaded so far. "
@@ -389,7 +389,7 @@ export function OpenPullRequests({
             </p>
           )}
           {search.trim() && descriptionSearch.isError && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-sm text-error-secondary">
               Title and description search is unavailable; showing repository,
               title, and PR number matches only.
             </p>
@@ -399,7 +399,7 @@ export function OpenPullRequests({
           ) : incomplete ? (
             <p
               role="status"
-              className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-amber-700 dark:text-amber-400"
+              className="rounded-lg border border-default bg-surface-level-1 px-4 py-12 text-center text-xs text-amber-700 dark:text-amber-400"
             >
               GitHub&rsquo;s pull request search timed out, and the partial
               answer it returned would have hidden most of your PRs. Filter by
@@ -409,7 +409,7 @@ export function OpenPullRequests({
             latest && (
               <>
                 {visible.length === 0 ? (
-                  <div className="rounded-lg border border-border bg-card px-4 py-12 text-center text-xs text-muted-foreground">
+                  <div className="rounded-lg border border-default bg-surface-level-1 px-4 py-12 text-center text-xs text-secondary">
                     {detailsLoading ||
                     query.isFetchingNextPage ||
                     descriptionSearch.isSearching
@@ -439,7 +439,7 @@ export function OpenPullRequests({
                     {card}
                   </PullRequestList>
                 )}
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="flex items-center gap-3 text-xs text-secondary">
                   <span>
                     {visible.length} of {filtered.length}
                     {query.hasNextPage ? "+" : ""} PRs

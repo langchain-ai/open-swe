@@ -28,10 +28,10 @@ export type ThreadFix = (
 ) => Promise<void> | void
 
 const PR_STATE_STYLES: Record<AgentPullRequest["state"], string> = {
-  draft: "bg-muted text-muted-foreground",
-  open: "bg-success/15 text-success-foreground",
-  merged: "bg-merged/15 text-merged-foreground",
-  closed: "bg-destructive/10 text-destructive",
+  draft: "bg-surface-level-2 text-secondary",
+  open: "bg-success text-success-secondary",
+  merged: "bg-purple text-purple",
+  closed: "bg-error text-error-secondary",
 }
 
 function relativeAge(value: string | null): string {
@@ -82,25 +82,25 @@ function pullRequestTone(
   health: AgentPullRequestHealth | undefined
 ): string {
   const state = pullRequestState(pullRequest, health)
-  if (state === "merged") return "text-info-foreground"
-  if (state === "closed") return "text-destructive"
-  if (hasActionableIssues(pullRequest, health)) return "text-destructive"
-  if (state === "draft") return "text-muted-foreground"
+  if (state === "merged") return "text-brand-primary"
+  if (state === "closed") return "text-error-secondary"
+  if (hasActionableIssues(pullRequest, health)) return "text-error-secondary"
+  if (state === "draft") return "text-secondary"
   if (
     !health?.statusAvailable ||
     !health.checksAvailable ||
     !health.commentsAvailable ||
     health.mergeConflictState !== "mergeable"
   ) {
-    return "text-muted-foreground"
+    return "text-secondary"
   }
   if (
     (health.pendingCheckCount ?? 0) > 0 ||
     (health.inconclusiveCheckCount ?? 0) > 0
   ) {
-    return "text-warning-foreground"
+    return "text-warning-secondary"
   }
-  return "text-success-foreground"
+  return "text-success-secondary"
 }
 
 function healthKey(repoFullName: string, number: number): string {
@@ -146,7 +146,7 @@ function HealthSummary({
       {failingCount > 0 && (
         <HealthItem
           icon={XCircle}
-          iconClassName="text-destructive"
+          iconClassName="text-error-secondary"
           count={failingCount}
           label={plural(failingCount, "check")}
         />
@@ -154,7 +154,7 @@ function HealthSummary({
       {commentCount > 0 && (
         <HealthItem
           icon={MessageCircle}
-          iconClassName="text-warning-foreground"
+          iconClassName="text-warning-secondary"
           count={commentCount}
           label={plural(commentCount, "comment")}
         />
@@ -162,14 +162,14 @@ function HealthSummary({
       {health.mergeConflictState === "conflicting" && (
         <HealthItem
           icon={AlertTriangle}
-          iconClassName="text-destructive"
+          iconClassName="text-error-secondary"
           label="Conflict"
         />
       )}
       {pendingCount > 0 && (
         <HealthItem
           icon={Clock}
-          iconClassName="text-warning-foreground"
+          iconClassName="text-warning-secondary"
           count={pendingCount}
           label="pending"
         />
@@ -187,39 +187,39 @@ function HealthDetails({
 }) {
   if (unavailable) {
     return (
-      <p className="border-t border-border/70 pt-3 text-xs text-muted-foreground">
+      <p className="border-t border-subtle pt-3 text-xs text-secondary">
         GitHub health is unavailable. This PR is not marked clean.
       </p>
     )
   }
   if (!health) {
-    return <p className="text-xs text-muted-foreground">Loading PR health…</p>
+    return <p className="text-xs text-secondary">Loading PR health…</p>
   }
   const healthUnavailable =
     !health.statusAvailable ||
     !health.checksAvailable ||
     !health.commentsAvailable
   return (
-    <div className="space-y-3 border-t border-border/70 pt-3">
+    <div className="space-y-3 border-t border-subtle pt-3">
       {health.mergeConflictState === "conflicting" && (
-        <div className="flex items-start gap-2 text-sm text-destructive">
+        <div className="flex items-start gap-2 text-sm text-error-secondary">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>This branch has merge conflicts.</span>
         </div>
       )}
       {health.failingChecks.length > 0 && (
         <div className="space-y-1.5" data-testid="pr-failing-checks">
-          <p className="text-xs font-medium text-foreground">
+          <p className="text-xs font-medium text-primary">
             Failing checks ({health.failingChecks.length})
           </p>
           {health.failingChecks.map((check, index) => {
             const label = check.name || "Unnamed check"
             const content = (
               <>
-                <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+                <AlertTriangle className="size-3.5 shrink-0 text-error-secondary" />
                 <span className="min-w-0 flex-1 truncate">{label}</span>
                 {check.conclusion && (
-                  <span className="shrink-0 text-muted-foreground">
+                  <span className="shrink-0 text-secondary">
                     {check.conclusion.replaceAll("_", " ")}
                   </span>
                 )}
@@ -228,7 +228,7 @@ function HealthDetails({
             return (
               <div
                 key={`${label}-${index}`}
-                className="flex items-center gap-2 px-1 py-0.5 text-xs text-foreground"
+                className="flex items-center gap-2 px-1 py-0.5 text-xs text-primary"
               >
                 {content}
               </div>
@@ -238,7 +238,7 @@ function HealthDetails({
       )}
       {(health.unresolvedReviewThreadCount ?? 0) > 0 && (
         <div className="space-y-2" data-testid="pr-unresolved-comments">
-          <p className="text-xs font-medium text-foreground">
+          <p className="text-xs font-medium text-primary">
             Unresolved comments ({health.unresolvedReviewThreadCount})
           </p>
           {health.unresolvedReviewThreads.map((thread, index) => {
@@ -247,13 +247,13 @@ function HealthDetails({
               : "Pull request"
             const content = (
               <>
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1.5 text-[11px] text-secondary">
                   <MessageCircle className="size-3 shrink-0" />
                   <span>{thread.author ?? "Unknown author"}</span>
                   <span aria-hidden="true">·</span>
                   <span className="truncate">{location}</span>
                 </div>
-                <p className="line-clamp-2 text-xs text-foreground">
+                <p className="line-clamp-2 text-xs text-primary">
                   {thread.body || "No comment text"}
                 </p>
               </>
@@ -270,7 +270,7 @@ function HealthDetails({
         </div>
       )}
       {healthUnavailable && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-secondary">
           Some GitHub health details are unavailable. This PR is not marked
           clean.
         </p>
@@ -306,28 +306,28 @@ export function PullRequestHoverCard({
         >
           {state}
         </span>
-        <span className="min-w-0 truncate text-muted-foreground">
+        <span className="min-w-0 truncate text-secondary">
           {pullRequest.repoFullName} #{pullRequest.number}
         </span>
         {age && (
           <time
             dateTime={pullRequest.createdAt ?? undefined}
             suppressHydrationWarning
-            className="ml-auto shrink-0 text-muted-foreground"
+            className="ml-auto shrink-0 text-secondary"
           >
             {age}
           </time>
         )}
       </div>
-      <p className="text-base leading-snug font-medium text-foreground">
+      <p className="text-base leading-snug font-medium text-primary">
         {pullRequest.title}
       </p>
-      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
         <span className="truncate">{pullRequest.baseRef}</span>
         <span aria-hidden="true">←</span>
         <span className="truncate">{pullRequest.headRef}</span>
       </div>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 text-sm text-secondary">
         <Avatar size="sm">
           {pullRequest.authorAvatarUrl && (
             <AvatarImage src={pullRequest.authorAvatarUrl} alt="" />
@@ -338,10 +338,10 @@ export function PullRequestHoverCard({
           {pullRequest.author ?? "Unknown author"}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
-          <span className="text-success-foreground">
+          <span className="text-success-secondary">
             +{pullRequest.diffStats.additions}
           </span>
-          <span className="text-destructive">
+          <span className="text-error-secondary">
             -{pullRequest.diffStats.deletions}
           </span>
           <span>
@@ -373,7 +373,7 @@ function PullRequestLink({
   const scopes = onFix ? fixScopes(pullRequest, health) : []
 
   return (
-    <div className="@container flex min-w-0 items-center gap-1 rounded-xl border border-foreground/20 bg-card p-1 text-xs text-muted-foreground shadow-sm dark:border-foreground/[0.06] dark:bg-[#222] dark:shadow-none">
+    <div className="@container flex min-w-0 items-center gap-1 rounded-xl border border-strong bg-surface-level-1 p-1 text-xs text-secondary shadow-sm dark:border-foreground/[0.06] dark:bg-[#222] dark:shadow-none">
       <Tooltip>
         <TooltipTrigger
           render={
@@ -384,22 +384,22 @@ function PullRequestLink({
               aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
               data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
               data-pr-tone={tone}
-              className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg px-2 py-1 transition-colors hover:bg-muted dark:hover:bg-muted/50"
+              className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg px-2 py-1 transition-colors hover:bg-surface-level-2 dark:hover:bg-surface-level-2/50"
             />
           }
         >
           <GitPullRequest className={cn("size-3.5 shrink-0", tone)} />
-          <span className="shrink-0 font-medium text-foreground">
+          <span className="shrink-0 font-medium text-primary">
             #{pullRequest.number}
           </span>
           <span className="min-w-0 flex-1 truncate">{pullRequest.title}</span>
           <span className="flex shrink-0 items-center gap-2 @xl:gap-3">
             <HealthSummary health={health} />
             <span className="hidden gap-1 @2xl:flex">
-              <span className="text-success-foreground">
+              <span className="text-success-secondary">
                 +{pullRequest.diffStats.additions}
               </span>
-              <span className="text-destructive">
+              <span className="text-error-secondary">
                 -{pullRequest.diffStats.deletions}
               </span>
             </span>
@@ -495,7 +495,7 @@ function FixMenu({
           <Button
             variant="ghost"
             aria-label={`Fix PR #${pullRequest.number}`}
-            className="text-foreground"
+            className="text-primary"
           />
         }
       >
@@ -562,7 +562,7 @@ export function ThreadPullRequests({
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
         >
           {expanded ? (
             <ChevronUp className="size-3.5" />

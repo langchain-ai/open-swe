@@ -56,7 +56,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         data-testid="assistant-ui-conversation"
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
-        <header className="flex items-center gap-3 border-b border-border px-5 py-3">
+        <header className="flex items-center gap-3 border-b border-default px-5 py-3">
           <h1 className="min-w-0 flex-1 truncate text-sm font-medium">
             {thread?.title ?? "New conversation"}
           </h1>
@@ -78,7 +78,7 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
             {loading && empty ? (
               <p
                 role="status"
-                className="py-16 text-center text-sm text-muted-foreground"
+                className="py-16 text-center text-sm text-secondary"
               >
                 Loading conversation…
               </p>
@@ -109,12 +109,12 @@ export function Conversation({ initialRepo }: { initialRepo?: string | null }) {
         <div className="relative mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
           <ThreadPrimitive.ScrollToBottom
             aria-label="Scroll to bottom"
-            className="absolute -top-10 left-1/2 rounded-full border border-border bg-background p-2 shadow-sm disabled:invisible"
+            className="absolute -top-10 left-1/2 rounded-full border border-default bg-surface-level-1 p-2 shadow-sm disabled:invisible"
           >
             <ArrowDown className="size-4" />
           </ThreadPrimitive.ScrollToBottom>
           {error && (
-            <p role="alert" className="mb-3 text-sm text-destructive">
+            <p role="alert" className="mb-3 text-sm text-error-secondary">
               {error}
             </p>
           )}

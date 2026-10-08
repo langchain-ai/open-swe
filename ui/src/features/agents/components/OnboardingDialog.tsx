@@ -30,15 +30,15 @@ export function OnboardingDialog() {
     >
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/50 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-popover p-6 text-popover-foreground shadow-md ring-1 ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-elevated p-6 text-primary shadow-md ring-1 ring-[color:var(--text-primary)] data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
           <div className="flex flex-col gap-4">
             <div className="flex items-center gap-3">
-              <IoLogoSlack className="size-6 shrink-0 text-muted-foreground" />
+              <IoLogoSlack className="size-6 shrink-0 text-secondary" />
               <Dialog.Title className="text-sm font-medium">
                 Connect your Slack account
               </Dialog.Title>
             </div>
-            <Dialog.Description className="text-xs text-muted-foreground">
+            <Dialog.Description className="text-xs text-secondary">
               Connect Slack so that when you tag Open SWE, it can resolve your
               GitHub account. We use the email Slack verifies, which also lets
               Linear mentions resolve to you.

@@ -36,7 +36,7 @@ function QueuedMessages({
         return (
           <div
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-border bg-accent/40 px-3 py-2 text-[14px] text-foreground shadow-sm"
+            className="ml-auto max-w-[85%] rounded-2xl border border-dashed border-default bg-surface-level-1-hover/40 px-3 py-2 text-[14px] text-primary shadow-sm"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
           >
@@ -46,11 +46,11 @@ function QueuedMessages({
               </div>
             )}
             {imageCount > 0 && (
-              <div className="mt-1 text-xs text-muted-foreground">
+              <div className="mt-1 text-xs text-secondary">
                 {imageCount} image{imageCount === 1 ? "" : "s"} attached
               </div>
             )}
-            <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="mt-2 flex items-center gap-3 text-xs text-secondary">
               <span
                 className="inline-flex h-6 items-center gap-1"
                 title={statusLabel}
@@ -58,14 +58,14 @@ function QueuedMessages({
               >
                 <Clock className="size-3.5" aria-hidden />
                 Queued
-                <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-foreground/60" />
+                <span className="ml-1 size-1.5 animate-status-pulse rounded-full bg-[color:var(--text-primary)]/60" />
               </span>
               {(onSteer || onRemove) && message.mine !== false && (
                 <div className="ml-auto flex items-center gap-0.5">
                   {onSteer && (
                     <button
                       type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                      className="flex size-6 items-center justify-center rounded-md hover:bg-surface-level-1-hover hover:text-primary disabled:pointer-events-none disabled:opacity-40"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onSteer(message.id)}
                       disabled={message.pending}
@@ -79,7 +79,7 @@ function QueuedMessages({
                   {onRemove && (
                     <button
                       type="button"
-                      className="flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                      className="flex size-6 items-center justify-center rounded-md hover:bg-surface-level-1-hover hover:text-primary disabled:pointer-events-none disabled:opacity-40"
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => onRemove(message.id)}
                       disabled={message.pending}
@@ -193,7 +193,7 @@ export const Messages = memo(function MessagesComponent({
                   capturePrependAnchor()
                   loadEarlier.onLoadEarlier()
                 }}
-                className="mb-3 w-full py-1.5 text-center text-xs text-muted-foreground hover:text-foreground disabled:cursor-default"
+                className="mb-3 w-full py-1.5 text-center text-xs text-secondary hover:text-primary disabled:cursor-default"
               >
                 {loadEarlier.loading
                   ? "Loading earlier turns…"
@@ -271,7 +271,7 @@ export const Messages = memo(function MessagesComponent({
             type="button"
             onClick={scrollToBottom}
             aria-label="Scroll to bottom"
-            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+            className="dropdown-glass absolute left-1/2 z-30 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full text-secondary transition-colors hover:text-primary"
             style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
           >
             <ChevronDown className="size-3.5" />

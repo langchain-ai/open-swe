@@ -187,8 +187,8 @@ export function FileBrowserPanel({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+    <div className="flex min-h-0 flex-1 flex-col bg-surface-level-1">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-default px-2">
         <button
           type="button"
           aria-label="Refresh files"
@@ -197,7 +197,7 @@ export function FileBrowserPanel({
             refresh()
             onRefreshSelectedFile?.()
           }}
-          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground"
+          className="flex size-6 shrink-0 items-center justify-center rounded text-tertiary transition-colors hover:text-primary"
         >
           <ArrowClockwiseIcon
             className={cn("size-3.5", isPending && "animate-spin")}
@@ -215,14 +215,14 @@ export function FileBrowserPanel({
             search.close()
             event.currentTarget.blur()
           }}
-          className="h-7 min-w-0 flex-1 bg-transparent px-1 text-xs outline-none placeholder:text-muted-foreground/70"
+          className="h-7 min-w-0 flex-1 bg-transparent px-1 text-xs outline-none placeholder:text-tertiary"
         />
       </div>
       {error ? (
         <button
           type="button"
           onClick={refresh}
-          className="p-4 text-left text-xs leading-relaxed text-destructive"
+          className="p-4 text-left text-xs leading-relaxed text-error-secondary"
         >
           {error} Click to retry.
         </button>
@@ -235,7 +235,7 @@ export function FileBrowserPanel({
           {
             height: "100%",
             ...treeThemeStyle(),
-            "--trees-theme-sidebar-bg": "var(--background)",
+            "--trees-theme-sidebar-bg": "var(--bg-surface-level-1)",
           } as React.CSSProperties
         }
       />

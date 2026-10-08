@@ -755,13 +755,13 @@ export const ChatComposer = memo(function ChatComposer({
       )}
     >
       {composerError && (
-        <div className="mb-2 px-1 text-xs text-destructive" role="alert">
+        <div className="mb-2 px-1 text-xs text-error-secondary" role="alert">
           {composerError}
         </div>
       )}
 
       {!selectedModelSupportsImages && (
-        <div className="dropdown-glass mb-2 rounded-xl border border-warning/30 px-3 py-2 text-xs text-muted-foreground">
+        <div className="dropdown-glass mb-2 rounded-xl border border-warning px-3 py-2 text-xs text-secondary">
           The selected model does not accept image input. Remove the image
           {pendingImages.length > 1 ? "s" : ""} or switch to a vision-enabled
           model to send.
@@ -771,11 +771,11 @@ export const ChatComposer = memo(function ChatComposer({
       <div
         data-chat-composer
         className={cn(
-          "relative z-10 flex flex-col rounded-2xl border border-foreground/20 bg-card px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-300 hover:shadow-lg dark:border-[0.75px] dark:border-foreground/[0.06] dark:bg-[#222] dark:shadow-none dark:hover:shadow-none",
+          "relative z-10 flex flex-col rounded-2xl border border-strong bg-surface-level-1 px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-300 hover:shadow-lg dark:border-[0.75px] dark:border-foreground/[0.06] dark:bg-[#222] dark:shadow-none dark:hover:shadow-none",
           compact ? "min-h-[88px]" : "min-h-[106px]",
           dragKind
-            ? "border-primary dark:border dark:border-primary"
-            : "focus-within:border-foreground/30 hover:border-foreground/30 dark:focus-within:border-foreground/[0.06] dark:hover:border-foreground/[0.06]"
+            ? "border-brand dark:border dark:border-brand"
+            : "focus-within:border-strong hover:border-strong dark:focus-within:border-foreground/[0.06] dark:hover:border-foreground/[0.06]"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -793,8 +793,8 @@ export const ChatComposer = memo(function ChatComposer({
         )}
 
         {dragKind && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-card/80 backdrop-blur-sm">
-            <span className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-surface-level-1/80 backdrop-blur-sm">
+            <span className="rounded-md bg-surface-level-1-hover px-3 py-1.5 text-xs font-medium text-primary">
               {dragKind === "path"
                 ? "Drop to mention this file"
                 : "Drop images here"}
@@ -820,12 +820,12 @@ export const ChatComposer = memo(function ChatComposer({
               >
                 <img
                   alt={image.fileName || "Pending image"}
-                  className="size-16 rounded-lg border border-border object-cover"
+                  className="size-16 rounded-lg border border-default object-cover"
                   src={`data:${image.mimeType};base64,${image.base64}`}
                 />
                 <button
                   aria-label="Remove image"
-                  className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:text-foreground"
+                  className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full border border-default bg-surface-level-1 text-secondary opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:text-primary"
                   onClick={() =>
                     setPendingImages((prev) =>
                       prev.filter((_, i) => i !== index)
@@ -862,7 +862,7 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-muted-foreground">
+        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-secondary">
           <Menu onOpenChange={setExtrasMenuOpen}>
             <MenuTrigger
               render={
@@ -896,7 +896,7 @@ export const ChatComposer = memo(function ChatComposer({
                 requireImageSupport={pendingImages.length > 0}
                 routed={routed}
                 selection={selection}
-                triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-muted-foreground/70 hover:bg-muted hover:text-foreground/80"
+                triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"
               />
             )}
           </div>

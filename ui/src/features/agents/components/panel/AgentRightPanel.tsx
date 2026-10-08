@@ -70,7 +70,7 @@ function PanelControl(props: {
     <Tooltip>
       <TooltipTrigger
         aria-label={props.label}
-        className="rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+        className="rounded-md p-1.5 text-tertiary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
         onClick={props.onClick}
         type="button"
       >
@@ -267,7 +267,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         onClick={() => onCollapsedChange(false)}
         aria-label="Show panel"
         title="Show panel"
-        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="fixed top-2 right-2 z-30 flex size-7 items-center justify-center rounded-md text-secondary hover:bg-surface-level-1-hover hover:text-primary"
       >
         <SidebarSimpleIcon className="size-4" />
       </button>

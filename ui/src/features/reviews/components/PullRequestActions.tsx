@@ -47,7 +47,7 @@ export function PullRequestActions({
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       {outcome && (
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-secondary">
           {outcomeLabels[outcome]} · leaves the list on the next refresh
         </span>
       )}

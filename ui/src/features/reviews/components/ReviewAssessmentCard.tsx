@@ -84,12 +84,12 @@ function AssessmentCard({
     <section
       id="assessment-feedback"
       aria-label="Review assessment"
-      className="mt-4 rounded-lg border border-border bg-card p-4 text-sm"
+      className="mt-4 rounded-lg border border-default bg-surface-level-1 p-4 text-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">Risk {assessment.risk_score}/5</span>
-          <span className="text-muted-foreground">·</span>
+          <span className="text-secondary">·</span>
           <span>
             {assessment.approved
               ? "Approved"
@@ -97,7 +97,7 @@ function AssessmentCard({
                 ? "Would approve"
                 : "Needs human review"}
           </span>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-secondary">
             {assessment.approved
               ? "Automatic approval"
               : assessment.dry_run
@@ -110,7 +110,7 @@ function AssessmentCard({
             {feedback.data && (
               <span
                 role="status"
-                className="flex items-center gap-1 text-xs text-muted-foreground"
+                className="flex items-center gap-1 text-xs text-secondary"
               >
                 <CheckIcon /> Feedback saved
               </span>
@@ -128,9 +128,9 @@ function AssessmentCard({
           </div>
         )}
       </div>
-      <details className="mt-2 text-xs text-muted-foreground">
+      <details className="mt-2 text-xs text-secondary">
         <summary className="cursor-pointer">Why this assessment?</summary>
-        <p className="mt-2 text-sm whitespace-pre-wrap text-foreground">
+        <p className="mt-2 text-sm whitespace-pre-wrap text-primary">
           {assessment.explanation}
         </p>
         <p className="mt-2">
@@ -144,7 +144,7 @@ function AssessmentCard({
         </p>
       )}
       {feedback.isError && (
-        <p role="alert" className="mt-3 text-xs text-destructive">
+        <p role="alert" className="mt-3 text-xs text-error-secondary">
           Could not load your feedback.{" "}
           <button
             type="button"
@@ -157,7 +157,7 @@ function AssessmentCard({
       )}
       {editing && login && feedback.isSuccess && (
         <form
-          className="mt-3 space-y-3 border-t border-border pt-3"
+          className="mt-3 space-y-3 border-t border-default pt-3"
           onSubmit={(event) => {
             event.preventDefault()
             if (value?.rating && !save.isPending)
@@ -185,7 +185,7 @@ function AssessmentCard({
                 </Button>
               ))}
             </div>
-            <label className="block space-y-1.5 text-xs text-muted-foreground">
+            <label className="block space-y-1.5 text-xs text-secondary">
               <span>Comment (optional)</span>
               <Textarea
                 maxLength={3000}
@@ -200,7 +200,7 @@ function AssessmentCard({
                 className="min-h-20 text-sm"
               />
             </label>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               Saved in Open SWE. Your comment is not posted to GitHub.
             </p>
             <div className="flex gap-2">

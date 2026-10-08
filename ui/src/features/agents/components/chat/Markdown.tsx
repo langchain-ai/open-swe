@@ -205,7 +205,7 @@ const COMPONENTS: Components = {
       src={typeof src === "string" ? src : undefined}
       alt={alt ?? ""}
       loading="lazy"
-      className="border border-border/60"
+      className="border border-subtle"
     />
   ),
   a: ({
@@ -250,7 +250,7 @@ class MarkdownErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   render(): ReactNode {
     if (this.state.failed) {
       return (
-        <pre className="font-sans [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-foreground">
+        <pre className="font-sans [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary">
           {this.props.content}
         </pre>
       )
@@ -279,7 +279,7 @@ export const Markdown = memo(function Markdown({
                 role="button"
                 tabIndex={0}
                 aria-label={`Enlarge ${alt || "image"}`}
-                className="cursor-zoom-in border border-border/60 focus-visible:outline-2 focus-visible:outline-ring"
+                className="cursor-zoom-in border border-subtle focus-visible:outline-2 focus-visible:outline-[color:var(--border-focus)]"
                 onClick={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
@@ -310,7 +310,7 @@ export const Markdown = memo(function Markdown({
   }, [transformImageUrl])
 
   return (
-    <div className="chat-markdown max-w-full min-w-0 text-[14px] leading-[1.6] [overflow-wrap:anywhere] break-words text-foreground">
+    <div className="chat-markdown max-w-full min-w-0 text-[14px] leading-[1.6] [overflow-wrap:anywhere] break-words text-primary">
       <MarkdownErrorBoundary content={content}>
         <Streamdown
           mode={isLive ? "streaming" : "static"}

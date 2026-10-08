@@ -37,7 +37,7 @@ const NAV = [
 ] as const
 
 const ROW =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover"
+  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
 
 export function SidebarNav({
   className,
@@ -64,7 +64,7 @@ export function SidebarNav({
           onClick={onNavigate}
           className={cn(
             ROW,
-            activeSection === item.to && "bg-sidebar-row-hover font-medium"
+            activeSection === item.to && "bg-surface-level-2-hover font-medium"
           )}
         >
           <item.icon className="size-4" />
@@ -75,9 +75,9 @@ export function SidebarNav({
         <MenuTrigger
           className={cn(
             ROW,
-            "text-muted-foreground data-popup-open:bg-sidebar-row-hover",
+            "text-secondary data-popup-open:bg-surface-level-2-hover",
             hidden.some((item) => item.to === activeSection) &&
-              "bg-sidebar-row-hover font-medium text-foreground"
+              "bg-surface-level-2-hover font-medium text-primary"
           )}
         >
           <CaretRightIcon className="size-4" />

@@ -57,7 +57,7 @@ function ReviewsPage() {
           )}
         >
           <div className="flex items-center gap-3">
-            <h1 className="font-heading text-base font-medium text-foreground">
+            <h1 className="font-heading text-base font-medium text-primary">
               Pull Requests
             </h1>
             <div className="flex items-center gap-1">
@@ -76,8 +76,8 @@ function ReviewsPage() {
                   className={cn(
                     "rounded-md px-2.5 py-1 text-xs transition-colors",
                     tab === value
-                      ? "bg-sidebar-row-hover font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-sidebar-row-hover"
+                      ? "bg-surface-level-2-hover font-medium text-primary"
+                      : "text-secondary hover:bg-surface-level-2-hover"
                   )}
                 >
                   {label}
@@ -86,7 +86,7 @@ function ReviewsPage() {
             </div>
             <OpenPullRequestInput />
             <ReviewBookmarklet />
-            <span className="hidden text-xs text-muted-foreground lg:inline">
+            <span className="hidden text-xs text-secondary lg:inline">
               Drag to your bookmarks bar
             </span>
           </div>

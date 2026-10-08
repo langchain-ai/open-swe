@@ -55,7 +55,7 @@ export function PullRequestLabels({
       {labels.data?.selected.map((label) => (
         <span
           key={label.name}
-          className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs"
+          className="inline-flex items-center gap-1 rounded-full border border-default px-2 py-0.5 text-xs"
           title={label.description ?? undefined}
         >
           <span
@@ -81,10 +81,10 @@ export function PullRequestLabels({
             onChange={(event) => setSearch(event.target.value)}
           />
           {labels.isPending && (
-            <p className="p-2 text-xs text-muted-foreground">Loading labels…</p>
+            <p className="p-2 text-xs text-secondary">Loading labels…</p>
           )}
           {labels.error && (
-            <p role="alert" className="p-2 text-xs text-destructive">
+            <p role="alert" className="p-2 text-xs text-error-secondary">
               {labels.error.message}
             </p>
           )}
@@ -100,7 +100,7 @@ export function PullRequestLabels({
                 return (
                   <label
                     key={label.name}
-                    className="flex cursor-pointer items-center gap-2 rounded p-2 text-xs hover:bg-muted"
+                    className="flex cursor-pointer items-center gap-2 rounded p-2 text-xs hover:bg-surface-level-2"
                     title={label.description ?? undefined}
                   >
                     <input
@@ -120,7 +120,7 @@ export function PullRequestLabels({
                 )
               })}
             {labels.data?.available.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">
+              <p className="p-2 text-xs text-secondary">
                 No repository labels.
               </p>
             )}

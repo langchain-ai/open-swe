@@ -17,7 +17,7 @@ export function MCPOAuthFields({
   const [revealed, setRevealed] = useState(false)
   return (
     <div className="space-y-3 rounded-md border p-3">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-secondary">
         Use an OAuth application to obtain and renew access tokens
         automatically. No redirect URI is needed for client credentials.
       </p>
@@ -94,7 +94,7 @@ export function MCPOAuthFields({
             onChange({ ...value, scope: event.target.value })
           }
         />
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-secondary">
           Use the scope names and separator required by your provider.
         </span>
       </label>
@@ -102,7 +102,7 @@ export function MCPOAuthFields({
         Client authentication
         <select
           aria-label="Client authentication"
-          className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+          className="mt-1 block w-full rounded-md border bg-surface-level-1 p-2 text-sm"
           value={value.token_endpoint_auth_method ?? "client_secret_post"}
           onChange={(event) =>
             onChange({

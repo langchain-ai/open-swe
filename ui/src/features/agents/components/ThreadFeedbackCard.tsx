@@ -23,14 +23,14 @@ const ratings: Array<{
     label: "Good",
     icon: ThumbsUp,
     className:
-      "border-success/40 bg-success/10 text-success-foreground hover:bg-success/20 hover:text-success-foreground dark:bg-success/10",
+      "border-success bg-success text-success-secondary hover:bg-success hover:text-success-secondary dark:bg-success",
   },
   {
     value: "bad",
     label: "Bad",
     icon: ThumbsDown,
     className:
-      "border-destructive/40 bg-destructive/10 text-destructive-foreground hover:bg-destructive/20 hover:text-destructive-foreground dark:bg-destructive/10",
+      "border-error bg-error text-error-secondary hover:bg-error hover:text-error-secondary dark:bg-error",
   },
 ]
 
@@ -123,7 +123,7 @@ export function ThreadFeedbackCard({
     return (
       <div
         role="status"
-        className="mt-4 rounded-lg bg-card px-4 py-3 text-sm text-muted-foreground"
+        className="mt-4 rounded-lg bg-surface-level-1 px-4 py-3 text-sm text-secondary"
       >
         Thanks for your feedback.
       </div>
@@ -134,7 +134,7 @@ export function ThreadFeedbackCard({
     <form
       aria-label="Thread feedback"
       className={cn(
-        "mt-4 rounded-lg bg-card p-4",
+        "mt-4 rounded-lg bg-surface-level-1 p-4",
         showComment
           ? "space-y-3"
           : "flex flex-wrap items-center justify-between gap-x-6 gap-y-3"
@@ -149,7 +149,7 @@ export function ThreadFeedbackCard({
         {showComment ? "How could Open SWE do better?" : "How did Open SWE do?"}
       </p>
       {showComment ? (
-        <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        <label className="flex flex-col gap-1.5 text-xs text-secondary">
           Comment (optional)
           <Textarea
             autoFocus
@@ -158,7 +158,7 @@ export function ThreadFeedbackCard({
             maxLength={3000}
             disabled={mutation.isPending}
             placeholder="What could be better?"
-            className="min-h-20 border-foreground/20 bg-background text-sm"
+            className="min-h-20 border-strong bg-surface-level-1 text-sm"
           />
         </label>
       ) : (
@@ -185,7 +185,7 @@ export function ThreadFeedbackCard({
             type="button"
             size="lg"
             variant="ghost"
-            className="text-muted-foreground"
+            className="text-secondary"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate({ action: "dismiss" })}
           >

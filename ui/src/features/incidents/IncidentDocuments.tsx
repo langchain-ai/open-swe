@@ -22,7 +22,7 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
   })
   if (documents.isPending)
     return (
-      <p role="status" className="text-sm text-muted-foreground">
+      <p role="status" className="text-sm text-secondary">
         Loading incident summary…
       </p>
     )
@@ -48,7 +48,7 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
     }
   }
   return (
-    <section className="space-y-4 rounded-xl border border-border bg-card p-5">
+    <section className="space-y-4 rounded-xl border border-default bg-surface-level-1 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium">Postmortem summary</h2>
         <Button
@@ -62,7 +62,7 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
         </Button>
       </div>
       {documents.error && (
-        <p role="alert" className="text-sm text-warning-foreground">
+        <p role="alert" className="text-sm text-warning-secondary">
           {documents.error.message}
         </p>
       )}
@@ -71,7 +71,7 @@ export function IncidentDocuments({ incidentId }: { incidentId: string }) {
           <Markdown content={markdown} />
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-secondary">
           The agent will add a summary after investigating.
         </p>
       )}

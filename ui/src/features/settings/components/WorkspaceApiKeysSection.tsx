@@ -80,15 +80,15 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
     >
       <div className="space-y-4 px-4 py-3.5">
         {keys.isPending ? (
-          <p className="text-sm text-muted-foreground">Loading API keys…</p>
+          <p className="text-sm text-secondary">Loading API keys…</p>
         ) : keys.isError ? (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-error-secondary">
             {keys.error.message}
           </p>
         ) : keys.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No API keys yet.</p>
+          <p className="text-sm text-secondary">No API keys yet.</p>
         ) : (
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-default">
             {keys.data.map((key) => (
               <li
                 key={key.id}
@@ -97,20 +97,20 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
                 <div className="space-y-1">
                   <p className="text-sm font-medium">
                     {key.name}{" "}
-                    <span className="font-mono text-xs text-muted-foreground">
+                    <span className="font-mono text-xs text-secondary">
                       …{key.key_suffix}
                     </span>
                   </p>
                   {key.description && (
-                    <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+                    <p className="text-sm break-words whitespace-pre-wrap text-secondary">
                       {key.description}
                     </p>
                   )}
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-secondary">
                     Created by{" "}
                     {key.created_by_name || key.created_by || "Unknown user"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-secondary">
                     {key.status} · Expires{" "}
                     {new Date(key.expires_at).toLocaleString()} · Last used{" "}
                     {key.last_used_at
@@ -134,7 +134,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
           </ul>
         )}
         {secret ? (
-          <div className="space-y-3 rounded-md border border-border p-3">
+          <div className="space-y-3 rounded-md border border-default p-3">
             <p className="text-sm font-medium">
               Copy your key now. It won’t be shown again.
             </p>
@@ -218,7 +218,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
           </form>
         )}
         {error && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-error-secondary">
             {error}
           </p>
         )}
@@ -238,7 +238,7 @@ export function WorkspaceApiKeysSection({ slug }: { slug: string }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-sm text-error-secondary">
               {error}
             </p>
           )}

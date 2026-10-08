@@ -75,8 +75,8 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+    <section className="rounded-xl border border-default bg-surface-level-1">
+      <div className="flex items-center justify-between gap-3 border-b border-default px-5 py-4">
         <h2 className="text-sm font-medium">{title}</h2>
         {aside}
       </div>
@@ -155,13 +155,13 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
     <div className="mx-auto w-full max-w-6xl px-5 py-7 sm:px-10">
       <Link
         to="/incidents"
-        className="mb-6 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        className="mb-6 inline-flex items-center gap-1.5 text-xs text-secondary hover:text-primary"
       >
         <ArrowLeft className="size-3.5" />
         All incidents
       </Link>
       <header className="mb-6">
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-secondary">
           <Hash className="size-3.5" />
           {incident.channel_name}
           <span>·</span>
@@ -174,15 +174,15 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             {incident.title || incident.channel_name}
           </h1>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Agent</span>
+            <span className="text-xs text-secondary">Agent</span>
             <StatusBadge status={incident.status} />
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-secondary">
           <span>Updated {formatTime(incident.updated_at)}</span>
         </div>
         {incident.reason && (
-          <p className="mt-3 text-sm text-warning-foreground">
+          <p className="mt-3 text-sm text-warning-secondary">
             {humanize(incident.reason)}
           </p>
         )}
@@ -206,14 +206,14 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             ))}
           <ExternalLink
             href={incident.slack_url}
-            className="ml-auto text-xs font-medium text-muted-foreground"
+            className="ml-auto text-xs font-medium text-secondary"
           >
             Open in Slack
           </ExternalLink>
           {trace_url && (
             <ExternalLink
               href={trace_url}
-              className="text-xs font-medium text-muted-foreground"
+              className="text-xs font-medium text-secondary"
             >
               Open trace
             </ExternalLink>
@@ -221,14 +221,14 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
         </div>
       </header>
       {detail.error && (
-        <p role="alert" className="mb-5 text-sm text-warning-foreground">
+        <p role="alert" className="mb-5 text-sm text-warning-secondary">
           {detail.error.message}
         </p>
       )}
       {notice && (
         <div
           role="status"
-          className="mb-5 rounded-lg border border-info/20 bg-info/5 p-3 text-sm text-info-foreground"
+          className="mb-5 rounded-lg border border-brand bg-brand-subtle p-3 text-sm text-brand-primary"
         >
           {pendingTransition || !appliedStates[notice]
             ? notices[notice]
@@ -238,13 +238,13 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
       <Tabs.Root defaultValue="overview">
         <Tabs.List
           aria-label="Incident details"
-          className="mb-6 flex gap-6 border-b border-border"
+          className="mb-6 flex gap-6 border-b border-default"
         >
           {(["overview", "postmortem", "timeline"] as const).map((tab) => (
             <Tabs.Tab
               key={tab}
               value={tab}
-              className="-mb-px border-b-2 border-transparent px-1 py-3 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring data-[active]:border-foreground data-[active]:font-medium data-[active]:text-foreground"
+              className="-mb-px border-b-2 border-transparent px-1 py-3 text-sm text-secondary outline-none focus-visible:ring-2 focus-visible:ring-focus data-[active]:border-strong data-[active]:font-medium data-[active]:text-primary"
             >
               {humanize(tab)}
             </Tabs.Tab>
@@ -261,7 +261,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                 title="Latest finding"
                 aside={
                   report && (
-                    <span className="text-[11px] text-muted-foreground">
+                    <span className="text-[11px] text-secondary">
                       {report.outcome === "inconclusive"
                         ? "Inconclusive"
                         : "Findings available"}
@@ -287,7 +287,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                       ([label, value]) =>
                         value && (
                           <div key={label} className="mt-4">
-                            <h3 className="mb-1 text-xs font-medium text-muted-foreground">
+                            <h3 className="mb-1 text-xs font-medium text-secondary">
                               {label}
                             </h3>
                             <p className="text-sm leading-relaxed whitespace-pre-wrap">
@@ -300,7 +300,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                         )
                     )}
                     {Boolean(report.next_steps?.length) && (
-                      <div className="mt-5 rounded-lg border border-info/20 bg-info/5 p-4">
+                      <div className="mt-5 rounded-lg border border-brand bg-brand-subtle p-4">
                         <h3 className="mb-2 text-xs font-medium">
                           Steps to solve
                         </h3>
@@ -314,20 +314,20 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                             </li>
                           ))}
                         </ul>
-                        <p className="mt-3 text-[11px] text-muted-foreground">
+                        <p className="mt-3 text-[11px] text-secondary">
                           Recommendations for the responder
                         </p>
                       </div>
                     )}
-                    <p className="mt-4 text-[11px] text-muted-foreground">
+                    <p className="mt-4 text-[11px] text-secondary">
                       Report updated {formatTime(report.created_at)}
                     </p>
                   </>
                 ) : (
                   <div className="py-7 text-center">
-                    <FileSearch className="mx-auto mb-3 size-6 text-muted-foreground" />
+                    <FileSearch className="mx-auto mb-3 size-6 text-secondary" />
                     <h3 className="text-sm font-medium">No findings yet</h3>
-                    <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                    <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-secondary">
                       Findings appear here after the first pass.
                     </p>
                   </div>
@@ -337,13 +337,13 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                 <Section
                   title="Sources"
                   aside={
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-secondary">
                       {report.evidence.length} sources
                     </span>
                   }
                 >
                   {report.evidence.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-secondary">
                       No linked evidence has been collected.
                     </p>
                   ) : (
@@ -352,10 +352,10 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                         <li
                           key={evidence.id}
                           id={`evidence-${encodeURIComponent(evidence.id)}`}
-                          className="scroll-mt-6 rounded-lg border border-border p-3"
+                          className="scroll-mt-6 rounded-lg border border-default p-3"
                         >
-                          <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-                            <span className="flex size-5 items-center justify-center rounded border border-border">
+                          <div className="mb-2 flex items-center gap-2 text-[11px] text-secondary">
+                            <span className="flex size-5 items-center justify-center rounded border border-default">
                               {index + 1}
                             </span>
                             <span className="font-medium">
@@ -378,11 +378,11 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                             )}
                           </ExternalLink>
                           {evidence.query && (
-                            <details className="mt-2 text-xs text-muted-foreground">
+                            <details className="mt-2 text-xs text-secondary">
                               <summary className="cursor-pointer">
                                 View query
                               </summary>
-                              <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-3 font-mono break-all whitespace-pre-wrap">
+                              <pre className="mt-2 overflow-x-auto rounded-md bg-surface-level-2 p-3 font-mono break-all whitespace-pre-wrap">
                                 {evidence.query}
                               </pre>
                             </details>
@@ -406,10 +406,10 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                             className={cn(
                               "rounded px-2 py-0.5 text-[11px]",
                               hypothesis.assessment === "supported"
-                                ? "bg-success/10 text-success-foreground"
+                                ? "bg-success text-success-secondary"
                                 : hypothesis.assessment === "rejected"
-                                  ? "bg-muted text-muted-foreground"
-                                  : "bg-warning/10 text-warning-foreground"
+                                  ? "bg-surface-level-2 text-secondary"
+                                  : "bg-warning text-warning-secondary"
                             )}
                           >
                             {humanize(hypothesis.assessment)}
@@ -424,14 +424,14 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                               <a
                                 key={id}
                                 href={`#evidence-${encodeURIComponent(id)}`}
-                                className="text-xs text-info-foreground hover:underline"
+                                className="text-xs text-brand-primary hover:underline"
                               >
                                 Evidence {evidenceIndex + 1}
                               </a>
                             ) : (
                               <span
                                 key={id}
-                                className="text-xs text-muted-foreground"
+                                className="text-xs text-secondary"
                               >
                                 Evidence unavailable
                               </span>
@@ -447,7 +447,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             <aside className="min-w-0 space-y-5">
               {report?.impact && (
                 <Section title="Observed impact">
-                  <p className="text-sm leading-relaxed text-muted-foreground">
+                  <p className="text-sm leading-relaxed text-secondary">
                     <CitedText
                       text={report.impact}
                       evidence={report.evidence}
@@ -461,7 +461,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                     {gaps.map((gap) => (
                       <li
                         key={gap}
-                        className="flex min-w-0 gap-2 text-xs leading-relaxed [overflow-wrap:anywhere] text-warning-foreground"
+                        className="flex min-w-0 gap-2 text-xs leading-relaxed [overflow-wrap:anywhere] text-warning-secondary"
                       >
                         <CircleHelp className="mt-0.5 size-3.5 shrink-0" />
                         {gap}
@@ -469,7 +469,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-xs leading-relaxed text-muted-foreground">
+                  <p className="text-xs leading-relaxed text-secondary">
                     {report
                       ? "No coverage gaps reported in this pass."
                       : "No coverage assessment yet."}
@@ -482,9 +482,9 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                     {report.checked.map((check) => (
                       <li
                         key={check}
-                        className="flex gap-2 text-xs leading-relaxed text-muted-foreground"
+                        className="flex gap-2 text-xs leading-relaxed text-secondary"
                       >
-                        <Check className="mt-0.5 size-3.5 shrink-0 text-success-foreground" />
+                        <Check className="mt-0.5 size-3.5 shrink-0 text-success-secondary" />
                         {check}
                       </li>
                     ))}
@@ -493,7 +493,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
               )}
               {report && report.questions.length > 0 && (
                 <Section title="Open questions">
-                  <ul className="list-disc space-y-3 pl-3 text-xs leading-relaxed text-muted-foreground">
+                  <ul className="list-disc space-y-3 pl-3 text-xs leading-relaxed text-secondary">
                     {report.questions.map((openQuestion) => (
                       <li key={openQuestion}>{openQuestion}</li>
                     ))}
@@ -519,13 +519,13 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
           <Section
             title="Timeline"
             aside={
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-secondary">
                 {activity.length} events
               </span>
             }
           >
             {activity.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-secondary">
                 No activity recorded yet.
               </p>
             ) : (
@@ -541,14 +541,14 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                   .map((item) => (
                     <li
                       key={item.id}
-                      className="relative grid gap-2 border-b border-border py-5 last:border-0 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-6"
+                      className="relative grid gap-2 border-b border-default py-5 last:border-0 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-6"
                     >
-                      <time className="text-xs text-muted-foreground">
+                      <time className="text-xs text-secondary">
                         {formatTime(item.at)}
                       </time>
                       <div className="min-w-0">
                         <h3 className="mb-2 flex items-center gap-2 text-xs font-medium">
-                          <Clock3 className="size-3.5 text-muted-foreground" />
+                          <Clock3 className="size-3.5 text-secondary" />
                           {humanize(item.type)}
                         </h3>
                         <p className="text-sm leading-relaxed whitespace-pre-wrap">
@@ -572,7 +572,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             if (question.trim() && !command.isPending)
               command.mutate({ action: "ask", text: question.trim() })
           }}
-          className="mt-6 rounded-xl border border-border bg-card p-4"
+          className="mt-6 rounded-xl border border-default bg-surface-level-1 p-4"
         >
           <label
             htmlFor="incidents-question"
@@ -591,7 +591,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
             className="min-h-24 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
           />
           <div className="mt-3 flex items-center justify-between gap-4">
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-secondary">
               Shared with this incident
             </span>
             <Button

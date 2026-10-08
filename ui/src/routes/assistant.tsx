@@ -43,7 +43,7 @@ function AssistantLayout() {
     (session.data && (profile.isPending || localThreads.isLoading))
   )
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-background">
+      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )

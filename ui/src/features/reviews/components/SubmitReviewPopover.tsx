@@ -116,7 +116,7 @@ export function SubmitReviewPopover({
         >
           <PopoverTitle className="text-xs">Finish your review</PopoverTitle>
           {pendingCount > 0 && (
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-secondary">
               {pendingCount} pending comment{pendingCount === 1 ? "" : "s"} will
               be submitted with this review.
             </p>
@@ -151,13 +151,13 @@ export function SubmitReviewPopover({
                   checked={event === verdict.event}
                   onChange={() => setEvent(verdict.event)}
                   disabled={submit.isPending}
-                  className="mt-0.5 accent-primary"
+                  className="mt-0.5 accent-[color:var(--border-focus)]"
                 />
                 <span>
-                  <span className="font-medium text-foreground">
+                  <span className="font-medium text-primary">
                     {verdict.label}
                   </span>
-                  <span className="block text-muted-foreground">
+                  <span className="block text-secondary">
                     {verdict.description}
                   </span>
                 </span>
@@ -165,7 +165,7 @@ export function SubmitReviewPopover({
             ))}
           </fieldset>
           {submit.error && (
-            <p className="mt-2 text-xs break-words text-destructive">
+            <p className="mt-2 text-xs break-words text-error-secondary">
               {submit.error.message}
             </p>
           )}
@@ -175,7 +175,7 @@ export function SubmitReviewPopover({
                 type="button"
                 size="sm"
                 variant="ghost"
-                className="mr-auto text-destructive"
+                className="mr-auto text-error-secondary"
                 disabled={submit.isPending || pending.discard.isPending}
                 onClick={() => pending.discard.mutate()}
               >

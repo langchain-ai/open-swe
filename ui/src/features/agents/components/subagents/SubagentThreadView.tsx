@@ -61,7 +61,7 @@ export function SubagentThreadView({
       params={{ threadId: thread.id }}
       search={{}}
       data-no-drag=""
-      className="flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      className="flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-secondary transition-colors hover:bg-surface-level-2 hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
     >
       <ArrowLeftIcon className="size-3.5" aria-hidden />
       <span className="max-w-48 truncate text-xs" title={thread.title}>
@@ -107,7 +107,7 @@ export function SubagentThreadView({
         contentWidthClass="max-w-3xl"
         footer={
           !isRunning && (
-            <p className="px-1 pt-2 pb-6 text-center text-xs text-muted-foreground/70">
+            <p className="px-1 pt-2 pb-6 text-center text-xs text-tertiary">
               Subagents cannot be replied to. Follow up in the parent thread.
             </p>
           )
@@ -120,7 +120,7 @@ export function SubagentThreadView({
     <div className="flex min-w-0 flex-1 flex-col">
       <header
         data-desktop-drag-region=""
-        className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
+        className="relative z-10 h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
       >
         <div
           className={cn(
@@ -129,7 +129,7 @@ export function SubagentThreadView({
           )}
         >
           {backLink}
-          <span className="text-muted-foreground/50" aria-hidden>
+          <span className="text-quaternary" aria-hidden>
             /
           </span>
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
@@ -143,17 +143,17 @@ export function SubagentThreadView({
             )}
             {task?.status === "in_progress" ? (
               <CircleNotchIcon
-                className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+                className="size-3.5 shrink-0 animate-spin text-secondary"
                 aria-label="Subagent running"
               />
             ) : task?.status === "error" ? (
               <WarningCircleIcon
-                className="size-3.5 shrink-0 text-destructive"
+                className="size-3.5 shrink-0 text-error-secondary"
                 aria-label="Subagent failed"
               />
             ) : task ? (
               <CheckCircleIcon
-                className="size-3.5 shrink-0 text-muted-foreground/70"
+                className="size-3.5 shrink-0 text-tertiary"
                 aria-label="Subagent finished"
               />
             ) : null}

@@ -347,12 +347,12 @@ export function MCPConnectionsSection({
     >
       <fieldset disabled={busy} className="space-y-4">
         {error && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-error-secondary">
             {error}
           </p>
         )}
         {pendingImports.length > 0 && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             {pendingImports.length} more{" "}
             {pendingImports.length === 1 ? "connection" : "connections"} to
             review after saving.
@@ -371,7 +371,7 @@ export function MCPConnectionsSection({
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           />
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-secondary">
             Use a lowercase name such as incident. Dots and spaces are not
             allowed.
           </span>
@@ -391,7 +391,7 @@ export function MCPConnectionsSection({
           Transport
           <select
             aria-label="Transport"
-            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+            className="mt-1 block w-full rounded-md border bg-surface-level-1 p-2 text-sm"
             value={draft.transport}
             onChange={(e) =>
               setDraft({
@@ -408,7 +408,7 @@ export function MCPConnectionsSection({
           Authentication
           <select
             aria-label="Authentication"
-            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm"
+            className="mt-1 block w-full rounded-md border bg-surface-level-1 p-2 text-sm"
             value={draft.oauth ? "oauth" : "headers"}
             onChange={(event) =>
               setDraft({
@@ -449,7 +449,7 @@ export function MCPConnectionsSection({
           <p className="text-sm font-medium">
             {draft.oauth ? "Additional headers" : "Authentication headers"}
           </p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             {draft.oauth
               ? "Optional headers are encrypted. OAuth supplies the Authorization header automatically."
               : "Values are encrypted and hidden by default. Use a header such as Authorization or X-API-Key."}
@@ -471,7 +471,7 @@ export function MCPConnectionsSection({
                     </label>
                   ))}
                   {Object.keys(savedHeaders).length === 0 && (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-secondary">
                       No saved headers.
                     </p>
                   )}
@@ -587,7 +587,7 @@ export function MCPConnectionsSection({
                 Add header
               </Button>
               {draft.existing && headers.length === 0 && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-secondary">
                   Saving with no headers clears the saved authentication.
                 </p>
               )}
@@ -596,14 +596,14 @@ export function MCPConnectionsSection({
         </div>
         <div className="space-y-2">
           <p className="text-sm font-medium">Allowed tools</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             Discover tools, review the selection, then save. All discovered
             tools are selected by default for new connections.
           </p>
           {toolNames.length > 0 && (
             <>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-auto text-xs text-muted-foreground">
+                <span className="mr-auto text-xs text-secondary">
                   {draft.allowed_tools.length} of {toolNames.length} selected
                 </span>
                 <Button
@@ -665,7 +665,7 @@ export function MCPConnectionsSection({
                     />
                     <span className="min-w-0 break-words">
                       {name}
-                      <span className="block text-xs text-muted-foreground">
+                      <span className="block text-xs text-secondary">
                         {toolDescriptions.get(name)}
                       </span>
                     </span>
@@ -712,10 +712,10 @@ export function MCPConnectionsSection({
     <SettingsSection title="MCP servers" description={description}>
       <div className="space-y-4 p-4">
         {connections.isLoading && (
-          <p className="text-sm text-muted-foreground">Loading connections…</p>
+          <p className="text-sm text-secondary">Loading connections…</p>
         )}
         {connections.error && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-error-secondary">
             {connections.error.message}
           </p>
         )}
@@ -726,10 +726,10 @@ export function MCPConnectionsSection({
               aria-label="Inherited instance MCP connections"
               className="rounded-md border border-dashed"
             >
-              <p className="px-3 pt-3 text-xs font-medium text-muted-foreground">
+              <p className="px-3 pt-3 text-xs font-medium text-secondary">
                 Inherited from the instance
               </p>
-              <ul className="divide-y divide-border">
+              <ul className="divide-y divide-default">
                 {inherited.data.map((connection) => {
                   const replaced = connections.data?.some(
                     (own) => own.name === connection.name
@@ -742,16 +742,16 @@ export function MCPConnectionsSection({
                       <div className="min-w-0">
                         <p className="text-sm">
                           {connection.name}{" "}
-                          <span className="text-muted-foreground">
+                          <span className="text-secondary">
                             · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
                             {connection.allowed_tools.length} tools
                           </span>
                         </p>
-                        <p className="text-xs break-all text-muted-foreground">
+                        <p className="text-xs break-all text-secondary">
                           {connection.url}
                         </p>
                       </div>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-secondary">
                         {replaced
                           ? "Replaced by this workspace's connection"
                           : "Edit under Admin"}
@@ -774,12 +774,12 @@ export function MCPConnectionsSection({
                 <div className="min-w-0">
                   <p className="text-sm font-medium">
                     {connection.name}{" "}
-                    <span className="text-muted-foreground">
+                    <span className="text-secondary">
                       · {connection.enabled ? "Enabled" : "Disabled"} ·{" "}
                       {connection.allowed_tools.length} tools
                     </span>
                   </p>
-                  <p className="text-xs break-all text-muted-foreground">
+                  <p className="text-xs break-all text-secondary">
                     {connection.url}
                   </p>
                 </div>

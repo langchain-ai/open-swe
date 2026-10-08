@@ -703,7 +703,7 @@ export function AgentsSidebar({
     recents.length === 0
 
   return (
-    <SidebarFrame {...layout} className="border-r border-border bg-sidebar">
+    <SidebarFrame {...layout} className="border-r border-default bg-surface-level-2">
       <div
         className={cn(
           "flex items-center justify-between px-4 pb-4",
@@ -712,7 +712,7 @@ export function AgentsSidebar({
       >
         <Link
           to="/my-settings"
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-foreground"
+          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
           <img
             src={`${import.meta.env.BASE_URL}logo-mark.png`}
@@ -730,7 +730,7 @@ export function AgentsSidebar({
               layout.closeOnMobile()
               openPalette()
             }}
-            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="flex size-6 items-center justify-center rounded text-secondary hover:bg-surface-level-1-hover hover:text-primary"
           >
             <MagnifyingGlassIcon className="size-4" />
           </button>
@@ -742,7 +742,7 @@ export function AgentsSidebar({
         <Link
           to={chat.home}
           onClick={layout.closeOnMobile}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-surface-level-2-hover"
         >
           <NotePencilIcon className="size-4" />
           New Thread
@@ -764,10 +764,10 @@ export function AgentsSidebar({
                 : undefined
             }
             className={cn(
-              "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-sidebar-row-hover",
+              "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-surface-level-2-hover",
               !!concierge.data?.thread_id &&
                 activeThreadId === concierge.data.thread_id &&
-                "bg-sidebar-row-active"
+                "bg-surface-level-2-hover"
             )}
           >
             <ChatCircleIcon className="size-4" />
@@ -780,14 +780,14 @@ export function AgentsSidebar({
         <div className="relative flex min-h-0 flex-1 flex-col">
           {scrollEdges.top && (
             <>
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-px bg-border" />
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-sidebar to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-px bg-[color:var(--border-default)]" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-surface-level-2 to-transparent" />
             </>
           )}
           {scrollEdges.bottom && (
             <>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-px bg-border" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-sidebar to-transparent" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-px bg-[color:var(--border-default)]" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-3 bg-gradient-to-t from-surface-level-2 to-transparent" />
             </>
           )}
           <div
@@ -819,7 +819,7 @@ export function AgentsSidebar({
               />
             )}
             {sourcesLoading && allItems.length > 0 && (
-              <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted-foreground/70">
+              <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-tertiary">
                 <CircleNotchIcon className="size-3.5 animate-spin" />
                 Loading threads…
               </div>
@@ -963,7 +963,7 @@ export function AgentsSidebar({
               </section>
             )}
             {isEmpty && !cloudError && !localThreads.isError && (
-              <p className="px-2.5 py-6 text-center text-xs text-muted-foreground/70">
+              <p className="px-2.5 py-6 text-center text-xs text-tertiary">
                 {hasActiveFilters(prefs.filters)
                   ? "No threads match these filters."
                   : "No threads yet."}
@@ -980,7 +980,7 @@ export function AgentsSidebar({
           ) : (
             <Link
               to="/login"
-              className="flex w-full items-center justify-center rounded-md border border-border px-2 py-1.5 text-xs font-medium hover:bg-sidebar-accent"
+              className="flex w-full items-center justify-center rounded-md border border-default px-2 py-1.5 text-xs font-medium hover:bg-surface-level-2-hover"
             >
               Sign in for cloud mode
             </Link>
@@ -997,7 +997,7 @@ export function AgentsSidebar({
             }
             disabled={updateInstalling}
             onClick={() => void installUpdate()}
-            className="flex h-8 shrink-0 items-center justify-center gap-2 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            className="flex h-8 shrink-0 items-center justify-center gap-2 rounded-full bg-brand px-3 text-xs font-medium text-brand-on-fill hover:bg-brand/90 disabled:opacity-60"
           >
             {updateInstalling ? (
               <>
@@ -1041,7 +1041,7 @@ function WorkspaceGroupSection({
         type="button"
         onClick={onToggleCollapsed}
         aria-expanded={!collapsed}
-        className="group/workspace flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[13px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+        className="group/workspace flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[13px] font-medium text-tertiary transition-colors hover:text-primary"
       >
         <StackIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
@@ -1147,7 +1147,7 @@ function RepoGroup({
 
   return (
     <div className="mb-1">
-      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover">
+      <div className="group/folder flex items-center gap-1.5 rounded-md pr-1 pl-2 text-sm text-primary transition-colors hover:bg-surface-level-2-hover">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -1162,7 +1162,7 @@ function RepoGroup({
           aria-label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
           title={pinned ? "Unpin repository" : "Pin repository"}
           onClick={onTogglePin}
-          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+          className="hidden size-5 shrink-0 items-center justify-center rounded text-tertiary group-hover/folder:flex hover:bg-surface-level-1-hover hover:text-primary"
         >
           {pinned ? (
             <PushPinSlashIcon className="size-3.5" />
@@ -1175,7 +1175,7 @@ function RepoGroup({
           aria-label={`Compose message in ${group.label}`}
           title="Compose message"
           onClick={onCompose}
-          className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground/80 group-hover/folder:flex hover:bg-accent hover:text-foreground"
+          className="hidden size-5 shrink-0 items-center justify-center rounded text-tertiary group-hover/folder:flex hover:bg-surface-level-1-hover hover:text-primary"
         >
           <NotePencilIcon className="size-3.5" />
         </button>
@@ -1184,13 +1184,13 @@ function RepoGroup({
         <>
           {shown.map((item) => renderRow(item, pullRequestFor(item)))}
           {shown.length === 0 && loading && (
-            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/70">
+            <div className="flex items-center gap-1.5 py-1 pr-2.5 pl-6 text-[13px] text-tertiary">
               <CircleNotchIcon className="size-3.5 animate-spin" />
               Loading chats…
             </div>
           )}
           {shown.length === 0 && !loading && !repo.isError && (
-            <p className="py-1 pr-2.5 pl-6 text-[13px] text-muted-foreground/60">
+            <p className="py-1 pr-2.5 pl-6 text-[13px] text-tertiary">
               No chats
             </p>
           )}
@@ -1198,7 +1198,7 @@ function RepoGroup({
             <button
               type="button"
               onClick={() => void repo.refetch()}
-              className="w-full py-1 pr-2.5 pl-6 text-left text-[13px] text-destructive"
+              className="w-full py-1 pr-2.5 pl-6 text-left text-[13px] text-error-secondary"
             >
               Retry loading chats
             </button>
@@ -1212,7 +1212,7 @@ function RepoGroup({
                 else repo.fetchNextPage()
               }}
               disabled={loading}
-              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-muted-foreground/70 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+              className="flex w-full items-center gap-1.5 rounded-lg py-1 pr-2.5 pl-6 text-left text-[13px] text-tertiary transition-colors hover:text-primary disabled:cursor-wait disabled:opacity-60"
             >
               {loading && <CircleNotchIcon className="size-3.5 animate-spin" />}
               {loading ? "Loading…" : "Show more"}
@@ -1270,11 +1270,11 @@ function ThreadSourceError({
   onRetry: () => void
 }) {
   return (
-    <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-secondary">
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <button
         type="button"
-        className="shrink-0 font-medium text-foreground hover:underline"
+        className="shrink-0 font-medium text-primary hover:underline"
         onClick={onRetry}
       >
         Retry
@@ -1321,7 +1321,7 @@ function LoadMoreThreadsOnScroll({
       onClick={() => load.current()}
       disabled={loading}
       aria-label={label}
-      className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] text-muted-foreground/70"
+      className="flex w-full items-center justify-center gap-1.5 py-2 text-[13px] text-tertiary"
     >
       {loading ? (
         <CircleNotchIcon className="size-3.5 animate-spin" />
@@ -1428,14 +1428,14 @@ export function AgentsShell({
 
   return (
     <SidebarLayoutProvider value={layout}>
-      <div className="agents-ui flex h-svh overflow-hidden bg-background">
+      <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
         <AgentsSidebar
           user={user}
           activeThreadId={activeThreadId}
           activeLocalSessionId={activeLocalSessionId}
           layout={layout}
         />
-        <main className="relative flex min-w-0 flex-1 overflow-hidden bg-background">
+        <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
           {children}
         </main>
       </div>

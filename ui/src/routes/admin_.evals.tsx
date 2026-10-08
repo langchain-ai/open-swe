@@ -259,7 +259,7 @@ function progressLabel(data: ReviewerEvalStatus): string | null {
 function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
   if (!data) {
     return (
-      <div className="p-4 text-xs text-muted-foreground">
+      <div className="p-4 text-xs text-secondary">
         Loading reviewer eval status…
       </div>
     )
@@ -267,7 +267,7 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
 
   const config = data.config_snapshot
   return (
-    <div className="grid gap-2 p-4 text-xs text-muted-foreground sm:grid-cols-2">
+    <div className="grid gap-2 p-4 text-xs text-secondary sm:grid-cols-2">
       <StatusLine label="Status" value={data.status} strong />
       <StatusLine label="Progress" value={progressLabel(data)} />
       <StatusLine
@@ -303,12 +303,12 @@ function ReviewerEvalStatusView({ data }: { data: ReviewerEvalStatus | null }) {
           href={data.experiment_url}
           target="_blank"
           rel="noreferrer"
-          className="underline hover:text-foreground"
+          className="underline hover:text-primary"
         >
           View experiment in LangSmith
         </a>
       )}
-      {data.error && <span className="text-destructive">{data.error}</span>}
+      {data.error && <span className="text-error-secondary">{data.error}</span>}
     </div>
   )
 }
@@ -325,7 +325,7 @@ function StatusLine({
   return (
     <span>
       {label}:{" "}
-      <span className={strong ? "font-medium text-foreground" : ""}>
+      <span className={strong ? "font-medium text-primary" : ""}>
         {value || "—"}
       </span>
     </span>
@@ -368,7 +368,7 @@ function ReviewerEvalLogs() {
           >
             {copied ? "Copied" : "Copy logs"}
           </Button>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="flex items-center gap-1.5 text-xs text-secondary">
             <input
               type="checkbox"
               checked={follow}
@@ -389,12 +389,12 @@ function ReviewerEvalLogs() {
                 el.scrollHeight - el.scrollTop - el.clientHeight < 24
               setFollow(atBottom)
             }}
-            className="max-h-[28rem] overflow-auto rounded-md bg-muted/50 p-3 font-mono text-xs break-words whitespace-pre-wrap text-foreground"
+            className="max-h-[28rem] overflow-auto rounded-md bg-surface-level-2/50 p-3 font-mono text-xs break-words whitespace-pre-wrap text-primary"
           >
             {logTail}
           </pre>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             {running
               ? "Waiting for output…"
               : "No output yet. Launch a reviewer eval to see logs here."}

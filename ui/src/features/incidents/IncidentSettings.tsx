@@ -56,7 +56,7 @@ function Field({
           aria-describedby={describedBy}
           defaultValue={value}
           placeholder={placeholder}
-          className="min-h-20 bg-background"
+          className="min-h-20 bg-surface-level-1"
         />
       ) : (
         <Input
@@ -68,13 +68,13 @@ function Field({
           required={name === "channel_prefix"}
           maxLength={name === "channel_prefix" ? 60 : undefined}
           pattern={name === "channel_prefix" ? "[a-z0-9_-]+" : undefined}
-          className="h-9 bg-background"
+          className="h-9 bg-surface-level-1"
         />
       )}
       {description && (
         <p
           id={`policy-${name}-description`}
-          className="text-xs leading-relaxed text-muted-foreground"
+          className="text-xs leading-relaxed text-secondary"
         >
           {description}
         </p>
@@ -106,7 +106,7 @@ function Notice({ children, error }: { children: ReactNode; error?: boolean }) {
   return (
     <div
       role={error ? "alert" : "status"}
-      className={`rounded-lg border p-3 text-sm ${error ? "border-destructive/20 bg-destructive/5 text-destructive-foreground" : "border-info/20 bg-info/5 text-info-foreground"}`}
+      className={`rounded-lg border p-3 text-sm ${error ? "border-error bg-error text-error-secondary" : "border-brand bg-brand-subtle text-brand-primary"}`}
     >
       {children}
     </div>
@@ -192,7 +192,7 @@ function PolicyForm({
                 value={excludedChannelIds}
                 onValueChange={setExcludedChannelIds}
                 aria-label="Excluded channels"
-                className="min-h-9 bg-background"
+                className="min-h-9 bg-surface-level-1"
               />
             </div>
           </div>
@@ -227,7 +227,7 @@ function PolicyForm({
                     id={`policy-${name}`}
                     name={name}
                     defaultValue={value}
-                    className="h-9 bg-background"
+                    className="h-9 bg-surface-level-1"
                   />
                 </label>
               ))}
@@ -255,8 +255,8 @@ function PolicyForm({
             : "Settings update requested. The policy becomes effective after server validation."}
         </Notice>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-5">
-        <p className="max-w-md text-xs leading-relaxed text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-default pt-5">
+        <p className="max-w-md text-xs leading-relaxed text-secondary">
           Policy version {initial.version}. Existing matching channels are not
           enrolled unless a new matching rename event is received.
         </p>
@@ -309,9 +309,9 @@ function SlackConnectionStatus({
     <div className="px-4 py-4">
       <div className="flex items-start gap-3">
         {connectionError ? (
-          <CircleAlert className="mt-0.5 size-5 text-warning-foreground" />
+          <CircleAlert className="mt-0.5 size-5 text-warning-secondary" />
         ) : (
-          <Radio className="mt-0.5 size-5 text-info-foreground" />
+          <Radio className="mt-0.5 size-5 text-brand-primary" />
         )}
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-medium">
@@ -320,13 +320,13 @@ function SlackConnectionStatus({
               : "Slack connection configured"}
           </h2>
           {connectionError && (
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            <p className="mt-1 text-xs leading-relaxed text-secondary">
               {connectionError}
             </p>
           )}
           <dl className="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
             <div>
-              <dt className="text-muted-foreground">Workspace</dt>
+              <dt className="text-secondary">Workspace</dt>
               <dd className="mt-1 font-mono">
                 {connection.workspace_id ||
                   policy.workspace_id ||
@@ -334,7 +334,7 @@ function SlackConnectionStatus({
               </dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Slack app</dt>
+              <dt className="text-secondary">Slack app</dt>
               <dd className="mt-1 font-mono">
                 {connection.slack_app_id ||
                   policy.slack_app_id ||
@@ -342,7 +342,7 @@ function SlackConnectionStatus({
               </dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Last verified</dt>
+              <dt className="text-secondary">Last verified</dt>
               <dd className="mt-1">{formatTime(connection.verified_at)}</dd>
             </div>
           </dl>

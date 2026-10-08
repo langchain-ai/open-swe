@@ -62,11 +62,11 @@ export function SlackChannelRow({
       <SlackChannelIcon channel={channel} />
       <span className="min-w-0 flex-1 truncate">{channel?.name ?? id}</span>
       {channel && !channel.is_member ? (
-        <span className="shrink-0 pr-5 text-muted-foreground">
+        <span className="shrink-0 pr-5 text-secondary">
           bot not in channel
         </span>
       ) : channel?.num_members != null ? (
-        <span className="shrink-0 pr-5 text-muted-foreground">
+        <span className="shrink-0 pr-5 text-secondary">
           {channel.num_members}
         </span>
       ) : null}

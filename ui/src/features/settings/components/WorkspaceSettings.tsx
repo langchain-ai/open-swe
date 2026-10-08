@@ -108,10 +108,10 @@ function GeneralSection({
         workspaces={workspaces}
         channelLabel={channelLabel}
       />
-      <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-2 border-t border-default px-4 py-3.5">
         {rebuildStatus}
         {error && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-error-secondary">
             {error}
           </p>
         )}
@@ -194,7 +194,7 @@ export function WorkspaceSettingsPanel({
   if (record.isLoading) return <Skeleton className="h-64 w-full" />
   if (record.isError || !record.data) {
     return (
-      <p role="alert" className="text-sm text-destructive">
+      <p role="alert" className="text-sm text-error-secondary">
         {record.error instanceof Error
           ? record.error.message
           : "Could not load this workspace."}
@@ -250,7 +250,7 @@ export function WorkspaceSettingsPanel({
           record.data.refresh_status === "refreshing" ? (
             <p
               role="status"
-              className="flex min-w-48 flex-1 items-center gap-2 text-xs text-muted-foreground"
+              className="flex min-w-48 flex-1 items-center gap-2 text-xs text-secondary"
             >
               <CircleNotchIcon
                 aria-hidden="true"
@@ -264,7 +264,7 @@ export function WorkspaceSettingsPanel({
           ) : awaitingRepositoryRebuild(record.data) ? (
             <p
               role="alert"
-              className="min-w-48 flex-1 text-xs text-destructive"
+              className="min-w-48 flex-1 text-xs text-error-secondary"
             >
               Repositories saved, but the image {buildAction.toLowerCase()}{" "}
               could not be confirmed. Check the sandbox image status or retry{" "}
@@ -275,7 +275,7 @@ export function WorkspaceSettingsPanel({
               role={
                 record.data.refresh_status === "failed" ? "alert" : "status"
               }
-              className="min-w-48 flex-1 text-xs text-muted-foreground"
+              className="min-w-48 flex-1 text-xs text-secondary"
             >
               {record.data.refresh_status === "failed"
                 ? `Image ${buildAction.toLowerCase()} failed. ${record.data.refresh_error ?? (record.data.snapshot_id ? "The previous image is still in use." : "No image is available yet.")}`

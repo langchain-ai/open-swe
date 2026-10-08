@@ -93,7 +93,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
                 return (
                   <span
                     key={elementIndex}
-                    className="rounded-md border border-border bg-card px-2 py-1 text-[12px] text-foreground"
+                    className="rounded-md border border-default bg-surface-level-1 px-2 py-1 text-[12px] text-primary"
                   >
                     {label}
                   </span>
@@ -103,7 +103,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
           )
         }
         if (block.type === "divider") {
-          return <div key={index} className="border-t border-border/60" />
+          return <div key={index} className="border-t border-subtle" />
         }
         return null
       })}
@@ -124,13 +124,13 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
 
   return (
     <div className="my-1">
-      <div className="flex items-center gap-1.5 py-1 text-[12px] text-muted-foreground">
+      <div className="flex items-center gap-1.5 py-1 text-[12px] text-secondary">
         <MessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span>{headerLabel(isLinear, chunk.status)}</span>
       </div>
       {body && (
-        <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/40">
-          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[14px] text-foreground">
+        <div className="overflow-hidden rounded-xl border border-subtle bg-surface-level-2/40">
+          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[14px] text-primary">
             {isLinear ? (
               <Markdown content={body} />
             ) : blocks ? (

@@ -37,11 +37,11 @@ export function ThreadVisibilityMenu({
         aria-busy={busy}
         disabled={busy}
         data-no-drag=""
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2 text-xs text-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-subtle px-2 text-xs text-primary transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:opacity-60"
       >
         <current.Icon className="size-3.5" />
         {current.label}
-        <CaretDownIcon className="size-3 text-muted-foreground" />
+        <CaretDownIcon className="size-3 text-secondary" />
       </MenuTrigger>
       <MenuPopup align="end" className="min-w-36">
         <MenuRadioGroup
@@ -60,7 +60,7 @@ export function ThreadVisibilityMenu({
                 closeOnClick
               >
                 <span className="inline-flex items-center gap-2">
-                  <Icon className="size-3.5 text-muted-foreground" />
+                  <Icon className="size-3.5 text-secondary" />
                   {label}
                 </span>
               </MenuRadioItem>

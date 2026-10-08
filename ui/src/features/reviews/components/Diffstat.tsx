@@ -14,12 +14,12 @@ export function Diffstat({ pr }: { pr: OpenPullRequest }) {
         <span className="text-emerald-600 dark:text-emerald-400">
           +{pr.additions.toLocaleString()}
         </span>
-        <span className="text-destructive">
+        <span className="text-error-secondary">
           −{pr.deletions.toLocaleString()}
         </span>
       </div>
       <div
-        className="mt-1.5 flex h-1 w-20 overflow-hidden rounded-full bg-muted"
+        className="mt-1.5 flex h-1 w-20 overflow-hidden rounded-full bg-surface-level-2"
         aria-hidden="true"
       >
         {total > 0 && (
@@ -29,7 +29,7 @@ export function Diffstat({ pr }: { pr: OpenPullRequest }) {
               style={{ width: `${(pr.additions / total) * 100}%` }}
             />
             <span
-              className="bg-destructive"
+              className="bg-error-strong"
               style={{ width: `${(pr.deletions / total) * 100}%` }}
             />
           </>

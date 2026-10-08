@@ -56,10 +56,10 @@ export function statusDetail(pr: OpenPullRequest): string | null {
 }
 
 export const statusTones: Record<string, string> = {
-  Conflicted: "border-destructive/30 bg-destructive/10 text-destructive",
-  Failing: "border-destructive/30 bg-destructive/10 text-destructive",
+  Conflicted: "border-error bg-error text-error-secondary",
+  Failing: "border-error bg-error text-error-secondary",
   "Changes Requested":
-    "border-destructive/30 bg-destructive/10 text-destructive",
+    "border-error bg-error text-error-secondary",
   Approved:
     "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   Pending:

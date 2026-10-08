@@ -130,7 +130,7 @@ export function SlackChannelTextarea({
         <div
           role="listbox"
           aria-label="Slack channels"
-          className="absolute top-full left-0 z-50 mt-1 w-full max-w-sm overflow-hidden rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+          className="absolute top-full left-0 z-50 mt-1 w-full max-w-sm overflow-hidden rounded-lg bg-elevated p-1 text-primary shadow-md ring-1 ring-[color:var(--text-primary)]"
         >
           {matches.map((channel) => (
             <button
@@ -140,7 +140,7 @@ export function SlackChannelTextarea({
               aria-selected={channel.id === active?.id}
               className={cn(
                 "relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-left text-xs/relaxed select-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-                channel.id === active?.id && "bg-accent text-accent-foreground"
+                channel.id === active?.id && "bg-surface-level-1-hover text-primary"
               )}
               // Keep focus in the textarea so the caret the insertion anchors to survives.
               onMouseDown={(event) => event.preventDefault()}

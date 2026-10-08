@@ -14,8 +14,8 @@ export function DiffWrapToggle({ className }: { className?: string }) {
       aria-pressed={wrap}
       title="Wrap lines"
       className={cn(
-        "flex size-6 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground",
-        wrap && "bg-accent text-foreground",
+        "flex size-6 items-center justify-center rounded text-tertiary transition-colors hover:text-primary",
+        wrap && "bg-surface-level-1-hover text-primary",
         className
       )}
     >

@@ -31,7 +31,7 @@ export function Chips({
       {values.map((value) => {
         const href = hrefFor?.(value) ?? null
         const className =
-          "rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+          "rounded-full border border-default px-2 py-0.5 text-[11px] text-secondary"
         if (!href)
           return (
             <span key={value} className={className}>
@@ -44,7 +44,7 @@ export function Chips({
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className={`${className} hover:border-foreground/30 hover:text-foreground`}
+            className={`${className} hover:border-strong hover:text-primary`}
           >
             {labelFor?.(value) ?? value}
           </a>
@@ -97,7 +97,7 @@ function SlackChannelRows({
 }) {
   const kitchen = new Set(draft.kitchenChannelIds)
   return (
-    <ul className="w-full divide-y divide-border rounded-md border border-border">
+    <ul className="w-full divide-y divide-default rounded-md border border-default">
       {draft.slackChannelIds.map((id) => (
         <li
           key={id}
@@ -111,7 +111,7 @@ function SlackChannelRows({
           >
             {channelLabel(id)}
           </a>
-          <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+          <label className="flex shrink-0 items-center gap-2 text-xs text-secondary">
             Kitchen
             <Switch
               aria-label={`Kitchen mode for ${channelLabel(id)}`}
@@ -146,7 +146,7 @@ export function WorkspaceEditor({
   channelLabel: (id: string) => string
 }) {
   return (
-    <div className="space-y-3 border-t border-border px-4 py-3.5">
+    <div className="space-y-3 border-t border-default px-4 py-3.5">
       <label className="block text-sm">
         Name
         <Input
@@ -161,7 +161,7 @@ export function WorkspaceEditor({
           <Tooltip>
             <TooltipTrigger
               aria-label="About workspace repositories"
-              className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="rounded-full text-secondary transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
               type="button"
             >
               <QuestionIcon size={15} weight="fill" />
@@ -183,7 +183,7 @@ export function WorkspaceEditor({
           {draft.repos.length > 0 ? (
             <Chips values={draft.repos} hrefFor={githubRepoHref} />
           ) : (
-            <span className="text-xs text-muted-foreground">None yet</span>
+            <span className="text-xs text-secondary">None yet</span>
           )}
           <RepositoryPicker
             selected={draft.repos}
@@ -199,7 +199,7 @@ export function WorkspaceEditor({
           <Tooltip>
             <TooltipTrigger
               aria-label="About kitchen channels"
-              className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="rounded-full text-secondary transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
               type="button"
             >
               <QuestionIcon size={15} weight="fill" />
@@ -223,7 +223,7 @@ export function WorkspaceEditor({
               channelLabel={channelLabel}
             />
           ) : (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-secondary">
               None yet. Add a channel to turn on Kitchen mode for it.
             </span>
           )}
@@ -256,7 +256,7 @@ export function WorkspaceEditor({
         <>
           <div className="text-sm">
             <div>Setup script (optional)</div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               Builds the image from the base snapshot immediately after creation
               and nightly. Without a setup script, no image is built.
             </p>
@@ -270,7 +270,7 @@ export function WorkspaceEditor({
           </div>
           <div className="text-sm">
             <div>Update script (optional)</div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               Runs after setup and refreshes the current image while it is in
               use.
             </p>

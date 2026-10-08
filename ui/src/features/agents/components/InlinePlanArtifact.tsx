@@ -38,7 +38,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
             params: { threadId },
           })
         }
-        className="block h-[250px] w-full overflow-hidden rounded-xl border border-border bg-background text-left shadow-sm transition-[border-color,box-shadow] outline-none hover:border-foreground/25 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring"
+        className="block h-[250px] w-full overflow-hidden rounded-xl border border-default bg-surface-level-1 text-left shadow-sm transition-[border-color,box-shadow] outline-none hover:border-strong hover:shadow-md focus-visible:ring-2 focus-visible:ring-focus"
       >
         {html ? (
           <PlanArtifactFrame
@@ -53,9 +53,9 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         )}
         <span
           data-testid="inline-plan-fade"
-          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-background/75 to-background p-3"
+          className="pointer-events-none absolute inset-x-0 bottom-0 flex h-24 items-end justify-end bg-linear-to-b from-transparent via-surface-level-1/75 to-surface-level-1 p-3"
         >
-          <span className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-sm">
+          <span className="inline-flex items-center gap-1 rounded-md bg-[color:var(--text-primary)] px-2.5 py-1.5 text-xs font-medium text-background shadow-sm">
             Open artifact
             <ArrowUpRight className="size-3.5" />
           </span>
@@ -66,7 +66,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
         aria-label="Dismiss artifact"
         disabled={dismiss.isPending}
         onClick={() => dismiss.mutate()}
-        className="absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-full border border-border bg-background/90 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-full border border-default bg-surface-level-1/90 text-secondary shadow-sm backdrop-blur-sm transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-focus"
       >
         <X className="size-3.5" />
       </button>

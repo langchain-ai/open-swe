@@ -71,21 +71,21 @@ function ActivityLine({
   steps: number
 }) {
   return (
-    <div className="mt-1 flex min-w-0 items-center gap-1.5 border-t border-border pt-1.5">
+    <div className="mt-1 flex min-w-0 items-center gap-1.5 border-t border-default pt-1.5">
       {status === "completed" ? (
-        <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
+        <Check className="h-3 w-3 shrink-0 text-brand-primary" aria-hidden />
       ) : status === "error" ? (
         <X className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
       ) : (
         <Loader2
-          className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
+          className="h-3 w-3 shrink-0 animate-spin text-tertiary"
           aria-hidden
         />
       )}
-      <span className="truncate text-[10px] text-muted-foreground/70">
+      <span className="truncate text-[10px] text-tertiary">
         {humanizeToolName(name)}
       </span>
-      <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+      <span className="ml-auto shrink-0 text-[10px] text-tertiary tabular-nums">
         {steps} {steps === 1 ? "step" : "steps"}
       </span>
     </div>

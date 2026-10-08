@@ -17,6 +17,8 @@
     "@fontsource-variable/inter": "^5.3.0",
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph-sdk": "1.12.0",
+    "@langchain/macaw-components": "file:vendor/macaw/langchain-macaw-components-2.0.0-alpha.0.tgz",
+    "@langchain/macaw-tokens": "file:vendor/macaw/langchain-macaw-tokens-2.0.0-alpha.0.tgz",
     "@langchain/react": "1.2.0",
     "@lexical/react": "^0.49.0",
     "@monaco-editor/react": "^4.7.0",

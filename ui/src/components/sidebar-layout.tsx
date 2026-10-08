@@ -129,7 +129,7 @@ export function SidebarFrame({
         data-sidebar-expand=""
         onClick={toggle}
         className={cn(
-          "fixed top-2 left-2 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground",
+          "fixed top-2 left-2 z-30 flex size-7 cursor-pointer items-center justify-center rounded-md text-secondary hover:bg-surface-level-1-hover hover:text-primary",
           isDesktop && "left-[90px]"
         )}
       >
@@ -209,8 +209,8 @@ function ResizeHandle({
       className={cn(
         "absolute top-0 right-0 z-20 h-full w-1 cursor-col-resize touch-none select-none",
         "after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-transparent after:transition-colors",
-        "hover:after:bg-border",
-        dragging && "after:bg-border"
+        "hover:after:bg-[color:var(--border-default)]",
+        dragging && "after:bg-[color:var(--border-default)]"
       )}
     />
   )
@@ -235,7 +235,7 @@ export function SidebarCollapseButton({
       data-sidebar-collapse=""
       onClick={onToggle}
       className={cn(
-        "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+        "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-secondary hover:bg-surface-level-1-hover hover:text-primary",
         isDesktop && "fixed top-2 left-[90px] z-30 size-7",
         className
       )}

@@ -124,9 +124,9 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
     : "whitespace-pre"
 
   return (
-    <div className="my-[0.65rem] max-w-full overflow-hidden rounded-lg border border-border/70 bg-muted/50">
+    <div className="my-[0.65rem] max-w-full overflow-hidden rounded-lg border border-subtle bg-surface-level-2/50">
       <div className="flex items-center justify-between gap-2 pt-1 pr-1 pl-2.5 select-none">
-        <span className="truncate font-mono text-[11px] text-muted-foreground">
+        <span className="truncate font-mono text-[11px] text-secondary">
           {title || displayLanguage}
         </span>
         <span
@@ -140,7 +140,7 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
             aria-pressed={wrapped}
             aria-label={wrapLabel}
             title={wrapLabel}
-            className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground aria-pressed:text-foreground"
+            className="rounded p-1 text-secondary transition-colors hover:text-primary aria-pressed:text-primary"
           >
             <WrapText className="size-3.5" />
           </button>
@@ -149,7 +149,7 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
             onClick={handleCopy}
             aria-label={copied ? "Copied" : "Copy code"}
             title={copied ? "Copied" : "Copy code"}
-            className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+            className="rounded p-1 text-secondary transition-colors hover:text-primary"
           >
             {copied ? (
               <Check className="size-3.5" />
@@ -176,7 +176,7 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
             ))}
           </code>
         ) : (
-          <code className={`block max-w-full text-foreground ${lineClassName}`}>
+          <code className={`block max-w-full text-primary ${lineClassName}`}>
             {code}
           </code>
         )}

@@ -15,8 +15,8 @@ function StatusPill({ connected }: { connected: boolean }) {
       className={cn(
         "rounded-full px-2 py-0.5 text-[10px] font-medium",
         connected
-          ? "bg-primary/10 text-primary"
-          : "bg-muted text-muted-foreground"
+          ? "bg-brand/10 text-brand-primary"
+          : "bg-surface-level-2 text-secondary"
       )}
     >
       {connected ? "Connected" : "Not connected"}
@@ -68,7 +68,7 @@ function SlackRow({ user }: { user: SessionUser }) {
                   : "Connect"}
             </Button>
           ) : (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[10px] text-secondary">
               Sign in with Slack unavailable
             </span>
           )}

@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils"
 
 export const navLink = cn(
   buttonVariants({ variant: "ghost", size: "sm" }),
-  "px-1.5 text-muted-foreground"
+  "px-1.5 text-secondary"
 )
 
 export function PullRequestLinks({
@@ -86,7 +86,7 @@ export function PullRequestLinks({
           </button>
           <Menu>
             <MenuTrigger
-              className={cn(navLink, "border-l border-border px-1")}
+              className={cn(navLink, "border-l border-default px-1")}
               aria-label="Agent options"
             >
               <ChevronDown className="size-3" />

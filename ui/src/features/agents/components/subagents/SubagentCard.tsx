@@ -35,20 +35,20 @@ export const SubagentCard = memo(function SubagentCard({
     ) : null
 
   return (
-    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-accent p-2.5">
+    <div className="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-default bg-surface-level-1-hover p-2.5">
       <div className="flex min-w-0 items-center gap-1.5">
         {isRunning ? (
           <Loader2
-            className="h-3 w-3 shrink-0 animate-spin text-primary"
+            className="h-3 w-3 shrink-0 animate-spin text-brand-primary"
             aria-hidden
           />
         ) : (
           <Bot
-            className={`h-3 w-3 shrink-0 ${isError ? "text-red-400" : "text-primary"}`}
+            className={`h-3 w-3 shrink-0 ${isError ? "text-red-400" : "text-brand-primary"}`}
             aria-hidden
           />
         )}
-        <span className="truncate text-[11px] font-medium text-muted-foreground">
+        <span className="truncate text-[11px] font-medium text-secondary">
           {subagentType}
         </span>
         {source?.kind === "transcript" && namespace && namespace.length > 0 && (
@@ -56,7 +56,7 @@ export const SubagentCard = memo(function SubagentCard({
             to="/agents/$threadId"
             params={{ threadId: source.threadId }}
             search={{ subagent: chunk.toolCallId }}
-            className="ml-auto flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-muted-foreground/70 hover:bg-background hover:text-foreground"
+            className="ml-auto flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-tertiary hover:bg-surface-level-1 hover:text-primary"
             aria-label="Open subagent transcript"
             title="Open subagent transcript"
           >
@@ -66,7 +66,7 @@ export const SubagentCard = memo(function SubagentCard({
         )}
       </div>
       {description && (
-        <p className="line-clamp-5 text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground/70">
+        <p className="line-clamp-5 text-[11px] leading-4 break-words whitespace-pre-wrap text-tertiary">
           {description}
         </p>
       )}

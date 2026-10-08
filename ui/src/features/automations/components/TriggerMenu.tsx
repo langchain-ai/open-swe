@@ -40,11 +40,11 @@ const SCHEDULE_OPTIONS: Array<{
 ]
 
 const ITEM =
-  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
 
 function GroupLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-center gap-2 px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+    <div className="flex items-center gap-2 px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-tertiary uppercase">
       {children}
     </div>
   )
@@ -90,7 +90,7 @@ export function TriggerMenu({
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-border bg-card pb-1 shadow-lg">
+        <div className="absolute top-full left-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-default bg-surface-level-1 pb-1 shadow-lg">
           {onGitHub && (
             <>
               <GroupLabel>

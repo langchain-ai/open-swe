@@ -286,7 +286,7 @@ function UsageAnalyticsPeriod({
         action={
           <div className="flex items-center gap-2">
             <div
-              className="flex rounded-md bg-muted p-0.5"
+              className="flex rounded-md bg-surface-level-2 p-0.5"
               role="group"
               aria-label="Usage scope"
             >
@@ -331,7 +331,7 @@ function UsageAnalyticsPeriod({
           </div>
         ) : leaderboard.isError ? (
           <div className="space-y-2 p-4 text-xs" role="alert">
-            <p className="text-destructive">
+            <p className="text-error-secondary">
               {leaderboard.error instanceof ApiError &&
               leaderboard.error.status === 503
                 ? "Usage analytics is unavailable on this deployment."
@@ -346,7 +346,7 @@ function UsageAnalyticsPeriod({
             </button>
           </div>
         ) : !leaderboard.data?.total_members ? (
-          <div className="p-6 text-center text-xs text-muted-foreground">
+          <div className="p-6 text-center text-xs text-secondary">
             No Open SWE Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -406,13 +406,13 @@ function UsageAnalyticsPeriod({
             <Skeleton className="h-24 w-full" />
           </div>
         ) : leaderboard.isError ? (
-          <p className="p-4 text-xs text-destructive">
+          <p className="p-4 text-xs text-error-secondary">
             Reviewer stats are unavailable. Retry usage analytics above.
           </p>
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
         ) : (
-          <div className="p-6 text-center text-xs text-muted-foreground">
+          <div className="p-6 text-center text-xs text-secondary">
             No reviewer stats have been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -470,7 +470,7 @@ function AnalyticsCoverage({
         description:
           "Some events could not be processed. Reports may be incomplete.",
         icon: WarningCircleIcon,
-        tone: "text-destructive",
+        tone: "text-error-secondary",
       }
     : hasPendingEvents
       ? {
@@ -488,19 +488,19 @@ function AnalyticsCoverage({
 
   return (
     <div role="status" aria-label="Analytics coverage">
-      <details className="group rounded-xl border border-border bg-card text-xs">
-        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+      <details className="group rounded-xl border border-default bg-surface-level-1 text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)] [&::-webkit-details-marker]:hidden">
           <StatusIcon
             aria-hidden="true"
             className={`size-4 shrink-0 ${status.tone}`}
             weight="fill"
           />
           <span className="min-w-0 flex-1">
-            <span className="block font-medium text-foreground">
+            <span className="block font-medium text-primary">
               {status.label}
             </span>
             {status.description ? (
-              <span className="mt-0.5 block text-muted-foreground">
+              <span className="mt-0.5 block text-secondary">
                 {status.description}
               </span>
             ) : null}
@@ -522,7 +522,7 @@ function AnalyticsCoverage({
             />
             {refreshing ? "Refreshing…" : "Refresh now"}
           </Button>
-          <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground group-open:text-foreground">
+          <span className="flex shrink-0 items-center gap-1 font-medium text-secondary group-open:text-primary">
             Details
             <CaretDownIcon
               aria-hidden="true"
@@ -530,7 +530,7 @@ function AnalyticsCoverage({
             />
           </span>
         </summary>
-        <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
+        <div className="space-y-1 border-t border-default px-4 py-3 text-secondary">
           <p>
             Period: {PERIOD_LABELS[period]} · PR report as of{" "}
             {reportServerAsOf ? (
@@ -547,7 +547,7 @@ function AnalyticsCoverage({
             .
           </p>
           {reportRefreshError ? (
-            <p className="text-destructive">
+            <p className="text-error-secondary">
               Last PR report refresh failed (
               {reportRefreshError.status > 0
                 ? `HTTP ${reportRefreshError.status}`
@@ -657,7 +657,7 @@ function PRMergeRateSection({
         </div>
       ) : failed ? (
         <div className="space-y-2 p-4 text-xs" role="alert">
-          <p className="text-destructive">
+          <p className="text-error-secondary">
             {report.error instanceof ApiError && report.error.status === 503
               ? "PR analytics is unavailable on this deployment."
               : "Could not load PR outcomes. Try again."}
@@ -678,15 +678,15 @@ function PRMergeRateSection({
         />
       ) : (
         <p
-          className="p-6 text-center text-xs text-muted-foreground"
+          className="p-6 text-center text-xs text-secondary"
           role="status"
         >
           {emptyMessage}
         </p>
       )}
       {data?.unavailable_thread_ids.length ? (
-        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        <details className="border-t border-default px-4 py-3 text-xs text-secondary">
+          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[color:var(--border-focus)]">
             Unavailable model attribution ({data.unavailable_thread_ids.length})
           </summary>
           <p className="mt-3">
@@ -699,7 +699,7 @@ function PRMergeRateSection({
                 <code className="select-all">{threadId}</code>
                 <button
                   type="button"
-                  className="rounded-sm underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  className="rounded-sm underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
                   onClick={() => void navigator.clipboard.writeText(threadId)}
                 >
                   Copy
@@ -710,8 +710,8 @@ function PRMergeRateSection({
         </details>
       ) : null}
       {data ? (
-        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        <details className="border-t border-default px-4 py-3 text-xs text-secondary">
+          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[color:var(--border-focus)]">
             How these numbers work
           </summary>
           <div className="mt-3 space-y-3">
@@ -798,7 +798,7 @@ function AvgTimeToPR({
     // A backend that predates the metric has no key for it at all.
     return (
       <span
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
         title="Metric unavailable from this backend"
         aria-label="Time to PR: metric unavailable from this backend"
         tabIndex={0}
@@ -855,7 +855,7 @@ function OutcomeCell({
   const value = (
     <>
       {count}{" "}
-      <span className="text-muted-foreground">
+      <span className="text-secondary">
         ({outcomePercent(group, outcome)}%)
       </span>
     </>
@@ -866,7 +866,7 @@ function OutcomeCell({
       <TooltipTrigger
         closeOnClick={false}
         onClick={() => setOpen(true)}
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
       >
         {value}
       </TooltipTrigger>
@@ -974,7 +974,7 @@ function PROutcomeCells({
     <>
       <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
         {group.cohort_size}{" "}
-        <span className="text-muted-foreground">(100%)</span>
+        <span className="text-secondary">(100%)</span>
       </td>
       {(["merged", "closed_without_merge", "open"] as const).map((outcome) => (
         <Fragment key={outcome}>
@@ -991,7 +991,7 @@ function PROutcomeCells({
                 {rate == null ? "—" : formatPercent(rate)}
               </span>
               {rate != null && (
-                <div className="text-xs text-muted-foreground">
+                <div className="text-xs text-secondary">
                   {group.merged}/{group.mature_denominator} eligible
                 </div>
               )}
@@ -1019,7 +1019,7 @@ function PROutcomeCells({
             className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
           >
             <Tooltip>
-              <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]">
                 {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
               </TooltipTrigger>
               <TooltipPopup>
@@ -1029,7 +1029,7 @@ function PROutcomeCells({
               </TooltipPopup>
             </Tooltip>
             {supported && group.distance_sample_size !== undefined && (
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-secondary">
                 {group.distance_sample_size}/{group.merged} measured
               </div>
             )}
@@ -1092,11 +1092,11 @@ function PRMergeRateTable({
     <div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1100px] text-xs">
-          <caption className="px-4 py-3 text-left text-muted-foreground">
+          <caption className="px-4 py-3 text-left text-secondary">
             Outcome shares use PRs opened in each row as their base. Expand a
             model to see its reasoning efforts.
           </caption>
-          <thead className="border-b border-border text-muted-foreground">
+          <thead className="border-b border-default text-secondary">
             <tr>
               {prOutcomeColumns(maturityDays).map((column) => (
                 <SortableHeader
@@ -1117,14 +1117,14 @@ function PRMergeRateTable({
                   }}
                   className={
                     column.key === "model"
-                      ? "sticky left-0 z-10 bg-card pl-4 text-left"
+                      ? "sticky left-0 z-10 bg-surface-level-1 pl-4 text-left"
                       : "text-right"
                   }
                 />
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border [&>tr:nth-child(even)]:bg-card [&>tr:nth-child(odd)]:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]">
+          <tbody className="divide-y divide-default [&>tr:nth-child(even)]:bg-surface-level-1 [&>tr:nth-child(odd)]:bg-[color-mix(in_oklab,var(--text-primary)_3%,var(--bg-surface-level-1))]">
             {rows.map((cohort) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
               const modelLabel =
@@ -1142,7 +1142,7 @@ function PRMergeRateTable({
                         {hasMultipleEfforts ? (
                           <button
                             type="button"
-                            className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                            className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-secondary hover:bg-surface-level-2 hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
                             aria-expanded={isExpanded}
                             aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
                             onClick={() =>
@@ -1168,7 +1168,7 @@ function PRMergeRateTable({
                         )}
                         <div>
                           <div className="font-medium">{modelLabel}</div>
-                          <div className="text-muted-foreground">
+                          <div className="text-secondary">
                             {hasMultipleEfforts
                               ? "All efforts"
                               : formatEffort(cohort.efforts[0]?.effort)}{" "}
@@ -1295,9 +1295,9 @@ function SortableHeader<Key extends string>({
     <button
       type="button"
       onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
-      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
+      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-surface-level-2/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)] ${
         column.align === "right" ? "justify-end" : "justify-start"
-      } ${isActive ? "text-foreground" : ""} ${
+      } ${isActive ? "text-primary" : ""} ${
         column.tooltip
           ? "cursor-help underline decoration-dotted underline-offset-2"
           : ""
@@ -1305,7 +1305,7 @@ function SortableHeader<Key extends string>({
     >
       {column.label}
       <Icon
-        className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+        className={`size-3 shrink-0 ${isActive ? "" : "text-quaternary"}`}
         aria-hidden
       />
     </button>
@@ -1371,7 +1371,7 @@ function UsageTable({
           {isUpdating ? (
             <caption className="sr-only">Updating leaderboard</caption>
           ) : null}
-          <thead className="border-b border-border text-xs text-muted-foreground">
+          <thead className="border-b border-default text-xs text-secondary">
             <tr>
               {usageColumns(scope, period).map((column, index, columns) => (
                 <SortableHeader
@@ -1380,27 +1380,27 @@ function UsageTable({
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={onSort}
-                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-card" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-surface-level-1" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
           </thead>
           <tbody
-            className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
+            className={`divide-y divide-default ${isUpdating ? "opacity-50" : ""}`}
           >
             {rows.map((row) => (
               <tr
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
-                className="bg-card odd:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]"
+                className="bg-surface-level-1 odd:bg-[color-mix(in_oklab,var(--text-primary)_3%,var(--bg-surface-level-1))]"
               >
-                <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
+                <td className="px-4 py-3 text-secondary">{row.rank}</td>
                 <td className="sticky left-0 z-10 bg-inherit px-2 py-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}
                   />
                 </td>
-                <td className="max-w-48 px-2 py-3 text-muted-foreground">
+                <td className="max-w-48 px-2 py-3 text-secondary">
                   <div className="truncate">
                     {safeModelLabel(row.favorite_model) || "Unavailable"}
                   </div>
@@ -1506,18 +1506,18 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
     <div className="space-y-4 p-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (
-          <div key={card.label} className="rounded-md border border-border p-3">
-            <div className="text-xs text-muted-foreground">{card.label}</div>
+          <div key={card.label} className="rounded-md border border-default p-3">
+            <div className="text-xs text-secondary">{card.label}</div>
             <div className="mt-1 text-lg font-medium tabular-nums">
               {formatNumber(card.value)}
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">
+            <div className="mt-1 text-xs text-secondary">
               {card.helper}
             </div>
           </div>
         ))}
       </div>
-      <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+      <div className="grid gap-4 border-t border-default pt-4 sm:grid-cols-2">
         <CounterList title="Top categories" rows={stats.top_categories} />
         <CounterList title="Severity mix" rows={severityRows(stats)} />
       </div>
@@ -1545,7 +1545,7 @@ function CounterList({
 }) {
   return (
     <div>
-      <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
+      <h3 className="text-xs font-medium text-secondary">{title}</h3>
       {rows.length ? (
         <ul className="mt-2 space-y-2 text-xs">
           {rows.map((row) => (
@@ -1553,15 +1553,15 @@ function CounterList({
               key={row.name}
               className="flex items-center justify-between gap-3"
             >
-              <span className="truncate text-foreground">{row.name}</span>
-              <span className="text-muted-foreground tabular-nums">
+              <span className="truncate text-primary">{row.name}</span>
+              <span className="text-secondary tabular-nums">
                 {formatNumber(row.count)}
               </span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-xs text-muted-foreground">No data yet.</p>
+        <p className="mt-2 text-xs text-secondary">No data yet.</p>
       )}
     </div>
   )
@@ -1582,12 +1582,12 @@ function UserCell({
       href={profileUrl}
       target="_blank"
       rel="noreferrer"
-      className="truncate font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="truncate font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
     >
       {row.user.name}
     </a>
   ) : (
-    <span className="truncate font-medium text-foreground">
+    <span className="truncate font-medium text-primary">
       {row.user.name}
     </span>
   )
@@ -1624,7 +1624,7 @@ function UserCell({
           ) : null}
         </div>
         {detail && detail !== row.user.name ? (
-          <span className="truncate text-xs text-muted-foreground">
+          <span className="truncate text-xs text-secondary">
             {detail}
           </span>
         ) : null}
@@ -1685,7 +1685,7 @@ function UsageCost({ row }: { row: UsageLeaderboardRow }) {
       <Tooltip>
         <TooltipTrigger
           aria-label={`Cost ${label.toLowerCase()}`}
-          className="cursor-help rounded-sm text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="cursor-help rounded-sm text-[10px] text-secondary underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
         >
           {label}
         </TooltipTrigger>

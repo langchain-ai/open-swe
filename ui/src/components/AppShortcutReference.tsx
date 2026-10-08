@@ -32,16 +32,16 @@ export function AppShortcutReference({
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/45 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
         <Dialog.Popup
-          className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(40rem,80vh)] w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+          className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(40rem,80vh)] w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-default bg-elevated text-primary shadow-2xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
           data-hotkeys="ignore"
         >
-          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="flex items-center justify-between border-b border-default px-5 py-4">
             <Dialog.Title className="font-heading text-sm font-medium">
               Keyboard shortcuts
             </Dialog.Title>
             <Dialog.Close
               aria-label="Close keyboard shortcuts"
-              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="rounded-md p-1 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
             >
               <X className="size-4" />
             </Dialog.Close>
@@ -52,10 +52,10 @@ export function AppShortcutReference({
           <div className="overflow-y-auto p-5">
             {[...groups].map(([group, groupCommands]) => (
               <section className="mb-6 last:mb-0" key={group}>
-                <h3 className="mb-2 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+                <h3 className="mb-2 text-[10px] font-semibold tracking-wide text-secondary uppercase">
                   {group}
                 </h3>
-                <div className="divide-y divide-border/60 rounded-lg border border-border">
+                <div className="divide-y divide-subtle rounded-lg border border-default">
                   {groupCommands.map((command) => (
                     <div
                       className="flex min-h-10 items-center gap-3 px-3 py-2"

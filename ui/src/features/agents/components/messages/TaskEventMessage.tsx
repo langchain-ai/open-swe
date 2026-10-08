@@ -67,8 +67,8 @@ export function TaskEventMessage({
           </Button>
         }
       >
-        <div className="mt-1 max-w-full rounded-xl border border-border bg-muted/50 p-3">
-          <div className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-foreground">
+        <div className="mt-1 max-w-full rounded-xl border border-default bg-surface-level-2/50 p-3">
+          <div className="text-[13px] leading-relaxed break-words whitespace-pre-wrap text-primary">
             {event.content}
           </div>
           {timestamp && (

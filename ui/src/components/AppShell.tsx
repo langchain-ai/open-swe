@@ -29,7 +29,7 @@ export function AppShell({
   children,
 }: AppShellProps) {
   return (
-    <div className="flex h-svh overflow-hidden bg-background text-foreground">
+    <div className="flex h-svh overflow-hidden bg-surface-level-1 text-primary">
       <AppSidebar user={user} />
       <main className="relative flex-1 overflow-y-auto">
         <div
@@ -41,7 +41,7 @@ export function AppShell({
           {backTo && (
             <Link
               to={backTo.to}
-              className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              className="mb-4 inline-flex items-center gap-1.5 text-xs text-secondary hover:text-primary"
             >
               <ArrowLeftIcon className="size-3.5" />
               {backTo.label}
@@ -53,7 +53,7 @@ export function AppShell({
                 {title}
               </h1>
               {description && (
-                <p className="mt-1.5 max-w-2xl text-xs text-muted-foreground">
+                <p className="mt-1.5 max-w-2xl text-xs text-secondary">
                   {description}
                 </p>
               )}
@@ -115,9 +115,9 @@ export function SettingsSection({
     <section id={id} className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-medium text-foreground">{title}</h2>
+          <h2 className="text-sm font-medium text-primary">{title}</h2>
           {description && (
-            <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+            <p className="mt-1 max-w-2xl text-xs text-secondary">
               {description}
             </p>
           )}
@@ -125,7 +125,7 @@ export function SettingsSection({
         {action}
       </div>
       {children && (
-        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+        <div className="divide-y divide-default overflow-hidden rounded-xl border border-default bg-surface-level-1">
           {children}
         </div>
       )}
@@ -161,7 +161,7 @@ export function SettingsRow({
           <span
             className={cn(
               "text-sm/none font-medium",
-              comingSoon ? "text-muted-foreground" : "text-foreground"
+              comingSoon ? "text-secondary" : "text-primary"
             )}
           >
             {label}
@@ -169,7 +169,7 @@ export function SettingsRow({
           {(comingSoon || badge) && (
             <span
               className={cn(
-                "rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground",
+                "rounded-sm border border-default bg-surface-level-2 px-1.5 py-0.5 text-[10px] font-normal text-secondary",
                 !comingSoon && badgeClassName
               )}
             >
@@ -178,7 +178,7 @@ export function SettingsRow({
           )}
         </span>
         {description && (
-          <span className="text-xs/relaxed text-muted-foreground">
+          <span className="text-xs/relaxed text-secondary">
             {description}
           </span>
         )}
@@ -206,19 +206,19 @@ export function SettingsNavRow({
     <Link
       to={to}
       params={params}
-      className="flex items-center justify-between gap-8 px-4 py-3.5 transition-colors hover:bg-muted/40"
+      className="flex items-center justify-between gap-8 px-4 py-3.5 transition-colors hover:bg-surface-level-2/40"
     >
       <div className="flex flex-col gap-1">
-        <span className="text-sm/none font-medium text-foreground">
+        <span className="text-sm/none font-medium text-primary">
           {label}
         </span>
         {description && (
-          <span className="text-xs/relaxed text-muted-foreground">
+          <span className="text-xs/relaxed text-secondary">
             {description}
           </span>
         )}
       </div>
-      <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <CaretRightIcon className="size-3.5 shrink-0 text-secondary" />
     </Link>
   )
 }

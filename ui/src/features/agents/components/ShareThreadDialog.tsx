@@ -29,9 +29,9 @@ export function ShareThreadDialog({
     >
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/70" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-destructive/50 bg-popover p-6 text-popover-foreground shadow-xl">
+        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-error bg-elevated p-6 text-primary shadow-xl">
           <div className="flex flex-col gap-4">
-            <Dialog.Title className="flex items-center gap-2 font-semibold text-destructive">
+            <Dialog.Title className="flex items-center gap-2 font-semibold text-error-secondary">
               <WarningIcon className="size-6 shrink-0" weight="fill" />
               Expose this entire thread to the workspace?
             </Dialog.Title>
@@ -45,12 +45,12 @@ export function ShareThreadDialog({
               This cannot be undone. Continuing privately creates a new copy; it
               does not hide this shared thread.
             </p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-secondary">
               Private-only tools, personal integrations, and private admin
               capabilities will no longer be available in this thread.
             </p>
             {running && (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" className="text-sm text-error-secondary">
                 Stop the active run before sharing this thread.
               </p>
             )}

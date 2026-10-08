@@ -125,7 +125,7 @@ export function ProposedCommentCard({
       </CardHeader>
       <CardContent>
         {outcome ? (
-          <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+          <p className="line-clamp-3 whitespace-pre-wrap text-secondary">
             {body}
           </p>
         ) : (

@@ -75,14 +75,14 @@ export function IncidentList({
           {view === "history" ? "Current incidents" : "Incident history"}
         </Button>
       </div>
-      <p className="mt-2 mb-6 text-sm text-muted-foreground">
+      <p className="mt-2 mb-6 text-sm text-secondary">
         Investigations, findings, and the context to act.
       </p>
       <div className="mb-5 flex flex-wrap items-center gap-4">
         {view !== "history" && (
           <div
             role="group"
-            className="flex gap-1 rounded-lg border border-border p-1"
+            className="flex gap-1 rounded-lg border border-default p-1"
             aria-label="Agent activity filters"
           >
             {incidentViews.map(({ value, label }) => (
@@ -94,8 +94,8 @@ export function IncidentList({
                 className={cn(
                   "min-h-8 rounded-md px-3 py-1.5 text-xs transition-colors",
                   view === value
-                    ? "bg-accent font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-accent/60"
+                    ? "bg-surface-level-1-hover font-medium text-primary"
+                    : "text-secondary hover:bg-surface-level-1-hover/60"
                 )}
               >
                 {label}
@@ -104,7 +104,7 @@ export function IncidentList({
           </div>
         )}
         <div className="relative min-w-0 flex-1 basis-56">
-          <Search className="absolute top-2.5 left-3 size-3.5 text-muted-foreground" />
+          <Search className="absolute top-2.5 left-3 size-3.5 text-secondary" />
           <Input
             type="search"
             aria-label="Search incidents"
@@ -119,7 +119,7 @@ export function IncidentList({
           />
         </div>
       </div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-secondary">
         <span>
           {view === "inactive"
             ? "Paused or completed agent activity"
@@ -135,7 +135,7 @@ export function IncidentList({
             : ""}
         </span>
       </div>
-      <div className="border-t border-border">
+      <div className="border-t border-default">
         {incidents.isPending ? (
           <LoadingState />
         ) : incidents.error ? (
@@ -160,7 +160,7 @@ export function IncidentList({
                       : "No inactive incidents"}
             </h2>
             {(filtered || view === "active") && (
-              <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground">
+              <p className="mt-3 max-w-sm text-sm leading-relaxed text-secondary">
                 {filtered
                   ? "No incidents match your search."
                   : "New public channels matching the prefix appear here once Incidents is enabled."}
@@ -168,13 +168,13 @@ export function IncidentList({
             )}
           </div>
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-default">
             {items.map((item) => (
               <Link
                 key={item.id}
                 to="/incidents/$incidentId"
                 params={{ incidentId: item.id }}
-                className="group flex flex-wrap items-start gap-4 px-2 py-5 transition-colors hover:bg-accent/40"
+                className="group flex flex-wrap items-start gap-4 px-2 py-5 transition-colors hover:bg-surface-level-1-hover/40"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -182,26 +182,26 @@ export function IncidentList({
                       {item.title || item.channel_name}
                     </h2>
                     {item.is_archived && (
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-[11px] text-secondary">
                         Channel archived
                       </span>
                     )}
                   </div>
-                  <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+                  <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-secondary">
                     {item.latest_finding
                       ? citationPreview(item.latest_finding)
                       : "Gathering incident context. Findings will appear here."}
                   </p>
-                  <p className="mt-3 text-xs text-muted-foreground">
+                  <p className="mt-3 text-xs text-secondary">
                     #{item.channel_name}
                   </p>
                   {item.reason && (
-                    <p className="mt-2 text-xs text-warning-foreground">
+                    <p className="mt-2 text-xs text-warning-secondary">
                       {humanize(item.reason)}
                     </p>
                   )}
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-3 text-[11px] text-muted-foreground">
+                <div className="flex shrink-0 flex-col items-end gap-3 text-[11px] text-secondary">
                   <StatusBadge status={item.status} />
                   <time>{formatTime(item.updated_at)}</time>
                   <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
@@ -211,7 +211,7 @@ export function IncidentList({
           </div>
         )}
         {incidents.hasNextPage && !incidents.error && (
-          <div className="border-t border-border p-4 text-center">
+          <div className="border-t border-default p-4 text-center">
             <Button
               variant="outline"
               size="sm"

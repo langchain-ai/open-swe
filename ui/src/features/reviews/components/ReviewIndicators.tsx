@@ -15,7 +15,7 @@ export function ReviewIndicators({ review }: { review: ReviewSummary }) {
         <span className="text-amber-700 dark:text-amber-400">Reviewing…</span>
       )}
       {review.status === "error" && (
-        <span className="text-destructive">Review failed</span>
+        <span className="text-error-secondary">Review failed</span>
       )}
     </a>
   )

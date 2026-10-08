@@ -33,7 +33,7 @@ export function PendingReviewCommentCard({
   }
   return (
     <div className="px-2 py-1 font-sans" data-testid="pending-review-comment">
-      <div className="rounded-md border border-border bg-card px-3 py-2 text-xs">
+      <div className="rounded-md border border-default bg-surface-level-1 px-3 py-2 text-xs">
         <div className="mb-1.5 flex items-center gap-2">
           <Badge variant="outline">Pending</Badge>
           <div className="ml-auto flex items-center gap-1">

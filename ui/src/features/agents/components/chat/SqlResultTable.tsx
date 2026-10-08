@@ -49,8 +49,8 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
   if (!result) return null
 
   return (
-    <div className="my-2 overflow-hidden rounded-lg border border-border/60 bg-muted/30 text-xs">
-      <div className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2 text-muted-foreground">
+    <div className="my-2 overflow-hidden rounded-lg border border-subtle bg-surface-level-2/30 text-xs">
+      <div className="flex items-center justify-between gap-3 border-b border-subtle px-3 py-2 text-secondary">
         <span>
           {result.row_count.toLocaleString()} row
           {result.row_count === 1 ? "" : "s"}
@@ -59,13 +59,13 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
       </div>
       <div className="max-h-[28rem] overflow-auto">
         <table className="min-w-max border-collapse text-left">
-          <thead className="sticky top-0 z-10 bg-muted">
+          <thead className="sticky top-0 z-10 bg-surface-level-2">
             <tr>
               {result.columns.map((column, index) => (
                 <th
                   key={`${index}:${column}`}
                   scope="col"
-                  className="border-b border-border px-3 py-2 font-medium whitespace-nowrap text-foreground"
+                  className="border-b border-default px-3 py-2 font-medium whitespace-nowrap text-primary"
                 >
                   {column}
                 </th>
@@ -76,12 +76,12 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
             {result.rows.map((row, rowIndex) => (
               <tr
                 key={rowIndex}
-                className="border-t border-border/50 first:border-t-0"
+                className="border-t border-subtle first:border-t-0"
               >
                 {row.map((value, columnIndex) => (
                   <td
                     key={columnIndex}
-                    className={`max-w-96 px-3 py-2 align-top font-mono text-[11px] leading-5 text-foreground ${value === null ? "text-muted-foreground italic" : ""}`}
+                    className={`max-w-96 px-3 py-2 align-top font-mono text-[11px] leading-5 text-primary ${value === null ? "text-secondary italic" : ""}`}
                   >
                     <div className="max-h-24 overflow-auto break-words whitespace-pre-wrap">
                       {displayCell(value)}
@@ -93,7 +93,7 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
           </tbody>
         </table>
         {result.rows.length === 0 && (
-          <div className="px-3 py-6 text-center text-muted-foreground">
+          <div className="px-3 py-6 text-center text-secondary">
             No rows
           </div>
         )}

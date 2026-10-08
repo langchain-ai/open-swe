@@ -33,7 +33,7 @@ export function PullRequestActionButton({
       {errors.map(
         (error, index) =>
           error && (
-            <p key={index} role="alert" className="mt-1 text-destructive">
+            <p key={index} role="alert" className="mt-1 text-error-secondary">
               {error.message}
             </p>
           )

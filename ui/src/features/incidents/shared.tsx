@@ -38,14 +38,14 @@ export function StatusBadge({ status }: { status: string }) {
       className={cn(
         "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
         {
-          "border-info/20 bg-info/5 text-info-foreground": [
+          "border-brand bg-brand-subtle text-brand-primary": [
             "pending",
             "watching",
             "investigating",
           ].includes(status),
-          "border-warning/20 bg-warning/5 text-warning-foreground":
+          "border-warning bg-warning text-warning-secondary":
             status === "needs_attention",
-          "border-border bg-muted text-muted-foreground": [
+          "border-default bg-surface-level-2 text-secondary": [
             "paused",
             "completed",
           ].includes(status),
@@ -67,7 +67,7 @@ export function LoadingState() {
   return (
     <div
       role="status"
-      className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground"
+      className="flex items-center justify-center gap-2 py-24 text-sm text-secondary"
     >
       <LoaderCircle className="size-4 animate-spin" />
       Loading incidents…
@@ -85,13 +85,13 @@ export function ErrorState({
   return (
     <div
       role="alert"
-      className="rounded-xl border border-destructive/20 bg-destructive/5 p-5"
+      className="rounded-xl border border-error bg-error p-5"
     >
       <div className="flex items-center gap-2 text-sm font-medium">
-        <CircleAlert className="size-4 text-destructive" />
+        <CircleAlert className="size-4 text-error-secondary" />
         Unable to load Incidents
       </div>
-      <p className="mt-2 text-sm text-muted-foreground">{error.message}</p>
+      <p className="mt-2 text-sm text-secondary">{error.message}</p>
       <Button variant="outline" size="sm" className="mt-4" onClick={retry}>
         Try again
       </Button>
@@ -143,7 +143,7 @@ export function CitedText({
             <ExternalLink
               key={source.id}
               href={source.url}
-              className="mx-0.5 text-[10px] font-medium text-info-foreground [&_svg]:hidden"
+              className="mx-0.5 text-[10px] font-medium text-brand-primary [&_svg]:hidden"
             >
               <span
                 aria-label={`Evidence ${evidenceIndex + 1}: ${source.source}`}
@@ -155,7 +155,7 @@ export function CitedText({
         })}
       </sup>
     ) : part.startsWith("[") && !citationPreview(part) ? (
-      <span key={index} className="text-xs text-muted-foreground">
+      <span key={index} className="text-xs text-secondary">
         [source unavailable]
       </span>
     ) : (
@@ -180,7 +180,7 @@ export function IncidentsMark({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex size-9 items-center justify-center rounded-xl border border-info/20 bg-info/5 text-info-foreground",
+        "flex size-9 items-center justify-center rounded-xl border border-brand bg-brand-subtle text-brand-primary",
         className
       )}
     >

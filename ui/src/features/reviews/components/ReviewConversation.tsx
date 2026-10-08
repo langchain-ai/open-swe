@@ -54,19 +54,19 @@ const REVIEW_STATE_STYLES: Record<ConversationReviewState, StateStyle> = {
     label: "Changes requested",
     verb: "requested changes",
     icon: <XCircleIcon weight="fill" />,
-    className: "bg-destructive/10 text-destructive dark:bg-destructive/20",
+    className: "bg-error text-error-secondary dark:bg-error",
   },
   COMMENTED: {
     label: "Commented",
     verb: "reviewed",
     icon: <EyeIcon />,
-    className: "bg-muted text-muted-foreground",
+    className: "bg-surface-level-2 text-secondary",
   },
   DISMISSED: {
     label: "Dismissed",
     verb: "left a review that was dismissed",
     icon: <ProhibitIcon />,
-    className: "bg-muted text-muted-foreground line-through",
+    className: "bg-surface-level-2 text-secondary line-through",
   },
 }
 
@@ -95,7 +95,7 @@ function Timestamp({ value, href }: { value: string; href: string }) {
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="text-muted-foreground hover:text-foreground hover:underline"
+      className="text-secondary hover:text-primary hover:underline"
     >
       <time
         dateTime={value}
@@ -123,16 +123,16 @@ function TimelineEntry({
   return (
     <li className="flex gap-3">
       <AuthorAvatar author={item.author} />
-      <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-border">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-muted/40 px-3 py-2 text-xs">
-          <span className="font-medium text-foreground">{login}</span>
-          <span className="text-muted-foreground">
+      <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-default">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-default bg-surface-level-2/40 px-3 py-2 text-xs">
+          <span className="font-medium text-primary">{login}</span>
+          <span className="text-secondary">
             {style ? style.verb : "commented"}
           </span>
           <Timestamp value={item.created_at} href={item.html_url} />
           <span className="ml-auto flex items-center gap-2">
             {review && review.inline_comment_count > 0 ? (
-              <span className="flex items-center gap-1 text-muted-foreground">
+              <span className="flex items-center gap-1 text-secondary">
                 <ChatCircleIcon />
                 {review.inline_comment_count}{" "}
                 {review.inline_comment_count === 1
@@ -151,7 +151,7 @@ function TimelineEntry({
               target="_blank"
               rel="noreferrer"
               aria-label="Open on GitHub"
-              className="text-muted-foreground hover:text-foreground"
+              className="text-secondary hover:text-primary"
             >
               <ArrowSquareOutIcon />
             </a>
@@ -227,12 +227,12 @@ function CommentBox({
         className="min-h-24"
       />
       {mutation.isError ? (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-error-secondary">
           {mutation.error.message}
         </p>
       ) : null}
       <div className="flex items-center justify-end gap-2">
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-secondary">
           Cmd/Ctrl + Enter to comment
         </span>
         <Button
@@ -284,7 +284,7 @@ export function ReviewConversation({
     )
   } else if (query.data.items.length === 0) {
     timeline = (
-      <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+      <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-default px-4 py-8 text-center text-sm text-secondary">
         <ChatCircleIcon className="size-5" />
         No comments or reviews yet.
       </div>

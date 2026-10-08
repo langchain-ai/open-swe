@@ -37,8 +37,8 @@ export function ContextWindowMeter({
   const hasPercentage = limit != null
   const isOverloaded = hasPercentage && percentage >= OVERLOADED_PERCENTAGE
   const usageColor = isOverloaded
-    ? "var(--color-destructive)"
-    : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)"
+    ? "var(--text-error-secondary)"
+    : "color-mix(in oklab, var(--text-secondary) 72%, transparent)"
   const label = hasPercentage
     ? `Context window ${formatPercentage(percentage)} used`
     : `Context window ${formatTokenCount(used)} tokens`
@@ -53,9 +53,9 @@ export function ContextWindowMeter({
           <button
             aria-label={label}
             className={cn(
-              "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground transition-colors outline-none",
-              "hover:bg-accent data-[pressed]:bg-accent",
-              "focus-visible:ring-2 focus-visible:ring-ring"
+              "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-secondary transition-colors outline-none",
+              "hover:bg-surface-level-1-hover data-[pressed]:bg-surface-level-1-hover",
+              "focus-visible:ring-2 focus-visible:ring-focus"
             )}
             data-testid="context-window-indicator"
             type="button"
@@ -71,7 +71,7 @@ export function ContextWindowMeter({
                   cy="12"
                   fill="none"
                   r={RADIUS}
-                  stroke="color-mix(in oklab, var(--color-muted-foreground) 24%, transparent)"
+                  stroke="color-mix(in oklab, var(--text-secondary) 24%, transparent)"
                   strokeDasharray={hasPercentage ? undefined : "3 3"}
                   strokeWidth="3"
                 />
@@ -102,10 +102,10 @@ export function ContextWindowMeter({
       >
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-xs font-medium text-muted-foreground">
+            <div className="text-xs font-medium text-secondary">
               Context window
             </div>
-            <div className="text-[11px] text-muted-foreground/70 tabular-nums">
+            <div className="text-[11px] text-tertiary tabular-nums">
               {hasPercentage ? (
                 <>
                   <span>{formatPercentage(percentage)}</span>
@@ -125,7 +125,7 @@ export function ContextWindowMeter({
               aria-valuemax={100}
               aria-valuemin={0}
               aria-valuenow={Math.round(percentage)}
-              className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
+              className="h-1.5 w-full overflow-hidden rounded-full bg-surface-level-2/60"
               role="progressbar"
             >
               <div
@@ -135,12 +135,12 @@ export function ContextWindowMeter({
             </div>
           )}
           {!hasPercentage && (
-            <p className="text-[11px] leading-4 text-muted-foreground/70">
+            <p className="text-[11px] leading-4 text-tertiary">
               The context window for this model was not reported.
             </p>
           )}
           {isOverloaded && (
-            <p className="text-[11px] leading-4 font-medium text-destructive">
+            <p className="text-[11px] leading-4 font-medium text-error-secondary">
               Approaching the context limit — start a new thread if replies
               degrade.
             </p>

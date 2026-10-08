@@ -84,7 +84,7 @@ function BackLink({ threadId }: { threadId: string }) {
     <Link
       to="/agents/$threadId"
       params={{ threadId }}
-      className="inline-flex items-center gap-1 text-xs text-muted-foreground/70 hover:text-foreground"
+      className="inline-flex items-center gap-1 text-xs text-tertiary hover:text-primary"
     >
       <ArrowLeft className="size-3.5" />
       Back to conversation
@@ -128,7 +128,7 @@ export function PlanView({
     const status = query.error instanceof PlanApiError ? query.error.status : 0
     return (
       <Centered standalone={standalone}>
-        <div className="space-y-3 text-center text-sm text-muted-foreground/70">
+        <div className="space-y-3 text-center text-sm text-tertiary">
           <p>
             {status === 401
               ? "Please sign in to view this artifact."
@@ -145,7 +145,7 @@ export function PlanView({
   if (!plan?.html.trim() && !plan?.markdown.trim()) {
     return (
       <Centered standalone={standalone}>
-        <div className="space-y-3 text-center text-sm text-muted-foreground/70">
+        <div className="space-y-3 text-center text-sm text-tertiary">
           <p>
             The agent is still writing the content. This view will update
             automatically…
@@ -159,7 +159,7 @@ export function PlanView({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {standalone && (
-        <div className="border-b border-border px-4 pt-14 md:px-6 md:pt-3">
+        <div className="border-b border-default px-4 pt-14 md:px-6 md:pt-3">
           {backLink}
         </div>
       )}

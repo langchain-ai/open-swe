@@ -142,7 +142,7 @@ export function AgentInstructionsPanel() {
   return (
     <div className="flex flex-col gap-6 p-4">
       {githubReauth && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <div className="rounded-md border border-error bg-error px-3 py-2 text-xs text-error-secondary">
           Your GitHub connection expired.{" "}
           <a
             href={loginUrl()}
@@ -199,7 +199,7 @@ export function AgentInstructionsPanel() {
                         {r.full_name}
                       </span>
                       {r.private && (
-                        <span className="ml-auto text-[10px] text-muted-foreground">
+                        <span className="ml-auto text-[10px] text-secondary">
                           private
                         </span>
                       )}
@@ -212,9 +212,9 @@ export function AgentInstructionsPanel() {
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs font-medium text-foreground">Repositories</p>
+          <p className="text-xs font-medium text-primary">Repositories</p>
           {(instructions.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               No repositories yet.
             </p>
           ) : (
@@ -223,10 +223,10 @@ export function AgentInstructionsPanel() {
                 <li key={s.full_name}>
                   <button
                     type="button"
-                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted ${
+                    className={`inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-level-2 ${
                       selected === s.full_name
-                        ? "border-primary bg-muted font-medium"
-                        : "border-border"
+                        ? "border-brand bg-surface-level-2 font-medium"
+                        : "border-default"
                     }`}
                     onClick={() => setSelected(s.full_name)}
                   >
@@ -239,17 +239,17 @@ export function AgentInstructionsPanel() {
         </div>
       </section>
 
-      <div className="border-t border-border" />
+      <div className="border-t border-default" />
 
       <section className="space-y-3">
         {!selected || !active ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             Select a repository above to view or edit its custom agent
             instructions.
           </p>
         ) : (
           <>
-            <p className="text-sm font-medium text-foreground">
+            <p className="text-sm font-medium text-primary">
               {active.full_name}
             </p>
             <div className="flex flex-wrap gap-2">
@@ -266,7 +266,7 @@ export function AgentInstructionsPanel() {
                 Save instructions
               </Button>
               {dirty && (
-                <span className="self-center text-xs text-muted-foreground">
+                <span className="self-center text-xs text-secondary">
                   Unsaved changes
                 </span>
               )}
@@ -295,7 +295,7 @@ export function AgentInstructionsPanel() {
             />
           </>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-xs text-error-secondary">{error}</p>}
       </section>
     </div>
   )

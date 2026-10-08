@@ -61,10 +61,10 @@ export function BotThreadsList({
             ← Bots
           </Button>
         )}
-        <h1 className="text-base font-medium text-foreground">
+        <h1 className="text-base font-medium text-primary">
           {bot ? `${botsByKey.get(bot)?.name ?? "Bot"} threads` : "Bots"}
         </h1>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-xs text-secondary">
           Threads started by Slack bots on the allowlist. They are read-only
           here: reply in the Slack thread to steer one.
           {!isAdmin && " Workspace admins manage which bots are allowed."}
@@ -72,18 +72,18 @@ export function BotThreadsList({
 
         {!bot &&
           (isAdmin ? (
-            <div className="mt-4 rounded-xl border border-border bg-card">
+            <div className="mt-4 rounded-xl border border-default bg-surface-level-1">
               <AllowedSlackBotsSection onBotChange={onBotChange} />
             </div>
           ) : (
-            <div className="mt-4 divide-y rounded-xl border border-border bg-card">
+            <div className="mt-4 divide-y rounded-xl border border-default bg-surface-level-1">
               {directory.isPending ? (
-                <p className="p-4 text-xs text-muted-foreground">
+                <p className="p-4 text-xs text-secondary">
                   Loading enabled bots…
                 </p>
               ) : directory.isError ? (
                 <div className="p-4">
-                  <p className="text-xs text-destructive">
+                  <p className="text-xs text-error-secondary">
                     Enabled bots could not be loaded.
                   </p>
                   <Button
@@ -96,7 +96,7 @@ export function BotThreadsList({
                   </Button>
                 </div>
               ) : bots.length === 0 ? (
-                <p className="p-4 text-xs text-muted-foreground">
+                <p className="p-4 text-xs text-secondary">
                   No Slack bots are enabled.
                 </p>
               ) : (
@@ -105,13 +105,13 @@ export function BotThreadsList({
                     key={entry.key}
                     type="button"
                     onClick={() => onBotChange(entry.key)}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-level-1-hover focus-visible:outline-2 focus-visible:outline-[color:var(--border-focus)]"
                   >
                     <BotAvatar entry={entry} />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">
                       {entry.name}
                     </span>
-                    <span className="text-xs text-success">Enabled</span>
+                    <span className="text-xs text-success-secondary">Enabled</span>
                     <span aria-hidden="true">→</span>
                   </button>
                 ))
@@ -127,8 +127,8 @@ export function BotThreadsList({
                 <Skeleton className="h-16 w-full rounded-xl" />
               </div>
             ) : threadsQuery.isError ? (
-              <div className="flex flex-col items-center rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
-                <p className="text-xs text-destructive">
+              <div className="flex flex-col items-center rounded-xl border border-error bg-error px-6 py-12 text-center">
+                <p className="text-xs text-error-secondary">
                   Bot threads could not be loaded.
                 </p>
                 <Button
@@ -143,7 +143,7 @@ export function BotThreadsList({
                 </Button>
               </div>
             ) : threads.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center text-xs text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-default px-6 py-12 text-center text-xs text-secondary">
                 No bot threads yet. They appear here once an allowed bot
                 mentions Open SWE in Slack.
               </div>
@@ -161,7 +161,7 @@ export function BotThreadsList({
                   />
                 ))}
                 {threadsQuery.data?.hasMore && (
-                  <p className="pt-4 text-center text-xs text-muted-foreground">
+                  <p className="pt-4 text-center text-xs text-secondary">
                     Showing the {THREAD_LIMIT} most recent threads.
                   </p>
                 )}
@@ -194,31 +194,31 @@ function BotThreadRow({
 }) {
   const slackUrl = thread.sourceAppUrl ?? thread.sourceUrl
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/70">
+    <div className="flex items-center gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:border-strong">
       <Link
         to="/agents/$threadId"
         params={{ threadId: thread.id }}
         className="flex min-w-0 flex-1 items-center gap-3"
       >
         {thread.status === "running" ? (
-          <CircleNotchIcon className="size-4 shrink-0 animate-spin text-primary" />
+          <CircleNotchIcon className="size-4 shrink-0 animate-spin text-brand-primary" />
         ) : (
           <span
             className={cn(
               "size-2.5 shrink-0 rounded-full",
               thread.status === "error" || thread.status === "interrupted"
-                ? "bg-destructive"
+                ? "bg-error-strong"
                 : thread.status === "finished"
-                  ? "bg-success"
-                  : "bg-border"
+                  ? "bg-success-strong"
+                  : "bg-[color:var(--border-default)]"
             )}
           />
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">
+          <p className="truncate text-sm font-medium text-primary">
             {thread.title}
           </p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-tertiary">
             <span>{STATUS_LABELS[thread.status]}</span>
             {thread.triggeringBot && (
               <span className="flex items-center gap-1">
@@ -236,14 +236,14 @@ function BotThreadRow({
           href={slackUrl}
           target="_blank"
           rel="noreferrer"
-          className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-secondary hover:bg-surface-level-1-hover hover:text-primary"
           aria-label="Open the Slack thread"
         >
           <IoLogoSlack className="size-3.5" />
           Slack
         </a>
       ) : (
-        <ArrowSquareOutIcon className="size-4 shrink-0 text-muted-foreground/70" />
+        <ArrowSquareOutIcon className="size-4 shrink-0 text-tertiary" />
       )}
     </div>
   )

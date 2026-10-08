@@ -118,7 +118,7 @@ function CodeChannelLink({ url }: { url?: string | null }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="mb-2 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="mb-2 flex w-fit items-center gap-1.5 rounded-md px-2 py-1 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
     >
       <IoLogoSlack className="size-3.5" />
       Open in Slack
@@ -758,7 +758,7 @@ export function AgentThreadView({
                     href={thread.traceUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-md px-2 py-1 text-xs font-medium text-destructive-foreground underline underline-offset-2 hover:bg-destructive/8"
+                    className="rounded-md px-2 py-1 text-xs font-medium text-error-secondary underline underline-offset-2 hover:bg-error"
                   >
                     Open trace
                   </a>
@@ -789,7 +789,7 @@ export function AgentThreadView({
                 <button
                   type="button"
                   onClick={() => setDismissedWarning(workspaceWarningKey)}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="rounded-md px-2 py-1 text-xs font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
                 >
                   Dismiss
                 </button>
@@ -886,7 +886,7 @@ export function AgentThreadView({
                           </AlertDescription>
                         </Alert>
                       ) : (
-                        <p className="text-xs text-muted-foreground/70">
+                        <p className="text-xs text-tertiary">
                           This thread has no messages yet.
                         </p>
                       )}

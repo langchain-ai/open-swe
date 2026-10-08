@@ -6,7 +6,7 @@ export function StatusPill({ status }: { status: string }) {
     <span
       className={cn(
         "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
-        statusTones[status] ?? "border-border bg-muted text-muted-foreground"
+        statusTones[status] ?? "border-default bg-surface-level-2 text-secondary"
       )}
     >
       {status}

@@ -50,7 +50,7 @@ export function ManagedToolsGatewaySection({
       title="Managed tools"
       description="Pick a LangSmith Managed Tools gateway. Private threads in this workspace offer its tools, called with each person's own LangSmith connection; they never load in threads other people can prompt. Build and edit gateways under LangSmith Settings > Tools."
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-default">
         <TierRow
           settings={settings}
           fields={["managed_tools_gateway_id"]}

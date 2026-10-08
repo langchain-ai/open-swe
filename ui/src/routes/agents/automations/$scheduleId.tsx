@@ -30,12 +30,12 @@ function EditAutomationPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-secondary">
         This automation could not be found.
       </p>
       <Link
         to="/agents/automations"
-        className="mt-3 inline-block text-xs text-primary hover:underline"
+        className="mt-3 inline-block text-xs text-brand-primary hover:underline"
       >
         Back to Automations
       </Link>

@@ -42,7 +42,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
           <Button
             aria-label="Copy message"
             className={cn(
-              "text-muted-foreground hover:text-foreground",
+              "text-secondary hover:text-primary",
               className
             )}
             onClick={copy}

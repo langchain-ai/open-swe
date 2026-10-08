@@ -278,8 +278,8 @@ function RightPanelEmptyState(props: {
   }
 
   const cardShellClass =
-    "rounded-lg border border-border/80 bg-card dark:border-transparent dark:shadow-none dark:inset-ring-1 dark:inset-ring-white/5"
-  const highlightedCardClass = "bg-accent/60 dark:inset-ring-white/20"
+    "rounded-lg border border-default bg-surface-level-1 dark:border-transparent dark:shadow-none dark:inset-ring-1 dark:inset-ring-white/5"
+  const highlightedCardClass = "bg-surface-level-1-hover/60 dark:inset-ring-white/20"
 
   return (
     <div
@@ -299,10 +299,10 @@ function RightPanelEmptyState(props: {
     >
       <div className="relative w-full max-w-lg">
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
-          <h3 className="text-sm font-medium text-foreground">
+          <h3 className="text-sm font-medium text-primary">
             Open a surface
           </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-secondary">
             Choose what to show in the right panel.
           </p>
         </div>
@@ -322,7 +322,7 @@ function RightPanelEmptyState(props: {
                   )
                 }
                 className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-border hover:bg-accent/60",
+                  "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-default hover:bg-surface-level-1-hover/60",
                   cardShellClass,
                   isHighlighted(action) && highlightedCardClass
                 )}
@@ -332,7 +332,7 @@ function RightPanelEmptyState(props: {
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                <span className="mt-1.5 text-xs leading-relaxed text-secondary">
                   {action.description}
                 </span>
               </button>
@@ -349,7 +349,7 @@ function RightPanelEmptyState(props: {
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
                 </span>
-                <span className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                <span className="mt-1.5 text-xs leading-relaxed text-secondary">
                   {action.disabledReason}
                 </span>
               </div>
@@ -527,13 +527,13 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   className={cn(
                     "group/tab flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
                     active
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                      ? "bg-surface-level-1-hover text-primary"
+                      : "text-secondary hover:bg-surface-level-1-hover/60 hover:text-primary"
                   )}
                 >
                   <button
                     type="button"
-                    className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-muted"
+                    className="group/close relative flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm hover:bg-surface-level-2"
                     aria-label={`Close ${title}`}
                     onClick={() => props.onCloseSurface(surface)}
                   >
@@ -573,7 +573,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               render={
                 <Button
                   aria-label="Add panel surface"
-                  className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+                  className="size-6 shrink-0 text-secondary hover:text-primary"
                   size="icon-xs"
                   variant="ghost"
                 />

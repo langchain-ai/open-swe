@@ -74,7 +74,7 @@ export function RepoSelector({
               disabled={disabled}
               title={selectedRepo ?? undefined}
               className={cn(
-                "flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+                "flex max-w-[260px] cursor-pointer items-center gap-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
                 triggerClassName
               )}
             />
@@ -90,17 +90,17 @@ export function RepoSelector({
           align="start"
           side={side}
           className={cn(
-            "flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover p-0 text-xs text-popover-foreground shadow-lg",
+            "flex max-h-72 w-72 flex-col overflow-hidden rounded border border-default bg-elevated p-0 text-xs text-primary shadow-lg",
             dropdownClassName
           )}
         >
-          <div className="flex items-center border-b border-border">
+          <div className="flex items-center border-b border-default">
             <input
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={searchPlaceholder}
-              className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-foreground outline-none placeholder:text-muted-foreground"
+              className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-primary outline-none placeholder:text-secondary"
             />
             <button
               type="button"
@@ -108,7 +108,7 @@ export function RepoSelector({
               aria-label="Refresh repositories"
               disabled={refresh.isPending}
               onClick={() => refresh.mutate()}
-              className="mr-1 cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-muted disabled:cursor-default"
+              className="mr-1 cursor-pointer rounded p-1 text-secondary transition-colors hover:bg-surface-level-2 disabled:cursor-default"
             >
               <ArrowsClockwiseIcon
                 className={cn("size-3.5", refresh.isPending && "animate-spin")}
@@ -116,7 +116,7 @@ export function RepoSelector({
             </button>
           </div>
           {allowArchived && repos?.some((repo) => repo.archived) && (
-            <label className="flex cursor-pointer items-center gap-2 border-b border-border px-2 py-1.5 text-muted-foreground">
+            <label className="flex cursor-pointer items-center gap-2 border-b border-default px-2 py-1.5 text-secondary">
               <input
                 type="checkbox"
                 checked={showArchived}
@@ -134,17 +134,17 @@ export function RepoSelector({
                 setQuery("")
               }}
               className={cn(
-                "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
-                selectedRepo ? "text-muted-foreground" : "text-foreground"
+                "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-surface-level-2",
+                selectedRepo ? "text-secondary" : "text-primary"
               )}
             >
               {emptySelectionLabel}
               {!selectedRepo && (
-                <span className="ml-auto pl-3 text-muted-foreground">✓</span>
+                <span className="ml-auto pl-3 text-secondary">✓</span>
               )}
             </button>
             {filteredRepos.length === 0 ? (
-              <div className="px-2 py-1.5 text-muted-foreground">
+              <div className="px-2 py-1.5 text-secondary">
                 {noMatchesLabel}
               </div>
             ) : (
@@ -161,21 +161,21 @@ export function RepoSelector({
                       setQuery("")
                     }}
                     className={cn(
-                      "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
-                      selected ? "text-foreground" : "text-muted-foreground"
+                      "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-surface-level-2",
+                      selected ? "text-primary" : "text-secondary"
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {repo.full_name}
                     </span>
                     {repo.private !== undefined && (
-                      <span className="ml-2 shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground">
+                      <span className="ml-2 shrink-0 rounded border border-default px-1 text-[10px] text-secondary">
                         {repo.private ? "Private" : "Public"}
                         {repo.archived ? " archive" : ""}
                       </span>
                     )}
                     {selected && (
-                      <span className="ml-auto pl-3 text-muted-foreground">
+                      <span className="ml-auto pl-3 text-secondary">
                         ✓
                       </span>
                     )}

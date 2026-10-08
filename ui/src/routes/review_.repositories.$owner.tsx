@@ -131,10 +131,10 @@ function RepositoriesOwnerPage() {
     >
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          <h2 className="text-xs font-medium tracking-wide text-secondary uppercase">
             Repositories
           </h2>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-secondary">
             {autoReviewCount}/{ownerRepos.length} run automatically
           </span>
         </div>
@@ -147,20 +147,20 @@ function RepositoriesOwnerPage() {
           placeholder="Search repositories…"
           aria-label="Search repositories"
         />
-        <div className="rounded-lg border border-border bg-card">
+        <div className="rounded-lg border border-default bg-surface-level-1">
           {loading && (
             <div className="p-4">
               <Skeleton className="h-32 w-full" />
             </div>
           )}
           {!loading && filteredRepos.length === 0 && (
-            <p className="px-4 py-3 text-xs text-muted-foreground">
+            <p className="px-4 py-3 text-xs text-secondary">
               {ownerRepos.length === 0
                 ? "No repositories found for this installation."
                 : "No repositories match your search."}
             </p>
           )}
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-default">
             {pageRepos.map((r) => {
               const runsAutomatically = autoReviewSet.has(r.full_name)
               return (
@@ -170,19 +170,19 @@ function RepositoriesOwnerPage() {
                 >
                   <div className="flex min-w-0 items-center gap-2 text-xs">
                     <span className="truncate">
-                      <span className="text-muted-foreground">{owner}/</span>
-                      <span className="font-medium text-foreground">
+                      <span className="text-secondary">{owner}/</span>
+                      <span className="font-medium text-primary">
                         {r.full_name.slice(owner.length + 1)}
                       </span>
                     </span>
                     {r.private && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-[10px] text-secondary">
                         private
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-secondary">
                       Run automatically
                     </span>
                     <span
@@ -211,8 +211,8 @@ function RepositoriesOwnerPage() {
             })}
           </ul>
           {filteredRepos.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
-              <span className="text-muted-foreground">
+            <div className="flex items-center justify-between gap-4 border-t border-default px-4 py-2 text-xs">
+              <span className="text-secondary">
                 Showing {pageStart + 1}-{pageEnd} of {filteredRepos.length}
               </span>
               <div className="flex items-center gap-2">
@@ -224,7 +224,7 @@ function RepositoriesOwnerPage() {
                 >
                   Prev
                 </Button>
-                <span className="text-muted-foreground">
+                <span className="text-secondary">
                   {safePage + 1} / {totalPages}
                 </span>
                 <Button

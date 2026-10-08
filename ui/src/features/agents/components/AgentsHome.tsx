@@ -597,7 +597,7 @@ export function AgentsHome({
         )}
         <AgentComposerDock>
           {localError && (
-            <div className="mb-3 w-full rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <div className="mb-3 w-full rounded-xl border border-error bg-error px-3 py-2 text-xs text-error-secondary">
               {localError}
             </div>
           )}

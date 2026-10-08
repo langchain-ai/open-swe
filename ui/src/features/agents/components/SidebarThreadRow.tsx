@@ -75,22 +75,22 @@ const PR_STATE_META: Record<
   draft: {
     icon: GitPullRequestIcon,
     label: "Draft pull request",
-    className: "text-muted-foreground/70",
+    className: "text-tertiary",
   },
   open: {
     icon: GitPullRequestIcon,
     label: "Open pull request",
-    className: "text-success-foreground",
+    className: "text-success-secondary",
   },
   merged: {
     icon: GitMergeIcon,
     label: "Merged pull request",
-    className: "text-merged-foreground",
+    className: "text-purple",
   },
   closed: {
     icon: GitPullRequestIcon,
     label: "Closed pull request",
-    className: "text-destructive",
+    className: "text-error-secondary",
   },
 }
 
@@ -204,17 +204,17 @@ function sidebarRowClassName({
     // archived row is indistinguishable from a live one.
     archived && "opacity-55",
     compact ? "h-7 gap-1.5" : "h-8",
-    "text-foreground",
+    "text-primary",
     active
-      ? "bg-zinc-200 dark:bg-accent"
-      : "group-hover/row:bg-sidebar-row-hover"
+      ? "bg-zinc-200 dark:bg-surface-level-1-hover"
+      : "group-hover/row:bg-surface-level-2-hover"
   )
 }
 
 function RunningIndicator({ label }: { label: string }) {
   return (
     <CircleNotchIcon
-      className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+      className="size-3.5 shrink-0 animate-spin text-secondary"
       aria-label={label}
     />
   )
@@ -223,7 +223,7 @@ function RunningIndicator({ label }: { label: string }) {
 function ErrorIndicator({ label }: { label: string }) {
   return (
     <WarningCircleIcon
-      className="size-3.5 shrink-0 text-destructive"
+      className="size-3.5 shrink-0 text-error-secondary"
       aria-label={label}
     />
   )
@@ -253,7 +253,7 @@ function PullRequestIcon({
       />
       {live?.checks === "failing" && (
         <span
-          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-destructive ring-2 ring-sidebar"
+          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-error-strong ring-2 ring-sidebar"
           aria-label="Checks failing"
         />
       )}
@@ -428,7 +428,7 @@ export function SidebarThreadRow({
             if (event.key === "Enter" || event.key === " ")
               onToggleSubagents(event)
           }}
-          className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
+          className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
         >
           <SubagentCaret className="size-3" weight="bold" />
         </span>
@@ -453,7 +453,7 @@ export function SidebarThreadRow({
               setWorkersExpanded((expanded) => !expanded)
             }
           }}
-          className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
+          className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
         >
           {workersExpanded ? (
             <CaretDownIcon className="size-3" weight="bold" />
@@ -468,20 +468,20 @@ export function SidebarThreadRow({
         {item.status === "error" && <ErrorIndicator label="Thread error" />}
         {thread?.automationActionPosted && (
           <IoLogoSlack
-            className="size-3.5 text-success-foreground"
+            className="size-3.5 text-success-secondary"
             aria-label="Action posted to Slack"
           />
         )}
         {item.reviewPage ? (
           <BookOpenTextIcon
-            className="size-3.5 text-muted-foreground/70"
+            className="size-3.5 text-tertiary"
             aria-label="Pull request review"
           />
         ) : (
           <>
             {source && SourceIcon && !item.pr && (
               <SourceIcon
-                className="size-3.5 text-muted-foreground/70"
+                className="size-3.5 text-tertiary"
                 aria-label={source.label}
               />
             )}
@@ -492,7 +492,7 @@ export function SidebarThreadRow({
           <RunningIndicator label="Thread running" />
         ) : unread ? (
           <span
-            className="size-2 rounded-full bg-primary"
+            className="size-2 rounded-full bg-brand"
             aria-label="Unread thread"
           />
         ) : null}
@@ -504,7 +504,7 @@ export function SidebarThreadRow({
           aria-label={pinned ? "Unpin thread" : "Pin thread"}
           title={pinned ? "Unpin" : "Pin"}
           onClick={onPinClick}
-          className="flex size-5 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground"
+          className="flex size-5 items-center justify-center rounded text-tertiary hover:bg-surface-level-1-hover hover:text-primary"
         >
           {pinned ? (
             <PushPinSlashIcon className="size-3.5" />
@@ -517,7 +517,7 @@ export function SidebarThreadRow({
           aria-label={archived ? "Unarchive thread" : "Archive thread"}
           title={archived ? "Unarchive" : "Archive"}
           onClick={onArchiveClick}
-          className="flex size-5 items-center justify-center rounded text-muted-foreground/80 hover:bg-accent hover:text-foreground"
+          className="flex size-5 items-center justify-center rounded text-tertiary hover:bg-surface-level-1-hover hover:text-primary"
         >
           {archived ? (
             <ArrowCounterClockwiseIcon className="size-3.5" />
@@ -590,7 +590,7 @@ export function SidebarThreadRow({
               side="right"
               align="start"
               sideOffset={8}
-              className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--sidebar)]"
+              className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--bg-surface-level-2)]"
             >
               <ThreadHoverCard item={item} live={live} />
             </TooltipPopup>
@@ -598,7 +598,7 @@ export function SidebarThreadRow({
         </ContextMenu.Trigger>
         <ContextMenu.Portal>
           <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+            <ContextMenu.Popup className="min-w-[10rem] overflow-hidden rounded-md border border-default bg-elevated p-1 text-primary shadow-md outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
               <ThreadMenuItems
                 thread={thread}
                 localThread={
@@ -731,7 +731,7 @@ function SidebarSubagentRow({
           side="right"
           align="start"
           sideOffset={8}
-          className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--sidebar)]"
+          className="pointer-events-auto max-w-80 rounded-xl p-3 [--dropdown-glass-background:var(--bg-surface-level-2)]"
         >
           <SubagentHoverCard subagent={subagent} />
         </TooltipPopup>
@@ -754,25 +754,25 @@ function ThreadHoverCard({
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
+        <span className="min-w-0 flex-1 text-[13px] font-medium text-primary">
           {item.title}
         </span>
         {item.location === "cloud" && item.thread.visibility === "private" && (
           <LockIcon
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            className="mt-0.5 size-3.5 shrink-0 text-secondary"
             aria-label="Private thread"
           />
         )}
         <LocationIcon
-          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+          className="mt-0.5 size-3.5 shrink-0 text-secondary"
           aria-label={locationLabel}
         />
-        <span className="mt-px shrink-0 text-[11px] text-muted-foreground">
+        <span className="mt-px shrink-0 text-[11px] text-secondary">
           {compactAge(item.updatedAt)}
         </span>
       </div>
       {item.repoLabel && (
-        <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-1.5 text-secondary">
           <FolderIcon className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate text-[12px]">{item.repoLabel}</span>
         </div>
@@ -783,7 +783,7 @@ function ThreadHoverCard({
           target="_blank"
           rel="noreferrer"
           onClick={(event) => event.stopPropagation()}
-          className="pointer-events-auto -mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="pointer-events-auto -mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-secondary hover:bg-surface-level-1-hover hover:text-primary"
         >
           <PullRequestIcon state={item.pr.state} live={live} />
           <span className="min-w-0 truncate text-[12px]">{item.pr.title}</span>
@@ -797,7 +797,7 @@ function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
+        <span className="min-w-0 flex-1 text-[13px] font-medium text-primary">
           {subagent.title}
         </span>
         {subagent.status === "in_progress" ? (
@@ -810,15 +810,15 @@ function SubagentHoverCard({ subagent }: { subagent: AgentSubagentSummary }) {
           </span>
         ) : (
           <CheckCircleIcon
-            className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+            className="mt-0.5 size-3.5 shrink-0 text-secondary"
             aria-label="Subagent finished"
           />
         )}
-        <span className="mt-px shrink-0 text-[11px] text-muted-foreground">
+        <span className="mt-px shrink-0 text-[11px] text-secondary">
           {compactAge(subagent.endedAt ?? subagent.startedAt)}
         </span>
       </div>
-      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-1.5 text-secondary">
         <RobotIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 truncate text-[12px]">
           {subagent.subagentType}
@@ -912,17 +912,17 @@ function SidebarTaskWorkerRow({
                 toggleSubagentsCollapsed(`cloud:${worker.id}`)
               }
             }}
-            className="flex h-5 w-4 shrink-0 items-center justify-center text-muted-foreground/80 transition-colors hover:text-foreground"
+            className="flex h-5 w-4 shrink-0 items-center justify-center text-tertiary transition-colors hover:text-primary"
           >
             <SubagentCaret className="size-3" weight="bold" />
           </span>
         )}
         <RobotIcon
-          className="size-3.5 shrink-0 text-muted-foreground"
+          className="size-3.5 shrink-0 text-secondary"
           aria-label="Asynchronous task worker"
         />
         <SidebarRowTitle marquee={marquee} title={worker.title} />
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+        <span className="flex shrink-0 items-center gap-1 text-[10px] text-secondary">
           {worker.status === "running" && (
             <RunningIndicator label="Worker running" />
           )}

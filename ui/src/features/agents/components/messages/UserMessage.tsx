@@ -59,7 +59,7 @@ function StandardUserMessage({ message }: { message: Message }) {
       {hasBody && (
         <div
           className={`relative overflow-hidden rounded-2xl p-3 ${
-            isSystem ? "mt-1 border border-border bg-muted/50" : "bg-accent"
+            isSystem ? "mt-1 border border-default bg-surface-level-2/50" : "bg-surface-level-1-hover"
           }`}
         >
           {excerpts.map((excerpt, i) => (
@@ -75,7 +75,7 @@ function StandardUserMessage({ message }: { message: Message }) {
               {images.map((img, i) => (
                 <div
                   key={i}
-                  className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                  className="overflow-hidden rounded-lg border border-default bg-surface-level-1/70"
                 >
                   <MessageImage
                     chunk={img}
@@ -88,7 +88,7 @@ function StandardUserMessage({ message }: { message: Message }) {
           {text && (
             <div
               ref={textRef}
-              className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-accent-foreground ${
+              className={`text-[14px] leading-[1.6] break-words whitespace-pre-wrap text-primary ${
                 !isSystem && !expanded ? "overflow-hidden" : ""
               }`}
               style={
@@ -110,7 +110,7 @@ function StandardUserMessage({ message }: { message: Message }) {
               onClick={() => setExpanded((value) => !value)}
               aria-expanded={expanded}
               data-testid="user-message-show-more"
-              className="mt-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+              className="mt-1 text-[13px] text-secondary transition-colors hover:text-primary"
             >
               {expanded ? "Show less" : "Show more"}
             </button>
@@ -141,7 +141,7 @@ function StandardUserMessage({ message }: { message: Message }) {
           (message.structuredSenderName ||
             isSlack ||
             message.structuredSenderIsBot) && (
-            <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground">
+            <div className="mb-1 flex items-center gap-1 px-1 text-[11px] font-medium text-secondary">
               {isSlack && (
                 <IoLogoSlack className="size-3" role="img" aria-label="Slack" />
               )}
@@ -157,7 +157,7 @@ function StandardUserMessage({ message }: { message: Message }) {
                 <span>{message.structuredSenderName}</span>
               )}
               {message.structuredSenderNote && (
-                <span className="font-normal text-muted-foreground/70">
+                <span className="font-normal text-tertiary">
                   {" · "}
                   {message.structuredSenderNote}
                 </span>
@@ -171,7 +171,7 @@ function StandardUserMessage({ message }: { message: Message }) {
               <>
                 <span>{message.structuredSenderName || "Context"}</span>
                 {message.structuredSenderNote && (
-                  <span className="text-muted-foreground/70">
+                  <span className="text-tertiary">
                     · {message.structuredSenderNote}
                   </span>
                 )}
@@ -187,8 +187,8 @@ function StandardUserMessage({ message }: { message: Message }) {
           <div
             className={`mt-1 pr-1 text-right text-[11px] ${
               message.deliveryStatus === "failed"
-                ? "text-destructive"
-                : "text-muted-foreground"
+                ? "text-error-secondary"
+                : "text-secondary"
             }`}
           >
             {message.deliveryStatus !== "failed" ? (

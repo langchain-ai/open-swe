@@ -75,8 +75,8 @@ function OverviewRow({
       className={cn(
         "flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left text-xs leading-5 transition-colors",
         active
-          ? "border-primary bg-sidebar-row-hover font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-sidebar-row-hover"
+          ? "border-brand bg-surface-level-2-hover font-medium text-primary"
+          : "border-transparent text-secondary hover:bg-surface-level-2-hover"
       )}
     >
       Overview
@@ -91,7 +91,7 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col pb-2">
       <div className="px-4 py-1">
-        <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+        <span className="text-[10px] font-medium tracking-wide text-tertiary uppercase">
           {data.title}
         </span>
       </div>
@@ -143,7 +143,7 @@ function ReviewViewTabs({
     <div
       role="tablist"
       aria-label="Sidebar view"
-      className="mx-3 mb-1 flex border-b border-border"
+      className="mx-3 mb-1 flex border-b border-default"
     >
       <ReviewViewTab
         active={view === "ai"}
@@ -185,16 +185,16 @@ function ReviewViewTab({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
         active
-          ? "border-primary font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground"
+          ? "border-brand font-medium text-primary"
+          : "border-transparent text-secondary hover:text-primary"
       )}
     >
       {children}
       {label}
       {count !== null && (
-        <span className="text-[11px] text-muted-foreground/70 tabular-nums">
+        <span className="text-[11px] text-tertiary tabular-nums">
           {count}
         </span>
       )}
@@ -234,7 +234,7 @@ export function renderInlineCode(text: string): Array<ReactNode> {
       return (
         <code
           key={i}
-          className="rounded bg-accent px-1 py-0.5 font-mono text-[0.9em] text-primary"
+          className="rounded bg-surface-level-1-hover px-1 py-0.5 font-mono text-[0.9em] text-brand-primary"
         >
           {part.slice(1, -1)}
         </code>
@@ -282,17 +282,17 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       className={cn(
         "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
         active
-          ? "border-primary bg-sidebar-row-hover"
-          : "border-transparent hover:bg-sidebar-row-hover"
+          ? "border-brand bg-surface-level-2-hover"
+          : "border-transparent hover:bg-surface-level-2-hover"
       )}
     >
-      <span className="mt-px shrink-0 text-[11px] font-medium text-muted-foreground/70 tabular-nums">
+      <span className="mt-px shrink-0 text-[11px] font-medium text-tertiary tabular-nums">
         {group.index}.
       </span>
       <span
         className={cn(
           "min-w-0 text-xs leading-5",
-          active ? "font-medium text-foreground" : "text-muted-foreground"
+          active ? "font-medium text-primary" : "text-secondary"
         )}
       >
         {title}
@@ -386,7 +386,7 @@ function ReviewFileTreeExplorer({
               ...treeThemeStyle(),
               // Must stay opaque: the tree's truncation marker ("…") paints
               // this color behind itself to hide the overflowing filename.
-              "--trees-theme-sidebar-bg": "var(--sidebar)",
+              "--trees-theme-sidebar-bg": "var(--bg-surface-level-2)",
             } as React.CSSProperties
           }
         />

@@ -87,7 +87,7 @@ function ScopeSwitcher(props: {
   return (
     <Menu open={open} onOpenChange={setOpen}>
       <MenuTrigger
-        className="flex h-6 min-w-0 shrink cursor-pointer items-center gap-1 rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+        className="flex h-6 min-w-0 shrink cursor-pointer items-center gap-1 rounded-md px-1.5 text-sm font-medium text-primary transition-colors hover:bg-surface-level-1-hover"
         aria-label={`Diff scope: ${label}`}
       >
         <span className="min-w-0 truncate">{label}</span>
@@ -145,7 +145,7 @@ export function ChangesPanel({
           title="Refresh changes"
           onClick={onRefresh}
           disabled={isFetching}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary disabled:opacity-50"
         >
           <RefreshCwIcon
             className={isFetching ? "size-3.5 animate-spin" : "size-3.5"}
@@ -159,7 +159,7 @@ export function ChangesPanel({
             rel="noreferrer"
             aria-label="View PR"
             title="View PR"
-            className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
+            className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-default px-2 text-xs font-medium text-primary transition-colors hover:bg-surface-level-1-hover @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
           >
             <GitPullRequestIcon className="size-3.5 shrink-0" />
             <span className="whitespace-nowrap @max-[680px]:hidden">
@@ -175,7 +175,7 @@ export function ChangesPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {truncated && (
-        <div className="shrink-0 border-b border-border bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+        <div className="shrink-0 border-b border-default bg-warning px-3 py-2 text-xs text-warning-secondary">
           Only the first {files.length} changed file
           {files.length === 1 ? " is" : "s are"} shown.
         </div>
@@ -197,7 +197,7 @@ export function ChangesPanel({
             {branch && (
               <>
                 <span
-                  className="min-w-0 truncate text-xs text-muted-foreground @max-[520px]:hidden"
+                  className="min-w-0 truncate text-xs text-secondary @max-[520px]:hidden"
                   title={branch}
                 >
                   {branch}
@@ -205,7 +205,7 @@ export function ChangesPanel({
                 <Tooltip>
                   <TooltipTrigger
                     aria-label={`Branch: ${branch}`}
-                    className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent @max-[520px]:flex"
+                    className="hidden size-7 shrink-0 items-center justify-center rounded-md text-secondary hover:bg-surface-level-1-hover @max-[520px]:flex"
                   >
                     <GitBranchIcon className="size-4 shrink-0" />
                   </TooltipTrigger>

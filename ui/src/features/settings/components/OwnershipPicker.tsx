@@ -185,20 +185,20 @@ export function OwnershipPicker({
       <label
         key={item.id}
         className={cn(
-          "flex items-start gap-3 px-3 py-2 text-sm transition-colors hover:bg-muted/40",
+          "flex items-start gap-3 px-3 py-2 text-sm transition-colors hover:bg-surface-level-2/40",
           elsewhere && "opacity-60"
         )}
       >
         <input
           type="checkbox"
-          className="mt-1 size-3.5 shrink-0 accent-primary"
+          className="mt-1 size-3.5 shrink-0 accent-[color:var(--border-focus)]"
           aria-label={item.label}
           checked={checked}
           disabled={locked}
           onChange={() => toggle(item.id)}
         />
         {item.icon && (
-          <span className="mt-0.5 shrink-0 text-muted-foreground">
+          <span className="mt-0.5 shrink-0 text-secondary">
             {item.icon}
           </span>
         )}
@@ -208,13 +208,13 @@ export function OwnershipPicker({
               {item.label}
             </span>
             {item.meta && (
-              <span className="shrink-0 text-xs text-muted-foreground">
+              <span className="shrink-0 text-xs text-secondary">
                 {item.meta}
               </span>
             )}
           </span>
           {item.warning && !elsewhere && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1 text-xs text-secondary">
               <WarningIcon size={12} /> {item.warning}
             </span>
           )}
@@ -229,7 +229,7 @@ export function OwnershipPicker({
   const renderGroup = (heading: string, group: Array<PickerItem>) =>
     group.length > 0 && (
       <div>
-        <div className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground">
+        <div className="px-3 pt-3 pb-1 text-xs font-medium text-secondary">
           {heading} · {group.length}
         </div>
         {group.map(renderRow)}
@@ -273,7 +273,7 @@ export function OwnershipPicker({
         <div className="flex items-center gap-3 px-3 pt-3 pb-2">
           <div className="relative min-w-0 flex-1">
             <MagnifyingGlassIcon
-              className="pointer-events-none absolute top-1.5 left-2 text-muted-foreground"
+              className="pointer-events-none absolute top-1.5 left-2 text-secondary"
               size={14}
             />
             <Input
@@ -285,7 +285,7 @@ export function OwnershipPicker({
             />
           </div>
           {filter && (
-            <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex shrink-0 items-center gap-2 text-xs text-secondary">
               {/* The enclosing label names the switch; an aria-label as well
                   would double the announced name. */}
               <Switch checked={filterOn} onCheckedChange={setFilterOn} />
@@ -316,22 +316,22 @@ export function OwnershipPicker({
             ))}
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto border-t border-border pb-2">
+        <div className="min-h-0 flex-1 overflow-y-auto border-t border-default pb-2">
           {notice && (
-            <p className="flex items-center gap-1 px-3 pt-3 text-xs text-muted-foreground">
+            <p className="flex items-center gap-1 px-3 pt-3 text-xs text-secondary">
               <WarningIcon size={12} /> {notice}
             </p>
           )}
           {loading && (
-            <p className="px-3 py-3 text-xs text-muted-foreground">Loading…</p>
+            <p className="px-3 py-3 text-xs text-secondary">Loading…</p>
           )}
           {loadError && (
-            <p role="alert" className="px-3 py-3 text-xs text-destructive">
+            <p role="alert" className="px-3 py-3 text-xs text-error-secondary">
               {loadError}
             </p>
           )}
           {!loading && !loadError && empty && (
-            <p className="px-3 py-3 text-xs text-muted-foreground">
+            <p className="px-3 py-3 text-xs text-secondary">
               Nothing matches.
             </p>
           )}
@@ -341,7 +341,7 @@ export function OwnershipPicker({
         </div>
         {manual && (
           <form
-            className="flex items-start gap-2 border-t border-border px-3 py-2"
+            className="flex items-start gap-2 border-t border-default px-3 py-2"
             onSubmit={(event) => {
               event.preventDefault()
               addManual()
@@ -358,12 +358,12 @@ export function OwnershipPicker({
                 }}
               />
               {manualError ? (
-                <span role="alert" className="text-xs text-destructive">
+                <span role="alert" className="text-xs text-error-secondary">
                   {manualError}
                 </span>
               ) : (
                 manual.hint && (
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-secondary">
                     {manual.hint}
                   </span>
                 )
@@ -379,8 +379,8 @@ export function OwnershipPicker({
             </Button>
           </form>
         )}
-        <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2">
-          <span className="text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-3 border-t border-default px-3 py-2">
+          <span className="text-xs text-secondary">
             {hiddenCount > 0 && (
               <Tooltip>
                 <TooltipTrigger className="cursor-help underline decoration-dotted underline-offset-4">

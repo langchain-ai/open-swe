@@ -107,27 +107,27 @@ export const TREE_UNSAFE_CSS = `
 
 export function treeThemeStyle(): React.CSSProperties {
   return {
-    "--trees-theme-sidebar-bg": "var(--card)",
-    "--trees-theme-sidebar-fg": "var(--foreground)",
-    "--trees-theme-sidebar-border": "var(--border)",
-    "--trees-theme-sidebar-header-fg": "var(--muted-foreground)",
+    "--trees-theme-sidebar-bg": "var(--bg-surface-level-1)",
+    "--trees-theme-sidebar-fg": "var(--text-primary)",
+    "--trees-theme-sidebar-border": "var(--border-default)",
+    "--trees-theme-sidebar-header-fg": "var(--text-secondary)",
     "--trees-theme-list-hover-bg":
-      "color-mix(in oklab, var(--primary) 10%, transparent)",
+      "color-mix(in oklab, var(--bg-brand) 10%, transparent)",
     "--trees-theme-list-active-selection-bg":
-      "color-mix(in oklab, var(--primary) 22%, transparent)",
-    "--trees-theme-list-active-selection-fg": "var(--foreground)",
+      "color-mix(in oklab, var(--bg-brand) 22%, transparent)",
+    "--trees-theme-list-active-selection-fg": "var(--text-primary)",
     "--trees-selected-focused-border-color-override": "transparent",
-    "--trees-theme-input-bg": "var(--card)",
-    "--trees-theme-input-fg": "var(--foreground)",
-    "--trees-theme-input-border": "var(--border)",
-    "--trees-theme-focus-ring": "var(--primary)",
-    "--trees-theme-scrollbar-thumb": "var(--border)",
+    "--trees-theme-input-bg": "var(--bg-surface-level-1)",
+    "--trees-theme-input-fg": "var(--text-primary)",
+    "--trees-theme-input-border": "var(--border-default)",
+    "--trees-theme-focus-ring": "var(--bg-brand)",
+    "--trees-theme-scrollbar-thumb": "var(--border-default)",
     "--trees-theme-git-added-fg": TREE_FILE_FG,
     "--trees-theme-git-modified-fg": TREE_FILE_FG,
     "--trees-theme-git-deleted-fg": TREE_FILE_FG,
     "--trees-theme-git-renamed-fg": TREE_FILE_FG,
     "--trees-theme-git-untracked-fg": TREE_FILE_FG,
-    "--trees-theme-git-ignored-fg": "var(--muted-foreground)",
+    "--trees-theme-git-ignored-fg": "var(--text-secondary)",
   } as React.CSSProperties
 }
 
@@ -208,13 +208,13 @@ export function DiffFilesView({
   return (
     <>
       {!hideHeader && (
-        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-border px-3 py-1">
+        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-default px-3 py-1">
           <div className="min-w-0 flex-1">{leading}</div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <DiffWrapToggle />
             {actions}
             {files.length > 0 && (
-              <span className="flex shrink-0 items-center gap-2 text-[11px] whitespace-nowrap text-muted-foreground/70">
+              <span className="flex shrink-0 items-center gap-2 text-[11px] whitespace-nowrap text-tertiary">
                 <span
                   className="@max-[620px]:hidden"
                   title={
@@ -224,10 +224,10 @@ export function DiffFilesView({
                   {truncated ? "first " : ""}
                   {files.length} file{files.length === 1 ? "" : "s"}
                 </span>
-                <span className="text-success-foreground">
+                <span className="text-success-secondary">
                   +{totals.additions}
                 </span>
-                <span className="text-destructive">-{totals.deletions}</span>
+                <span className="text-error-secondary">-{totals.deletions}</span>
               </span>
             )}
           </div>
@@ -258,13 +258,13 @@ export function DiffFilesView({
             </Virtualizer>
           </WorkerPoolContextProvider>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
+          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-tertiary">
             {emptyLabel}
           </div>
         )}
 
         {fullScreen && !isMobile && files.length > 0 && (
-          <div className="w-72 shrink-0 border-l border-border bg-card">
+          <div className="w-72 shrink-0 border-l border-default bg-surface-level-1">
             <FileTreeExplorer
               files={files}
               selectedTreePath={selectedTreePath}
@@ -354,47 +354,47 @@ const FileDiffSection = memo(
     const fileName = file.treePath.slice(lastSlash + 1)
 
     return (
-      <div ref={sectionRef} className="overflow-hidden border-b border-border">
+      <div ref={sectionRef} className="overflow-hidden border-b border-default">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
+          className="flex w-full items-center gap-2 bg-surface-level-1 px-3 py-2 text-left text-xs transition-colors hover:bg-surface-level-1-hover"
         >
           <CaretDownIcon
             className={cn(
-              "size-3 shrink-0 text-muted-foreground transition-transform",
+              "size-3 shrink-0 text-secondary transition-transform",
               !open && "-rotate-90"
             )}
           />
           <span className="min-w-0 truncate" title={file.treePath}>
             {directory && (
-              <span className="text-muted-foreground">{directory}</span>
+              <span className="text-secondary">{directory}</span>
             )}
-            <span className="font-medium text-foreground">{fileName}</span>
+            <span className="font-medium text-primary">{fileName}</span>
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2">
-            <span className="text-success-foreground">+{file.additions}</span>
-            <span className="text-destructive">-{file.deletions}</span>
+            <span className="text-success-secondary">+{file.additions}</span>
+            <span className="text-error-secondary">-{file.deletions}</span>
           </span>
         </button>
         {open &&
           (file.unrenderable ? (
             file.patch ? (
-              <pre className="overflow-x-auto bg-background p-4 font-mono text-xs leading-5 text-foreground">
+              <pre className="overflow-x-auto bg-surface-level-1 p-4 font-mono text-xs leading-5 text-primary">
                 <code>{file.patch}</code>
               </pre>
             ) : (
-              <div className="bg-background p-4 text-center text-xs text-muted-foreground/70">
+              <div className="bg-surface-level-1 p-4 text-center text-xs text-tertiary">
                 Binary file — diff not available.
               </div>
             )
           ) : (
             <div
               {...lineSelection.wrapperProps}
-              className="overflow-hidden bg-background"
+              className="overflow-hidden bg-surface-level-1"
               style={
                 {
-                  "--panel-diff-bg": "var(--background)",
+                  "--panel-diff-bg": "var(--bg-surface-level-1)",
                 } as React.CSSProperties
               }
             >
@@ -421,7 +421,7 @@ const FileDiffSection = memo(
               }}
             >
               {draft && (
-                <div className="truncate text-xs text-muted-foreground">
+                <div className="truncate text-xs text-secondary">
                   {file.treePath} ·{" "}
                   {draft.start === draft.end
                     ? `line ${draft.start}`

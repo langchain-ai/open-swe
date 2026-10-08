@@ -105,7 +105,7 @@ function AuditDetails({ log }: { log: AuditLog }) {
             .filter(([, value]) => value != null)
             .map(([label, value]) => (
               <div key={label} className="contents">
-                <dt className="text-muted-foreground">{label}</dt>
+                <dt className="text-secondary">{label}</dt>
                 <dd className="font-mono break-all">{value}</dd>
               </div>
             ))}
@@ -113,7 +113,7 @@ function AuditDetails({ log }: { log: AuditLog }) {
         {meta.settings_changes != null && (
           <section className="space-y-3">
             <h3 className="text-sm font-medium">Settings changes</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               Stored overrides, not effective values. Unset inherits defaults;
               redacted values are not available.
             </p>
@@ -122,7 +122,7 @@ function AuditDetails({ log }: { log: AuditLog }) {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="text-muted-foreground">
+                  <thead className="text-secondary">
                     <tr>
                       <th className="p-2">Setting</th>
                       <th className="p-2">Before</th>
@@ -176,7 +176,7 @@ export function AuditLogs() {
   return (
     <div className="space-y-6">
       <form
-        className="space-y-4 rounded-xl border bg-card p-4"
+        className="space-y-4 rounded-xl border bg-surface-level-1 p-4"
         onSubmit={(event) => {
           event.preventDefault()
           const start = new Date(draft.start_time).getTime()
@@ -241,13 +241,13 @@ export function AuditLogs() {
           ))}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             Filters match exactly. Maximum range: 31 days.
           </p>
           <Button type="submit">Apply filters</Button>
         </div>
         {validation && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-xs text-error-secondary">
             {validation}
           </p>
         )}
@@ -261,7 +261,7 @@ export function AuditLogs() {
         <div className="flex items-center justify-between gap-3">
           <div className="space-y-1">
             <h2 className="text-sm font-medium">Events</h2>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               {items.length} loaded · Newest first · Times shown locally
             </p>
           </div>
@@ -277,7 +277,7 @@ export function AuditLogs() {
         {logs.isError && (
           <div
             role="alert"
-            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 p-4 text-xs"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-error p-4 text-xs"
           >
             <p>Could not load audit logs: {logs.error.message}</p>
             <Button
@@ -294,9 +294,9 @@ export function AuditLogs() {
             </Button>
           </div>
         )}
-        <div className="overflow-x-auto rounded-xl border bg-card">
+        <div className="overflow-x-auto rounded-xl border bg-surface-level-1">
           <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="border-b bg-muted/40 text-muted-foreground">
+            <thead className="border-b bg-surface-level-2/40 text-secondary">
               <tr>
                 {["Time", "Operation", "Actor", "Outcome", "Details"].map(
                   (heading) => (
@@ -313,7 +313,7 @@ export function AuditLogs() {
             </thead>
             <tbody className="divide-y">
               {items.map((log) => (
-                <tr key={log.id} className="hover:bg-muted/30">
+                <tr key={log.id} className="hover:bg-surface-level-2/30">
                   <td className="px-4 py-4 whitespace-nowrap">
                     <time dateTime={log.request_time}>
                       {new Date(log.request_time).toLocaleString()}
@@ -323,7 +323,7 @@ export function AuditLogs() {
                     <div className="font-mono break-all">
                       {log.operation_name}
                     </div>
-                    <div className="mt-1 text-muted-foreground">
+                    <div className="mt-1 text-secondary">
                       {log.enrichments.source === "tool"
                         ? "Agent tool"
                         : "HTTP API"}
@@ -349,7 +349,7 @@ export function AuditLogs() {
                 <tr>
                   <td
                     colSpan={5}
-                    className="px-4 py-12 text-center text-muted-foreground"
+                    className="px-4 py-12 text-center text-secondary"
                   >
                     {logs.isPending
                       ? "Loading audit logs…"
@@ -374,7 +374,7 @@ export function AuditLogs() {
           </div>
         )}
       </section>
-      <p className="text-xs/relaxed text-muted-foreground">
+      <p className="text-xs/relaxed text-secondary">
         Recording is best effort and covers authenticated API writes and
         selected agent tools, not all activity. HTTP success reflects the
         response status, not proof of a committed change.

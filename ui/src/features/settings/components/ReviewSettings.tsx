@@ -58,7 +58,7 @@ export function ReviewSettings({
       >
         <div className="flex flex-col gap-2 p-4">
           {scoped && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               {guidelinesInherited
                 ? "Inherited from the instance."
                 : "Overridden for this workspace."}
@@ -94,7 +94,7 @@ export function ReviewSettings({
                 </Button>
               )}
               {guidelinesDirty && (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-secondary">
                   Unsaved changes
                 </span>
               )}
@@ -104,7 +104,7 @@ export function ReviewSettings({
       </SettingsSection>
 
       <SettingsSection title="Review configuration">
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-default">
           <TierRow
             settings={settings}
             fields={["review_draft_prs"]}
@@ -130,7 +130,7 @@ export function ReviewSettings({
       </SettingsSection>
 
       {!canEdit && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-secondary">
           These settings are read-only. Ask a workspace admin to change them.
         </p>
       )}

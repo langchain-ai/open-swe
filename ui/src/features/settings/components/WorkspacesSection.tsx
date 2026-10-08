@@ -51,10 +51,10 @@ function refreshLabel(
 }
 
 const REFRESH_CLASS: Record<WorkspaceRefreshStatus, string> = {
-  never: "text-muted-foreground",
-  refreshing: "text-muted-foreground",
-  success: "text-muted-foreground",
-  failed: "text-destructive",
+  never: "text-secondary",
+  refreshing: "text-secondary",
+  success: "text-secondary",
+  failed: "text-error-secondary",
 }
 
 function refreshedAt(timestamp: string | null | undefined): string | null {
@@ -70,9 +70,9 @@ const STEP_MARK: Record<WorkspaceRefreshStep["status"], string> = {
 }
 
 const STEP_CLASS: Record<WorkspaceRefreshStep["status"], string> = {
-  running: "border-border text-foreground",
-  success: "border-border text-muted-foreground",
-  failed: "border-destructive/40 text-destructive",
+  running: "border-default text-primary",
+  success: "border-default text-secondary",
+  failed: "border-error text-error-secondary",
 }
 
 // A rebuild runs for minutes to an hour; which stage it reached is the only
@@ -116,11 +116,11 @@ function WorkspaceRow({
     <div data-workspace-row className="flex flex-col gap-2 px-4 py-3.5">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
         <div className="flex flex-col gap-1">
-          <span className="flex items-center gap-2 text-sm/none font-medium text-foreground">
+          <span className="flex items-center gap-2 text-sm/none font-medium text-primary">
             {workspace.name}
             {isDefault && <Badge variant="secondary">Default</Badge>}
           </span>
-          <span className="text-xs/relaxed text-muted-foreground">
+          <span className="text-xs/relaxed text-secondary">
             {detail}
           </span>
         </div>
@@ -154,16 +154,16 @@ function WorkspaceRow({
       />
       {steps.length > 0 && <RefreshSteps steps={steps} />}
       {workspace.refresh_error && (
-        <p className="text-xs/relaxed text-destructive">
+        <p className="text-xs/relaxed text-error-secondary">
           {workspace.refresh_error}
         </p>
       )}
       {/* The API omits the log for non-admins; this guard is defence in depth
           for a `bash -x` trace that can carry expanded credentials. */}
       {isAdmin && log && (
-        <details className="text-xs text-muted-foreground">
+        <details className="text-xs text-secondary">
           <summary className="cursor-pointer select-none">Refresh log</summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
+          <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-default bg-surface-level-2/40 p-3 text-[11px] leading-relaxed whitespace-pre-wrap">
             {log}
           </pre>
         </details>
@@ -236,11 +236,11 @@ export function WorkspacesSection({
           <Skeleton className="h-8 w-full" />
         </div>
       ) : workspaces.isError ? (
-        <p className="px-4 py-3.5 text-xs text-destructive">
+        <p className="px-4 py-3.5 text-xs text-error-secondary">
           Could not load workspaces.
         </p>
       ) : !options || options.workspaces.length === 0 ? (
-        <p className="px-4 py-3.5 text-xs text-muted-foreground">
+        <p className="px-4 py-3.5 text-xs text-secondary">
           No workspaces are configured.
         </p>
       ) : (
@@ -266,9 +266,9 @@ export function WorkspacesSection({
               workspaces={options?.workspaces ?? []}
               channelLabel={channelLabel}
             />
-            <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3.5">
+            <div className="flex flex-wrap items-center gap-2 border-t border-default px-4 py-3.5">
               {createError && (
-                <p role="alert" className="text-xs text-destructive">
+                <p role="alert" className="text-xs text-error-secondary">
                   {createError}
                 </p>
               )}

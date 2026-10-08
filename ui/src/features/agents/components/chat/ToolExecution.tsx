@@ -91,8 +91,8 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
         >
-          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
-            Edited <span className="text-primary">{fileName}</span>
+          <span className={isError ? "text-red-400" : "text-secondary"}>
+            Edited <span className="text-brand-primary">{fileName}</span>
           </span>
         </button>
       </div>
@@ -107,17 +107,17 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left transition-colors hover:brightness-125"
         >
-          <span className={isError ? "text-red-400" : "text-muted-foreground"}>
+          <span className={isError ? "text-red-400" : "text-secondary"}>
             Edited file
           </span>
-          <span className="text-[10px] text-muted-foreground/70">▾</span>
+          <span className="text-[10px] text-tertiary">▾</span>
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border/60 bg-muted">
+      <div className="overflow-hidden rounded-lg border border-subtle bg-surface-level-2">
         <div className="flex items-center gap-2 px-3 py-2">
           <span
-            className={`min-w-0 flex-1 truncate text-[13px] ${isError ? "text-red-400" : "text-primary"}`}
+            className={`min-w-0 flex-1 truncate text-[13px] ${isError ? "text-red-400" : "text-brand-primary"}`}
           >
             {filePath}
           </span>
@@ -130,7 +130,7 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
         <div
           ref={scrollRef}
           onScroll={updateScrollIndicators}
-          className="max-h-[250px] overflow-auto border-t border-border"
+          className="max-h-[250px] overflow-auto border-t border-default"
           style={{ boxShadow: edgeShadows || "none" }}
         >
           <ScopedFileDiff
@@ -193,7 +193,7 @@ export const ToolExecution = memo(function ToolExecution({
     return (
       <div className="my-1 text-[12px] leading-5">
         <DiffView diffData={diffData} />
-        <span className="text-muted-foreground/70">
+        <span className="text-tertiary">
           Waiting for approval...
         </span>
       </div>
@@ -225,7 +225,7 @@ export const ToolExecution = memo(function ToolExecution({
       ? "text-red-400"
       : status === "in_progress" || status === "pending"
         ? "text-yellow-400"
-        : "text-muted-foreground"
+        : "text-secondary"
 
   return (
     <div className="my-0.5 text-[12px] leading-5">

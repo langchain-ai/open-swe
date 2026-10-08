@@ -52,7 +52,7 @@ function effortForModel(
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-3 pt-2 pb-1 text-[11px] text-muted-foreground/60">
+    <div className="px-3 pt-2 pb-1 text-[11px] text-tertiary">
       {children}
     </div>
   )
@@ -85,17 +85,17 @@ function OptionRow({
       onMouseEnter={onMouseEnter}
       className={cn(
         "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] whitespace-nowrap transition-colors",
-        selected ? "text-foreground" : "text-muted-foreground",
-        focused && "bg-accent",
+        selected ? "text-primary" : "text-secondary",
+        focused && "bg-surface-level-1-hover",
         disabled
           ? "cursor-default opacity-40"
-          : "cursor-pointer hover:bg-accent"
+          : "cursor-pointer hover:bg-surface-level-1-hover"
       )}
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {trailing ??
         (selected && (
-          <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
+          <Check className="size-3.5 shrink-0 text-tertiary" />
         ))}
     </button>
   )
@@ -367,7 +367,7 @@ export function ModelPicker({
         aria-expanded={open}
         title={triggerTitle}
         className={cn(
-          "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+          "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
           triggerClassName
         )}
       >
@@ -394,7 +394,7 @@ export function ModelPicker({
                   <>
                     <SectionHeading>Context</SectionHeading>
                     <div
-                      className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-foreground"
+                      className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-primary"
                       title="Context window reported for this model"
                     >
                       <span className="min-w-0 flex-1 truncate">
@@ -425,18 +425,18 @@ export function ModelPicker({
                 </div>
               </>
             ) : (
-              <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
+              <p className="px-3 py-1.5 text-[13px] text-tertiary">
                 Model and reasoning are chosen when the thread starts.
               </p>
             )}
-            <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">
+            <div ref={modelRowRef} className="mt-1 border-t border-default pt-1">
               <SectionHeading>Model</SectionHeading>
               <OptionRow
                 label={selectedModel?.label ?? "Auto"}
                 selected={false}
                 focused={pane === "models" || mainIndex === modelRowIndex}
                 trailing={
-                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
+                  <ChevronRight className="size-3.5 shrink-0 text-tertiary" />
                 }
                 onMouseEnter={openModelPane}
                 onClick={openModelPane}
@@ -455,7 +455,7 @@ export function ModelPicker({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search models"
                 aria-label="Search models"
-                className="w-full border-b border-border bg-transparent px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60"
+                className="w-full border-b border-default bg-transparent px-3 py-2 text-[13px] text-primary outline-none placeholder:text-tertiary"
               />
               <div
                 role="listbox"
@@ -472,7 +472,7 @@ export function ModelPicker({
                   />
                 )}
                 {filteredModels.length === 0 ? (
-                  <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
+                  <p className="px-3 py-1.5 text-[13px] text-tertiary">
                     No matches
                   </p>
                 ) : (
@@ -487,7 +487,7 @@ export function ModelPicker({
                       label={
                         <>
                           {model.label}{" "}
-                          <span className="text-muted-foreground/60">
+                          <span className="text-tertiary">
                             {formatEffort(effortForModel(model, selection))}
                           </span>
                         </>

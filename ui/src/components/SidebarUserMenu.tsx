@@ -108,7 +108,7 @@ export function SidebarUserMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-sidebar-accent"
+        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-surface-level-2-hover"
       >
         <Avatar className="size-7">
           {user.avatar_url && (
@@ -119,7 +119,7 @@ export function SidebarUserMenu({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-xs font-medium">{user.login}</span>
           {user.email && (
-            <span className="truncate text-[10px] text-muted-foreground">
+            <span className="truncate text-[10px] text-secondary">
               {user.email}
             </span>
           )}
@@ -128,10 +128,10 @@ export function SidebarUserMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-default bg-elevated p-1 text-primary shadow-md"
         >
           <div className="px-2 py-1.5">
-            <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+            <span className="text-[10px] font-medium tracking-wide text-secondary uppercase">
               Theme
             </span>
             <div className="mt-1.5 grid grid-cols-3 gap-1">
@@ -147,8 +147,8 @@ export function SidebarUserMenu({
                     className={cn(
                       "flex flex-col items-center gap-1 rounded-sm border px-1 py-1.5 text-[10px] transition-colors",
                       active
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-transparent text-muted-foreground hover:bg-muted"
+                        ? "border-brand-subtle bg-brand/10 text-brand-primary"
+                        : "border-transparent text-secondary hover:bg-surface-level-2"
                     )}
                   >
                     <Icon className="size-3.5" />
@@ -158,13 +158,13 @@ export function SidebarUserMenu({
               })}
             </div>
           </div>
-          <div className="my-1 h-px bg-border" />
+          <div className="my-1 h-px bg-[color:var(--border-default)]" />
           {datadogInitialized && (
             <button
               type="button"
               role="menuitem"
               onClick={() => void copyDatadogSessionLink()}
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-surface-level-2"
             >
               <IoCopyOutline className="size-3.5" />
               {datadogCopyStatus === "copied"
@@ -179,7 +179,7 @@ export function SidebarUserMenu({
               to="/my-settings"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-muted"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-surface-level-2"
             >
               <IoSettingsOutline className="size-3.5" />
               Settings
@@ -189,7 +189,7 @@ export function SidebarUserMenu({
             type="button"
             role="menuitem"
             onClick={() => void onLogout()}
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-surface-level-2"
           >
             <IoLogOutOutline className="size-3.5" />
             Sign out

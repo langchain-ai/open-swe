@@ -59,14 +59,14 @@ function RepositoriesSection() {
       title="Repositories"
       description="All installed repositories support on-demand reviews. Click into an installation to configure automatic reviews."
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-default">
         {loading && (
           <div className="p-4">
             <Skeleton className="h-16 w-full" />
           </div>
         )}
         {!loading && grouped.length === 0 && (
-          <p className="px-4 py-3 text-xs text-muted-foreground">
+          <p className="px-4 py-3 text-xs text-secondary">
             No GitHub App installations found. Install the Open SWE GitHub App
             on an account or org to manage repos here.
           </p>
@@ -80,18 +80,18 @@ function RepositoriesSection() {
               key={owner}
               to="/review/repositories/$owner"
               params={{ owner }}
-              className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/40"
+              className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-surface-level-2/40"
             >
               <div className="flex items-center gap-3">
-                <IoLogoGithub className="size-5 shrink-0 text-muted-foreground" />
+                <IoLogoGithub className="size-5 shrink-0 text-secondary" />
                 <div className="flex flex-col gap-0.5">
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="font-medium text-foreground">{owner}</span>
+                    <span className="font-medium text-primary">{owner}</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">GitHub</span>
+                  <span className="text-xs text-secondary">GitHub</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 text-xs text-secondary">
                 <span>
                   {autoReviewCount}/{list.length} Run Automatically
                 </span>

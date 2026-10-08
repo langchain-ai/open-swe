@@ -58,7 +58,7 @@ export function TierRow({
       label={label}
       description={description}
       badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
-      badgeClassName={!inherits ? "text-destructive" : undefined}
+      badgeClassName={!inherits ? "text-error-secondary" : undefined}
       control={
         <div className="flex items-center gap-2">
           {control}
@@ -96,7 +96,7 @@ export function LLMGatewaySection({ scope }: { scope: SettingsScope }) {
       title="LLM Gateway"
       description="Route agent and reviewer LLM calls through the LangSmith LLM Gateway. It authenticates with the workspace LangSmith API key and resolves provider keys from Provider Secrets, so no provider keys are needed at runtime. Requires the gateway (private beta) enabled for your organization."
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-default">
         <TierRow
           settings={settings}
           fields={["gateway_enabled"]}
@@ -154,7 +154,7 @@ export function DefaultRepoSection({
           : "Where a run lands when nothing names a repository and the workspace sets no default of its own."
       }
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-default">
         <TierRow
           settings={settings}
           fields={["default_repo"]}
@@ -169,7 +169,7 @@ export function DefaultRepoSection({
                 onRepoChange={(repo) => settings.save({ default_repo: repo })}
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-2/20 px-2 py-1.5 text-xs/relaxed text-primary transition-colors hover:opacity-100 dark:bg-surface-level-2/30"
                 dropdownClassName="w-56"
                 disabled={!settings.data}
               />
@@ -262,7 +262,7 @@ export function ModelDefaultsSection({
           : "Models for runs in every workspace that does not override them. Each user's Agent settings override the agent defaults."
       }
     >
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-default">
         <TierRow
           settings={settings}
           fields={["model_routing_enabled"]}

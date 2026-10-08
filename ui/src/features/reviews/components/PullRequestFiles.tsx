@@ -59,7 +59,7 @@ const fileMarks: Record<string, string> = {
 
 const fileTones: Record<string, string> = {
   added: "text-emerald-700 dark:text-emerald-400",
-  removed: "text-destructive",
+  removed: "text-error-secondary",
   renamed: "text-sky-700 dark:text-sky-400",
   copied: "text-sky-700 dark:text-sky-400",
 }
@@ -243,13 +243,13 @@ export function PullRequestFiles({
               onToggle={() => toggle(file.path)}
             />
             {open && (
-              <div className="mt-1 mb-2 overflow-hidden rounded-md border border-border">
+              <div className="mt-1 mb-2 overflow-hidden rounded-md border border-default">
                 {diff.isPending ? (
-                  <p className="p-3 text-xs text-muted-foreground">
+                  <p className="p-3 text-xs text-secondary">
                     Loading diff…
                   </p>
                 ) : diff.error ? (
-                  <p role="alert" className="p-3 text-xs text-destructive">
+                  <p role="alert" className="p-3 text-xs text-error-secondary">
                     {diff.error.message}
                   </p>
                 ) : (
@@ -284,12 +284,12 @@ function FileRow({
       type="button"
       aria-expanded={open}
       onClick={onToggle}
-      className="flex w-full items-baseline gap-2.5 rounded px-1 py-1 text-left font-mono text-xs hover:bg-sidebar-row-hover"
+      className="flex w-full items-baseline gap-2.5 rounded px-1 py-1 text-left font-mono text-xs hover:bg-surface-level-2-hover"
     >
       <CaretRightIcon
         aria-hidden="true"
         className={cn(
-          "size-3 shrink-0 self-center text-muted-foreground transition-transform",
+          "size-3 shrink-0 self-center text-secondary transition-transform",
           open && "rotate-90"
         )}
       />
@@ -301,15 +301,15 @@ function FileRow({
         {fileMarks[file.status] ?? "M"}
       </span>
       <span className="min-w-0 flex-1 truncate" title={file.path}>
-        <span className="text-muted-foreground">
+        <span className="text-secondary">
           {cut < 0 ? "" : file.path.slice(0, cut + 1)}
         </span>
-        <span className="text-foreground">{file.path.slice(cut + 1)}</span>
+        <span className="text-primary">{file.path.slice(cut + 1)}</span>
       </span>
       <span className="shrink-0 text-emerald-700 tabular-nums dark:text-emerald-400">
         +{file.additions}
       </span>
-      <span className="w-12 shrink-0 text-destructive tabular-nums">
+      <span className="w-12 shrink-0 text-error-secondary tabular-nums">
         −{file.deletions}
       </span>
     </button>
@@ -442,7 +442,7 @@ function FileDiff({
   )
   if (!file || file.unrenderable || !file.patch) {
     return (
-      <p className="p-3 text-center text-xs text-muted-foreground">
+      <p className="p-3 text-center text-xs text-secondary">
         {file
           ? "Binary or large file — diff not shown."
           : "This file is not in the loaded diff."}
@@ -450,7 +450,7 @@ function FileDiff({
     )
   }
   return (
-    <div className="overflow-x-auto bg-card font-mono text-[11px] leading-5">
+    <div className="overflow-x-auto bg-surface-level-1 font-mono text-[11px] leading-5">
       <PatchDiff<FileAnnotation>
         patch={file.patch}
         // Pierre's worker pool highlights partial diffs out of step with the
@@ -482,8 +482,8 @@ function Composer({
   const empty = !body.trim()
   return (
     <div className="px-2 py-1 font-sans">
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        <div className="flex items-center border-b border-border px-2 py-1 text-[11px]">
+      <div className="overflow-hidden rounded-md border border-default bg-surface-level-1">
+        <div className="flex items-center border-b border-default px-2 py-1 text-[11px]">
           <span className="font-medium">
             Comment on line {commentRangeLabel(draft.range)}
           </span>
@@ -555,14 +555,14 @@ function CommentCard({
 }) {
   return (
     <div className="px-2 py-1 font-sans">
-      <div className="rounded-md border border-border bg-card px-2.5 py-2 text-xs">
-        <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="rounded-md border border-default bg-surface-level-1 px-2.5 py-2 text-xs">
+        <div className="mb-1 flex items-center gap-1.5 text-[11px] text-secondary">
           {href ? (
             <a
               href={href}
               target="_blank"
               rel="noreferrer"
-              className="hover:text-foreground hover:underline"
+              className="hover:text-primary hover:underline"
             >
               {label}
             </a>
@@ -584,7 +584,7 @@ function CommentCard({
             </IconButton>
           )}
         </div>
-        <p className="whitespace-pre-wrap text-foreground">{body}</p>
+        <p className="whitespace-pre-wrap text-primary">{body}</p>
       </div>
     </div>
   )
