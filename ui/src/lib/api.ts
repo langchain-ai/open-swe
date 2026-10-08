@@ -1904,10 +1904,10 @@ export const api = {
     request<{ available: boolean }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
-  requestHumanReview: (pr: OpenPullRequest) =>
+  requestHumanReview: (pr: OpenPullRequest, channel = "") =>
     request<HumanReviewRequestResult>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
-      { method: "POST" }
+      { method: "POST", body: JSON.stringify({ channel }) }
     ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
