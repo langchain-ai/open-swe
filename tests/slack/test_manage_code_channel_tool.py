@@ -21,15 +21,15 @@ async def test_sandbox_content_reader_enforces_source_and_size(
         AsyncMock(return_value=(backend, "/workspace/plan.md", "/workspace")),
     )
 
-    assert await manage_tool._resolve_content("", "plan.md") == "# Plan"
+    assert await manage_tool.resolve_view_content("", "plan.md") == "# Plan"
     with pytest.raises(ValueError, match="Pass content or file_path, not both"):
-        await manage_tool._resolve_content("inline", "plan.md")
+        await manage_tool.resolve_view_content("inline", "plan.md")
 
     backend.adownload_files.return_value = [
         SimpleNamespace(content=b"x" * (manage_tool.VIEW_CONTENT_MAX_BYTES + 1))
     ]
     with pytest.raises(ValueError, match="file_path exceeds Slack's 1 MB view limit"):
-        await manage_tool._resolve_content("", "large.html")
+        await manage_tool.resolve_view_content("", "large.html")
 
 
 async def test_promotion_initializes_status_context_and_runtime_commands(

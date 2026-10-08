@@ -220,7 +220,7 @@ Before publishing a changed tree, the run typechecks the dashboard. On failure i
 
 The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
 
-To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every seven days, a scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
+To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every Sunday, the first scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
 
 ## Desktop app (experimental)
 
@@ -281,7 +281,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 
 - `redirect_uri is not associated with this application`: the App must list `http://localhost:2024/dashboard/api/auth/callback` (or the `:3000` one when you open Vite directly). Add it in the App's settings.
 - Login redirects but the session does not stick: keep local URLs on `http://` so the cookie is `SameSite=Lax`.
-- `DASHBOARD_BASE_URL not configured` on Sign in with Slack or Notion: the backend has neither a dashboard build nor `DASHBOARD_DEV_SERVER_URL`, so it does not know where the dashboard is. Run `make build-dashboard` or use `make dev-ui`.
+- `DASHBOARD_BASE_URL not configured` on Sign in with Slack or LangSmith: the backend has neither a dashboard build nor `DASHBOARD_DEV_SERVER_URL`, so it does not know where the dashboard is. Run `make build-dashboard` or use `make dev-ui`.
 - Admin pages 403: add your GitHub login or email to `CONFIGURED_ADMINS`.
 
 ### Dashboard shows the LangGraph JSON instead of the UI, or 404s at `/`

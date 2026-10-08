@@ -13,11 +13,13 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
 from openswe.invocation import resolve_invocation_id
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
@@ -545,14 +547,16 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
     }
 
 
-async def _queued_message_count(client: Any, thread_id: str) -> int:
+async def _queued_message_count(thread_id: str) -> int:
     try:
-        item = await client.store.get_item(("queue", thread_id), "pending_messages")
+        return len(await QueuedMessage.for_thread(thread_id))
     except Exception:
+        logger.warning(
+            "Could not count queued messages",
+            exc_info=True,
+            extra={"thread": {"thread_id": thread_id}},
+        )
         return 0
-    value = _value(item, "value")
-    messages = value.get("messages") if isinstance(value, Mapping) else None
-    return len(messages) if isinstance(messages, list) else 0
 
 
 def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) -> dict[str, Any]:
@@ -753,7 +757,7 @@ async def get_thread(
             plan_content_task = tasks.create_task(get_plan_content(thread_id))
             plan_comments_task = tasks.create_task(list_plan_comments(thread_id))
             approvals_task = tasks.create_task(get_workflow_push_approvals(thread_id))
-            queued_count_task = tasks.create_task(_queued_message_count(client, thread_id))
+            queued_count_task = tasks.create_task(_queued_message_count(thread_id))
             # Fetched separately from `runs_task` (bounded to the recent-history
             # window): a pending run enqueued long ago can fall outside that
             # window while a busy thread accumulates newer completed runs.
@@ -950,6 +954,7 @@ def _unexpected_action_arguments(
     return sorted(provided - allowed)
 
 
+@audit_tool()
 async def manage_thread(
     thread_id: str,
     action: ThreadAction,
@@ -1086,6 +1091,7 @@ async def manage_thread(
         return _failure("Thread action failed")
 
 
+@audit_tool()
 async def start_thread(
     title: str,
     instructions: str,

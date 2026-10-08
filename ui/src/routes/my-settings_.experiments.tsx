@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { SettingsPage, SettingsSection } from "@/components/AppShell"
+import {
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/AppShell"
+import { Switch } from "@/components/ui/switch"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
@@ -22,10 +27,17 @@ function ExperimentsPage() {
         <AssistantUiPreference />
       </SettingsSection>
       <SettingsSection title="Agent">
-        <ProfileSwitchRow
-          field="experimental_task_coordination"
-          label="Asynchronous task coordination (experimental)"
-          description="Let your agent delegate to workers that run independently. Turning this off prevents new workers; existing workers can finish and remain available to message or cancel."
+        <SettingsRow
+          htmlFor="experimental_task_coordination"
+          label="Asynchronous task coordination (experimental) — ALWAYS DISABLED"
+          description="Disabled for everyone, regardless of your saved preference."
+          control={
+            <Switch
+              id="experimental_task_coordination"
+              checked={profile.data?.experimental_task_coordination ?? false}
+              disabled
+            />
+          }
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"

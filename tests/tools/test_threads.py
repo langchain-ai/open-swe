@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from openswe.message_queue import QueuedMessage
+
 threads_tool = importlib.import_module("openswe.tools.threads")
 
 
@@ -133,15 +135,13 @@ class _DetailClient:
             ]
 
         self.runs = SimpleNamespace(list=AsyncMock(side_effect=_list_runs))
-        self.store = SimpleNamespace(
-            get_item=AsyncMock(return_value={"value": {"messages": [{"content": "queued"}]}})
-        )
 
 
 async def test_get_thread_counts_pending_run_outside_history_window(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    await QueuedMessage.put("thread-1", "queued")
     client = _DetailClient()
 
     async def _list_runs(*args: object, **kwargs: object) -> list[dict[str, object]]:
@@ -182,8 +182,8 @@ async def test_get_thread_counts_pending_run_outside_history_window(
 
     # The recent-history fetch (bounded to _MAX_RUNS + 1) has no pending run
     # in it, but the thread still has one pending, counted via the
-    # independent status="pending" fetch. The legacy queue also has one
-    # ("queued" in _DetailClient.store), so the total is 2.
+    # independent status="pending" fetch. The message queue also has one, so
+    # the total is 2.
     assert result["queued_message_count"] == 2
 
 

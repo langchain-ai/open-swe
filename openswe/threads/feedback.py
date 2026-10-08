@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from openswe.analytics.feedback import record_feedback_submission
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.source_context import SourceContext
 from openswe.thread_feedback import PromptStatus, Rating, feedback_prompt_status, feedback_store
@@ -74,6 +75,7 @@ async def get_thread_feedback(
 
 
 @feedback_router.post("/{thread_id}/feedback")
+@audit_endpoint
 async def submit_thread_feedback(
     thread_id: str, submission: FeedbackSubmission, session: dict[str, Any] = _SESSION_DEP
 ) -> ThreadFeedbackResponse:
