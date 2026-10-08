@@ -132,7 +132,10 @@ export function SidebarFrame({
         size="sm"
         data-sidebar-expand=""
         onClick={toggle}
-        className={cn("fixed top-2 left-2 z-30", isDesktop && "left-[90px]")}
+        className={cn(
+          "fixed top-2 left-2 z-30 size-7",
+          isDesktop && "left-[90px]"
+        )}
       />,
       document.body
     )
@@ -238,7 +241,7 @@ export function SidebarCollapseButton({
       onClick={onToggle}
       className={cn(
         "shrink-0",
-        isDesktop && "fixed top-2 left-[90px] z-30",
+        isDesktop && "fixed top-2 left-[90px] z-30 size-7",
         className
       )}
     />
