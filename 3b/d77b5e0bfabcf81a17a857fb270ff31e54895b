@@ -6,6 +6,7 @@ openswe/rollout_events.py
   s_8c15db54e0c42b::t_541ed693e8da06 7,33-34,36,40-45,64-66,85-102,131,135,145-147,149,155-165
 openswe/webhooks/event_log.py
   s_8c15db54e0c42b::t_e9a9afa4dd604c 1,22,239-244,248,288,296
+  s_8c15db54e0c42b::t_4e766aaf0f6961 257,259
 openswe/webhooks/event_subscriptions.py
   s_8c15db54e0c42b::t_1e6e187289e833 174-175,238-255
 tests/webhooks/test_rollout_webhook.py
