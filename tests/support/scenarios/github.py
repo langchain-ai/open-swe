@@ -27,6 +27,7 @@ from tests.support.scenarios.core import (
 )
 
 type ReviewState = Literal["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]
+GITHUB_REVIEW_REQUEST = "github_review_request"
 
 
 @dataclass
@@ -107,7 +108,15 @@ class GitHub:
         if url.endswith("/requested_reviewers") and method == "POST":
             body = kwargs.get("json")
             if isinstance(body, dict) and isinstance(reviewers := body.get("reviewers"), list):
-                self.requested.update(str(r) for r in reviewers)
+                for login in map(str, reviewers):
+                    self.requested.add(login)
+                    # GitHub notifies whoever is requested, so it is a message they get.
+                    self.scenario.record(
+                        "message",
+                        "review requested on GitHub",
+                        target=login,
+                        label=GITHUB_REVIEW_REQUEST,
+                    )
             return httpx2.Response(201, json={}, request=request)
         return httpx2.Response(200, json=[], request=request)
 

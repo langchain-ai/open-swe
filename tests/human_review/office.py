@@ -41,7 +41,7 @@ from tests.support.scenarios.core import (
     returning,
 )
 from tests.support.scenarios.events import Decisions
-from tests.support.scenarios.github import GitHub, ReviewState
+from tests.support.scenarios.github import GITHUB_REVIEW_REQUEST, GitHub, ReviewState
 from tests.support.scenarios.slack import Directory, Slack
 
 NEW_YORK = "America/New_York"
@@ -86,6 +86,10 @@ def dm_to(person: Person, notice: NoticeKind) -> Seen:
     return Seen.message(person, notice)
 
 
+def requested_on_github(person: Person) -> Seen:
+    return Seen.message(person, GITHUB_REVIEW_REQUEST)
+
+
 def edited(person: Person) -> Seen:
     return Seen.edit(person)
 
@@ -99,22 +103,31 @@ class Agent(Protocol):
     async def woken(self, office: ReviewOffice, thread_id: str, prompt: str) -> None: ...
 
 
+@dataclass(frozen=True)
 class TakesSuggestions:
-    """Assigns every reviewer the prompt suggests, with the tool the prompt names."""
+    """Assigns every reviewer the prompt suggests, with the tool the prompt names.
+
+    With no suggestion, it assigns ``otherwise`` if given, as its own research of CODEOWNERS
+    and history would; without one it picks nobody.
+    """
+
+    otherwise: Person | None = None
 
     async def woken(self, office: ReviewOffice, thread_id: str, prompt: str) -> None:
-        suggestions = _SUGGESTION.findall(prompt)
+        suggestions = [(login, reason.strip()) for login, reason in _SUGGESTION.findall(prompt)]
+        if not suggestions and self.otherwise is not None:
+            suggestions = [(self.otherwise.login, "They know this code from its history.")]
         if not suggestions:
-            office.record("agent", "woken; no suggestion, would research CODEOWNERS", source=AGENT)
+            office.record("agent", "woken; no suggestion and nobody to pick", source=AGENT)
         for login, reason in suggestions:
             result = await office.use_tool(
                 thread_id,
                 assign_human_reviewer,
                 pr_url=office.pr_url,
                 github_login=login,
-                reason=reason.strip(),
+                reason=reason,
             )
-            outcome = "assigned" if result.get("success") else f"refused: {result.get('error')}"
+            outcome = str(result.get("next") if result.get("success") else result.get("error"))
             office.record("agent", f"assign_human_reviewer @{login} → {outcome}", source=AGENT)
 
 
@@ -155,8 +168,10 @@ class ReviewOffice(Scenario):
 
     # Describing the office.
 
-    def owns(self, path: str, *owners: Person) -> None:
-        self.codeowners.append(f"{path} " + " ".join(f"@{owner.login}" for owner in owners))
+    def owns(self, path: str, *owners: Person | str) -> None:
+        """CODEOWNERS for ``path``; a plain string is a GitHub handle with no Open SWE account."""
+        handles = (owner if isinstance(owner, str) else owner.login for owner in owners)
+        self.codeowners.append(f"{path} " + " ".join(f"@{handle}" for handle in handles))
 
     def habit(
         self, person: Person, action: Habit, *, after: timedelta = timedelta(hours=1)
@@ -415,22 +430,23 @@ class ReviewOffice(Scenario):
         ]
 
     @invariant
-    def picks_happen_in_work_hours(self) -> list[str]:
-        """Someone is picked only during their own work hours."""
-        return [
-            f"{login} was picked outside their work hours ({self.people[login].local(self.timeline[i].at)})"
-            for i, logins in self._decisions_of("reviewer_picked")
-            for login in logins
-            if not self.people[login].on_shift(self.timeline[i].at)
-        ]
+    def nobody_is_notified_outside_work_hours(self) -> list[str]:
+        """Nobody gets a DM or a GitHub review request outside their own work hours.
 
-    @invariant
-    def dms_arrive_in_work_hours(self) -> list[str]:
-        """Nobody is DMed outside their own work hours."""
+        Someone who signed up themselves asked for the review, so theirs may come any time.
+        """
+        volunteers = {
+            login
+            for _, logins in self._decisions_of("reviewer_joined", "signed_up")
+            for login in logins
+        }
         return [
-            f"{m.target} was DMed outside their work hours ({self.people[m.target].local(m.at)}): {m.label or 'message'}"
+            f"{m.target} was notified outside their work hours "
+            f"({self.people[m.target].local(m.at)}): {m.label or 'message'}"
             for m in self.timeline
-            if m.kind == "message" and not self.people[m.target].on_shift(m.at)
+            if m.kind == "message"
+            and not self.people[m.target].on_shift(m.at)
+            and not (m.label == GITHUB_REVIEW_REQUEST and m.target in volunteers)
         ]
 
     @invariant

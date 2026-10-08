@@ -144,6 +144,15 @@ async def assign_human_reviewer(
     result = await assign(request, login, reason, replace=named_by_person)
     if not result.success:
         return _failure(result.error)
+    if result.starts_at is not None:
+        return {
+            "success": True,
+            "next": (
+                f"They are shown on the review card now. It is outside their work hours, so "
+                f"their GitHub review request and direct message with Accept, Decline and "
+                f"Snooze go out when their work day starts, at {result.starts_at.isoformat()}."
+            ),
+        }
     return {
         "success": True,
         "next": (

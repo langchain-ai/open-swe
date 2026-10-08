@@ -4,13 +4,46 @@ from tests.human_review.office import (
     LONDON,
     NEW_YORK,
     ReviewOffice,
+    TakesSuggestions,
     dm_to,
     edited,
     joined,
     overdue,
     picked,
     released,
+    requested_on_github,
 )
+
+
+async def test_a_pick_made_at_night_waits_for_the_reviewers_work_day(
+    office: ReviewOffice,
+) -> None:
+    """A pick made at night waits for the reviewer's work day.
+
+    Ada asks for a review late in the evening. Nobody signs up, and Open SWE has nobody to
+    suggest: the only code owner has no Open SWE account. The review thread's agent picks Eric
+    itself at 01:37, from its own reading of the code's history. Eric is on the card at once,
+    but nothing reaches him until his work day starts: no GitHub review request and no DM at
+    night, and his window to accept starts at 09:00.
+    """
+    ada = office.person("ada", NEW_YORK)
+    eric = office.person("eric", NEW_YORK)
+    office.owns("/web/", "vera")
+    office.pull_request(author=ada, files=["web/page.tsx"])
+    office.agent = TakesSuggestions(otherwise=eric)
+
+    async with office.from_(ada.at("Mon 23:37")):
+        with office.step("Ada asks for a review late in the evening"):
+            await office.request_review()
+            office.expect()
+
+        with office.step("Two hours on, at 01:37, the agent picks Eric; nothing reaches him"):
+            await office.wait(hours=2)
+            office.expect(picked(eric))
+
+        with office.step("Eric's work day starts at 09:00, and he hears about the pick"):
+            await office.wait(hours=8)
+            office.expect(requested_on_github(eric), dm_to(eric, "reviewer_pick"))
 
 
 async def test_two_unaccepted_picks_escalate_to_the_author(office: ReviewOffice) -> None:
@@ -32,7 +65,7 @@ async def test_two_unaccepted_picks_escalate_to_the_author(office: ReviewOffice)
         with office.step("Ada asks for a review, and nobody signs up within two hours"):
             await office.request_review()
             await office.wait(hours=2)
-            office.expect(picked(bob), dm_to(bob, "reviewer_pick"))
+            office.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
 
         with office.step("Bob ignores the pick for two of his work hours; Carol's day is over"):
             await office.wait(hours=2)
@@ -40,7 +73,7 @@ async def test_two_unaccepted_picks_escalate_to_the_author(office: ReviewOffice)
 
         with office.step("Carol's work day starts in London, and Open SWE picks her"):
             await office.wait(hours=14)
-            office.expect(picked(carol), dm_to(carol, "reviewer_pick"))
+            office.expect(picked(carol), requested_on_github(carol), dm_to(carol, "reviewer_pick"))
 
         with office.step("Carol lets her pick lapse too, two of her work hours later"):
             await office.wait(hours=2)
@@ -81,7 +114,7 @@ async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover
         with office.step("Ada asks for a review, and nobody signs up within two hours"):
             await office.request_review()
             await office.wait(hours=2)
-            office.expect(picked(bob), dm_to(bob, "reviewer_pick"))
+            office.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
 
         with office.step("Carol owns the same API code and clicks I'll review on the card"):
             await office.clicks(carol, "ill_review")
@@ -89,11 +122,12 @@ async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover
                 edited(bob),
                 released(bob, cause="claimed_by_overlapping_owner"),
                 joined(carol, cause="signed_up"),
+                requested_on_github(carol),
             )
 
         with office.step("Carol approves on GitHub; the UI still has no reviewer"):
             await office.reviews_on_github(carol)
-            office.expect(picked(dana), dm_to(dana, "reviewer_pick"))
+            office.expect(picked(dana), requested_on_github(dana), dm_to(dana, "reviewer_pick"))
 
         with office.step("Half an hour later, Erin approves the UI on GitHub unasked"):
             await office.wait(minutes=30)

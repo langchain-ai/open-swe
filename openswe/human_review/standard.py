@@ -100,6 +100,8 @@ _DEADLINE_RETRY = timedelta(minutes=5)
 _ROUNDS_BEFORE_AUTHOR = 2
 # The why of an overdue notice still owed to the author, by the still-assigned reviewers' ids.
 _OVERDUE_NOTICE = "overdue_notice:"
+# The reason for a pick held until the reviewer's work day starts, by their user id.
+_PICK_START = "pick_start:"
 SNOOZE_DURATIONS = {
     "30 minutes": timedelta(minutes=30),
     "1 hour": timedelta(hours=1),
@@ -154,6 +156,8 @@ class RequestResult(BaseModel):
     reused: bool = False
     summary_updated: bool = False
     claimed: bool = False
+    # A pick made outside the reviewer's work hours is told then.
+    starts_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -734,32 +738,73 @@ async def assign(
         code_owners=[handle for area in theirs for handle in area.handles],
         reason=reason.strip(),
     )
-    await _request_github_review(added, github_login)
-    minutes = await _assignment_minutes(added)
+    hours = await WorkHours.for_user(user)
     now = datetime.now(UTC)
-    accept_by = (await WorkHours.for_user(user)).after(now, timedelta(minutes=minutes))
+    minutes = await _assignment_minutes(added)
+    # The window counts only their work hours, so it starts with their next work day.
+    accept_by = hours.after(now, timedelta(minutes=minutes))
     if not await _schedule(added, "pick_expiry", accept_by - now):
         logger.warning(
             "A reviewer pick will not rotate if it is never accepted",
             extra={"request_id": str(added.id), "github_login": github_login},
         )
-    why = f" {escape(reason.strip())}" if reason.strip() else ""
-    deadline = f" Accept within {minutes} minutes of your work hours."
-    permalink = await _permalink(added)
-    where = "review card" if added.has_card else "Slack post"
-    card = f" (<{permalink}|{where}>)" if permalink else ""
-    await _send_pick_dm(
-        added,
-        user,
-        f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}",
-    )
-    await _schedule(added, f"remind:{user.id}", timedelta(0))
+    starts_at = hours.next_start(now)
+    if starts_at > now:
+        async with HumanReviewRequest.locked(added.id) as (_, row):
+            if row is not None:
+                row.run_config = {**row.run_config, f"{_PICK_START}{user.id}": reason.strip()}
+        logger.info(
+            "Holding a reviewer pick until their work day starts",
+            extra={
+                "request_id": str(added.id),
+                "github_login": github_login,
+                "until": starts_at.isoformat(),
+            },
+        )
+        await _schedule(added, f"{_PICK_START}{user.id}", starts_at - now)
+    else:
+        await _notify_pick(added, user, reason)
     return RequestResult(
         success=True,
         request_id=str(added.id),
         channel=added.slack_channel_id,
-        permalink=permalink,
+        permalink=await _permalink(added),
+        starts_at=starts_at if starts_at > now else None,
     )
+
+
+async def _notify_pick(request: HumanReviewRequest, user: User, reason: str) -> None:
+    """Tell a pick on GitHub and in Slack; only ever during their work hours."""
+    pr = request.pull_request
+    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    await _request_github_review(request, user.login_for("github"))
+    minutes = await _assignment_minutes(request)
+    why = f" {escape(reason.strip())}" if reason.strip() else ""
+    deadline = f" Accept within {minutes} minutes of your work hours."
+    permalink = await _permalink(request)
+    where = "review card" if request.has_card else "Slack post"
+    card = f" (<{permalink}|{where}>)" if permalink else ""
+    await _send_pick_dm(
+        request,
+        user,
+        f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}",
+    )
+    await _schedule(request, f"remind:{user.id}", timedelta(0))
+
+
+async def _start_held_pick(request: HumanReviewRequest, user_id: str) -> str:
+    """Their work day started: tell a pick held overnight, unless it ended meanwhile."""
+    key = f"{_PICK_START}{user_id}"
+    reason = request.run_config.get(key)
+    try:
+        participant = request.participant(UUID(user_id))
+    except ValueError:
+        participant = None
+    await _forget(request, key)
+    if participant is None or participant.decision != "picked" or not isinstance(reason, str):
+        return "no_longer_picked"
+    await _notify_pick(request, participant.user, reason)
+    return "notified"
 
 
 async def _send_pick_dm(
@@ -1709,6 +1754,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
     if step.startswith("overdue:"):
         return {"status": await _check_overdue(request, step.removeprefix("overdue:"))}
+    if step.startswith(_PICK_START):
+        return {"status": await _start_held_pick(request, step.removeprefix(_PICK_START))}
     if step.startswith(_OVERDUE_NOTICE):
         return {"status": await _notify_author_overdue(request, step.removeprefix(_OVERDUE_NOTICE))}
 
