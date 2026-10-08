@@ -2,10 +2,12 @@
 
 from typing import Any
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.review_guide.context import GuideContext, GuideUnavailableError, requester_login
 from openswe.review_guide.github import mark_ready
 
 
+@audit_tool()
 async def mark_pull_request_ready() -> dict[str, Any]:
     """Implement the `mark_pull_request_ready` tool."""
     try:

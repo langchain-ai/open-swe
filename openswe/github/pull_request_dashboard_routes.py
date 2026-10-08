@@ -5,6 +5,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.dashboard.repo_access import require_repo_access_for_user
@@ -117,6 +118,7 @@ async def api_pull_request_details(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/action")
+@audit_endpoint
 async def api_act_on_pull_request(
     owner: str,
     repo: str,
@@ -140,6 +142,7 @@ async def api_pull_request_thread_status(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/thread")
+@audit_endpoint
 async def api_start_pull_request_thread(
     owner: str,
     repo: str,
@@ -153,6 +156,7 @@ async def api_start_pull_request_thread(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/review-threads/resolve")
+@audit_endpoint
 async def api_resolve_review_threads(
     owner: str,
     repo: str,
