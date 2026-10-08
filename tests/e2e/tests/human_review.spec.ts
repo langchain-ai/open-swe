@@ -710,11 +710,8 @@ test.describe("Human review in Slack", () => {
     expect(picked.thread_ts).toBe(picked.ts);
     await expect
       .poll(async () => {
-        const queued = await request.get(`${HARNESS}/store/items`, {
-          params: {
-            namespace: `queue.${dm.thread_id}`,
-            key: "pending_messages",
-          },
+        const queued = await request.get(`${HARNESS}/control/queued`, {
+          params: { thread_id: dm.thread_id },
         });
         const state = await request.get(`/threads/${dm.thread_id}/state`);
         return JSON.stringify([await queued.json(), await state.json()]);
