@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx2
 from langchain_core.messages.content import create_text_block
 
+from openswe.human_review.notices import ReviewNotice
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
     ChannelIdentity,
@@ -441,6 +442,7 @@ def _slack_context_input(
     prior_message_text: str = "",
     is_breakout: bool = False,
     turn_context: str = "",
+    replying_to: ReviewNotice | None = None,
     constant_context: str = "",
     dispatched_timestamps: set[str] | None = None,
     run_described_person_ids: set[str] | None = None,
@@ -600,6 +602,7 @@ def _slack_context_input(
                 "data": {
                     "timestamp": event_ts,
                     "explicit_bot_mention": str(explicit_mention).lower(),
+                    **({"replying_to": replying_to.as_data()} if replying_to is not None else {}),
                 },
             },
         )
@@ -1160,15 +1163,31 @@ async def _process_slack_mention_impl(
         )
         if section
     )
-    # A thread started under a DM Open SWE sent for another thread is about that thread's work.
+    # A reply under a DM Open SWE sent for another thread is about that thread's work.
+    replied_dm_ts = reply_thread_ts or thread_ts
     dm_origin = (
-        await DmOrigin.of(channel_id, thread_ts)
-        if is_first_mention
-        and not concierge_mode
-        and event_ts != thread_ts
-        and is_dm_channel(channel_context)
+        await DmOrigin.of(channel_id, replied_dm_ts)
+        if event_ts != replied_dm_ts and is_dm_channel(channel_context)
         else None
     )
+    review_notice = dm_origin.notice if dm_origin is not None else None
+    if (
+        review_notice is None
+        and event_ts != thread_ts
+        and context_thread_ts == thread_ts
+        and any(
+            slack_utils.is_own_slack_message(message, bot_user_id)
+            and isinstance(message.get("text"), str)
+            and message["text"].startswith(
+                ("Review requested for ", "Expedited review requested for ")
+            )
+            for message in thread_messages
+        )
+        and (card := await HumanReviewRequest.card_in_thread(channel_id, thread_ts)) is not None
+    ):
+        review_notice = card.card_notice
+    if review_notice is not None or not is_first_mention or concierge_mode:
+        dm_origin = None
     dm_origin_section = (
         prompt(
             "slack/dm-origin",
@@ -1187,19 +1206,6 @@ async def _process_slack_mention_impl(
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
-            prompt("runs/slack-review-request")
-            if event_ts != thread_ts
-            and context_thread_ts == thread_ts
-            and any(
-                slack_utils.is_own_slack_message(message, bot_user_id)
-                and isinstance(message.get("text"), str)
-                and message["text"].startswith(
-                    ("Review requested for ", "Expedited review requested for ")
-                )
-                for message in thread_messages
-            )
-            and await HumanReviewRequest.is_card_thread(channel_id, thread_ts)
-            else "",
             resolved_links_section,
         )
         if section
@@ -1336,6 +1342,7 @@ async def _process_slack_mention_impl(
         prior_message_text=request.prior_message_text,
         is_breakout=bool(request.context_thread_ts),
         turn_context=turn_context,
+        replying_to=review_notice,
         constant_context="" if request.web_only else constant_context,
         web_only=request.web_only,
         dispatched_timestamps=dispatched_timestamps,

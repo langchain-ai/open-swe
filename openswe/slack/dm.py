@@ -13,6 +13,7 @@ from typing import Any, Self
 
 from pydantic import BaseModel, ValidationError
 
+from openswe.human_review.notices import ReviewNotice
 from openswe.prompts import prompt
 from openswe.slack.client import (
     get_slack_permalink,
@@ -85,15 +86,21 @@ class DmOrigin(BaseModel):
     channel_id: str
     thread_ts: str
     subject: str = ""
+    notice: ReviewNotice | None = None
 
     @property
     def location(self) -> tuple[str, str]:
         return self.channel_id, self.thread_ts
 
-    async def save_for(self, dm_channel_id: str, message_ts: str) -> None:
+    async def save_for(self, dm_channel_id: str, message_ts: str, text: str) -> None:
+        saved = self
+        if self.notice is not None and not self.notice.text:
+            saved = self.model_copy(
+                update={"notice": self.notice.model_copy(update={"text": text})}
+            )
         try:
             await langgraph_client().store.put_item(
-                (_DM_ORIGIN_NAMESPACE, dm_channel_id), message_ts, self.model_dump()
+                (_DM_ORIGIN_NAMESPACE, dm_channel_id), message_ts, saved.model_dump()
             )
         except Exception:
             logger.warning(
@@ -163,7 +170,7 @@ async def send_dm_with_location(
         )
         return None
     if origin is not None:
-        await origin.save_for(channel_id, message_ts)
+        await origin.save_for(channel_id, message_ts, text)
         await note_for_thread_owner(
             *origin.location,
             prompt("slack/dm-sent-for-thread", recipient=f"<@{slack_user_id}>", text=text),

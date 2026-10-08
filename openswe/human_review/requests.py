@@ -30,6 +30,7 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.human_review.notices import NoticeKind, ReviewNotice
 from openswe.human_review.pick_messages import PickMessage
 from openswe.slack.client import lookup_slack_thread_id
 from openswe.slack.dm import DmOrigin
@@ -207,6 +208,27 @@ class HumanReviewRequest(Base):
             channel_id=self.slack_channel_id, thread_ts=root, subject=self.pull_request.url
         )
 
+    def notice(self, kind: NoticeKind, text: str = "") -> ReviewNotice:
+        return ReviewNotice(
+            kind=kind,
+            review_request_id=str(self.id),
+            pr_url=self.pull_request.url,
+            text=text,
+            target_thread_id=self.thread_id,
+        )
+
+    def notice_origin(self, kind: NoticeKind) -> DmOrigin | None:
+        """``dm_origin`` for a DM that is this ``kind`` of notice, so a reply to it arrives described."""
+        origin = self.dm_origin
+        return origin.model_copy(update={"notice": self.notice(kind)}) if origin else None
+
+    @property
+    def card_notice(self) -> ReviewNotice:
+        pr = self.pull_request
+        if self.kind == "expedited":
+            return self.notice("expedited_review_card", f"Expedited review requested for {pr.url}")
+        return self.notice("review_card", f"Review requested for {pr.url}: {pr.title}")
+
     async def picked_by(self, thread_id: str) -> bool:
         """Whether ``thread_id`` may pick this request's reviewer: its own thread or its Slack thread's."""
         if not thread_id:
@@ -340,13 +362,13 @@ class HumanReviewRequest(Base):
             return Counter(dict(rows.tuples().all()))
 
     @classmethod
-    async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:
-        """Whether this Slack thread contains an Open SWE review-request card."""
+    async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
+        """The request whose Open SWE card is in this Slack thread, the newest first."""
         if not postgres.configured():
-            return False
+            return None
         async with postgres.session() as session:
-            request_id = await session.scalar(
-                select(cls.id)
+            return await session.scalar(
+                cls._loaded(select(cls))
                 .where(
                     cls.kind.in_(("standard", "expedited")),
                     or_(
@@ -361,9 +383,9 @@ class HumanReviewRequest(Base):
                         & (cls.slack_copy_ts == thread_ts),
                     ),
                 )
+                .order_by(desc(cls.created_at))
                 .limit(1)
             )
-            return request_id is not None
 
     @classmethod
     async def copy_channels_for_author(cls, login: str, *, since: datetime) -> list[str]:

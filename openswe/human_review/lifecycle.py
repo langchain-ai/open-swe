@@ -231,7 +231,7 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
         diff_image_id=approval.slack_diff_file_id or None,
     )
     text, blocks = await _warn_target(approval, (text, blocks))
-    origin = approval.dm_origin
+    origin = approval.notice_origin("author_ready_prompt")
     dm_location = await send_dm_with_location(
         author.slack_user_id,
         text,
@@ -769,7 +769,7 @@ async def _tell_withdrawn(
     slack_user_id = participant.user.slack_user_id
     if not slack_user_id:
         return
-    origin = request.dm_origin
+    origin = request.notice_origin("reviewer_released")
     messages = participant.pick_messages
     if not messages:
         await send_dm(
@@ -787,6 +787,8 @@ async def _tell_withdrawn(
     status = f":no_entry_sign: {text}"
     for message in messages:
         await message.show(status)
+        if origin is not None:
+            await origin.save_for(message.channel_id, message.ts, f"{message.text}\n{status}")
     note = prompt(
         "slack/review-pick-withdrawn",
         recipient=f"<@{slack_user_id}>",

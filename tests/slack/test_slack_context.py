@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 import pytest
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.human_review.notices import ReviewNotice
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack import webhook as slack_webhooks
@@ -859,8 +860,27 @@ def _context_input(messages: list[dict], **kwargs: object) -> list[str]:
         dispatched_timestamps=cast(set, kwargs.get("dispatched_timestamps", set())),
         run_described_person_ids=cast(set, kwargs.get("run_described_person_ids", set())),
         explicit_mention=bool(kwargs.get("explicit_mention", False)),
+        replying_to=cast(ReviewNotice | None, kwargs.get("replying_to")),
     )
     return [cast(str, message["content"]) for message in run_input["messages"]]
+
+
+def test_reply_to_a_review_notice_names_it_and_the_target_thread() -> None:
+    notice = ReviewNotice(
+        kind="reviewer_pick",
+        review_request_id="0198",
+        pr_url="https://github.com/o/r/pull/1",
+        text="Open SWE picked you to review o/r#1",
+        target_thread_id="thread-impl",
+    )
+    contents = _context_input(
+        [{"ts": "9.0", "text": "why me?", "user": "U123"}], replying_to=notice
+    )
+
+    trigger = str(contents[-1])
+    assert "<replying_to>" in trigger
+    assert "<kind>reviewer_pick</kind>" in trigger
+    assert "<target_thread_id>thread-impl</target_thread_id>" in trigger
 
 
 @pytest.mark.parametrize("explicit_mention", [True, False])

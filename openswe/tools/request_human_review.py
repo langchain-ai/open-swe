@@ -3,6 +3,7 @@
 import re
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from fastapi import HTTPException
 from langgraph.config import get_config
@@ -182,12 +183,26 @@ async def _named_by_trigger(cfg: RunConfig, github_login: str) -> bool:
     return re.search(rf"@{re.escape(github_login)}(?![\w-])", text, re.IGNORECASE) is not None
 
 
-async def get_human_review_status(pr_url: str) -> dict[str, Any]:
+async def get_human_review_status(pr_url: str = "", review_request_id: str = "") -> dict[str, Any]:
     """Implement the `get_human_review_status` tool."""
+    thread_id = RunConfig.from_config(get_config()).thread_id or ""
+    if review_request_id:
+        try:
+            request = await HumanReviewRequest.get(UUID(review_request_id))
+        except ValueError:
+            request = None
+        if request is None:
+            return _failure("No review request has that review_request_id.")
+        pr_ref = parse_github_pr_url(request.pull_request.url)
+        if pr_ref is None:
+            return _failure("The review request's pull request URL could not be read.")
+        if refusal := await _repository_refusal(pr_ref, thread_id):
+            return _failure(refusal)
+        status = await ReviewStatus.of(request)
+        return {"success": True, **status.model_dump(mode="json")}
     pr_ref = parse_github_pr_url(pr_url)
     if pr_ref is None:
-        return _failure("pr_url must be a canonical GitHub pull request URL")
-    thread_id = RunConfig.from_config(get_config()).thread_id or ""
+        return _failure("Pass review_request_id, or pr_url as a canonical GitHub pull request URL.")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
     request = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)

@@ -52,10 +52,16 @@ from openswe.human_review.lifecycle import (
     update_blocked_reactions,
 )
 from openswe.human_review.merging import merge_pull_request
+from openswe.human_review.notices import NoticeKind
 from openswe.human_review.people import Outcome, Participant, repo_token, resolve_writer
 from openswe.human_review.pick_messages import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.requests import (
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+    RequestState,
+)
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
@@ -726,11 +732,13 @@ async def assign(
     )
 
 
-async def _send_pick_dm(request: HumanReviewRequest, user: User, text: str) -> None:
+async def _send_pick_dm(
+    request: HumanReviewRequest, user: User, text: str, kind: NoticeKind = "reviewer_pick"
+) -> None:
     """DM a pick's buttons and remember the message, so it can be edited when the pick ends."""
     if not user.slack_user_id:
         return
-    origin = request.dm_origin
+    origin = request.notice_origin(kind)
     location = await send_dm_with_location(
         user.slack_user_id,
         text,
@@ -766,8 +774,14 @@ class AreaStatus(BaseModel):
 
 
 class ReviewStatus(BaseModel):
-    """Who an open review request is assigned to, for an agent asked about it."""
+    """Where a review request stands and who it is assigned to, for an agent asked about it."""
 
+    review_request_id: str
+    pr_url: str
+    kind: RequestKind
+    state: RequestState
+    detail: str
+    requesting_thread_id: str
     requested_by: str
     reviewers: list[str]
     pending_picks: list[PendingPick]
@@ -795,6 +809,12 @@ class ReviewStatus(BaseModel):
         coverage = await Coverage.load(request)
         assigned = [p.github_login for p in request.reviewers + request.picks]
         return cls(
+            review_request_id=str(request.id),
+            pr_url=request.pull_request.url,
+            kind=request.kind,
+            state=request.state,
+            detail=request.detail,
+            requesting_thread_id=request.thread_id,
             requested_by=requester.login_for("github") if requester else "",
             reviewers=[p.github_login for p in request.reviewers],
             pending_picks=picks,
@@ -1322,7 +1342,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
             f"*{escape(pr.title)}*. {mention(request.requested_by) if request.requested_by else 'The author'} "
             f"has been waiting {waited} since the review request was opened. "
             "Please submit your review on GitHub.",
-            origin=request.dm_origin,
+            origin=request.notice_origin("review_reminder"),
         )
         if sent:
             row.run_config = {**row.run_config, marker: True}
@@ -1490,7 +1510,10 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
             await _schedule(request, step, remaining)
             return {"status": "snoozed"}
         await _send_pick_dm(
-            request, participant.user, f"Your review snooze ended: {request.pull_request.url}."
+            request,
+            participant.user,
+            f"Your review snooze ended: {request.pull_request.url}.",
+            "review_snooze_ended",
         )
         return {"status": "reminded"}
     if step.startswith("remind:"):
