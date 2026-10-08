@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.sandboxes.state import (
+from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
+from openswe.sandboxes.state import (
     SANDBOX_CONNECTIONS,
     get_or_create_sandbox_backend_proxy,
     set_sandbox_backend,
@@ -25,18 +25,18 @@ async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={},
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=sandbox_backend,
         ) as create_sandbox,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(thread_id)
@@ -69,23 +69,23 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-existing"},
         ),
         patch(
-            "agent.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             return_value=existing_backend,
         ) as connect_sandbox,
         patch(
-            "agent.sandboxes.lifecycle._refresh_github_proxy_or_fail",
+            "openswe.sandboxes.lifecycle._refresh_github_proxy_or_fail",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ) as refresh_proxy,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(thread_id)
@@ -117,23 +117,23 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-existing"},
         ),
         patch(
-            "agent.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             return_value=existing_backend,
         ) as connect_sandbox,
         patch(
-            "agent.sandboxes.lifecycle._refresh_github_proxy_or_fail",
+            "openswe.sandboxes.lifecycle._refresh_github_proxy_or_fail",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ) as refresh_proxy,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(thread_id)
@@ -168,23 +168,23 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-new"},
         ),
         patch(
-            "agent.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             return_value=new_backend,
         ) as connect_sandbox,
         patch(
-            "agent.sandboxes.lifecycle._refresh_github_proxy_or_fail",
+            "openswe.sandboxes.lifecycle._refresh_github_proxy_or_fail",
             new_callable=AsyncMock,
             side_effect=passthrough,
         ),
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(thread_id)
@@ -207,15 +207,15 @@ async def test_ensure_sandbox_does_not_replace_sandbox_when_metadata_lookup_fail
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             side_effect=RuntimeError("langgraph api unavailable"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy", new_callable=AsyncMock
         ) as create,
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
     ):
         with pytest.raises(RuntimeError, match="langgraph api unavailable"):

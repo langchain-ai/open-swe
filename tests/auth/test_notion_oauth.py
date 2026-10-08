@@ -7,10 +7,10 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent import store as agent_store
-from agent.dashboard import notion_oauth as no
-from agent.dashboard import notion_routes
-from agent.dashboard.oauth import COOKIE_NAME, issue_session
+from openswe import store as agent_store
+from openswe.dashboard import notion_oauth as no
+from openswe.dashboard import notion_routes
+from openswe.dashboard.oauth import COOKIE_NAME, issue_session
 
 
 class _FakeStore:
@@ -122,7 +122,7 @@ async def test_store_and_pop_notion_oauth_flow(
             "https://dashboard.example/agents/thread-1?from=chat#latest",
         ),
         ("https://evil.example/steal", "https://dashboard.example"),
-        (None, "https://dashboard.example/my-settings"),
+        (None, "https://dashboard.example/my-settings/connections"),
     ],
 )
 def test_notion_browser_connection_returns_to_safe_target(

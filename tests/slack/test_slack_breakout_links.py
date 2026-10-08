@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.slack import breakout_links
+from openswe.slack import breakout_links
 
 
 @pytest.mark.asyncio

@@ -5,12 +5,12 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from agent.database import postgres
-from agent.github.repositories import Repository
-from agent.store import now_iso
-from agent.workspaces import store as env_store
-from agent.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
-from agent.workspaces.store import (
+from openswe.database import postgres
+from openswe.github.repositories import Repository
+from openswe.store import now_iso
+from openswe.workspaces import store as env_store
+from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
+from openswe.workspaces.store import (
     WORKSPACES,
     RefreshStep,
     Workspace,
@@ -160,7 +160,7 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> No
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
         patch(
-            "agent.sandboxes.providers.langsmith.get_async_sandbox_client",
+            "openswe.sandboxes.providers.langsmith.get_async_sandbox_client",
             return_value=_sandbox_client(capture),
         ),
     ):
@@ -274,6 +274,7 @@ def _fully_populated(now: str) -> Workspace:
     """A record with nothing left at its default, so a dropped field shows up."""
     return Workspace(
         slug="base",
+        inherit_default_sandbox=True,
         name="Base",
         prompt="build with make",
         setup_script="make setup",
