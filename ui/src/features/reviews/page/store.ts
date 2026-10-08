@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { toast } from "sonner"
 import type { SelectedLineRange } from "@pierre/diffs"
 
 import type { PullRequestReviewEvent } from "@/lib/api"
@@ -13,7 +14,14 @@ export type DiffTarget =
   | { kind: "top" }
   | { kind: "file"; path: string }
   | { kind: "entry"; id: string }
-  | { kind: "line"; path: string; line: number; side: "LEFT" | "RIGHT" }
+  | {
+      kind: "line"
+      path: string
+      line: number
+      side: "LEFT" | "RIGHT"
+      /** First line of a multi-line target; the whole range is highlighted. */
+      start?: number
+    }
 
 export interface CommentDraftTarget {
   path: string
@@ -40,6 +48,8 @@ interface ReviewPageState {
   /** Bumped per request so asking for the same target twice still scrolls. */
   jump: { key: number; target: DiffTarget } | null
   composer: CommentDraftTarget | null
+  /** What's typed in the composer; kept here so a half-written comment is never moved or lost. */
+  composerText: string
   expandedFinding: string | null
   chatDraft: { key: number; text: string } | undefined
   /** Bumped to bring the discussion's open conversations into view. */
@@ -48,6 +58,8 @@ interface ReviewPageState {
   findingsKey: number
   /** Files whose collapsed state the viewer flipped away from the default (viewed = collapsed). */
   collapsed: ReadonlySet<string>
+  /** The diff's entries in reading order. */
+  entryOrder: ReadonlyArray<{ id: string; path: string }>
 }
 
 interface ReviewPageActions {
@@ -64,11 +76,17 @@ interface ReviewPageActions {
   setActive: (entry: { id: string; path: string } | null) => void
   jumpTo: (target: DiffTarget) => void
   setComposer: (target: CommentDraftTarget | null) => void
+  setComposerText: (text: string) => void
   setExpandedFinding: (id: string | null) => void
   askInChat: (text: string) => void
   showOpenConversations: () => void
   showFindings: () => void
   toggleCollapsed: (path: string) => void
+  setEntryOrder: (entries: ReadonlyArray<{ id: string; path: string }>) => void
+  /** Marks an entry's file viewed (or not); from the file being read, moves on to the next unread one. */
+  markViewed: (id: string) => void
+  /** The next file not yet viewed, in reading order, after the one being read. */
+  jumpToUnviewed: () => void
 }
 
 const ORDER_KEY = "open-swe.review.view"
@@ -139,11 +157,13 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     activeEntry: null,
     jump: null,
     composer: null,
+    composerText: "",
     expandedFinding: null,
     chatDraft: undefined,
     openConversationsKey: 0,
     findingsKey: 0,
     collapsed: new Set(),
+    entryOrder: [],
 
     open: (pr, headSha) => {
       const samePr = samePullRequest(get().pr, pr)
@@ -162,6 +182,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
               activeEntry: null,
               jump: null,
               composer: null,
+              composerText: "",
               expandedFinding: null,
               chatDraft: undefined,
               collapsed: new Set(),
@@ -214,9 +235,46 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     },
     jumpTo: (target) => {
       jumpKey += 1
-      set({ jump: { key: jumpKey, target }, navigatorOverlay: false })
+      // Claim the target now so a key pressed before the scroll settles moves on from it.
+      const landing =
+        target.kind === "entry"
+          ? get().entryOrder.find((entry) => entry.id === target.id)
+          : target.kind === "file"
+            ? get().entryOrder.find((entry) => entry.path === target.path)
+            : undefined
+      set({
+        jump: { key: jumpKey, target },
+        navigatorOverlay: false,
+        ...(landing
+          ? { activeEntry: landing.id, activePath: landing.path }
+          : {}),
+      })
     },
-    setComposer: (composer) => set({ composer }),
+    setComposer: (composer) => {
+      const current = get().composer
+      if (!composer) {
+        set({ composer: null, composerText: "" })
+        return
+      }
+      if (current && get().composerText.trim()) {
+        const end = Math.max(current.range.start, current.range.end)
+        toast("Finish or cancel the comment you started first", {
+          id: "review-composer-busy",
+        })
+        get().jumpTo({
+          kind: "line",
+          path: current.path,
+          line: end,
+          side:
+            (current.range.endSide ?? current.range.side) === "deletions"
+              ? "LEFT"
+              : "RIGHT",
+        })
+        return
+      }
+      set({ composer, composerText: "" })
+    },
+    setComposerText: (composerText) => set({ composerText }),
     setExpandedFinding: (expandedFinding) => set({ expandedFinding }),
     showOpenConversations: () =>
       set({
@@ -232,6 +290,33 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
       const key = (get().chatDraft?.key ?? 0) + 1
       set({ chatDraft: { key, text }, railTab: "chat", railOpen: true })
       focusChatComposer()
+    },
+    setEntryOrder: (entryOrder) => set({ entryOrder }),
+    markViewed: (id) => {
+      const { entryOrder, activeEntry, toggleViewed, jumpTo } = get()
+      const index = entryOrder.findIndex((entry) => entry.id === id)
+      const entry = entryOrder[index]
+      if (!entry) return
+      const reading = activeEntry === id
+      const nowViewed = toggleViewed(entry.path)
+      if (!reading) return
+      const viewed = get().viewed
+      const next = nowViewed
+        ? entryOrder
+            .slice(index + 1)
+            .find((candidate) => !viewed.has(candidate.path))
+        : undefined
+      jumpTo({ kind: "entry", id: (next ?? entry).id })
+    },
+    jumpToUnviewed: () => {
+      const { entryOrder, activeEntry, viewed, jumpTo } = get()
+      const from = entryOrder.findIndex((entry) => entry.id === activeEntry)
+      const ordered = [
+        ...entryOrder.slice(from + 1),
+        ...entryOrder.slice(0, from + 1),
+      ]
+      const next = ordered.find((entry) => !viewed.has(entry.path))
+      if (next) jumpTo({ kind: "entry", id: next.id })
     },
     toggleCollapsed: (path) => {
       const next = new Set(get().collapsed)

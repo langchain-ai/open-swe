@@ -217,7 +217,7 @@ export const DIFF_WORKER_HIGHLIGHTER_OPTIONS = {
   langs: ["text"],
 } satisfies WorkerInitializationRenderOptions
 
-function hashFileContents(contents: string): string {
+export function hashFileContents(contents: string): string {
   let hash = 0x811c9dc5
   for (let i = 0; i < contents.length; i++) {
     hash ^= contents.charCodeAt(i)

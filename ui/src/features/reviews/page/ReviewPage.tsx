@@ -7,15 +7,17 @@ import {
   useState,
 } from "react"
 
+import { Link } from "@tanstack/react-router"
+
 import { useIsHydrated } from "@/lib/hydration"
+import { Button } from "@/components/ui/button"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { pageTitle } from "@/lib/pageTitle"
-import { Sheet, SheetPopup } from "@/components/ui/sheet"
+import { Sheet, SheetPopup, SheetTitle } from "@/components/ui/sheet"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import {
   agentThreadKeys,
   markReviewViewed,
-  reviewChatQuery,
 } from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
@@ -23,7 +25,7 @@ import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { Changes } from "./Changes"
 import { Header } from "./Header"
 import { Navigator } from "./Navigator"
-import { reviewQueries, type PullRequestRef } from "./queries"
+import { reviewQueries, useReviewChat, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 
@@ -45,11 +47,19 @@ function readRailWidth(): number {
   }
 }
 
+function saveRailWidth(width: number): void {
+  try {
+    window.localStorage.setItem(RAIL_WIDTH_KEY, String(width))
+  } catch (error) {
+    console.warn("Could not save the chat width", error)
+  }
+}
+
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
 export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
-  const chatThreadId = useQuery(reviewChatQuery(pr)).data?.thread_id
+  const chatThreadId = useReviewChat(pr).data?.thread_id
   // The chat's thread view retitles the tab with its own name; watch for that and take it back.
   const chatTitle = useQuery({
     queryKey: agentThreadKeys.detail(chatThreadId ?? ""),
@@ -93,9 +103,11 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
 
   // Re-marked when a walkthrough lands, since its arrival is what made the row unread.
   const walkthroughSha = detail.data?.walkthrough?.head_sha
+  const detailLoaded = detail.isSuccess
   useEffect(() => {
-    if (chatThreadId) markReviewViewed(queryClient, pr, chatThreadId)
-  }, [queryClient, pr, chatThreadId, walkthroughSha])
+    if (chatThreadId && detailLoaded)
+      markReviewViewed(queryClient, pr, chatThreadId)
+  }, [queryClient, pr, chatThreadId, detailLoaded, walkthroughSha])
 
   useCollapseAppSidebar(pr)
   const sidebar = useSidebarControls()
@@ -116,11 +128,14 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   return (
     <ChatDraftsProvider>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
-        <Header pr={pr} leftInset={leftInset} compactRail={!wide} />
+        <Header
+          pr={pr}
+          leftInset={leftInset}
+          compactRail={!wide}
+          navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
+        />
         {detail.isError ? (
-          <div className="p-6 text-xs text-destructive">
-            {detail.error.message}
-          </div>
+          <PullRequestUnavailable pr={pr} message={detail.error.message} />
         ) : (
           <div className="flex min-h-0 flex-1">
             {navigatorInline && (
@@ -128,17 +143,38 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
                 <Navigator pr={pr} />
               </div>
             )}
-            <main className="min-w-0 flex-1">
+            <section aria-label="Changes" className="min-w-0 flex-1">
               <Changes pr={pr} />
-            </main>
+            </section>
             {wide && (
               <>
                 <div
                   role="separator"
+                  tabIndex={0}
                   aria-orientation="vertical"
                   aria-label="Resize the chat"
+                  aria-valuemin={RAIL_MIN}
+                  aria-valuemax={RAIL_MAX}
+                  aria-valuenow={railWidth}
                   onPointerDown={startResize}
-                  className="group relative w-px shrink-0 cursor-col-resize bg-border"
+                  onKeyDown={(event) => {
+                    const step = event.shiftKey ? 80 : 20
+                    const delta =
+                      event.key === "ArrowLeft"
+                        ? step
+                        : event.key === "ArrowRight"
+                          ? -step
+                          : 0
+                    if (!delta) return
+                    event.preventDefault()
+                    const next = Math.min(
+                      RAIL_MAX,
+                      Math.max(RAIL_MIN, railWidth + delta)
+                    )
+                    setRailWidth(next)
+                    saveRailWidth(next)
+                  }}
+                  className="group relative w-px shrink-0 cursor-col-resize bg-border outline-none focus-visible:bg-primary"
                 >
                   <span className="absolute inset-y-0 -left-1.5 w-3 group-hover:bg-primary/15" />
                 </div>
@@ -163,17 +199,54 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
         )}
         {!roomForNavigator && (
           <Sheet open={navigatorOverlay} onOpenChange={setNavigatorOverlay}>
-            <SheetPopup
-              side="left"
-              showCloseButton={false}
-              className="max-w-[300px] p-0"
-            >
+            <SheetPopup side="left" className="max-w-[300px] p-0">
+              <SheetTitle className="sr-only">Files</SheetTitle>
               <Navigator pr={pr} />
             </SheetPopup>
           </Sheet>
         )}
       </div>
     </ChatDraftsProvider>
+  )
+}
+
+function PullRequestUnavailable({
+  pr,
+  message,
+}: {
+  pr: PullRequestRef
+  message: string
+}) {
+  const githubUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`
+  return (
+    <div
+      role="alert"
+      className="mx-auto flex max-w-md flex-1 flex-col items-start justify-center gap-3 px-6"
+    >
+      <p className="text-[17px] font-semibold text-foreground">
+        Can&apos;t open {pr.owner}/{pr.repo}#{pr.number}
+      </p>
+      <p className="text-sm text-muted-foreground">
+        It doesn&apos;t exist, or your GitHub account can&apos;t see it. GitHub
+        said: {message}.
+      </p>
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          render={<Link to="/agents/reviews" />}
+        >
+          Back to reviews
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          render={<a href={githubUrl} target="_blank" rel="noreferrer" />}
+        >
+          Try it on GitHub
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -195,11 +268,7 @@ function useResize(width: number, setWidth: (width: number) => void) {
         window.removeEventListener("pointermove", move)
         window.removeEventListener("pointerup", up)
         document.body.style.removeProperty("cursor")
-        try {
-          window.localStorage.setItem(RAIL_WIDTH_KEY, String(latest))
-        } catch (error) {
-          console.warn("Could not save the chat width", error)
-        }
+        saveRailWidth(latest)
       }
       document.body.style.cursor = "col-resize"
       window.addEventListener("pointermove", move)
@@ -217,10 +286,10 @@ function useCollapseAppSidebar(pr: PullRequestRef) {
   useEffect(() => {
     sidebarRef.current = sidebar
   }, [sidebar])
-  useEffect(() => {
+  useLayoutEffect(() => {
     const controls = sidebarRef.current
     if (!controls || controls.collapsed || fromSidebar.current) return
-    controls.setCollapsed(true)
-    return () => controls.setCollapsed(false)
+    controls.setCollapsedForPage(true)
+    return () => controls.setCollapsedForPage(false)
   }, [])
 }

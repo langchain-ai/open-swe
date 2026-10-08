@@ -3,8 +3,14 @@ import { useLayoutEffect, useMemo, useRef } from "react"
 import type { SelectedLineRange } from "@pierre/diffs"
 
 import { useRegisterAppCommands, type AppCommand } from "@/lib/appCommands"
-import type { DiffEntry } from "./diffEntries"
-import { isAnchored } from "./findings"
+import { toast } from "sonner"
+
+import {
+  readStoredDiffOverflow,
+  writeStoredDiffOverflow,
+} from "@/features/agents/utils/diffUtils"
+import { containsLine, type DiffEntry } from "./diffEntries"
+import { isAnchored, threadsNeedingAttention } from "./findings"
 import { reviewQueries } from "./queries"
 import type { TextSelection } from "./SelectionBar"
 import { focusChatComposer, useReviewPage, type DiffTarget } from "./store"
@@ -12,8 +18,11 @@ import { focusChatComposer, useReviewPage, type DiffTarget } from "./store"
 interface Stop {
   path: string
   line: number
+  start: number | undefined
   side: "LEFT" | "RIGHT"
   finding: string | null
+  label: string | null
+  order: number
 }
 
 /** Review-page shortcuts, registered with the app so `?` lists them beside the global ones. */
@@ -50,18 +59,15 @@ export function useDiffKeys({
   const stopIndex = useRef(-1)
 
   const commands = useMemo<Array<AppCommand>>(() => {
-    const paths = () => [
-      ...new Set(live.current.entries.map((entry) => entry.file.path)),
-    ]
     const moveFile = (delta: 1 | -1) => {
-      const all = paths()
-      if (all.length === 0) return
-      const { activePath, jumpTo } = useReviewPage.getState()
-      const index = activePath ? all.indexOf(activePath) : -1
-      const next = all[Math.min(all.length - 1, Math.max(0, index + delta))]
-      if (next) jumpTo({ kind: "file", path: next })
+      const { entryOrder, activeEntry, jumpTo } = useReviewPage.getState()
+      if (entryOrder.length === 0) return
+      const index = entryOrder.findIndex((entry) => entry.id === activeEntry)
+      const next =
+        entryOrder[Math.min(entryOrder.length - 1, Math.max(0, index + delta))]
+      if (next) jumpTo({ kind: "entry", id: next.id })
     }
-    // Findings and open threads in diff order: one queue of things that want attention.
+    // Findings and open threads in reading order: one queue of things that want attention.
     const stops = (): Array<Stop> => {
       const { pr } = useReviewPage.getState()
       if (!pr) return []
@@ -69,33 +75,41 @@ export function useDiffKeys({
       const conversation = queryClient.getQueryData(
         reviewQueries.conversation(pr).queryKey
       )
-      const order = new Map(paths().map((path, i) => [path, i]))
-      const list: Array<Stop> = [
-        ...(detail?.findings ?? [])
+      const findings = detail?.findings ?? []
+      const shown = live.current.entries
+      const position = (stop: Omit<Stop, "order">) =>
+        shown.findIndex(
+          (entry) =>
+            entry.file.path === stop.path &&
+            (entry.step === null ||
+              containsLine(entry.fileDiff, stop.line, stop.side))
+        )
+      const list: Array<Omit<Stop, "order">> = [
+        ...findings
           .filter((finding) => finding.status === "open" && isAnchored(finding))
           .map((finding) => ({
             path: finding.file,
             line: finding.end_line as number,
+            start: finding.start_line ?? undefined,
             side: finding.side,
             finding: finding.id,
+            label: finding.title,
           })),
-        ...(conversation?.threads ?? [])
-          .filter(
-            (thread) =>
-              !thread.resolved && !thread.outdated && thread.line !== null
-          )
-          .map((thread) => ({
+        ...threadsNeedingAttention(conversation?.threads ?? [], findings).map(
+          (thread) => ({
             path: thread.path,
             line: thread.line as number,
+            start: thread.start_line ?? undefined,
             side: thread.side,
             finding: null,
-          })),
+            label: null,
+          })
+        ),
       ]
       return list
-        .filter((stop) => order.has(stop.path))
-        .sort(
-          (a, b) => order.get(a.path)! - order.get(b.path)! || a.line - b.line
-        )
+        .map((stop) => ({ ...stop, order: position(stop) }))
+        .filter((stop) => stop.order >= 0)
+        .sort((a, b) => a.order - b.order || a.line - b.line)
     }
     const moveStop = (delta: 1 | -1) => {
       const all = stops()
@@ -108,8 +122,18 @@ export function useDiffKeys({
         kind: "line",
         path: stop.path,
         line: stop.line,
+        start: stop.start,
         side: stop.side,
       })
+      const name = stop.path.split("/").pop() ?? stop.path
+      toast(
+        `${stopIndex.current + 1} of ${all.length} · ${name}:${stop.line}`,
+        {
+          id: "review-stop",
+          description: stop.label ?? "Open conversation",
+          duration: 1500,
+        }
+      )
     }
     return [
       {
@@ -146,15 +170,32 @@ export function useDiffKeys({
         shortcuts: ["v"],
         group: "Pull request",
         run: () => {
-          const { activePath, toggleViewed, viewed, jumpTo } =
-            useReviewPage.getState()
-          if (!activePath) return
-          if (!toggleViewed(activePath)) return
-          const all = paths()
-          const after = all.slice(all.indexOf(activePath) + 1)
-          const next = after.find((path) => !viewed.has(path))
-          if (next) jumpTo({ kind: "file", path: next })
+          const { activeEntry, markViewed } = useReviewPage.getState()
+          if (activeEntry) markViewed(activeEntry)
         },
+      },
+      {
+        id: "review-collapse-file",
+        label: "Collapse or expand the file",
+        shortcuts: ["x"],
+        group: "Pull request",
+        run: () => {
+          const { activeEntry, activePath, toggleCollapsed, jumpTo } =
+            useReviewPage.getState()
+          if (!activeEntry || !activePath) return
+          toggleCollapsed(activePath)
+          jumpTo({ kind: "entry", id: activeEntry })
+        },
+      },
+      {
+        id: "review-wrap",
+        label: "Wrap long lines",
+        shortcuts: ["w"],
+        group: "Pull request",
+        run: () =>
+          writeStoredDiffOverflow(
+            readStoredDiffOverflow() === "wrap" ? "scroll" : "wrap"
+          ),
       },
       {
         id: "review-ask-selection",

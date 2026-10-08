@@ -41,6 +41,14 @@ export function buildCommentPayload(
   }
 }
 
+/** "line 8", "lines 20–24", with "old" for the deleted side. */
+export function readableRangeLabel(range: SelectedLineRange): string {
+  const old = (range.endSide ?? range.side) === "deletions" ? "old " : ""
+  const lo = Math.min(range.start, range.end)
+  const hi = Math.max(range.start, range.end)
+  return lo === hi ? `${old}line ${hi}` : `${old}lines ${lo}–${hi}`
+}
+
 export function commentRangeLabel(range: SelectedLineRange): string {
   const side = (range.endSide ?? range.side) === "deletions" ? "L" : "R"
   const lo = Math.min(range.start, range.end)

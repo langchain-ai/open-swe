@@ -13,7 +13,11 @@ import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { buildEntries, compareTreePaths, type DiffEntry } from "./diffEntries"
-import { findingGroupColor, isAnchored } from "./findings"
+import {
+  findingGroupColor,
+  isAnchored,
+  threadsNeedingAttention,
+} from "./findings"
 import { InlineCode } from "./inlineCode"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { useReviewPage } from "./store"
@@ -100,9 +104,8 @@ function markersFor(
       byFile.set(finding.file, finding.group)
   }
   const threadCount = new Map<string, number>()
-  for (const thread of threads)
-    if (!thread.resolved && !thread.outdated)
-      threadCount.set(thread.path, (threadCount.get(thread.path) ?? 0) + 1)
+  for (const thread of threadsNeedingAttention(threads, findings))
+    threadCount.set(thread.path, (threadCount.get(thread.path) ?? 0) + 1)
   return { findings: byFile, threads: threadCount }
 }
 
@@ -129,16 +132,15 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
       <div className="flex flex-col gap-2 px-3 pt-3 pb-2">
         {hasWalkthrough && (
           <div
-            role="tablist"
-            aria-label="Order"
+            role="group"
+            aria-label="Reading order"
             className="flex rounded-md bg-muted p-0.5"
           >
             {(["guide", "files"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
-                role="tab"
-                aria-selected={order === value}
+                aria-pressed={order === value}
                 onClick={() => setOrder(value)}
                 className={cn(
                   "flex-1 rounded-[5px] py-1 text-[11px] font-medium text-muted-foreground",
@@ -238,7 +240,7 @@ function StepList({
                 )}
               >
                 <InlineCode text={step.title} />
-                <span className="block text-[11px] text-muted-foreground/80">
+                <span className="block text-[11px] text-muted-foreground">
                   {entries.length} file{entries.length === 1 ? "" : "s"}
                 </span>
               </span>
@@ -280,7 +282,6 @@ function FileTree({
         />
       </label>
       <ul
-        role="tree"
         aria-label="Changed files"
         className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-4"
       >
@@ -316,9 +317,10 @@ const TreeRow = memo(function TreeRow({
   const [open, setOpen] = useState(true)
   if (node.kind === "folder")
     return (
-      <li role="treeitem" aria-expanded={open}>
+      <li>
         <button
           type="button"
+          aria-expanded={open}
           onClick={() => setOpen((value) => !value)}
           style={{ paddingLeft: 6 + depth * 12 }}
           className="flex h-6 w-full items-center gap-1 rounded-md pr-2 text-left text-xs text-muted-foreground hover:bg-accent"
@@ -333,7 +335,7 @@ const TreeRow = memo(function TreeRow({
           <span className="truncate">{node.name}</span>
         </button>
         {open && (
-          <ul role="group">
+          <ul>
             {node.children.map((child) => (
               <TreeRow
                 key={child.kind === "folder" ? child.path : child.file.path}
@@ -371,15 +373,33 @@ function FileRow({
   const viewed = useReviewPage((state) => state.viewed.has(file.path))
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const ref = useRef<HTMLLIElement>(null)
+  // Scroll only the file list; scrollIntoView would also move the page around it.
   useEffect(() => {
-    if (active) ref.current?.scrollIntoView({ block: "nearest" })
+    const row = ref.current
+    const list = row?.closest("ul[aria-label='Changed files']")
+    if (!active || !row || !(list instanceof HTMLElement)) return
+    const top = row.offsetTop - list.offsetTop
+    if (top < list.scrollTop) list.scrollTop = top
+    else if (top + row.offsetHeight > list.scrollTop + list.clientHeight)
+      list.scrollTop = top + row.offsetHeight - list.clientHeight
   }, [active])
   const finding = markers.findings.get(file.path)
   const threads = markers.threads.get(file.path) ?? 0
+  const description = [
+    file.path,
+    `${file.additions + file.deletions} lines changed`,
+    finding && "Open SWE finding",
+    threads > 0 && `${threads} open conversation${threads === 1 ? "" : "s"}`,
+    viewed && "viewed",
+  ]
+    .filter(Boolean)
+    .join(", ")
   return (
-    <li ref={ref} role="treeitem" aria-selected={active}>
+    <li ref={ref}>
       <button
         type="button"
+        aria-current={active ? "location" : undefined}
+        aria-label={description}
         onClick={() => jumpTo({ kind: "file", path: file.path })}
         title={file.path}
         style={{ paddingLeft: 22 + depth * 12 }}
@@ -388,7 +408,7 @@ function FileRow({
           active
             ? "bg-accent text-foreground"
             : viewed
-              ? "text-muted-foreground/70"
+              ? "text-muted-foreground"
               : "text-foreground/90"
         )}
       >

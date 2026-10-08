@@ -4,7 +4,6 @@ import { useMemo } from "react"
 import { ArrowSquareOutIcon, XIcon } from "@phosphor-icons/react"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
-import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -12,7 +11,7 @@ import { cn } from "@/lib/utils"
 import { AgentMark } from "./AgentMark"
 import { Discussion } from "./Discussion"
 import { openBugCount } from "./pullRequestStanding"
-import { reviewQueries, type PullRequestRef } from "./queries"
+import { reviewQueries, useReviewChat, type PullRequestRef } from "./queries"
 import { useReviewPage, type RailTab } from "./store"
 
 /** The right column: the agent you can talk to about this PR, and the people who already did. */
@@ -26,10 +25,22 @@ export function Rail({
   const tab = useReviewPage((state) => state.railTab)
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const conversation = useQuery(reviewQueries.conversation(pr)).data
-  const chat = useQuery(reviewChatQuery(pr)).data
-  const people = conversation?.items.filter(
-    (item) => item.kind !== "commit"
+  const chat = useReviewChat(pr).data
+  const unresolved = conversation?.threads.filter(
+    (thread) => !thread.resolved
   ).length
+  const tabs: ReadonlyArray<RailTab> = ["chat", "discussion"]
+  const onTabKey = (event: React.KeyboardEvent) => {
+    const step =
+      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
+    if (!step) return
+    event.preventDefault()
+    const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]!
+    setRailTab(next)
+    event.currentTarget
+      .querySelector<HTMLElement>(`[data-rail-tab="${next}"]`)
+      ?.focus()
+  }
 
   return (
     <aside
@@ -41,6 +52,7 @@ export function Rail({
         <div
           role="tablist"
           aria-label="Rail"
+          onKeyDown={onTabKey}
           className="flex items-center gap-1"
         >
           <RailTabButton
@@ -57,9 +69,12 @@ export function Rail({
             onSelect={setRailTab}
           >
             Discussion
-            {people !== undefined && people > 0 && (
-              <span className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums">
-                {people}
+            {unresolved !== undefined && unresolved > 0 && (
+              <span
+                title={`${unresolved} open conversation${unresolved === 1 ? "" : "s"}`}
+                className="rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground tabular-nums"
+              >
+                {unresolved}
               </span>
             )}
           </RailTabButton>
@@ -113,7 +128,9 @@ function RailTabButton({
     <button
       type="button"
       role="tab"
+      data-rail-tab={tab}
       aria-selected={active}
+      tabIndex={active ? 0 : -1}
       onClick={() => onSelect(tab)}
       className={cn(
         "flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground",
@@ -128,10 +145,7 @@ function RailTabButton({
 /** Ways into an empty chat, picked from where this PR stands. They fill the composer; nothing sends unseen. */
 function ChatStarters({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr)).data
-  const status = useQuery({
-    ...reviewQueries.status(pr),
-    enabled: detail?.pr.state === "open",
-  }).data
+  const status = useQuery(reviewQueries.status(pr)).data
   const askInChat = useReviewPage((state) => state.askInChat)
   const bugs = detail ? openBugCount(detail) : 0
   const starters = [
@@ -175,7 +189,7 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
 }
 
 function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
-  const meta = useQuery(reviewChatQuery(pr))
+  const meta = useReviewChat(pr)
   const chatDraft = useReviewPage((state) => state.chatDraft)
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const actions = useMemo(

@@ -1,4 +1,5 @@
 import type { FindingGroup, ReviewFinding } from "@/lib/api"
+import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 
 export const findingGroupLabel: Record<FindingGroup, string> = {
   bug: "Bug",
@@ -50,4 +51,21 @@ export function askAboutFinding(finding: ReviewFinding): string {
 
 export function fixFinding(finding: ReviewFinding): string {
   return `Fix Open SWE's finding "${finding.title}" at \`${finding.file}${finding.end_line !== null ? `:${finding.end_line}` : ""}\` on this branch.`
+}
+
+/** Open, current review threads, minus the GitHub copies of Open SWE's own findings. */
+export function threadsNeedingAttention(
+  threads: ReadonlyArray<ReviewThread>,
+  findings: ReadonlyArray<ReviewFinding>
+): Array<ReviewThread> {
+  const mirrored = new Set(
+    findings.flatMap((finding) => finding.github_review_comment_id ?? [])
+  )
+  return threads.filter(
+    (thread) =>
+      !thread.resolved &&
+      !thread.outdated &&
+      thread.line !== null &&
+      !mirrored.has(thread.id)
+  )
 }

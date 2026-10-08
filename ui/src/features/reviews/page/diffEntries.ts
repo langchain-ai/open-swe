@@ -106,6 +106,7 @@ export function buildEntries(
 
   const byPath = new Map(sorted.map((file) => [file.path, file]))
   const seen = new Set<string>()
+  const shownWhole = new Set<string>()
   const groups: Array<{
     title: string
     summary: string
@@ -117,10 +118,13 @@ export function buildEntries(
     for (const lines of step.files) {
       const file = byPath.get(lines.path)
       if (!file) continue
+      // "Other changes" is for what the steps left out, not a second copy.
+      if (step.other && shownWhole.has(file.path)) continue
       seen.add(file.path)
       const hasLines = lines.added.length > 0 || lines.deleted.length > 0
       const sliced =
         hasLines && isRenderable(file) ? walkthroughFileDiff(file, lines) : null
+      if (!sliced) shownWhole.add(file.path)
       entries.push({
         file,
         fileDiff: sliced ?? wholeFileDiff(file),
@@ -165,7 +169,7 @@ export function buildEntries(
   )
 }
 
-function lineInDiff(
+export function containsLine(
   diff: FileDiffMetadata,
   line: number,
   side: "LEFT" | "RIGHT"
@@ -198,7 +202,7 @@ export function entryNotes(
   const path = entry.file.path
   const notes: Array<NoteAnnotation> = []
   const shows = (line: number, side: "LEFT" | "RIGHT") =>
-    entry.step === null || lineInDiff(entry.fileDiff, line, side)
+    entry.step === null || containsLine(entry.fileDiff, line, side)
   if (entry.step?.first)
     notes.push({ side: "additions", lineNumber: 0, metadata: { kind: "step" } })
   const findingThreads = new Set<number>()

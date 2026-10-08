@@ -1,4 +1,3 @@
-import { useState } from "react"
 import type { SelectedLineRange } from "@pierre/diffs"
 
 import { Button } from "@/components/ui/button"
@@ -6,7 +5,7 @@ import { Kbd } from "@/components/ui/kbd"
 import { Textarea } from "@/components/ui/textarea"
 import {
   buildCommentPayload,
-  commentRangeLabel,
+  readableRangeLabel,
 } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
@@ -30,8 +29,9 @@ export function Composer({
 }) {
   const pending = usePendingReview(pr.owner, pr.repo, pr.number)
   const setComposer = useReviewPage((state) => state.setComposer)
+  const body = useReviewPage((state) => state.composerText)
+  const setBody = useReviewPage((state) => state.setComposerText)
   const askAboutLines = useAskAboutLines(pr)
-  const [body, setBody] = useState("")
   const close = () => setComposer(null)
   const addToReview = () => {
     const text = body.trim()
@@ -54,8 +54,7 @@ export function Composer({
         }}
       >
         <p className="mb-1.5 text-muted-foreground">
-          Comment on{" "}
-          <span className="font-mono">{commentRangeLabel(range)}</span>
+          Comment on {readableRangeLabel(range)}
         </p>
         <Textarea
           aria-label="Comment body"
@@ -72,7 +71,9 @@ export function Composer({
             }
             if (event.key === "Escape") {
               event.stopPropagation()
-              close()
+              // A typed comment survives Escape; Cancel is the way to drop it.
+              if (body.trim()) event.currentTarget.blur()
+              else close()
             }
           }}
           className="resize-y text-[13px]"

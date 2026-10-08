@@ -241,9 +241,10 @@ export function AgentThreadView({
       sandboxBridgeClient: "desktop",
     }
   }, [handoff, thread.id, thread.repoFullName])
+  // The review page shows its PR's status itself; don't poll it a second time here.
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
-    (thread.pullRequests?.length ?? 0) > 0
+    !reviewChat && (thread.pullRequests?.length ?? 0) > 0
   )
   const pullRequestHealth = pullRequestStatus.isError
     ? undefined
@@ -372,6 +373,7 @@ export function AgentThreadView({
         key: (previous?.key ?? 0) + 1,
         text: composerDraft.text,
         images: [],
+        replacesSuggestion: true,
       }))
     }
   }
@@ -1006,14 +1008,17 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      <AgentGitPanel
-        thread={thread}
-        onComment={canPost ? commentOnDiff : undefined}
-        revealFilePath={revealFilePath}
-        revealChangesKey={revealChangesKey}
-        collapsed={panelCollapsed}
-        onCollapsedChange={handlePanelCollapsedChange}
-      />
+      {/* The review page is already the diff; a second panel only squeezes the chat. */}
+      {!reviewChat && (
+        <AgentGitPanel
+          thread={thread}
+          onComment={canPost ? commentOnDiff : undefined}
+          revealFilePath={revealFilePath}
+          revealChangesKey={revealChangesKey}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+        />
+      )}
     </div>
   )
 }

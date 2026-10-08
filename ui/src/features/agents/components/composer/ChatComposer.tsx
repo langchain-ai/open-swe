@@ -97,6 +97,8 @@ export interface RestoredDraft {
   key: number
   text: string
   images: Array<ImageChunk>
+  /** Replace the previous suggested prompt if it is still exactly as suggested, instead of stacking on it. */
+  replacesSuggestion?: boolean
 }
 
 export interface ChatComposerProps {
@@ -410,11 +412,17 @@ export const ChatComposer = memo(function ChatComposer({
   }, [])
 
   const restoredKeyRef = useRef<number | null>(null)
+  const lastSuggestionRef = useRef<string | null>(null)
   useEffect(() => {
     if (!restoreDraft || restoredKeyRef.current === restoreDraft.key) return
     restoredKeyRef.current = restoreDraft.key
     const current = editorRef.current?.readSnapshot()?.value ?? value
-    const next = [restoreDraft.text, current]
+    const untouched =
+      restoreDraft.replacesSuggestion &&
+      current.trim() === (lastSuggestionRef.current ?? "").trim()
+    if (restoreDraft.replacesSuggestion)
+      lastSuggestionRef.current = restoreDraft.text
+    const next = [restoreDraft.text, untouched ? "" : current]
       .filter((part) => part.trim().length > 0)
       .join("\n\n")
     applyPrompt(next, next.length)

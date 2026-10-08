@@ -56,37 +56,33 @@ export function Header({
   pr,
   leftInset,
   compactRail,
+  navigatorShown,
 }: {
   pr: PullRequestRef
   leftInset: string
   compactRail: boolean
+  navigatorShown: boolean
 }) {
-  const detail = useQuery(reviewQueries.detail(pr)).data
-  const status = useQuery({
-    ...reviewQueries.status(pr),
-    enabled: detail?.pr.state === "open",
-  }).data
+  const detailQuery = useQuery(reviewQueries.detail(pr))
+  const detail = detailQuery.data
+  const status = useQuery(reviewQueries.status(pr)).data
   const diff = useQuery(reviewQueries.diff(pr)).data
   const viewedCount = useReviewPage(
     (state) =>
       diff?.files.filter((file) => state.viewed.has(file.path)).length ?? 0
   )
+  const entryOrder = useReviewPage((state) => state.entryOrder)
   const reviewOpen = useReviewPage((state) => state.reviewOpen)
   const reviewVerdict = useReviewPage((state) => state.reviewVerdict)
   const setReviewOpen = useReviewPage((state) => state.setReviewOpen)
   const toggleNavigator = useReviewPage((state) => state.toggleNavigator)
-  const navigatorOpen = useReviewPage((state) => state.navigatorOpen)
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const jumpTo = useReviewPage((state) => state.jumpTo)
+  const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
   const { openShortcutReference } = useAppCommandControls()
   const githubUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`
-  const state = detail ? pillState(detail, status?.draft) : "open"
+  const state = detail ? pillState(detail, status?.draft) : null
   const files = diff?.files ?? []
-  const nextUnviewed = () => {
-    const viewed = useReviewPage.getState().viewed
-    const next = files.find((file) => !viewed.has(file.path))
-    if (next) jumpTo({ kind: "file", path: next.path })
-  }
 
   return (
     <header
@@ -105,28 +101,34 @@ export function Header({
       </Link>
       <button
         type="button"
-        aria-label={navigatorOpen ? "Hide files" : "Show files"}
-        aria-pressed={navigatorOpen}
+        aria-label={navigatorShown ? "Hide files" : "Show files"}
+        aria-pressed={navigatorShown}
         onClick={toggleNavigator}
-        className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground lg:flex"
+        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <SidebarSimpleIcon className="size-4" />
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span
-            className={cn(
-              "inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium capitalize max-sm:px-1.5",
-              pill[state].className
-            )}
-          >
-            {state === "merged" ? (
-              <GitMergeIcon weight="bold" className="size-3" />
-            ) : (
-              <GitPullRequestIcon weight="bold" className="size-3" />
-            )}
-            <span className="max-sm:sr-only">{pill[state].label}</span>
-          </span>
+          {state ? (
+            <span
+              className={cn(
+                "inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium capitalize max-sm:px-1.5",
+                pill[state].className
+              )}
+            >
+              {state === "merged" ? (
+                <GitMergeIcon weight="bold" className="size-3" />
+              ) : (
+                <GitPullRequestIcon weight="bold" className="size-3" />
+              )}
+              <span className="max-sm:sr-only">{pill[state].label}</span>
+            </span>
+          ) : (
+            !detailQuery.isError && (
+              <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
+            )
+          )}
           <h1 className="min-w-0 truncate text-[15px] leading-6 font-semibold tracking-[-0.01em]">
             <a
               href={githubUrl}
@@ -147,16 +149,18 @@ export function Header({
           </h1>
         </div>
         {detail ? (
-          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
             <a
               href={`https://github.com/${pr.owner}/${pr.repo}`}
               target="_blank"
               rel="noreferrer"
-              className="shrink-0 hover:text-foreground hover:underline"
+              className="shrink-0 hover:text-foreground hover:underline max-lg:hidden"
             >
               {pr.owner}/{pr.repo}
             </a>
-            <span aria-hidden>·</span>
+            <span aria-hidden className="max-lg:hidden">
+              ·
+            </span>
             <a
               href={`https://github.com/${detail.pr.author?.login ?? ""}`}
               target="_blank"
@@ -165,7 +169,13 @@ export function Header({
             >
               {detail.pr.author?.login ?? "unknown"}
             </a>
-            <span className="shrink-0">wants to merge into</span>
+            <span className="shrink-0">
+              {state === "merged"
+                ? "merged into"
+                : state === "closed"
+                  ? "wanted to merge into"
+                  : "wants to merge into"}
+            </span>
             <a
               href={`https://github.com/${pr.owner}/${pr.repo}/tree/${detail.pr.base_ref}`}
               target="_blank"
@@ -174,16 +184,16 @@ export function Header({
             >
               {detail.pr.base_ref}
             </a>
-            <span className="shrink-0">from</span>
+            <span className="shrink-0 max-md:hidden">from</span>
             <button
               type="button"
-              title="Copy the branch name"
+              title={`Copy ${detail.pr.head_ref}`}
               onClick={() =>
                 void navigator.clipboard
                   .writeText(detail.pr.head_ref)
                   .then(() => toast.success("Copied the branch name"))
               }
-              className="group/branch flex min-w-0 items-center gap-1 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground"
+              className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-1 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground max-md:hidden"
             >
               <span className="truncate">{detail.pr.head_ref}</span>
               <CopyIcon className="size-3 shrink-0 opacity-0 group-hover/branch:opacity-100" />
@@ -191,10 +201,9 @@ export function Header({
             <button
               type="button"
               title="Go to the changes"
-              onClick={() => {
-                const first = files[0]
-                if (first) jumpTo({ kind: "file", path: first.path })
-              }}
+              onClick={() =>
+                jumpTo({ kind: "entry", id: entryOrder[0]?.id ?? "" })
+              }
               className="hidden shrink-0 rounded px-0.5 font-mono tabular-nums hover:bg-accent sm:inline"
             >
               <span className="text-success-foreground">
@@ -209,7 +218,7 @@ export function Header({
                 href={githubUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="hidden shrink-0 hover:text-foreground hover:underline md:inline"
+                className="hidden shrink-0 hover:text-foreground hover:underline xl:inline"
               >
                 · opened{" "}
                 {formatRelativeTime(new Date(detail.pr.created_at).getTime())}
@@ -223,7 +232,7 @@ export function Header({
       {files.length > 0 && (
         <button
           type="button"
-          onClick={nextUnviewed}
+          onClick={jumpToUnviewed}
           title="Go to the next file you haven't viewed"
           className="hidden shrink-0 items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground tabular-nums hover:bg-accent hover:text-foreground md:flex"
         >

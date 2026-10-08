@@ -53,7 +53,7 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
   const diffStyle = useReviewPage((state) => state.diffStyle)
   const setDiffStyle = useReviewPage((state) => state.setDiffStyle)
   const viewed = useReviewPage((state) => state.viewed)
-  const jumpTo = useReviewPage((state) => state.jumpTo)
+  const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
   const files = diff.data?.files ?? []
   const linesLeft = files
     .filter((file) => !viewed.has(file.path))
@@ -80,10 +80,7 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
               <button
                 type="button"
                 title="Go to the next file you haven't viewed"
-                onClick={() => {
-                  const next = files.find((file) => !viewed.has(file.path))
-                  if (next) jumpTo({ kind: "file", path: next.path })
-                }}
+                onClick={jumpToUnviewed}
                 className="underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground"
               >
                 {linesLeft.toLocaleString()} lines left

@@ -6,6 +6,7 @@ import type {
   ReviewLineRange,
   ReviewWalkthroughFile,
 } from "@/lib/api"
+import { hashFileContents } from "@/features/agents/utils/diffUtils"
 
 function overlaps(
   start: number,
@@ -68,14 +69,38 @@ export function walkthroughFileDiff(
 ): FileDiffMetadata | null {
   if (lines.added.length === 0 && lines.deleted.length === 0) return null
   if (!file.patch) return null
-  const full = getSingularPatch(file.patch)
+  // Reusing the object keeps its hydrated contents across re-renders and order switches.
+  const key = JSON.stringify([lines.added, lines.deleted])
+  let cache = slices.get(file)
+  if (!cache) {
+    cache = new Map()
+    slices.set(file, cache)
+  }
+  if (!cache.has(key)) cache.set(key, sliceFileDiff(file, file.patch, lines))
+  return cache.get(key) ?? null
+}
+
+const slices = new WeakMap<
+  ReviewDiffFile,
+  Map<string, FileDiffMetadata | null>
+>()
+
+function sliceFileDiff(
+  file: ReviewDiffFile,
+  patch: string,
+  lines: ReviewWalkthroughFile
+): FileDiffMetadata | null {
+  const full = getSingularPatch(patch)
   const kept = full.hunks.filter(
     (hunk) =>
       overlaps(hunk.additionStart, hunk.additionCount, lines.added) ||
       overlaps(hunk.deletionStart, hunk.deletionCount, lines.deleted)
   )
   if (kept.length === 0 || kept.length === full.hunks.length) return null
-  return getSingularPatch(
+  const slice =
     patchHeader(file) + kept.map((hunk) => hunkPatch(full, hunk)).join("")
-  )
+  const sliced = getSingularPatch(slice)
+  // Hydration keys its highlight cache on this; without it a slice reuses the whole file's rows.
+  sliced.cacheKey = `${file.path}:slice:${hashFileContents(slice)}`
+  return sliced
 }

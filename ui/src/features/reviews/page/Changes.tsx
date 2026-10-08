@@ -37,6 +37,7 @@ import { useAskAboutLines } from "./askAboutLines"
 import { ChangesToolbar } from "./ChangesToolbar"
 import {
   buildEntries,
+  containsLine,
   entryNotes,
   isRenderable,
   notesSignature,
@@ -113,20 +114,6 @@ function toPierreSide(side: "LEFT" | "RIGHT") {
   return side === "LEFT" ? "deletions" : "additions"
 }
 
-function containsLine(
-  diff: FileDiffMetadata,
-  line: number,
-  side: "LEFT" | "RIGHT"
-): boolean {
-  return diff.hunks.some((hunk) =>
-    side === "LEFT"
-      ? line >= hunk.deletionStart &&
-        line < hunk.deletionStart + hunk.deletionCount
-      : line >= hunk.additionStart &&
-        line < hunk.additionStart + hunk.additionCount
-  )
-}
-
 /** The centre column: the overview, then every file, in one virtualized scroll. */
 export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const diff = useQuery(reviewQueries.diff(pr))
@@ -155,6 +142,14 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const entryMap = useMemo(
     () => new Map(entries.map((entry) => [entry.id, entry])),
     [entries]
+  )
+  const setEntryOrder = useReviewPage((state) => state.setEntryOrder)
+  useEffect(
+    () =>
+      setEntryOrder(
+        entries.map((entry) => ({ id: entry.id, path: entry.file.path }))
+      ),
+    [entries, setEntryOrder]
   )
   const draftComments = drafts?.comments
   const sources = useMemo<NoteSources>(
@@ -275,6 +270,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     [pr]
   )
 
+  const highlightTimer = useRef(0)
   const scrollTo = useCallback(
     (target: DiffTarget) => {
       const view = handle.current
@@ -322,15 +318,17 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           align: "center",
           behavior: "smooth",
         })
+        const start = Math.min(target.start ?? target.line, target.line)
         view.setSelectedLines({
           id: entry.id,
-          range: { start: target.line, end: target.line, side },
+          range: { start, end: target.line, side },
         })
-        window.setTimeout(() => {
+        window.clearTimeout(highlightTimer.current)
+        highlightTimer.current = window.setTimeout(() => {
           const current = view.getSelectedLines()
-          if (current?.id === entry.id && current.range.start === target.line)
+          if (current?.id === entry.id && current.range.end === target.line)
             view.clearSelectedLines()
-        }, 1800)
+        }, 2400)
       })
     },
     [entries, toggleCollapsed]
@@ -344,6 +342,15 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       }),
     [scrollTo]
   )
+
+  // Switching reading order keeps you on the file you were reading.
+  const shownOrder = useRef(order)
+  useEffect(() => {
+    if (shownOrder.current === order) return
+    shownOrder.current = order
+    const path = useReviewPage.getState().activePath
+    if (path) scrollTo({ kind: "file", path })
+  }, [order, scrollTo])
 
   // The file under the top edge, read from what is actually painted, so it
   // stays right while items above are still being measured.

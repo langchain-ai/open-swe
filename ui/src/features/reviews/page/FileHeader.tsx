@@ -13,7 +13,11 @@ import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { AgentMark } from "./AgentMark"
 import { isRenderable } from "./diffEntries"
 import { useEntry, FILE_HEADER_HEIGHT } from "./entries"
-import { findingGroupColor, isAnchored } from "./findings"
+import {
+  findingGroupColor,
+  isAnchored,
+  threadsNeedingAttention,
+} from "./findings"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { useReviewPage } from "./store"
 
@@ -30,7 +34,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
   const path = entry?.file.path ?? ""
   const viewed = useReviewPage((state) => state.viewed.has(path))
   const flipped = useReviewPage((state) => state.collapsed.has(path))
-  const toggleViewed = useReviewPage((state) => state.toggleViewed)
+  const markViewed = useReviewPage((state) => state.markViewed)
   const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const askInChat = useReviewPage((state) => state.askInChat)
   const jumpTo = useReviewPage((state) => state.jumpTo)
@@ -45,13 +49,10 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
     (finding) =>
       finding.file === path && finding.status === "open" && isAnchored(finding)
   )
-  const openThreads = (conversation?.threads ?? []).filter(
-    (thread) =>
-      thread.path === path &&
-      !thread.resolved &&
-      !thread.outdated &&
-      thread.line !== null
-  )
+  const openThreads = threadsNeedingAttention(
+    conversation?.threads ?? [],
+    detail?.findings ?? []
+  ).filter((thread) => thread.path === path)
   const threads = openThreads.length
   const slash = path.lastIndexOf("/")
   const dir = slash >= 0 ? path.slice(0, slash + 1) : ""
@@ -126,7 +127,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
             .writeText(path)
             .then(() => toast.success("Copied the path"))
         }
-        className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground group-hover/header:flex hover:text-foreground"
+        className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground group-focus-within/header:flex group-hover/header:flex hover:text-foreground"
       >
         <CopyIcon className="size-3" />
       </button>
@@ -154,6 +155,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
               kind: "line",
               path,
               line: worst.end_line ?? 1,
+              start: worst.start_line ?? undefined,
               side: worst.side,
             })
           }}
@@ -197,7 +199,8 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       <button
         type="button"
         onClick={() => askInChat(`About \`${path}\` in this pull request: `)}
-        className="hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground group-hover/header:flex hover:bg-accent hover:text-foreground"
+        aria-label={`Ask Open SWE about ${path}`}
+        className="hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground group-focus-within/header:flex group-hover/header:flex hover:bg-accent hover:text-foreground"
       >
         <AgentMark className="size-3" />
         Ask
@@ -207,7 +210,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         target="_blank"
         rel="noreferrer"
         aria-label={`View ${path} on GitHub`}
-        className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground group-hover/header:flex hover:bg-accent hover:text-foreground"
+        className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground group-focus-within/header:flex group-hover/header:flex hover:bg-accent hover:text-foreground"
       >
         <ArrowSquareOutIcon className="size-3.5" />
       </a>
@@ -215,7 +218,8 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         type="button"
         role="checkbox"
         aria-checked={viewed}
-        onClick={() => toggleViewed(path)}
+        aria-label={`Viewed ${path}`}
+        onClick={() => markViewed(id)}
         className={cn(
           "flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors",
           viewed
