@@ -136,9 +136,7 @@ function localCallbackUrl(navigationUrl, backendUrl) {
     if (
       !["http:", "https:"].includes(target.protocol) ||
       target.origin !== backend.origin ||
-      !/^\/dashboard\/api\/(?:auth|slack)\/callback$/.test(
-        target.pathname,
-      )
+      !/^\/dashboard\/api\/(?:auth|slack)\/callback$/.test(target.pathname)
     ) {
       return null;
     }
