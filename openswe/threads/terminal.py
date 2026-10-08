@@ -10,6 +10,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisconnect
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.oauth import decode_terminal_ticket, issue_terminal_ticket
@@ -52,6 +53,7 @@ def _cloud_terminal_session(websocket: WebSocket, thread_id: str) -> dict[str, A
 
 
 @router.post("/threads/{thread_id}/terminal/connect")
+@audit_endpoint
 async def api_thread_terminal_connection(
     thread_id: str,
     response: Response,

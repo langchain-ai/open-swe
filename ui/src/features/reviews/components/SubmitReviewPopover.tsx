@@ -3,7 +3,7 @@ import { CaretDownIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import type { PullRequestReviewEvent } from "@/lib/api"
+import type { OpenPullRequest, PullRequestReviewEvent } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   Popover,
@@ -13,7 +13,16 @@ import {
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
+import { optimisticUpdate } from "@/lib/optimistic"
+import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
+import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
+import {
+  standingReview,
+  withSubmittedReview,
+} from "@/features/reviews/lib/reviewers"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { usePullRequestStatus } from "@/features/reviews/lib/usePullRequestStatus"
 import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
 
 const VERDICTS: ReadonlyArray<{
@@ -49,12 +58,20 @@ export function SubmitReviewPopover({
   number: number
 }) {
   const queryClient = useQueryClient()
+  const session = useSession()
+  const login = session.data?.login
   const pending = usePendingReview(owner, repo, number)
   const pendingCount = pending.comments.length
+  const status = usePullRequestStatus(`${owner}/${repo}`, number)
+  const approved = standingReview(status.data, login) === "approved"
   const [open, setOpen] = useState(false)
   const [event, setEvent] = useState<PullRequestReviewEvent>("COMMENT")
   const [body, setBody] = useState("")
   const needsBody = event !== "APPROVE" && pendingCount === 0
+  const statusKey = pullRequestStatusQuery(login ?? "", {
+    repo: `${owner}/${repo}`,
+    number,
+  }).queryKey
   const submit = useMutation({
     mutationFn: () =>
       api.submitPullRequestReview(owner, repo, number, {
@@ -62,6 +79,23 @@ export function SubmitReviewPopover({
         body: body.trim(),
       }),
     meta: { errorTitle: "Couldn't submit the review", silent: true },
+    onMutate: async () => {
+      if (!login) return {}
+      const undo = await optimisticUpdate<OpenPullRequest | null>(
+        queryClient,
+        statusKey,
+        (current) =>
+          withSubmittedReview(
+            current,
+            { login, avatarUrl: session.data?.avatar_url ?? null },
+            event
+          )
+      )
+      return { undo }
+    },
+    onError: (_error, _variables, context) => context?.undo?.(),
+    onSettled: () =>
+      void queryClient.invalidateQueries({ queryKey: statusKey, exact: true }),
     onSuccess: (result) => {
       setOpen(false)
       setBody("")
@@ -139,30 +173,40 @@ export function SubmitReviewPopover({
           />
           <fieldset className="mt-3 flex flex-col gap-2">
             <legend className="sr-only">Review verdict</legend>
-            {VERDICTS.map((verdict) => (
-              <label
-                key={verdict.event}
-                className="flex cursor-pointer items-start gap-2 text-xs"
-              >
-                <input
-                  type="radio"
-                  name="review-verdict"
-                  value={verdict.event}
-                  checked={event === verdict.event}
-                  onChange={() => setEvent(verdict.event)}
-                  disabled={submit.isPending}
-                  className="mt-0.5 accent-primary"
-                />
-                <span>
-                  <span className="font-medium text-foreground">
-                    {verdict.label}
+            {VERDICTS.map((verdict) => {
+              const alreadyGiven = approved && verdict.event === "APPROVE"
+              return (
+                <label
+                  key={verdict.event}
+                  className={cn(
+                    "flex items-start gap-2 text-xs",
+                    alreadyGiven
+                      ? "cursor-not-allowed opacity-60"
+                      : "cursor-pointer"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="review-verdict"
+                    value={verdict.event}
+                    checked={event === verdict.event}
+                    onChange={() => setEvent(verdict.event)}
+                    disabled={submit.isPending || alreadyGiven}
+                    className="mt-0.5 accent-primary"
+                  />
+                  <span>
+                    <span className="font-medium text-foreground">
+                      {verdict.label}
+                    </span>
+                    <span className="block text-muted-foreground">
+                      {alreadyGiven
+                        ? "You approved these changes."
+                        : verdict.description}
+                    </span>
                   </span>
-                  <span className="block text-muted-foreground">
-                    {verdict.description}
-                  </span>
-                </span>
-              </label>
-            ))}
+                </label>
+              )
+            })}
           </fieldset>
           {submit.error && (
             <p className="mt-2 text-xs break-words text-destructive">

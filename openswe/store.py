@@ -41,6 +41,7 @@ class StoreEntry(NamedTuple):
 
     namespace: list[str] | None
     value: dict[str, Any]
+    key: str = ""
 
 
 _DEFAULT_PAGE_SIZE = 100
@@ -72,6 +73,11 @@ def _unwrap(item: Any) -> dict[str, Any] | None:
         return None
     value = item.get("value") if isinstance(item, dict) else getattr(item, "value", None)
     return value if isinstance(value, dict) else None
+
+
+def _item_key(item: Any) -> str:
+    key = item.get("key") if isinstance(item, dict) else getattr(item, "key", None)
+    return key if isinstance(key, str) else ""
 
 
 def _item_namespace(item: Any) -> list[str] | None:
@@ -163,7 +169,7 @@ async def search_all_entries(
         if not items:
             return entries
         entries.extend(
-            StoreEntry(_item_namespace(item), value)
+            StoreEntry(_item_namespace(item), value, _item_key(item))
             for item in items
             if (value := _unwrap(item)) is not None
         )

@@ -1,7 +1,9 @@
 import { useQueries } from "@tanstack/react-query"
 
-import { api, type OpenPullRequest } from "@/lib/api"
+import type { OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
+
+import { leftOpenList, pullRequestStatusQuery } from "./cache"
 
 /**
  * Fill in the lightweight listing rows with their per-PR detail reads.
@@ -17,8 +19,7 @@ export function usePullRequestDetails(
 ) {
   const detailQueries = useQueries({
     queries: requested.map((pr) => ({
-      queryKey: ["my-pr-details", login, pr.repo, pr.number],
-      queryFn: () => api.myPullRequestDetails(pr.repo, pr.number),
+      ...pullRequestStatusQuery(login, pr),
       enabled: pr.detailsLoading === true,
       ...expiresInBrowser,
       refetchOnWindowFocus: false,
@@ -31,7 +32,7 @@ export function usePullRequestDetails(
       (row) => row.repo === pr.repo && row.number === pr.number
     )
     const detail = detailQueries[index]
-    if (detail?.data === null) return []
+    if (leftOpenList(detail?.data)) return []
     if (detail?.data)
       return [
         {

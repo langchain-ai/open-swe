@@ -9,7 +9,7 @@ the run the token names.
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Final, Literal, TypedDict
+from typing import Final, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -20,7 +20,8 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from openswe.github.thread_token import resolve_thread_github_token
 from openswe.middleware import check_message_queue_before_model, settle_review_check_on_exit
 from openswe.middleware.check_message_queue import LinearNotifyState
-from openswe.prompts import load_prompt, prompt
+from openswe.prompts import prompt
+from openswe.remote_runtime.server import ToolResult, UnknownHookError
 from openswe.remote_runtime.tokens import RemoteRun
 from openswe.review.diff import compute_diff_line_set, review_diff_path, review_diff_range
 from openswe.reviewer import (
@@ -80,15 +81,6 @@ class RuntimeSpec(TypedDict):
 
     sandbox_tools: list[ToolSpec]
     subagent: SubagentSpec
-
-
-class UnknownHookError(LookupError):
-    """A remote graph called a run hook this backend does not serve."""
-
-
-class ToolResult(BaseModel):
-    status: Literal["success", "error"]
-    content: JsonValue
 
 
 class ModelSpec(BaseModel):
@@ -155,7 +147,7 @@ def runtime_spec() -> RuntimeSpec:
         ],
         "subagent": {
             "name": "reviewer",
-            "description": load_prompt("reviewer/subagent-description.md"),
+            "description": prompt("reviewer/subagent-description"),
             "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
         },
     }

@@ -3,9 +3,11 @@
 import logging
 from typing import Any
 
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.review_scout.git import OTHER_TITLE, ScoutCheckout, ScoutGitError
 from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
+from openswe.ui_invalidations import Topic
 
 logger = logging.getLogger(__name__)
 
@@ -45,4 +47,8 @@ async def commit_walkthrough_step(
         return {"success": False, "error": str(exc)}
     if sha is None:
         return {"success": False, "error": "nothing is staged; stage this step's changes first"}
+    if cfg.repo is not None and cfg.pr_number is not None:
+        await Topic.PULL_REQUESTS.invalidate(
+            key=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
+        )
     return {"success": True, "commit": sha}

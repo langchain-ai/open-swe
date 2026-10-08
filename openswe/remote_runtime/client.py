@@ -10,7 +10,6 @@ from pydantic import JsonValue, TypeAdapter
 from openswe.config import ENV
 from openswe.remote_runtime.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.run_config import RunConfig
-from openswe.sandboxes.lifecycle import SandboxCreateConfig
 
 _configurable = TypeAdapter(dict[str, JsonValue])
 
@@ -65,6 +64,9 @@ async def remote_run_context(
             configurable=_configurable.validate_python(configurable),
         )
     )
+    # The webapp must not import the agent stack at startup.
+    from openswe.sandboxes.lifecycle import SandboxCreateConfig
+
     cfg = RunConfig.parse(configurable)
     sandbox = await SandboxCreateConfig.resolve(cfg.workspace_slug)
     context: RemoteRunContext = {"run_token": token}

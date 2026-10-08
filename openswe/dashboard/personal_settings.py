@@ -5,17 +5,17 @@ from collections.abc import Mapping
 from openswe.dashboard.feature_flags import feature_flag_names
 from openswe.dashboard.options import default_model_pair
 from openswe.dashboard.profiles import (
-    PROFILES_NAMESPACE,
+    PROFILES,
     ProfileUpdate,
     get_profile,
     normalize_profile_for_response,
 )
 from openswe.dashboard.user_preferences import (
-    USER_PREFERENCES_NAMESPACE,
+    USER_PREFERENCES,
     UserPreferencesUpdate,
     set_user_preferences,
 )
-from openswe.store import get_value, now_iso, put_value
+from openswe.store import now_iso
 from openswe.users import User, UserPreferencesPatch
 
 SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
@@ -99,7 +99,7 @@ async def patch_personal_settings(
                     if validated[key] != profile.get(key):
                         profile_patch[key] = validated[key]
     if preferences_patch:
-        existing = await get_value(USER_PREFERENCES_NAMESPACE, login) or {}
+        existing = await USER_PREFERENCES.get(login) or {}
         preferences = UserPreferencesUpdate.model_validate(
             {
                 "default_visibility": "private",
@@ -114,10 +114,8 @@ async def patch_personal_settings(
             raise ValueError("No Open SWE user record for this login yet")
         result.update({key: getattr(saved_sql, key) for key in sql_patch})
     if profile is not None:
-        await put_value(
-            PROFILES_NAMESPACE,
-            login,
-            {**profile, **profile_patch, "login": login, "updated_at": now_iso()},
+        await PROFILES.put(
+            login, {**profile, **profile_patch, "login": login, "updated_at": now_iso()}
         )
         result.update(profile_patch)
     if preferences is not None:

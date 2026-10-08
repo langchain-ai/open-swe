@@ -23,7 +23,7 @@ from openswe.github.ci import (
     list_commit_statuses,
     unreported_required_checks,
 )
-from openswe.github.http import GitHubClient
+from openswe.github.http import GitHubClient, or_none
 from openswe.github.pull_request_status import Mergeability
 from openswe.github.pull_requests import PullRequestPayload
 
@@ -145,7 +145,7 @@ async def review_authors(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int
 ) -> set[str] | None:
     """Lowercased logins of everyone who submitted a review, comment-only ones included."""
-    reviews = await GitHubClient(client).repo(owner, repo).pull_request(number).reviews()
+    reviews = await or_none(GitHubClient(client).repo(owner, repo).pull_request(number).reviews())
     if reviews is None:
         return None
     authors: set[str] = set()
@@ -161,7 +161,7 @@ async def latest_review_states(
     client: httpx2.AsyncClient, owner: str, repo: str, number: int, author: str
 ) -> dict[str, str] | None:
     """Each non-author reviewer's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state."""
-    reviews = await GitHubClient(client).repo(owner, repo).pull_request(number).reviews()
+    reviews = await or_none(GitHubClient(client).repo(owner, repo).pull_request(number).reviews())
     if reviews is None:
         return None
     return _latest_reviews_by_user(reviews, author)
@@ -222,7 +222,7 @@ async def assess_readiness(
     async with GitHubClient.connect(token=token) as github:
         pull_request = github.repo(owner, repo).pull_request(pr_number)
         threads = await pull_request.unresolved_threads()
-        reviews = await pull_request.reviews()
+        reviews = await or_none(pull_request.reviews())
         mergeability = await pull_request.mergeability()
     if threads is None or reviews is None:
         return None

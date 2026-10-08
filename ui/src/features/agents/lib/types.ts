@@ -63,7 +63,7 @@ export type AcpToolKind =
   | "slack"
   | "linear"
   | "sql"
-  | "service-connection"
+  | "managed-tools"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
@@ -543,6 +543,8 @@ export interface AgentThread {
   sandboxId?: string | null
   /** For a thread bridged to someone's machine: which app serves it. */
   sandboxBridgeClient?: "cli" | "desktop" | null
+  /** Whether that machine is serving the thread's checkout right now; null in lists. */
+  sandboxBridgeOnline?: boolean | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

@@ -157,12 +157,14 @@ def readiness_prompt(
 ) -> tuple[str, list[Block]]:
     """The full author-only draft card."""
     pr = approval.pull_request
-    text = f"Mark {pr.url} ready for review so someone else can approve it."
+    text = f"Review {pr.url} carefully yourself before clicking Mark ready for review."
     return text, [
         *_header(approval, title, author),
         divider(),
         *_voting_diff(approval, files, diff_image_id),
-        section("*Draft.* Mark it ready for review to request an approval in the thread."),
+        section(
+            f"*Draft.* Review <{pr.url}|the pull request> carefully yourself before clicking *Mark ready for review* to request an approval in the thread."
+        ),
         actions(_ready_button(approval), _dismiss_button(approval)),
     ]
 
@@ -260,3 +262,20 @@ def closed_card(
         context(_vote_summary(approval, author)),
     ]
     return f"{outcome} — {pr.url}", blocks
+
+
+def author_status(
+    approval: HumanReviewRequest, outcome: str, *, origin_url: str | None = None
+) -> tuple[str, list[Block]]:
+    """The persistent author DM record, without a diff or actions."""
+    pr = approval.pull_request
+    text = f"Expedited review: {outcome} — {pr.url}"
+    blocks: list[Block] = [
+        section(
+            f"*Expedited review: {outcome}*\n"
+            f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> {escape(pr.title)}"
+        )
+    ]
+    if origin_url:
+        blocks.append(context(f"Requested from <{origin_url}|this thread>."))
+    return text, blocks

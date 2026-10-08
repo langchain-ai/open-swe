@@ -17,12 +17,14 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
+from urllib.parse import quote
 
 import httpx2
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient
@@ -197,21 +199,101 @@ async def github_request(
     raise last_exc or httpx2.HTTPError("Max retries exceeded")
 
 
+class GitHubSignInRequired(Exception):
+    """The person has no usable GitHub authorization and must sign in again."""
+
+    def __init__(self, login: str) -> None:
+        super().__init__(f"GitHub sign-in required for {login}")
+        self.login = login
+
+
+class GitHubAppUnavailable(Exception):
+    """No GitHub App installation token can be minted for the request."""
+
+
 class GitHubClient:
     """GitHub's REST and GraphQL APIs over one HTTP client, with ``github_request``'s retries.
 
-    Every call raises ``httpx2.HTTPError`` when GitHub fails or refuses it, and
-    ``ValueError`` when it answers with something other than the expected shape.
+    Open one as the person or the App it acts for: ``as_user`` or ``as_app``.
+    Every call raises ``GitHubError`` when GitHub refuses it, another
+    ``httpx2.HTTPError`` when it cannot be reached, and ``ValueError`` when it
+    answers with something other than the expected shape.
     """
 
-    def __init__(self, http: httpx2.AsyncClient) -> None:
+    def __init__(self, http: httpx2.AsyncClient, *, login: str | None = None) -> None:
+        """``login`` is the person whose OAuth token ``http`` carries, if it is one."""
         self.http = http
+        self.login = login
+        self._refresh: asyncio.Future[str] | None = None
 
     @classmethod
     @asynccontextmanager
     async def connect(
         cls, *, token: str | None = None, timeout: httpx2.Timeout | float | None = None
     ) -> AsyncIterator[Self]:
+        async with github_client(token=token, timeout=timeout) as http:
+            yield cls(http)
+
+    @classmethod
+    @asynccontextmanager
+    async def as_user(
+        cls, login: str, *, timeout: httpx2.Timeout | float | None = None
+    ) -> AsyncIterator[Self]:
+        """Acts with ``login``'s own GitHub permissions; a rejected token is refreshed once.
+
+        Raises ``GitHubSignInRequired`` when ``login`` has no usable authorization,
+        including when GitHub still rejects the refreshed token.
+        """
+        # profiles imports this module.
+        from openswe.dashboard.profiles import get_valid_access_token
+
+        token = await get_valid_access_token(login)
+        if not token:
+            raise GitHubSignInRequired(login)
+        async with github_client(token=token, timeout=timeout) as http:
+            yield cls(http, login=login)
+
+    async def _refreshed_token(self, login: str) -> str:
+        """One refresh per client, shared by every request that GitHub rejected."""
+        # profiles imports this module.
+        from openswe.dashboard.profiles import get_valid_access_token
+
+        async def refresh() -> str:
+            if token := await get_valid_access_token(login, force_refresh=True):
+                return token
+            raise GitHubSignInRequired(login)
+
+        if self._refresh is None:
+            self._refresh = asyncio.ensure_future(refresh())
+        return await asyncio.shield(self._refresh)
+
+    @classmethod
+    @asynccontextmanager
+    async def as_app(
+        cls,
+        owner: str | None = None,
+        repo: str | None = None,
+        *,
+        timeout: httpx2.Timeout | float | None = None,
+    ) -> AsyncIterator[Self]:
+        """Acts as the Open SWE GitHub App: its installation on ``owner/repo``, else the default one.
+
+        Raises ``GitHubAppUnavailable`` when no installation token can be minted.
+        """
+        # app imports this module.
+        from openswe.github.app import (
+            get_github_app_installation_id_for_repo,
+            get_github_app_installation_token,
+        )
+
+        installation_id = None
+        if owner is not None and repo is not None:
+            installation_id = await get_github_app_installation_id_for_repo(owner, repo)
+            if installation_id is None:
+                raise GitHubAppUnavailable(f"no GitHub App installation on {owner}/{repo}")
+        token = await get_github_app_installation_token(installation_id=installation_id)
+        if not token:
+            raise GitHubAppUnavailable("GitHub App token unavailable")
         async with github_client(token=token, timeout=timeout) as http:
             yield cls(http)
 
@@ -222,14 +304,34 @@ class GitHubClient:
         """``path`` is relative to the REST API root, or an absolute URL."""
         url = path if "://" in path else f"{GITHUB_API_BASE}/{path}"
         response = await github_request(self.http, method, url, **kwargs)
-        response.raise_for_status()
+        if response.status_code == 401 and self.login is not None:
+            self.http.headers.update(github_headers(await self._refreshed_token(self.login)))
+            response = await github_request(self.http, method, url, **kwargs)
+            if response.status_code == 401:
+                raise GitHubSignInRequired(self.login)
+        if not response.is_success:
+            raise GitHubError(response)
         return response
 
     async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
         return (await self.request("GET", path, params=params)).json()
 
+    async def post(self, path: str, json: Mapping[str, object]) -> object:
+        return _json_or_none(await self.request("POST", path, json=dict(json)))
+
+    async def patch(self, path: str, json: Mapping[str, object]) -> object:
+        return _json_or_none(await self.request("PATCH", path, json=dict(json)))
+
+    async def delete(self, path: str) -> None:
+        await self.request("DELETE", path)
+
     async def pages(
-        self, path: str, *, key: str | None = None, params: Mapping[str, str] | None = None
+        self,
+        path: str,
+        *,
+        key: str | None = None,
+        params: Mapping[str, str] | None = None,
+        max_pages: int | None = None,
     ) -> list[dict[str, Any]]:
         """Every item of a paginated list; ``key`` names the list inside each page's object."""
         items: list[dict[str, Any]] = []
@@ -244,12 +346,17 @@ class GitHubClient:
             if not isinstance(batch, list):
                 raise ValueError(f"GitHub answered {path} without a list")
             items.extend(item for item in batch if isinstance(item, dict))
-            if len(batch) < _PAGE_SIZE:
+            if len(batch) < _PAGE_SIZE or page == max_pages:
                 return items
             page += 1
 
-    async def graphql(self, query: str, variables: Mapping[str, object]) -> Mapping[str, Any]:
-        """The response's ``data``; GraphQL errors raise ``GraphQLError``."""
+    async def graphql(
+        self, query: str, variables: Mapping[str, object], *, partial: bool = False
+    ) -> Mapping[str, Any]:
+        """The response's ``data``; GraphQL errors raise ``GraphQLError`` unless ``partial``.
+
+        With ``partial``, fields GitHub could not resolve come back null beside the ones it did.
+        """
         payload = (
             await self.request(
                 "POST", GITHUB_GRAPHQL, json={"query": query, "variables": dict(variables)}
@@ -257,7 +364,7 @@ class GitHubClient:
         ).json()
         if not isinstance(payload, Mapping):
             raise ValueError("GitHub answered GraphQL without an object")
-        if payload.get("errors"):
+        if payload.get("errors") and not partial:
             raise GraphQLError(payload["errors"])
         data = payload.get("data")
         if not isinstance(data, Mapping):
@@ -289,10 +396,26 @@ class RepoClient:
     async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
         return await self.github.get(f"repos/{self.full_name}/{path}", params)
 
+    async def post(self, path: str, json: Mapping[str, object]) -> object:
+        return await self.github.post(f"repos/{self.full_name}/{path}", json)
+
+    async def patch(self, path: str, json: Mapping[str, object]) -> object:
+        return await self.github.patch(f"repos/{self.full_name}/{path}", json)
+
+    async def delete(self, path: str) -> None:
+        await self.github.delete(f"repos/{self.full_name}/{path}")
+
     async def pages(
-        self, path: str, *, key: str | None = None, params: Mapping[str, str] | None = None
+        self,
+        path: str,
+        *,
+        key: str | None = None,
+        params: Mapping[str, str] | None = None,
+        max_pages: int | None = None,
     ) -> list[dict[str, Any]]:
-        return await self.github.pages(f"repos/{self.full_name}/{path}", key=key, params=params)
+        return await self.github.pages(
+            f"repos/{self.full_name}/{path}", key=key, params=params, max_pages=max_pages
+        )
 
     async def graphql(
         self, query: str, variables: Mapping[str, object] | None = None
@@ -301,6 +424,31 @@ class RepoClient:
         return await self.github.graphql(
             query, {"owner": self.owner, "repo": self.name, **(variables or {})}
         )
+
+    async def info(self) -> dict[str, Any]:
+        """The repository itself: default branch, merge settings, visibility."""
+        payload = await self.github.get(f"repos/{self.full_name}")
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the repository without an object")
+        return payload
+
+    async def labels(self) -> list[dict[str, Any]]:
+        return await self.pages("labels")
+
+    async def branch(self, name: str) -> dict[str, Any]:
+        payload = await self.get(f"branches/{quote(name, safe='')}")
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the branch without an object")
+        return payload
+
+    async def review_comment(self, comment_id: int) -> object:
+        return await self.get(f"pulls/comments/{comment_id}")
+
+    async def edit_review_comment(self, comment_id: int, body: str) -> object:
+        return await self.patch(f"pulls/comments/{comment_id}", {"body": body})
+
+    async def delete_review_comment(self, comment_id: int) -> None:
+        await self.delete(f"pulls/comments/{comment_id}")
 
     async def check_runs(self, sha: str) -> list[dict[str, Any]]:
         """The latest run of each check on ``sha``."""
@@ -318,9 +466,61 @@ class RepoClient:
         return list(latest.values())
 
 
+async def or_none[T](read: Awaitable[T]) -> T | None:
+    """``read``'s answer, or ``None`` when GitHub could not give one."""
+    try:
+        return await read
+    except httpx2.HTTPError, ValueError:
+        return None
+
+
+def _json_or_none(response: httpx2.Response) -> object:
+    return None if response.status_code == 204 or not response.content else response.json()
+
+
+class _GitHubErrorBody(BaseModel):
+    message: str = ""
+    errors: list[object] = []
+
+
+class GitHubError(httpx2.HTTPStatusError):
+    """GitHub refused a request; ``message`` is GitHub's own explanation."""
+
+    def __init__(self, response: httpx2.Response) -> None:
+        super().__init__(
+            f"GitHub answered {response.status_code}",
+            request=response.request,
+            response=response,
+        )
+
+    @property
+    def message(self) -> str:
+        fallback = f"GitHub request failed ({self.response.status_code})"
+        try:
+            body = _GitHubErrorBody.model_validate(self.response.json())
+        except ValueError:
+            return fallback
+        details = "; ".join(
+            str(error["message"]) if isinstance(error, dict) and "message" in error else str(error)
+            for error in body.errors
+        )
+        if body.message and details:
+            return f"{body.message}: {details}"
+        return body.message or details or fallback
+
+
 class GraphQLError(ValueError):
     """GitHub answered a GraphQL query with errors."""
 
     def __init__(self, errors: object) -> None:
         super().__init__(f"GitHub GraphQL errors: {errors}")
         self.errors = errors
+
+    @property
+    def message(self) -> str:
+        messages = (
+            str(error["message"])
+            for error in (self.errors if isinstance(self.errors, list) else [])
+            if isinstance(error, dict) and "message" in error
+        )
+        return "; ".join(messages) or "GitHub rejected the request"

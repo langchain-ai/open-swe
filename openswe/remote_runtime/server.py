@@ -12,17 +12,17 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractAsyncContextManager
-from typing import Final, NamedTuple
+from functools import cache
+from typing import Final, Literal, NamedTuple
 
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from openswe.remote_runtime import reviewer
 from openswe.remote_runtime.tokens import RemoteRun, RuntimeTokenError, verify_runtime_token
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,17 @@ HOOKS_PATH: Final = "/remote-runtime/hooks/{hook}"
 _SERVER_NAME: Final = "open-swe-remote-runtime"
 _RUN_STATE_KEY: Final = "remote_run"
 
-Call = Callable[[RemoteRun, str, Mapping[str, JsonValue]], Awaitable[reviewer.ToolResult]]
+
+class UnknownHookError(LookupError):
+    """A remote graph called a run hook this backend does not serve."""
+
+
+class ToolResult(BaseModel):
+    status: Literal["success", "error"]
+    content: JsonValue
+
+
+Call = Callable[[RemoteRun, str, Mapping[str, JsonValue]], Awaitable[ToolResult]]
 Hook = Callable[[RemoteRun, str], Awaitable[JsonValue]]
 
 
@@ -42,26 +52,28 @@ class Catalog(NamedTuple):
     hook: Hook
 
 
-def _reviewer_tools() -> list[types.Tool]:
-    return [
-        types.Tool(
-            name=spec["name"],
-            description=spec["description"],
-            inputSchema=spec["parameters"],
-        )
-        for spec in reviewer.served_tools()
-    ]
+@cache
+def _catalogs() -> Mapping[str, Catalog]:
+    # The webapp must not import the agent stack at startup.
+    from openswe.remote_runtime import reviewer
 
+    def tools() -> list[types.Tool]:
+        return [
+            types.Tool(
+                name=spec["name"],
+                description=spec["description"],
+                inputSchema=spec["parameters"],
+            )
+            for spec in reviewer.served_tools()
+        ]
 
-_CATALOGS: Final[Mapping[str, Catalog]] = {
-    reviewer.ASSISTANT_ID: Catalog(
-        tools=_reviewer_tools, call=reviewer.call_tool, hook=reviewer.run_hook
-    ),
-}
+    return {
+        reviewer.ASSISTANT_ID: Catalog(tools=tools, call=reviewer.call_tool, hook=reviewer.run_hook)
+    }
 
 
 def _catalog(run: RemoteRun) -> Catalog:
-    catalog = _CATALOGS.get(run.assistant_id)
+    catalog = _catalogs().get(run.assistant_id)
     if catalog is None:
         raise PermissionError(f"No remote runtime serves {run.assistant_id}")
     return catalog
@@ -115,7 +127,7 @@ async def _hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     hook = scope["path_params"]["hook"]
     try:
         result = await _catalog(run).hook(run, hook)
-    except reviewer.UnknownHookError:
+    except UnknownHookError:
         await JSONResponse({"detail": f"Unknown hook {hook}"}, status_code=404)(
             scope, receive, send
         )
