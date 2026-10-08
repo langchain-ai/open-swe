@@ -402,7 +402,7 @@ ENV.var("OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS", "Cap on a single model call.")
 # --- Sandboxes ---------------------------------------------------------------------------------
 ENV.var(
     "SANDBOX_TYPE",
-    "Sandbox provider: langsmith, modal, daytona, runloop, e2b or local.",
+    "Sandbox provider: langsmith, modal, daytona, runloop, e2b, mainbrella or local.",
     default="langsmith",
 )
 ENV.var("DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES", "Root filesystem size for new sandboxes.")
@@ -462,6 +462,11 @@ ENV.var(
 )
 ENV.var("E2B_API_KEY", "E2B API key.", secret=True)
 ENV.var("E2B_TEMPLATE", "E2B template new sandboxes boot from.")
+ENV.var("MAINBRELLA_API_KEY", "Mainbrella API key.", secret=True)
+ENV.var("MAINBRELLA_API_URL", "Mainbrella API origin.", default="https://api.mainbrella.com")
+ENV.var("MAINBRELLA_CATALOG_ID", "Mainbrella catalog image for new sandboxes.", default="python")
+ENV.var("MAINBRELLA_IMAGE_ID", "Mainbrella custom image ID; overrides MAINBRELLA_CATALOG_ID.")
+ENV.var("MAINBRELLA_SANDBOX_SIZE", "Mainbrella machine size for new sandboxes.", default="small")
 ENV.var("RUNLOOP_API_KEY", "Runloop API key.", secret=True)
 
 # --- Desktop, local auth and debugging -------------------------------------------------------

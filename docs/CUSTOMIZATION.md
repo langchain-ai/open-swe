@@ -61,12 +61,28 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 | `daytona` | `openswe/sandboxes/providers/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"`, optional `DAYTONA_SANDBOX_SNAPSHOT` |
 | `runloop` | `openswe/sandboxes/providers/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
 | `e2b` | `openswe/sandboxes/providers/e2b.py` | `E2B_API_KEY`, `SANDBOX_TYPE="e2b"`, optional `E2B_TEMPLATE` |
+| `mainbrella` | `openswe/sandboxes/providers/mainbrella.py` | `MAINBRELLA_API_KEY`, `SANDBOX_TYPE="mainbrella"` |
 | `modal` | `openswe/sandboxes/providers/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
 | `local` | `openswe/sandboxes/providers/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
+The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing. LangSmith, Mainbrella and local work with the base install.
+
+Mainbrella uses the async container API without an additional SDK dependency:
+
+```bash
+SANDBOX_TYPE="mainbrella"
+MAINBRELLA_API_KEY="..."
+MAINBRELLA_SANDBOX_SIZE="small"   # Optional: lite, small (default), medium, large, xl
+MAINBRELLA_CATALOG_ID="python"   # Optional; defaults to python for filesystem helpers
+# MAINBRELLA_IMAGE_ID="..."      # Optional custom image; overrides the catalog choice
+# MAINBRELLA_API_URL="http://localhost:8787" # Optional local backend
+```
+
+Images must include `python3`, bash, git and GNU coreutils; install `gh`, `rg` and any project runtimes in a custom image or workspace setup script as needed. The Python catalog image includes Python and git. File transfers are limited to 1 MiB per file. Commands default to 60 seconds; explicit timeouts above 60 seconds use managed execution, up to 900 seconds. Mainbrella retains at most 32 managed jobs per generation for one hour, so routine commands use foreground execution. Output is capped at 1 MiB. Container hard deadlines still apply.
+
+Sandbox IDs include the slot and creation timestamp. Reconnecting verifies that the exact generation is running and never provisions a replacement on failure. Stopping a container discards its unsaved filesystem; LangSmith workspace snapshot settings do not apply to Mainbrella.
 
 For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
 

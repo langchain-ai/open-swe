@@ -26,6 +26,7 @@ SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
     "modal": ("openswe.sandboxes.providers.modal", "create_modal_sandbox"),
     "runloop": ("openswe.sandboxes.providers.runloop", "create_runloop_sandbox"),
     "e2b": ("openswe.sandboxes.providers.e2b", "create_e2b_sandbox"),
+    "mainbrella": ("openswe.sandboxes.providers.mainbrella", "create_mainbrella_sandbox"),
     "local": ("openswe.sandboxes.providers.local", "create_local_sandbox"),
 }
 
@@ -82,9 +83,9 @@ async def create_sandbox(
     """Create or reconnect to a sandbox using the configured provider.
 
     The provider is selected via the SANDBOX_TYPE environment variable.
-    Supported values: langsmith (default), daytona, modal, runloop, e2b, local.
+    Supported values: langsmith (default), daytona, modal, runloop, e2b, mainbrella, local.
 
-    langsmith and modal provision natively async. local stays on
+    langsmith, modal and mainbrella provision natively async. local stays on
     ``asyncio.to_thread`` because ``LocalShellBackend`` setup performs synchronous
     filesystem I/O. daytona, e2b and runloop stay there because their
     ``langchain_*`` wrappers bind synchronous SDK handles.
@@ -138,3 +139,7 @@ def validate_sandbox_startup_config() -> None:
         from openswe.sandboxes.providers.langsmith import LangSmithProvider
 
         LangSmithProvider.validate_startup_config()
+    elif sandbox_type == "mainbrella":
+        from openswe.sandboxes.providers.mainbrella import MainbrellaProvider
+
+        MainbrellaProvider()
