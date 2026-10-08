@@ -6182,6 +6182,17 @@
       },
       "ToolList": {
         "properties": {
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
           "tools": {
             "items": {
               "$ref": "#/components/schemas/ToolDescription"
@@ -6192,11 +6203,17 @@
           "total": {
             "title": "Total",
             "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
           }
         },
         "required": [
           "tools",
-          "total"
+          "total",
+          "truncated",
+          "next_offset"
         ],
         "title": "ToolList",
         "type": "object"
@@ -15648,11 +15665,17 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
             }
           }
         ],
@@ -15841,11 +15864,17 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
             }
           }
         ],
@@ -15908,11 +15937,17 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
             }
           }
         ],
