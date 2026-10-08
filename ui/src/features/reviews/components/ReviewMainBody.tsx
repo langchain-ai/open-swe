@@ -100,6 +100,7 @@ import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { HumanInputCard } from "@/features/reviews/components/HumanInputCard"
 import { PrHeader } from "@/features/reviews/components/PrHeader"
+import { PullRequestLabels } from "@/features/reviews/components/PullRequestLabels"
 import { ReviewAssessmentCard } from "@/features/reviews/components/ReviewAssessmentCard"
 import {
   rangeLineCount,
@@ -1385,7 +1386,7 @@ function ReviewBodyInner({
               <Virtualizer
                 className="relative min-h-0 flex-1 overflow-y-auto"
                 contentClassName={cn(
-                  "mx-auto w-full px-6 py-6",
+                  "mx-auto w-full px-3 py-4 sm:px-6 sm:py-6",
                   diffStyle === "split" ? "max-w-none" : "max-w-6xl"
                 )}
                 config={DIFF_VIRTUALIZER_CONFIG}
@@ -2091,7 +2092,7 @@ const FileDiffCard = memo(function FileDiffCard({
   return (
     <div
       ref={sectionRef}
-      className="scroll-mt-4 overflow-clip rounded-lg border border-border"
+      className="-mx-3 scroll-mt-4 overflow-clip border-y border-border sm:mx-0 sm:rounded-lg sm:border"
     >
       <div
         className={cn(
@@ -2103,7 +2104,7 @@ const FileDiffCard = memo(function FileDiffCard({
         <button
           type="button"
           onClick={() => onToggleExpanded(file.path)}
-          className="inline-flex items-center gap-2 text-left"
+          className="inline-flex min-w-0 items-center gap-2 text-left"
         >
           <CaretDownIcon
             className={cn(
@@ -2111,9 +2112,9 @@ const FileDiffCard = memo(function FileDiffCard({
               !expanded && "-rotate-90"
             )}
           />
-          <span className="font-mono font-medium">{file.path}</span>
+          <span className="truncate font-mono font-medium">{file.path}</span>
         </button>
-        <span className="flex items-center gap-1.5 font-mono text-[11px]">
+        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
           <span className="text-emerald-500">+{additions}</span>
           <span className="text-red-500">-{deletions}</span>
         </span>
@@ -2123,8 +2124,8 @@ const FileDiffCard = memo(function FileDiffCard({
             {findings.length}
           </span>
         )}
-        <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
-          Mark as viewed
+        <label className="ml-auto inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="sr-only sm:not-sr-only">Mark as viewed</span>
           <button
             type="button"
             role="checkbox"
@@ -3067,20 +3068,11 @@ function SidePanel({
             <PeopleSection title="Assignees" people={detail.pr.assignees} />
             <section className="px-3 py-3">
               <h3 className="mb-2 text-xs font-medium">Labels</h3>
-              {detail.pr.labels.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">None</p>
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {detail.pr.labels.map((label) => (
-                    <span
-                      key={label.name}
-                      className="rounded-full border border-border px-2 py-0.5 text-[11px]"
-                    >
-                      {label.name}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <PullRequestLabels
+                owner={detail.owner}
+                repo={detail.repo}
+                number={detail.number}
+              />
             </section>
           </div>
         )}

@@ -98,23 +98,21 @@ class UserRecords:
                 delete(UserRecord).where(self._where(login, key)).returning(UserRecord.value)
             )
 
-    async def import_store(self, namespace: Namespace, *, nested: bool = False) -> StoreImport:
-        """Move Store records into this kind.
+    async def import_store(self, namespace: Namespace) -> StoreImport:
+        """Move Store records, keyed by login, into this kind.
 
-        A flat namespace is keyed by login; a ``nested`` one is ``[*namespace, login]``
-        keyed by this kind's key. A record already in PostgreSQL wins, and one whose
-        login has no ``users`` row stays in the Store for the next startup.
+        A record already in PostgreSQL wins, and one whose login has no ``users``
+        row stays in the Store for the next startup.
         """
         moved = waiting = 0
         for entry in await search_all_entries(namespace):
             item_namespace = entry.namespace or list(namespace)
-            if len(item_namespace) != len(namespace) + nested:
+            if len(item_namespace) != len(namespace):
                 continue
-            login = item_namespace[-1] if nested else entry.key
-            key = entry.key if nested else ""
+            login = entry.key
             try:
-                if await self.get(login, key) is None:
-                    await self.put(login, entry.value, key)
+                if await self.get(login) is None:
+                    await self.put(login, entry.value)
             except UnknownUser:
                 logger.warning(
                     "Store record waits for its users row",

@@ -289,7 +289,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "follow_up_behavior": "steer",
             },
             "instructions": "",
-            "connections": {"notion": {"connected": False}},
         }
     ]
     assert "secret" not in repr(result)

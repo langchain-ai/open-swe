@@ -1,7 +1,7 @@
 """Per-person records moved out of the LangGraph Store.
 
 One JSON document per person, kind, and key: profiles, dashboard preferences,
-custom instructions, encrypted GitHub and Notion tokens, and pending OAuth flows.
+custom instructions, encrypted GitHub tokens, and pending OAuth flows.
 ``store_import`` tracks each import out of the Store until a pass finds nothing left.
 """
 

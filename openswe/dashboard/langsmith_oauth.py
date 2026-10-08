@@ -8,13 +8,14 @@ LangSmith's MCP resource, not its API), keeps each person's tokens encrypted in 
 """
 
 import logging
+import secrets
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlparse
 
 import httpx2
 
 from openswe.config import ENV
-from openswe.dashboard.notion_oauth import code_challenge_for_verifier, generate_code_verifier
+from openswe.dashboard.oauth import pkce_s256_challenge
 from openswe.dashboard.oauth_credentials import (
     OAuthProvider,
     delete_credential,
@@ -142,7 +143,7 @@ async def start_langsmith_oauth(
     """Store a pending flow and return LangSmith's authorize URL."""
     endpoints = await _metadata()
     client_id = _client_id()
-    verifier = generate_code_verifier()
+    verifier = secrets.token_urlsafe(32)
     await LANGSMITH_OAUTH_FLOWS.put(
         login,
         {
@@ -159,7 +160,7 @@ async def start_langsmith_oauth(
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "state": state,
-        "code_challenge": code_challenge_for_verifier(verifier),
+        "code_challenge": pkce_s256_challenge(verifier),
         "code_challenge_method": "S256",
         "scope": "openid email offline_access",
         "resource": langsmith_issuer(),

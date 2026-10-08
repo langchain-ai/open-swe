@@ -7,7 +7,6 @@ not moved: they expire within minutes and a retry starts a new one.
 """
 
 from openswe.dashboard.profiles import GITHUB_OAUTH_TOKENS, PROFILES
-from openswe.dashboard.user_credentials import USER_CREDENTIALS
 from openswe.dashboard.user_instructions import USER_INSTRUCTIONS
 from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.database.store_imports import StoreImport
@@ -23,4 +22,4 @@ async def import_user_records() -> StoreImport:
         (USER_INSTRUCTIONS, ["user_instructions"]),
     ):
         result += await records.import_store(namespace)
-    return result + await USER_CREDENTIALS.import_store(["user_credentials"], nested=True)
+    return result
