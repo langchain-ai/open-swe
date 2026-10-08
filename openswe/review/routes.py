@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.profiles import get_valid_access_token
@@ -38,6 +39,7 @@ from openswe.review.eval_jobs import (
     resolve_eval_config,
     start_reviewer_eval,
 )
+from openswe.review.labels import LabelChange, PullRequestLabelClient, PullRequestLabels
 from openswe.review.reviews import (
     PendingReview,
     PendingReviewCommentInput,
@@ -100,6 +102,7 @@ async def api_list_enabled_review_repos(
 
 
 @router.put("/enabled-review-repos")
+@audit_endpoint
 async def api_set_enabled_review_repo(
     update: EnabledReviewRepoUpdate,
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -134,6 +137,7 @@ class ReviewerEvalStart(BaseModel):
 
 
 @router.post("/admin/evals/reviewer")
+@audit_endpoint
 async def admin_start_reviewer_eval(
     body: ReviewerEvalStart,
     session: dict[str, Any] = ADMIN_DEP,
@@ -240,6 +244,7 @@ async def get_assessment_feedback(
 
 
 @router.put("/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}")
+@audit_endpoint
 async def submit_assessment_feedback(
     owner: str,
     repo: str,
@@ -263,6 +268,38 @@ async def api_get_pull_request_preview(
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     return await get_pull_request_preview(owner, repo, pr_number, token)
+
+
+@router.get("/reviews/{owner}/{repo}/{pr_number}/labels")
+async def api_get_pull_request_labels(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    session: dict[str, object] = SESSION_DEP,
+) -> PullRequestLabels:
+    user_id = str(session["sub"])
+    await require_repo_access_for_user(user_id, f"{owner}/{repo}")
+    token = await get_valid_access_token(user_id)
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    return await PullRequestLabelClient(owner, repo, pr_number, token).read()
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/labels", status_code=204)
+@audit_endpoint
+async def api_change_pull_request_label(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    change: LabelChange,
+    session: dict[str, object] = SESSION_DEP,
+) -> None:
+    user_id = str(session["sub"])
+    await require_repo_access_for_user(user_id, f"{owner}/{repo}")
+    token = await get_valid_access_token(user_id)
+    if not token:
+        raise HTTPException(401, "GitHub token unavailable, re-login required")
+    await PullRequestLabelClient(owner, repo, pr_number, token).change(change)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/diff")
@@ -306,6 +343,7 @@ async def api_get_review_image(
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/re-review")
+@audit_endpoint
 async def api_re_review(
     owner: str,
     repo: str,
@@ -317,6 +355,7 @@ async def api_re_review(
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/scout")
+@audit_endpoint
 async def api_run_review_scout(
     owner: str,
     repo: str,
@@ -345,6 +384,7 @@ class WalkthroughDismissed(BaseModel):
 
 
 @router.delete("/reviews/{owner}/{repo}/{pr_number}/walkthrough")
+@audit_endpoint
 async def api_dismiss_walkthrough(
     owner: str,
     repo: str,
@@ -368,6 +408,7 @@ async def api_list_review_comments(
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/comments")
+@audit_endpoint
 async def api_post_review_comment(
     owner: str,
     repo: str,
@@ -385,6 +426,7 @@ class PullRequestReviewSubmit(BaseModel):
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/submit-review")
+@audit_endpoint
 async def api_submit_pull_request_review(
     owner: str,
     repo: str,
@@ -421,6 +463,7 @@ async def api_get_pending_review(
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/pending-review/comments")
+@audit_endpoint
 async def api_add_pending_review_comment(
     owner: str,
     repo: str,
@@ -439,6 +482,7 @@ class PendingReviewCommentUpdate(BaseModel):
 
 
 @router.patch("/reviews/{owner}/{repo}/{pr_number}/pending-review/comments/{comment_id}")
+@audit_endpoint
 async def api_update_pending_review_comment(
     owner: str,
     repo: str,
@@ -454,6 +498,7 @@ async def api_update_pending_review_comment(
 
 
 @router.delete("/reviews/{owner}/{repo}/{pr_number}/pending-review/comments/{comment_id}")
+@audit_endpoint
 async def api_delete_pending_review_comment(
     owner: str,
     repo: str,
@@ -471,6 +516,7 @@ class PendingReviewDiscarded(BaseModel):
 
 
 @router.delete("/reviews/{owner}/{repo}/{pr_number}/pending-review")
+@audit_endpoint
 async def api_discard_pending_review(
     owner: str, repo: str, pr_number: int, session: dict[str, Any] = SESSION_DEP
 ) -> PendingReviewDiscarded:
@@ -487,6 +533,7 @@ class ReviewCommentUpdate(BaseModel):
 
 
 @router.patch("/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}")
+@audit_endpoint
 async def api_update_review_comment(
     owner: str,
     repo: str,
@@ -531,6 +578,7 @@ async def api_get_review_chat(
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands")
+@audit_endpoint
 async def api_review_chat_commands(
     owner: str,
     repo: str,
@@ -619,6 +667,7 @@ async def api_review_chat_history(
 
 
 @router.post("/review-styles")
+@audit_endpoint
 async def api_create_review_style(
     body: ReviewStyleCreate,
     session: dict[str, Any] = SESSION_DEP,
@@ -661,6 +710,7 @@ async def api_get_review_style(
 
 
 @router.put("/review-styles/{full_name:path}")
+@audit_endpoint
 async def api_update_review_style_prompt(
     full_name: str,
     body: ReviewStylePromptUpdate,
@@ -678,6 +728,7 @@ async def api_update_review_style_prompt(
 
 
 @router.post("/review-styles/{full_name:path}/analyze")
+@audit_endpoint
 async def api_analyze_review_style(
     full_name: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -699,6 +750,7 @@ async def api_analyze_review_style(
 
 
 @router.post("/review-styles/{full_name:path}/cancel")
+@audit_endpoint
 async def api_cancel_review_style(
     full_name: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -711,6 +763,7 @@ async def api_cancel_review_style(
 
 
 @router.delete("/review-styles/{full_name:path}")
+@audit_endpoint
 async def api_delete_review_style(
     full_name: str,
     session: dict[str, Any] = SESSION_DEP,

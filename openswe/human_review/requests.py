@@ -30,8 +30,11 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.slack.client import lookup_slack_thread_id
+from openswe.slack.dm import DmOrigin
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
+from openswe.utils.thread_ops import langgraph_client
 
 RequestKind = Literal["expedited", "standard", "posted"]
 RequestState = Literal["open", "merged", "rejected", "superseded", "cancelled"]
@@ -183,6 +186,28 @@ class HumanReviewRequest(Base):
         return next((p for p in self.participants if p.user_id == user_id), None)
 
     @property
+    def dm_origin(self) -> DmOrigin | None:
+        """The review's Slack thread, which DMs about it are sent on behalf of."""
+        root = self.slack_thread_ts or self.slack_message_ts
+        if not self.slack_channel_id or not root:
+            return None
+        return DmOrigin(
+            channel_id=self.slack_channel_id, thread_ts=root, subject=self.pull_request.url
+        )
+
+    async def picked_by(self, thread_id: str) -> bool:
+        """Whether ``thread_id`` may pick this request's reviewer: its own thread or its Slack thread's."""
+        if not thread_id:
+            return False
+        if self.thread_id == thread_id:
+            return True
+        root = self.slack_thread_ts or self.slack_message_ts
+        if not self.slack_channel_id or not root:
+            return False
+        owner = await lookup_slack_thread_id(langgraph_client(), self.slack_channel_id, root)
+        return owner == thread_id
+
+    @property
     def slack_location(self) -> tuple[str, str] | None:
         if self.slack_channel_id and self.slack_thread_ts:
             return self.slack_channel_id, self.slack_thread_ts
@@ -216,6 +241,25 @@ class HumanReviewRequest(Base):
                     cls.state == "open",
                 )
             )
+
+    @classmethod
+    async def assigned_to(cls, user_id: UUID) -> list[Self]:
+        """Open review requests for which Open SWE explicitly picked this person."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .join(cls.pull_request)
+                .join(cls.participants)
+                .where(
+                    cls.state == "open",
+                    cls.kind.in_(("standard", "posted")),
+                    PullRequest.state == "open",
+                    HumanReviewParticipant.user_id == user_id,
+                    HumanReviewParticipant.decision == "review",
+                    HumanReviewParticipant.assigned_by_agent.is_(True),
+                )
+            )
+            return list(rows)
 
     @classmethod
     async def is_expedited_approver(cls, owner: str, repo: str, number: int, login: str) -> bool:

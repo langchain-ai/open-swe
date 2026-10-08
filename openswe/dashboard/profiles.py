@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
@@ -438,6 +439,7 @@ async def dismiss_slack_onboarding(
 
 
 @router.put("/profile")
+@audit_endpoint
 async def put_my_profile(
     update: ProfileUpdate,
     session: dict[str, Any] = _SESSION_DEP,

@@ -1,14 +1,25 @@
 """Dashboard API for asking a repository's Slack review channel to review a pull request."""
 
-from typing import Any
+import asyncio
+import logging
+from datetime import UTC, datetime
+from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from openswe.audit_logs.middleware import audit_endpoint
+from openswe.dashboard import profiles, repo_access
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
+from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.ci import fetch_pr
-from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.http import github_client
+from openswe.github.pull_request_status import (
+    OpenPullRequest,
+    OpenPullRequests,
+    pull_request_identity,
+)
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import dismiss_by
@@ -18,7 +29,97 @@ from openswe.human_review.standard import Origin, RequestResult, request_review
 from openswe.slack.client import GitHubPrRef
 from openswe.users import User
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["human-review"])
+
+
+@router.get("/review-assignments")
+async def api_review_assignments(
+    repo: str = "",
+    sort: Literal["created", "updated"] = "updated",
+    direction: Literal["asc", "desc"] = "desc",
+    page: int = Query(1, ge=1),
+    session: dict[str, str] = SESSION_DEP,
+) -> OpenPullRequests:
+    login = session["sub"]
+    repositories = {name.lower() for name in repo.split(",")} if repo else set()
+    if any(
+        pull_request_identity({"repo_full_name": name, "number": 1}) is None
+        for name in repositories
+    ):
+        raise HTTPException(422, "repository must be owner/repo")
+    user = await User.for_login("github", login)
+    requests = await HumanReviewRequest.assigned_to(user.id) if user is not None else []
+    requests = [
+        request
+        for request in requests
+        if not repositories or request.pull_request.repo_full_name.lower() in repositories
+    ]
+    rows: list[OpenPullRequest] = []
+    if requests:
+        token = await profiles.get_valid_access_token(login)
+        if not token:
+            raise HTTPException(401, "GitHub token unavailable, re-login required")
+        allowed: set[str] = set()
+        for full_name in {request.pull_request.repo_full_name for request in requests}:
+            try:
+                await repo_access.assert_repo_access(full_name, token)
+            except HTTPException as exc:
+                if exc.status_code not in {403, 404}:
+                    raise
+                logger.info(
+                    "Review assignment repository no longer accessible",
+                    extra={"repository": full_name},
+                )
+            else:
+                allowed.add(full_name)
+        semaphore = asyncio.Semaphore(4)
+        async with github_client(token=token) as client:
+
+            async def pending(request: HumanReviewRequest) -> OpenPullRequest | None:
+                pr = request.pull_request
+                if pr.repo_full_name not in allowed:
+                    return None
+                async with semaphore:
+                    states = await latest_review_states(
+                        client, pr.owner, pr.repo, pr.number, pr.author
+                    )
+                if states is None:
+                    raise HTTPException(502, "Could not load assigned reviews from GitHub")
+                if any(
+                    who.lower() == login.lower() and state in {"APPROVED", "CHANGES_REQUESTED"}
+                    for who, state in states.items()
+                ):
+                    return None
+                return OpenPullRequest(
+                    repo=pr.repo_full_name,
+                    number=pr.number,
+                    title=pr.title,
+                    created_at=request.created_at.isoformat() if request.created_at else None,
+                    updated_at=request.updated_at.isoformat() if request.updated_at else None,
+                    details_loading=True,
+                )
+
+            rows = [
+                row
+                for row in await asyncio.gather(*(pending(request) for request in requests))
+                if row is not None
+            ]
+    rows.sort(
+        key=lambda row: (
+            (row.created_at if sort == "created" else row.updated_at) or "",
+            row.repo,
+            row.number,
+        ),
+        reverse=direction == "desc",
+    )
+    start = (page - 1) * 100
+    return OpenPullRequests(
+        pull_requests=rows[start : start + 100],
+        next_page=page + 1 if start + 100 < len(rows) else None,
+        incomplete=False,
+        updated_at=datetime.now(UTC).isoformat(),
+    )
 
 
 class HumanReviewRequestBody(BaseModel):
@@ -72,6 +173,7 @@ async def api_human_review_availability(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review")
+@audit_endpoint
 async def api_request_human_review(
     owner: str,
     repo: str,
@@ -101,6 +203,7 @@ async def api_request_human_review(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review/dismiss")
+@audit_endpoint
 async def api_dismiss_human_review_request(
     owner: str,
     repo: str,

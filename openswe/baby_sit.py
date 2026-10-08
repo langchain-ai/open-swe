@@ -306,7 +306,8 @@ async def _notify_watch(watch: BabySitWatch, message: str) -> bool:
 
 
 async def _finish_watch(watch: BabySitWatch, message: str) -> str:
-    notified = await _notify_watch(watch, message)
+    # The agent owning a Slack thread is the only thing that posts in it.
+    notified = watch.source_context.slack_location is None and await _notify_watch(watch, message)
     if not notified:
         try:
             configurable = watch.dispatch_config()

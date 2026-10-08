@@ -28,27 +28,28 @@ function iframeChunk(): ToolExecutionChunk {
 }
 
 describe("buildRenderItems", () => {
-  it("keeps a connection card visible outside folded work", () => {
+  it("shows a managed tools offer as a card, and a failed one as a tool call", () => {
+    const offer = {
+      status: "connection_required",
+      gateway: { id: "gw-1", name: "Engineering" },
+      missing: [{ slug: "linear", display_name: "Linear", kind: "oauth" }],
+    }
     const card: ToolExecutionChunk = {
       kind: "tool-execution",
-      toolCallId: "connect-1",
-      title: "Request service connection",
-      toolKind: "service-connection",
-      input: { service: "notion" },
+      toolCallId: "managed-1",
+      title: "Connect managed tools",
+      toolKind: "managed-tools",
       status: "completed",
+      output: JSON.stringify({ success: true, ...offer }),
     }
-    const items = buildRenderItems([
-      card,
-      {
-        kind: "tool-execution",
-        toolCallId: "read-1",
-        title: "Read file",
-        toolKind: "read",
-        status: "completed",
-      },
-    ])
-    expect(selectCollapsedTurnItems(items)).toEqual([
-      { type: "connection-item", key: "tool-connect-1", chunk: card },
+    const failed: ToolExecutionChunk = {
+      ...card,
+      toolCallId: "managed-2",
+      output: JSON.stringify({ success: false, error: "Not private" }),
+    }
+    expect(buildRenderItems([card, failed])).toEqual([
+      { type: "managed-tools-item", key: "tool-managed-1", chunk: card, offer },
+      { type: "tool-item", key: "tool-managed-2", chunk: failed },
     ])
   })
 

@@ -11,7 +11,6 @@ from openswe.dashboard.agent_instructions import router as agent_instructions_ro
 from openswe.dashboard.auth_routes import router as auth_router
 from openswe.dashboard.client_errors import router as client_errors_router
 from openswe.dashboard.langsmith_routes import router as langsmith_router
-from openswe.dashboard.notion_routes import router as notion_router
 from openswe.dashboard.oauth import require_same_origin_for_mutations
 from openswe.dashboard.options_routes import router as options_router
 from openswe.dashboard.profiles import router as profiles_router
@@ -50,7 +49,6 @@ router.include_router(user_preferences_router)
 router.include_router(options_router)
 router.include_router(profiles_router)
 router.include_router(users_router)
-router.include_router(notion_router)
 router.include_router(langsmith_router)
 router.include_router(slack_router)
 router.include_router(workspace_settings_router)

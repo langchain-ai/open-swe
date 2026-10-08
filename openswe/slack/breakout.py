@@ -24,6 +24,7 @@ from openswe.slack.move import move_slack_thread
 from openswe.slack.request import SlackRequest
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
+from openswe.utils.message_commands import unquoted_text
 from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 from openswe.workspaces.store import parse_workspace_tag
@@ -48,6 +49,7 @@ class BreakoutCommand:
         cls, text: str, bot_user_id: str, *, command: Literal["breakout", "web"] = "breakout"
     ) -> BreakoutCommand | None:
         """Parse a command immediately after the bot mention, or a bare command."""
+        command_text = unquoted_text(text)
         mentions = [f"<@{bot_user_id}>"] if bot_user_id else []
         if common.SLACK_BOT_USERNAME:
             mentions.append(f"@{common.SLACK_BOT_USERNAME}")
@@ -60,13 +62,15 @@ class BreakoutCommand:
         prior_text = ""
         if mentions:
             mention_re = re.compile("|".join(re.escape(mention) for mention in mentions))
-            for mention in mention_re.finditer(text):
+            for mention in mention_re.finditer(command_text):
+                if not command_text[mention.end() :].lstrip().lower().startswith("/breakout"):
+                    continue
                 candidate = command_re.fullmatch(text[mention.end() :].strip())
                 if candidate is not None:
                     match = candidate
                     prior_text = text[: mention.start()].strip()
                     break
-        if match is None:
+        if match is None and command_text.lstrip().lower().startswith("/breakout"):
             match = command_re.fullmatch(text.strip())
         if match is None:
             return None

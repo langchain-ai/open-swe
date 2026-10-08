@@ -1,4 +1,4 @@
-"""Append-only log of verified GitHub, Slack, and Linear webhook deliveries."""
+"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries."""
 
 import asyncio
 import json
@@ -19,7 +19,7 @@ from openswe.slack.pr_links import event_pull_requests
 
 logger = logging.getLogger(__name__)
 
-type WebhookSource = Literal["github", "slack", "linear"]
+type WebhookSource = Literal["github", "slack", "linear", "deployment"]
 
 RETAINED_DAYS = 2
 _TABLE = "event_log"
@@ -236,12 +236,16 @@ class EventLog:
         event_type: str = "",
         delivery_id: str = "",
         refs: EventRefs | None = None,
-    ) -> None:
-        """Log, then wake subscribed threads. Never raises: the delivery is still handled."""
+    ) -> bool:
+        """Log, then wake subscribed threads.
+
+        Never raises. False means the row was not stored, so a caller that must
+        not drop the delivery can ask the sender to retry.
+        """
         from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
 
         if not configured():
-            return
+            return False
         if source == "slack":
             from openswe.slack.channels import SlackChannel
 
@@ -250,9 +254,9 @@ class EventLog:
                 channel = await SlackChannel.load(channel_id)
             except Exception:
                 logger.warning("Checking event log Slack channel failed", exc_info=True)
-                return
+                return True
             if channel is None or not channel.details.publishes_events:
-                return
+                return True
         try:
             await cls.ensure_partitions()
         except Exception:  # noqa: BLE001
@@ -281,7 +285,7 @@ class EventLog:
                 extra={"webhook_source": source, "webhook_endpoint": request.url.path},
                 exc_info=True,
             )
-            return
+            return False
         from openswe.analytics.segment import record_webhook
 
         event = LoggedEvent.model_validate({**row, "payload": payload})
@@ -289,6 +293,7 @@ class EventLog:
         _SEGMENT_TASKS.add(task)
         task.add_done_callback(_SEGMENT_TASKS.discard)
         await EventSubscription.deliver(event)
+        return True
 
     @classmethod
     async def kinds(

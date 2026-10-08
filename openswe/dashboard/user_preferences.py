@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.store import get_value, now_iso, put_value
@@ -92,6 +93,7 @@ async def api_get_my_preferences(
 
 
 @router.put("/me/preferences")
+@audit_endpoint
 async def api_put_my_preferences(
     body: UserPreferencesUpdate,
     session: dict[str, Any] = SESSION_DEP,
