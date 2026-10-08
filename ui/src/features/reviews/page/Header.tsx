@@ -95,7 +95,7 @@ export function Header({
       <Link
         to="/agents/reviews"
         aria-label="Back to reviews"
-        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground max-sm:hidden"
       >
         <ArrowLeftIcon className="size-4" />
       </Link>
@@ -129,7 +129,7 @@ export function Header({
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
             )
           )}
-          <h1 className="min-w-0 truncate text-[15px] leading-6 font-semibold tracking-[-0.01em]">
+          <h1 className="min-w-0 truncate text-[15px] leading-6 font-semibold tracking-[-0.01em] max-sm:line-clamp-2 max-sm:text-[14px] max-sm:leading-5 max-sm:whitespace-normal">
             <a
               href={githubUrl}
               target="_blank"
@@ -149,7 +149,7 @@ export function Header({
           </h1>
         </div>
         {detail ? (
-          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
+          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground max-sm:hidden">
             <a
               href={`https://github.com/${pr.owner}/${pr.repo}`}
               target="_blank"
@@ -226,7 +226,7 @@ export function Header({
             )}
           </p>
         ) : (
-          <Skeleton className="mt-1 h-3.5 w-80" />
+          <Skeleton className="mt-1 h-3.5 w-80 max-w-full max-sm:hidden" />
         )}
       </div>
       {files.length > 0 && (

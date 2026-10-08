@@ -22,7 +22,10 @@ import type {
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn, formatRelativeTime } from "@/lib/utils"
-import type { ConversationReview } from "@/features/reviews/lib/conversationApi"
+import type {
+  ConversationAuthor,
+  ConversationReview,
+} from "@/features/reviews/lib/conversationApi"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -45,8 +48,10 @@ import {
   findingGroupColor,
   findingGroupLabel,
   findingLocation,
+  findingGroupTextColor,
   fixFinding,
   isAnchored,
+  openConversationCounts,
   rankFindings,
 } from "./findings"
 import { InlineCode } from "./inlineCode"
@@ -72,13 +77,19 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   const session = useSession()
   const detail = useQuery(reviewQueries.detail(pr)).data
   const open = detail?.pr.state === "open"
-  const status = useQuery({ ...reviewQueries.status(pr), enabled: open }).data
+  const status = useQuery(reviewQueries.status(pr)).data
+  const threads = useQuery(reviewQueries.conversation(pr)).data?.threads
   const showFindings = useReviewPage((state) => state.showFindings)
   const showOpenConversations = useReviewPage(
     (state) => state.showOpenConversations
   )
   if (!detail) return null
-  const standing = pullRequestStanding(detail, status, session.data?.login)
+  const standing = pullRequestStanding(
+    detail,
+    status,
+    session.data?.login,
+    threads
+  )
   const login = session.data?.login ?? ""
 
   return (
@@ -428,17 +439,25 @@ function ReviewsRow({
     })
   ).data
   // Each reviewer's standing review, as GitHub's sidebar lists them: a later
-  // comment never replaces an approval or a change request.
+  // comment never replaces an approval or a change request, and the author
+  // replying in threads is not reviewing.
+  const author = detail.pr.author?.login.toLowerCase()
   const verdicts = new Map<string, ConversationReview>()
   for (const item of conversation?.items ?? []) {
     if (item.kind !== "review" || !item.author) continue
-    const standing = verdicts.get(item.author.login)
+    if (item.author.login.toLowerCase() === author) continue
+    const who = item.author.login.replace(/\[bot\]$/, "")
+    const standing = verdicts.get(who)
     const decisive = (state: ConversationReview["state"]) =>
       state === "APPROVED" || state === "CHANGES_REQUESTED"
     if (item.state === "COMMENTED" && standing && decisive(standing.state))
       continue
-    verdicts.set(item.author.login, item)
+    verdicts.set(who, item)
   }
+  const conversations = openConversationCounts(
+    conversation?.threads ?? [],
+    detail.findings
+  )
   const requested = detail.pr.requested_reviewers.map((r) => `@${r.login}`)
   const decision =
     status.reviewDecision === "approved"
@@ -448,7 +467,10 @@ function ReviewsRow({
         : status.reviewRequired
           ? "An approving review is required"
           : "No reviews required"
-  const unresolved = status.unresolvedThreads ?? 0
+  // Every unresolved thread, as GitHub and the discussion count them.
+  const unresolved = conversation
+    ? conversation.threads.filter((thread) => !thread.resolved).length
+    : (status.unresolvedThreads ?? 0)
   return (
     <div>
       <Row
@@ -477,7 +499,7 @@ function ReviewsRow({
               </button>
             )}
             {hasUnresolvedConversations(status) &&
-              status.unresolvedThreads !== 0 && (
+              (conversation ? conversations.current > 0 : unresolved > 0) && (
                 <PullRequestThreadAction
                   pr={status}
                   login={login}
@@ -496,7 +518,7 @@ function ReviewsRow({
             <li key={review.id} className="flex items-center gap-2">
               <ReviewVerdictMark state={review.state} />
               <a
-                href={`https://github.com/${review.author?.login ?? ""}`}
+                href={profileUrl(review.author)}
                 target="_blank"
                 rel="noreferrer"
                 className="font-medium hover:underline"
@@ -532,6 +554,14 @@ function ReviewsRow({
       )}
     </div>
   )
+}
+
+/** Apps have no user page; their bot account lives under /apps. */
+function profileUrl(author: ConversationAuthor | null): string {
+  if (!author) return "https://github.com"
+  return author.bot
+    ? `https://github.com/apps/${author.login.replace(/\[bot\]$/, "")}`
+    : `https://github.com/${author.login}`
 }
 
 const reviewVerdictWords: Record<ConversationReview["state"], string> = {
@@ -696,6 +726,9 @@ function OpenSweRow({
   })
   const running = detail.status === "running" || reReview.isPending
   const assessment = detail.assessment
+  const canExpand = detail.findings.length > 0 || Boolean(assessment)
+  // Open, the assessment card below says the risk itself.
+  const verdict = assessment && !(expanded && canExpand) ? assessment : null
   const summary = running
     ? "Reviewing this pull request…"
     : detail.status === "none"
@@ -703,11 +736,11 @@ function OpenSweRow({
       : detail.status === "error"
         ? `Review failed${detail.review_error ? `: ${detail.review_error}` : ""}`
         : [
-            assessment ? `Risk ${assessment.risk_score}/5` : null,
-            assessment
-              ? assessment.approved
+            verdict ? `Risk ${verdict.risk_score}/5` : null,
+            verdict
+              ? verdict.approved
                 ? "approved"
-                : assessment.decision === "would_approve"
+                : verdict.decision === "would_approve"
                   ? "would approve"
                   : "needs human review"
               : null,
@@ -722,7 +755,7 @@ function OpenSweRow({
           ]
             .filter(Boolean)
             .join(" · ")
-  const canExpand = detail.findings.length > 0 || Boolean(assessment)
+  const prOpen = detail.pr.state === "open"
   return (
     <div>
       <Row
@@ -748,23 +781,32 @@ function OpenSweRow({
                 {running ? "Watch it work" : "See how it reviewed"}
               </Link>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={running}
-              onClick={() => reReview.mutate()}
-              className="text-muted-foreground"
-            >
-              <ArrowClockwiseIcon />
-              {detail.status === "none" ? "Review" : "Re-review"}
-            </Button>
+            {prOpen && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={running}
+                onClick={() => reReview.mutate()}
+                className="text-muted-foreground"
+              >
+                <ArrowClockwiseIcon />
+                {detail.status === "none" ? "Review" : "Re-review"}
+              </Button>
+            )}
           </>
         }
       >
         {summary}
       </Row>
       {expanded && canExpand && (
-        <div className="pr-4 pb-3 pl-11">
+        <div
+          // Remounting replays the flash each time something asks for the findings.
+          key={findingsKey}
+          className={cn(
+            "pr-4 pb-3 pl-11",
+            findingsKey > 0 && "motion-safe:animate-attention-flash"
+          )}
+        >
           {detail.findings.length > 0 && (
             <FindingQueue findings={detail.findings} />
           )}
@@ -805,44 +847,47 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
             )}
             style={{ borderLeftColor: findingGroupColor[finding.group] }}
           >
-            <div className="flex items-baseline gap-2 text-xs">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
               <span
                 className="shrink-0 font-medium"
-                style={{ color: findingGroupColor[finding.group] }}
+                style={{ color: findingGroupTextColor[finding.group] }}
               >
                 {findingGroupLabel[finding.group]}
               </span>
               <button
                 type="button"
+                aria-expanded={open}
                 onClick={() => setOpenId(open ? null : finding.id)}
                 className={cn(
-                  "min-w-0 flex-1 text-left leading-5 text-foreground hover:underline",
+                  "min-w-[16ch] flex-1 text-left leading-5 text-foreground hover:underline",
                   settled && "line-through decoration-muted-foreground/60"
                 )}
               >
                 <InlineCode text={finding.title} />
               </button>
-              <button
-                type="button"
-                disabled={!anchored}
-                onClick={() => {
-                  setExpandedFinding(finding.id)
-                  jumpTo({
-                    kind: "line",
-                    path: finding.file,
-                    line: finding.end_line ?? 1,
-                    side: finding.side,
-                  })
-                }}
-                className="shrink-0 font-mono text-[11px] text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground"
-                title={finding.file}
-              >
-                {findingLocation(finding)}
-              </button>
-              <span className="flex shrink-0 gap-2 text-[11px] text-muted-foreground">
+              <span className="ml-auto flex shrink-0 items-baseline gap-1 text-[11px] text-muted-foreground">
                 <button
                   type="button"
-                  className="hover:text-foreground"
+                  disabled={!anchored}
+                  onClick={() => {
+                    setExpandedFinding(finding.id)
+                    jumpTo({
+                      kind: "line",
+                      path: finding.file,
+                      line: finding.end_line ?? 1,
+                      start: finding.start_line ?? undefined,
+                      side: finding.side,
+                    })
+                  }}
+                  className="rounded px-1 py-0.5 font-mono hover:bg-accent hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  title={finding.file}
+                >
+                  {findingLocation(finding)}
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Ask Open SWE about: ${finding.title}`}
+                  className="rounded px-1 py-0.5 hover:bg-accent hover:text-foreground"
                   onClick={() => askInChat(askAboutFinding(finding))}
                 >
                   Ask
@@ -850,10 +895,11 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 {!settled && (
                   <button
                     type="button"
-                    className="hover:text-foreground"
+                    aria-label={`Ask Open SWE to fix: ${finding.title}`}
+                    className="rounded px-1 py-0.5 hover:bg-accent hover:text-foreground"
                     onClick={() => askInChat(fixFinding(finding))}
                   >
-                    Fix
+                    Fix it
                   </button>
                 )}
               </span>

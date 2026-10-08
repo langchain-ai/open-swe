@@ -14,6 +14,13 @@ export const findingGroupColor: Record<FindingGroup, string> = {
   informational: "var(--muted-foreground)",
 }
 
+/** The same severities, at text contrast. */
+export const findingGroupTextColor: Record<FindingGroup, string> = {
+  bug: "var(--destructive-foreground)",
+  investigate: "var(--warning-foreground)",
+  informational: "var(--muted-foreground)",
+}
+
 const groupRank: Record<FindingGroup, number> = {
   bug: 0,
   investigate: 1,
@@ -68,4 +75,22 @@ export function threadsNeedingAttention(
       thread.line !== null &&
       !mirrored.has(thread.id)
   )
+}
+
+/** Unresolved conversations people still need to look at, split from the outdated ones. */
+export function openConversationCounts(
+  threads: ReadonlyArray<ReviewThread>,
+  findings: ReadonlyArray<ReviewFinding>
+): { current: number; outdated: number } {
+  const mirrored = new Set(
+    findings.flatMap((finding) => finding.github_review_comment_id ?? [])
+  )
+  let current = 0
+  let outdated = 0
+  for (const thread of threads) {
+    if (thread.resolved || mirrored.has(thread.id)) continue
+    if (thread.outdated) outdated += 1
+    else current += 1
+  }
+  return { current, outdated }
 }

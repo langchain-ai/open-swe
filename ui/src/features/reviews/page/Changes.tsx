@@ -60,6 +60,8 @@ import { useDiffKeys } from "./useDiffKeys"
 
 type Item = CodeViewItem<Note>
 
+const NO_ITEMS: Array<Item> = []
+
 // A diff row as painted: the line-number gutter sets the grid track, not the 18px code line.
 const DIFF_ROW_HEIGHT = 20
 
@@ -117,7 +119,10 @@ function toPierreSide(side: "LEFT" | "RIGHT") {
 /** The centre column: the overview, then every file, in one virtualized scroll. */
 export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const diff = useQuery(reviewQueries.diff(pr))
-  const detail = useQuery(reviewQueries.detail(pr)).data
+  const detailQuery = useQuery(reviewQueries.detail(pr))
+  const detail = detailQuery.data
+  // Files wait for the overview above them, so they never get pushed down once painted.
+  const overviewSettled = !detailQuery.isPending
   const conversation = useQuery(reviewQueries.conversation(pr)).data
   const pending = usePendingReview(pr.owner, pr.repo, pr.number)
   const drafts = useChatDrafts()
@@ -441,7 +446,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
         >
           <CodeView<Note>
             ref={handle}
-            items={items}
+            items={overviewSettled ? items : NO_ITEMS}
             options={options}
             // Each file is a card on the page's gutter, as on GitHub. The
             // outline is a shadow, so it adds nothing CodeView must measure.

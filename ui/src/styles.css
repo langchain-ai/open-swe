@@ -23,6 +23,7 @@ body:has(.version-mismatch-banner) {
     /* Duty-cycled indicator animation: long holds with stepped ramps, so the
        compositor updates discrete frames instead of every vsync. */
     --animate-status-pulse: status-pulse 2s infinite;
+    --animate-attention-flash: attention-flash 1.4s ease-out;
     --color-warning-foreground: var(--warning-foreground);
     --color-warning: var(--warning);
     --color-info-foreground: var(--info-foreground);
@@ -77,6 +78,14 @@ body:has(.version-mismatch-banner) {
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    @keyframes attention-flash {
+        0% {
+            background-color: color-mix(in oklab, var(--primary) 16%, transparent);
+        }
+        100% {
+            background-color: transparent;
+        }
+    }
     @keyframes status-pulse {
         0%,
         40% {

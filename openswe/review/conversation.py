@@ -26,6 +26,16 @@ router = APIRouter(tags=["review"])
 _GITHUB_TIMEOUT = httpx2.Timeout(15.0, connect=5.0)
 # Hidden markers (Open SWE's finding ids, bot metadata) are not part of what a person wrote.
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# Open SWE stamps everything it publishes, including what it posts with a person's token.
+_OPEN_SWE_MARKER_RE = re.compile(r"<!--\s*open-swe-review(?:er|-comment)\b")
+OPEN_SWE_LOGIN = "open-swe"
+# Open SWE's GitHub footers point back at this page or ask for GitHub reactions; here they're noise.
+_OPEN_SWE_FOOTER_RES = (
+    re.compile(r"-{3,}\s*\n\*Your feedback helps Open SWE learn\.[^\n]*\*"),
+    re.compile(r"^React 👍 or 👎.*$", re.MULTILINE),
+    re.compile(r"\[Open in Web\]\([^)]*\)(?:\s*•\s*)?"),
+)
+_BLANK_RUN_RE = re.compile(r"\n{3,}")
 
 ReviewState = Literal["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"]
 DiffSide = Literal["LEFT", "RIGHT"]
@@ -132,6 +142,8 @@ class ConversationAuthor(BaseModel):
     login: str
     avatar_url: str
     bot: bool
+    # Set when Open SWE posted through this person's GitHub account; ``login`` is then Open SWE.
+    posted_by: str | None = None
 
 
 class ConversationComment(BaseModel):
@@ -239,20 +251,29 @@ mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { is
 """
 
 
-def _author(user: _GitHubUser | None) -> ConversationAuthor | None:
+def _author(user: _GitHubUser | None, body: str | None = None) -> ConversationAuthor | None:
     if user is None:
         return None
-    return ConversationAuthor(login=user.login, avatar_url=user.avatar_url, bot=user.type == "Bot")
+    bot = user.type == "Bot"
+    if not bot and body and _OPEN_SWE_MARKER_RE.search(body):
+        return ConversationAuthor(
+            login=OPEN_SWE_LOGIN, avatar_url="", bot=True, posted_by=user.login
+        )
+    return ConversationAuthor(login=user.login, avatar_url=user.avatar_url, bot=bot)
 
 
 def _display_body(body: str | None) -> str:
-    return _HTML_COMMENT_RE.sub("", body or "").strip()
+    text = body or ""
+    if _OPEN_SWE_MARKER_RE.search(text):
+        for footer in _OPEN_SWE_FOOTER_RES:
+            text = footer.sub("", text)
+    return _BLANK_RUN_RE.sub("\n\n", _HTML_COMMENT_RE.sub("", text)).strip()
 
 
 def _comment_item(comment: _GitHubIssueComment) -> ConversationComment:
     return ConversationComment(
         id=comment.id,
-        author=_author(comment.user),
+        author=_author(comment.user, comment.body),
         created_at=comment.created_at,
         body=_display_body(comment.body),
         html_url=comment.html_url,
@@ -263,7 +284,7 @@ def _thread_comment(comment: _GitHubReviewComment) -> ThreadComment:
     return ThreadComment(
         id=comment.id,
         review_id=comment.pull_request_review_id,
-        author=_author(comment.user),
+        author=_author(comment.user, comment.body),
         created_at=comment.created_at,
         body=_display_body(comment.body),
         html_url=comment.html_url,
@@ -286,7 +307,7 @@ def build_timeline(
         items.append(
             ConversationReview(
                 id=review.id,
-                author=_author(review.user),
+                author=_author(review.user, review.body),
                 created_at=review.submitted_at,
                 body=_display_body(review.body),
                 html_url=review.html_url,

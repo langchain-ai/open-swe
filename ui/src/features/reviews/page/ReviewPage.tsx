@@ -199,7 +199,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
         )}
         {!roomForNavigator && (
           <Sheet open={navigatorOverlay} onOpenChange={setNavigatorOverlay}>
-            <SheetPopup side="left" className="max-w-[300px] p-0">
+            <SheetPopup side="left" className="max-w-[300px] p-0 pt-10">
               <SheetTitle className="sr-only">Files</SheetTitle>
               <Navigator pr={pr} />
             </SheetPopup>

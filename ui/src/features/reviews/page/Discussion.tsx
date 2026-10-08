@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
+  ArrowDownIcon,
   CaretRightIcon,
   CheckCircleIcon,
+  CheckIcon,
   ChatCircleIcon,
   GitCommitIcon,
   XCircleIcon,
@@ -11,18 +13,20 @@ import {
 import {
   postReviewConversationComment,
   type Conversation,
+  type ConversationAuthor,
   type ConversationComment,
   type ConversationCommit,
   type ConversationItem,
   type ConversationReview,
   type ReviewThread,
+  type ThreadComment,
 } from "@/features/reviews/lib/conversationApi"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
-import { cn, formatRelativeTime } from "@/lib/utils"
-import { Avatar, Byline } from "./notes/Byline"
+import { cn } from "@/lib/utils"
+import { Avatar, Byline, formatWhen } from "./notes/Byline"
 import { ThreadCard, ThreadSummary } from "./notes/ThreadNote"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { useReviewPage } from "./store"
@@ -30,10 +34,37 @@ import { plainFirstLine } from "./text"
 
 type Said = ConversationComment | ConversationReview
 
+/** A reply someone left in an existing thread. */
+interface Reply {
+  thread: ReviewThread
+  comment: ThreadComment
+}
+
+interface ReviewParts {
+  /** Threads this review opened. */
+  started: Array<ReviewThread>
+  /** Its comments in threads that someone else opened. */
+  replies: Array<Reply>
+}
+
 type Block =
   | { kind: "commits"; key: string; commits: Array<ConversationCommit> }
   /** `earlier` holds the same message, said before, by the same bot. */
-  | { kind: "item"; key: string; item: Said; earlier: Array<Said> }
+  | {
+      kind: "item"
+      key: string
+      item: Said
+      earlier: Array<Said>
+      parts: ReviewParts
+    }
+  /** Back-to-back reviews by one person that only replied in threads. */
+  | {
+      kind: "replies"
+      key: string
+      author: ConversationAuthor | null
+      reviews: Array<ConversationReview>
+      replies: Array<Reply>
+    }
 
 const stateWords: Record<ConversationReview["state"], string> = {
   APPROVED: "approved",
@@ -42,8 +73,39 @@ const stateWords: Record<ConversationReview["state"], string> = {
   DISMISSED: "had a review dismissed",
 }
 
-/** Consecutive pushes become one block, and a bot repeating itself folds into its latest say. */
-function toBlocks(items: ReadonlyArray<ConversationItem>): Array<Block> {
+const NO_PARTS: ReviewParts = { started: [], replies: [] }
+
+function reviewParts(
+  threads: ReadonlyArray<ReviewThread>
+): Map<number, ReviewParts> {
+  const parts = new Map<number, ReviewParts>()
+  const of = (id: number) => {
+    let entry = parts.get(id)
+    if (!entry) {
+      entry = { started: [], replies: [] }
+      parts.set(id, entry)
+    }
+    return entry
+  }
+  for (const thread of threads)
+    thread.comments.forEach((comment, index) => {
+      if (comment.review_id === null) return
+      if (index === 0) of(comment.review_id).started.push(thread)
+      else of(comment.review_id).replies.push({ thread, comment })
+    })
+  return parts
+}
+
+/**
+ * Every thread appears once, under the review that opened it. Replies-only
+ * reviews by one person run together, pushes merge, and a bot repeating the
+ * same words folds into its latest say.
+ */
+function toBlocks(
+  items: ReadonlyArray<ConversationItem>,
+  threads: ReadonlyArray<ReviewThread>
+): Array<Block> {
+  const partsByReview = reviewParts(threads)
   const blocks: Array<Block> = []
   for (const item of items) {
     const last = blocks.at(-1)
@@ -53,15 +115,46 @@ function toBlocks(items: ReadonlyArray<ConversationItem>): Array<Block> {
         blocks.push({ kind: "commits", key: `c-${item.sha}`, commits: [item] })
       continue
     }
+    const parts =
+      item.kind === "review"
+        ? (partsByReview.get(item.id) ?? NO_PARTS)
+        : NO_PARTS
+    const body = item.body.trim()
+    if (
+      item.kind === "review" &&
+      !body &&
+      parts.started.length === 0 &&
+      parts.replies.length > 0
+    ) {
+      if (
+        last?.kind === "replies" &&
+        last.author?.login === item.author?.login
+      ) {
+        last.reviews.push(item)
+        last.replies.push(...parts.replies)
+      } else
+        blocks.push({
+          kind: "replies",
+          key: `r-${item.id}`,
+          author: item.author,
+          reviews: [item],
+          replies: [...parts.replies],
+        })
+      continue
+    }
+    // Only a bot's spoken words fold; what it left in threads is never the same thing twice.
+    const index =
+      item.author?.bot && body && parts.started.length === 0
+        ? blocks.findLastIndex(
+            (block) =>
+              block.kind === "item" &&
+              block.parts.started.length === 0 &&
+              block.item.author?.login === item.author?.login &&
+              block.item.kind === item.kind &&
+              plainFirstLine(block.item.body) === plainFirstLine(item.body)
+          )
+        : -1
     // The repeat moves to where it was last said, so the timeline keeps reading forward.
-    const index = blocks.findLastIndex(
-      (block) =>
-        block.kind === "item" &&
-        !!item.author?.bot &&
-        block.item.author?.login === item.author.login &&
-        block.item.kind === item.kind &&
-        plainFirstLine(block.item.body) === plainFirstLine(item.body)
-    )
     const folded =
       index >= 0
         ? (blocks.splice(index, 1)[0] as Extract<Block, { kind: "item" }>)
@@ -71,41 +164,62 @@ function toBlocks(items: ReadonlyArray<ConversationItem>): Array<Block> {
       key: `${item.kind}-${item.id}`,
       item,
       earlier: folded ? [...folded.earlier, folded.item] : [],
+      parts,
     })
   }
-  return blocks
+  // Folding can leave pushes that were apart side by side.
+  return blocks.reduce<Array<Block>>((merged, block) => {
+    const previous = merged.at(-1)
+    if (block.kind === "commits" && previous?.kind === "commits")
+      previous.commits.push(...block.commits)
+    else merged.push(block)
+    return merged
+  }, [])
 }
 
 /** GitHub's conversation, with people at full volume and bots folded to a line each. */
 export function Discussion({ pr }: { pr: PullRequestRef }) {
   const conversation = useQuery(reviewQueries.conversation(pr))
-  const blocks = useMemo(
-    () => toBlocks(conversation.data?.items ?? []),
-    [conversation.data?.items]
-  )
   const threads = conversation.data?.threads
-  // A reply is a review of its own on GitHub, so a review owns every thread it wrote in.
-  const threadsByReview = useMemo(() => {
-    const map = new Map<number, Array<ReviewThread>>()
-    for (const thread of threads ?? []) {
-      const reviews = new Set(
-        thread.comments.flatMap((comment) =>
-          comment.review_id === null ? [] : [comment.review_id]
-        )
-      )
-      for (const review of reviews)
-        map.set(review, [...(map.get(review) ?? []), thread])
-    }
-    return map
-  }, [threads])
+  const blocks = useMemo(
+    () => toBlocks(conversation.data?.items ?? [], threads ?? []),
+    [conversation.data?.items, threads]
+  )
   const open = useMemo(
     () => (threads ?? []).filter((thread) => !thread.resolved),
     [threads]
   )
+  const scroller = useRef<HTMLDivElement>(null)
+  const [awayFromLatest, setAwayFromLatest] = useState(false)
+  // The tab mounts hidden, so measure again whenever it is shown or its content grows.
+  useEffect(() => {
+    const node = scroller.current
+    if (!node) return
+    const measure = () =>
+      setAwayFromLatest(
+        node.scrollHeight - node.scrollTop - node.clientHeight > 400
+      )
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    if (node.firstElementChild) observer.observe(node.firstElementChild)
+    return () => observer.disconnect()
+  }, [blocks])
 
   return (
-    <section aria-label="Conversation" className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+    <section
+      aria-label="Conversation"
+      className="relative flex h-full min-h-0 flex-col"
+    >
+      <div
+        ref={scroller}
+        onScroll={(event) => {
+          const node = event.currentTarget
+          setAwayFromLatest(
+            node.scrollHeight - node.scrollTop - node.clientHeight > 400
+          )
+        }}
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+      >
         {conversation.isPending ? (
           <div className="flex flex-col gap-4">
             {Array.from({ length: 4 }, (_, i) => (
@@ -131,17 +245,21 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
                 {blocks.map((block) =>
                   block.kind === "commits" ? (
                     <CommitsBlock key={block.key} commits={block.commits} />
+                  ) : block.kind === "replies" ? (
+                    <RepliesBlock
+                      key={block.key}
+                      pr={pr}
+                      author={block.author}
+                      reviews={block.reviews}
+                      replies={block.replies}
+                    />
                   ) : (
                     <ItemBlock
                       key={block.key}
                       pr={pr}
                       item={block.item}
                       earlier={block.earlier}
-                      threads={
-                        block.item.kind === "review"
-                          ? (threadsByReview.get(block.item.id) ?? [])
-                          : []
-                      }
+                      parts={block.parts}
                     />
                   )
                 )}
@@ -150,6 +268,21 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
           </>
         )}
       </div>
+      {awayFromLatest && (
+        <button
+          type="button"
+          onClick={() =>
+            scroller.current?.scrollTo({
+              top: scroller.current.scrollHeight,
+              behavior: "smooth",
+            })
+          }
+          className="absolute right-4 bottom-[132px] flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-medium text-foreground shadow-sm hover:bg-accent"
+        >
+          Latest
+          <ArrowDownIcon className="size-3" />
+        </button>
+      )}
       <CommentBox pr={pr} />
     </section>
   )
@@ -247,7 +380,7 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
           {authors.join(", ")}
         </span>{" "}
         pushed {commits.length} commit{commits.length === 1 ? "" : "s"}{" "}
-        {formatRelativeTime(new Date(commits.at(-1)!.created_at).getTime())}
+        {formatWhen(commits.at(-1)!.created_at)}
         <CaretRightIcon
           className={cn(
             "ml-1 inline size-3 align-[-2px] transition-transform",
@@ -288,27 +421,102 @@ function ReviewStateMark({ state }: { state: ConversationReview["state"] }) {
   return <ChatCircleIcon className="size-3.5 text-muted-foreground" />
 }
 
+/** One person's run of thread replies: where each went and what it said. */
+function RepliesBlock({
+  pr,
+  author,
+  reviews,
+  replies,
+}: {
+  pr: PullRequestRef
+  author: ConversationAuthor | null
+  reviews: Array<ConversationReview>
+  replies: Array<Reply>
+}) {
+  const latest = reviews.at(-1)!
+  const threadCount = new Set(replies.map((reply) => reply.thread.id)).size
+  return (
+    <li className="relative pl-8">
+      <Avatar
+        author={author}
+        className="absolute top-0 left-0 size-6 ring-4 ring-background"
+      />
+      <Byline
+        author={author}
+        createdAt={latest.created_at}
+        href={latest.html_url}
+        verb={`replied in ${threadCount} thread${threadCount === 1 ? "" : "s"}`}
+      />
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {replies.map((reply) => (
+          <li key={reply.comment.id}>
+            <ReplyRow pr={pr} reply={reply} />
+          </li>
+        ))}
+      </ul>
+    </li>
+  )
+}
+
+function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
+  const [open, setOpen] = useState(false)
+  const { thread, comment } = reply
+  const line = thread.line ?? thread.original_line
+  const name = thread.path.split("/").pop() ?? thread.path
+  if (open)
+    return (
+      <ThreadCard
+        pr={pr}
+        thread={thread}
+        withContext
+        onCollapse={() => setOpen(false)}
+      />
+    )
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      title={`${thread.path}${line ? `:${line}` : ""}`}
+      className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-accent"
+    >
+      <span className="max-w-[45%] shrink-0 truncate font-mono text-[11px] text-muted-foreground">
+        {name}
+        {line ? `:${line}` : ""}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-foreground/90">
+        {plainFirstLine(comment.body)}
+      </span>
+      {thread.resolved && (
+        <CheckIcon
+          aria-label="Resolved"
+          className="size-3 shrink-0 self-center text-muted-foreground"
+        />
+      )}
+    </button>
+  )
+}
+
 function ItemBlock({
   pr,
   item,
   earlier,
-  threads,
+  parts,
 }: {
   pr: PullRequestRef
   item: Said
   earlier: Array<Said>
-  threads: Array<ReviewThread>
+  parts: ReviewParts
 }) {
   const bot = Boolean(item.author?.bot)
   const body = item.body.trim()
   const [open, setOpen] = useState(!bot)
   const [showEarlier, setShowEarlier] = useState(false)
-  // A review with no words of its own only replied in threads; say where.
-  const repliedOnly = item.kind === "review" && !body && threads.length > 0
+  const { started, replies } = parts
+  const leftOnlyComments = item.kind === "review" && !body && started.length > 0
   const verb =
     item.kind === "review"
-      ? repliedOnly
-        ? `replied in ${threads.length} thread${threads.length === 1 ? "" : "s"}`
+      ? leftOnlyComments && item.state === "COMMENTED"
+        ? `left ${started.length} comment${started.length === 1 ? "" : "s"}`
         : stateWords[item.state]
       : "commented"
   return (
@@ -318,7 +526,7 @@ function ItemBlock({
         className="absolute top-0 left-0 size-6 ring-4 ring-background"
       />
       <div className="flex min-w-0 items-center gap-1.5">
-        {item.kind === "review" && !repliedOnly && (
+        {item.kind === "review" && item.state !== "COMMENTED" && (
           <ReviewStateMark state={item.state} />
         )}
         <Byline
@@ -349,8 +557,7 @@ function ItemBlock({
                 rel="noreferrer"
                 className="hover:text-foreground hover:underline"
               >
-                Also {said.kind === "review" ? "reviewed" : "said"}{" "}
-                {formatRelativeTime(new Date(said.created_at).getTime())}
+                Said the same {formatWhen(said.created_at)}
               </a>
             </li>
           ))}
@@ -379,11 +586,20 @@ function ItemBlock({
             {plainFirstLine(item.body)}
           </button>
         ))}
-      {threads.length > 0 && (
+      {started.length > 0 && (
         <ul className="mt-1.5 flex flex-col gap-1">
-          {threads.map((thread) => (
+          {started.map((thread) => (
             <li key={thread.id}>
               <ThreadRow pr={pr} thread={thread} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {replies.length > 0 && (
+        <ul className="mt-1.5 flex flex-col gap-1">
+          {replies.map((reply) => (
+            <li key={reply.comment.id}>
+              <ReplyRow pr={pr} reply={reply} />
             </li>
           ))}
         </ul>

@@ -64,7 +64,11 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
     <div
       data-file-header={path}
       onPointerEnter={() => {
-        if (renderable)
+        // Only a changed file has unchanged context to expand into.
+        if (
+          renderable &&
+          (file.status === "modified" || file.status === "renamed")
+        )
           loadReviewFileContents(pr.owner, pr.repo, pr.number, file).catch(
             (error: unknown) =>
               console.warn("Could not prefetch file contents", { path, error })
@@ -104,10 +108,10 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         </span>
       )}
       <span
-        className="flex min-w-0 items-baseline font-mono text-[12px]"
+        className="flex min-w-0 items-baseline overflow-hidden font-mono text-[12px]"
         title={path}
       >
-        <span className="truncate text-left text-muted-foreground [direction:rtl]">
+        <span className="truncate text-left text-muted-foreground [direction:rtl] max-sm:hidden">
           <bdi>{dir}</bdi>
         </span>
         <span
@@ -132,7 +136,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         <CopyIcon className="size-3" />
       </button>
       {status && (
-        <span className="shrink-0 rounded-[4px] border border-border px-1 text-[10px] leading-4 text-muted-foreground">
+        <span className="shrink-0 rounded-[4px] border border-border px-1 text-[10px] leading-4 text-muted-foreground max-sm:hidden">
           {status}
         </span>
       )}
@@ -237,7 +241,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         >
           {viewed && <CheckIcon weight="bold" className="size-2.5" />}
         </span>
-        Viewed
+        <span className="max-sm:hidden">Viewed</span>
       </button>
     </div>
   )

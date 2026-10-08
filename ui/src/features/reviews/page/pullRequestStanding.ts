@@ -1,4 +1,6 @@
 import type { OpenPullRequest, ReviewDetail } from "@/lib/api"
+import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
+import { openConversationCounts } from "./findings"
 import type { PullRequestThreadActionName } from "@/features/reviews/lib/threadActions"
 import {
   canAttemptMerge,
@@ -49,7 +51,8 @@ export function openBugCount(detail: ReviewDetail): number {
 export function pullRequestStanding(
   detail: ReviewDetail,
   status: OpenPullRequest | null | undefined,
-  viewer: string | undefined
+  viewer: string | undefined,
+  threads: ReadonlyArray<ReviewThread> | undefined
 ): Standing {
   if (detail.pr.merged_at)
     return { tone: "merged", headline: "Merged.", details: [], next: null }
@@ -84,9 +87,18 @@ export function pullRequestStanding(
     }
   const isAuthor =
     !!viewer && detail.pr.author?.login.toLowerCase() === viewer.toLowerCase()
-  if (status.unresolvedThreads)
+  // A finding's own GitHub thread is already counted as a finding above.
+  const conversations = threads
+    ? openConversationCounts(threads, detail.findings)
+    : { current: status.unresolvedThreads ?? 0, outdated: 0 }
+  if (conversations.current)
     details.push({
-      text: plural(status.unresolvedThreads, "unresolved conversation"),
+      text: plural(conversations.current, "open conversation"),
+      opens: "conversations",
+    })
+  if (conversations.outdated)
+    details.push({
+      text: `${plural(conversations.outdated, "outdated conversation")} still unresolved`,
       opens: "conversations",
     })
 
@@ -158,9 +170,13 @@ export function pullRequestStanding(
     return {
       tone: "ready",
       headline:
-        status.reviewDecision === "approved"
-          ? "Approved and ready to merge."
-          : "Ready to merge.",
+        conversations.current > 0
+          ? status.reviewDecision === "approved"
+            ? "Approved, with conversations still open."
+            : "Mergeable, with conversations still open."
+          : status.reviewDecision === "approved"
+            ? "Approved and ready to merge."
+            : "Ready to merge.",
       details,
       next: { kind: "merge" },
     }

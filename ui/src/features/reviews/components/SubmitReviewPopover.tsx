@@ -185,6 +185,12 @@ export function SubmitReviewPopover({
               </label>
             ))}
           </fieldset>
+          {isAuthor && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              GitHub doesn&apos;t let you approve or request changes on your own
+              pull request.
+            </p>
+          )}
           {submit.error && (
             <p className="mt-2 text-xs break-words text-destructive">
               {submit.error.message}

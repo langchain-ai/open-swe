@@ -71,6 +71,9 @@ export function wholeFileDiff(file: ReviewDiffFile): FileDiffMetadata {
   let diff: FileDiffMetadata
   try {
     diff = file.patch ? getSingularPatch(file.patch) : emptyDiff(file)
+    // An added or deleted file's patch is the whole file, so there is no hidden context to offer.
+    if (file.patch && (file.status === "added" || file.status === "removed"))
+      diff.isPartial = false
   } catch (error) {
     console.warn("Could not parse a file's patch", { path: file.path, error })
     diff = emptyDiff(file)

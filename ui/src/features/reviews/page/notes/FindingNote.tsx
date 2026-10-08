@@ -12,6 +12,7 @@ import {
   askAboutFinding,
   findingGroupColor,
   findingGroupLabel,
+  findingGroupTextColor,
   fixFinding,
 } from "@/features/reviews/page/findings"
 import { InlineCode } from "@/features/reviews/page/inlineCode"
@@ -63,7 +64,10 @@ export function FindingNote({
           className="flex w-full items-start gap-2 px-3 py-2 text-left"
         >
           <AgentMark className="mt-0.5" />
-          <span className="shrink-0 font-medium" style={{ color }}>
+          <span
+            className="shrink-0 font-medium"
+            style={{ color: findingGroupTextColor[finding.group] }}
+          >
             {findingGroupLabel[finding.group]}
           </span>
           <span

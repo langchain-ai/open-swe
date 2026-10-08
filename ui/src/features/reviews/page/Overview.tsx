@@ -7,6 +7,7 @@ import { reviewImageProxyUrl } from "@/lib/api"
 import { formatRelativeTime } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { Skeleton } from "@/components/ui/skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
 import { PullRequestLabels } from "@/features/reviews/components/PullRequestLabels"
 import { AgentMark } from "./AgentMark"
@@ -18,6 +19,25 @@ const CLAMP_PX = 320
 /** The top of the centre scroll: where the PR stands, then what its author wrote. */
 export function Overview({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr)).data
+  if (!detail)
+    return (
+      <div
+        aria-hidden
+        className="flex w-full max-w-[920px] flex-col gap-4 px-4 pt-5 pb-8"
+      >
+        <Skeleton className="h-[236px] rounded-xl" />
+        <Skeleton className="h-4 w-48" />
+        <div className="flex flex-col gap-2">
+          {[92, 100, 84, 96, 60].map((width) => (
+            <Skeleton
+              key={width}
+              className="h-3.5"
+              style={{ width: `${width}%` }}
+            />
+          ))}
+        </div>
+      </div>
+    )
   return (
     <div className="flex w-full max-w-[920px] flex-col gap-4 px-4 pt-5 pb-8">
       <StandingPanel pr={pr} />

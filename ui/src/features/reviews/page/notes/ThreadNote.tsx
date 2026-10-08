@@ -1,5 +1,10 @@
 import { useState } from "react"
-import { CaretRightIcon, CheckIcon } from "@phosphor-icons/react"
+import {
+  ArrowSquareOutIcon,
+  CaretRightIcon,
+  ChatCircleIcon,
+  CheckIcon,
+} from "@phosphor-icons/react"
 
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -55,52 +60,107 @@ export function ThreadSummary({
 }) {
   const first = thread.comments[0]
   if (!first) return null
+  const last = thread.comments.at(-1)!
+  const said = (
+    <span className="min-w-0 flex-1 truncate">
+      <span className="font-medium">
+        {first.author?.login.replace(/\[bot\]$/, "") ?? "ghost"}
+      </span>{" "}
+      <span className="text-muted-foreground">
+        {plainFirstLine(first.body)}
+      </span>
+    </span>
+  )
+  const state = (
+    <>
+      {thread.comments.length > 1 && (
+        <span
+          title={`${thread.comments.length} comments`}
+          className="flex shrink-0 items-center gap-0.5 text-muted-foreground tabular-nums"
+        >
+          <ChatCircleIcon className="size-3" />
+          {thread.comments.length}
+        </span>
+      )}
+      {thread.resolved ? (
+        <CheckIcon
+          aria-label="Resolved"
+          className="size-3 shrink-0 text-muted-foreground"
+        />
+      ) : (
+        thread.outdated && (
+          <span className="shrink-0 rounded-[4px] border border-border px-1 text-[10px] text-muted-foreground">
+            Outdated
+          </span>
+        )
+      )}
+    </>
+  )
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-left text-xs hover:bg-accent"
+      className="flex w-full min-w-0 flex-col gap-0.5 overflow-hidden rounded-lg border border-border bg-card px-2.5 py-1.5 text-left text-xs hover:bg-accent"
     >
-      <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />
-      <span className="flex -space-x-1">
-        {thread.comments.slice(0, 3).map((comment) => (
-          <Avatar
-            key={comment.id}
-            author={comment.author}
-            className="size-4 ring-2 ring-card"
-          />
-        ))}
+      <span className="flex w-full min-w-0 items-center gap-2">
+        <CaretRightIcon className="size-3 shrink-0 text-muted-foreground" />
+        <span className="flex shrink-0 -space-x-1">
+          {thread.comments.slice(0, 3).map((comment) => (
+            <Avatar
+              key={comment.id}
+              author={comment.author}
+              className="size-4 ring-2 ring-card"
+            />
+          ))}
+        </span>
+        {location ? (
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+            {location}
+          </span>
+        ) : (
+          said
+        )}
+        {state}
       </span>
-      {location && (
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-          {location}
-        </span>
-      )}
-      <span className="min-w-0 flex-1 truncate">
-        <span className="font-medium">
-          {first.author?.login.replace(/\[bot\]$/, "") ?? "ghost"}
-        </span>{" "}
-        <span className="text-muted-foreground">
-          {plainFirstLine(first.body)}
-        </span>
-      </span>
-      {thread.comments.length > 1 && (
-        <span className="shrink-0 text-muted-foreground tabular-nums">
-          {thread.comments.length}
-        </span>
-      )}
-      {thread.outdated && (
-        <span className="shrink-0 rounded-[4px] border border-border px-1 text-[10px] text-muted-foreground">
-          Outdated
-        </span>
-      )}
-      {thread.resolved && (
-        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-          <CheckIcon className="size-3" /> Resolved
+      {location && <span className="flex w-full min-w-0 pl-5">{said}</span>}
+      {location && thread.comments.length > 1 && (
+        <span className="w-full truncate pl-5 text-muted-foreground">
+          <span className="font-medium text-foreground/80">
+            {last.author?.login.replace(/\[bot\]$/, "") ?? "ghost"}
+          </span>{" "}
+          {plainFirstLine(last.body)}
         </span>
       )}
     </button>
   )
+}
+
+const SUGGESTION_RE = /```suggestion[^\n]*\n([\s\S]*?)```/g
+
+/** GitHub's suggestion blocks, shown as the change they propose against the lines commented on. */
+function withSuggestions(body: string, thread: ReviewThread): string {
+  if (!body.includes("```suggestion")) return body
+  const count =
+    thread.start_line !== null && thread.line !== null
+      ? thread.line - thread.start_line + 1
+      : 1
+  const original =
+    thread.side === "RIGHT"
+      ? thread.diff_hunk
+          .split("\n")
+          .filter(
+            (line) => line && !line.startsWith("@@") && !line.startsWith("-")
+          )
+          .slice(-count)
+          .map((line) => `-${line.slice(1)}`)
+      : []
+  return body.replace(SUGGESTION_RE, (_match, suggested: string) => {
+    const proposed = suggested
+      .replace(/\n$/, "")
+      .split("\n")
+      .map((line) => `+${line}`)
+    return `**Suggested change**\n\n\`\`\`diff\n${[...original, ...proposed].join("\n")}\n\`\`\``
+  })
 }
 
 /** The code a thread was left on, as GitHub kept it: the last lines of its hunk. */
@@ -143,6 +203,9 @@ export function ThreadCard({
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const { reply, resolve } = useThreadActions(pr, thread)
   const line = thread.line ?? thread.original_line
+  const suggestion = thread.comments.findLast((comment) =>
+    comment.body.includes("```suggestion")
+  )
   return (
     <div
       className={cn(
@@ -156,6 +219,18 @@ export function ThreadCard({
             {thread.path}
             {line ? `:${line}` : ""}
           </span>
+          {thread.comments[0]?.html_url && (
+            <a
+              href={thread.comments[0].html_url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="View this conversation on GitHub"
+              className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+            >
+              GitHub
+              <ArrowSquareOutIcon className="size-3" />
+            </a>
+          )}
           {thread.outdated ? (
             <span className="shrink-0 rounded-[4px] border border-border px-1 text-[10px] text-muted-foreground">
               Outdated
@@ -193,7 +268,7 @@ export function ThreadCard({
                 href={comment.html_url || undefined}
               />
               <div className="mt-1 text-[13px] leading-[1.6] [&_.markdown-body]:text-[13px]">
-                <Markdown content={comment.body} />
+                <Markdown content={withSuggestions(comment.body, thread)} />
               </div>
             </div>
           </li>
@@ -219,13 +294,27 @@ export function ThreadCard({
               {thread.resolved ? "Unresolve" : "Resolve conversation"}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => askInChat(threadQuote(thread))}
-          >
-            Ask Open SWE
-          </Button>
+          {suggestion ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                askInChat(
+                  `${threadQuote(thread)}Apply ${suggestion.author?.login ?? "their"}'s suggested change on this branch.`
+                )
+              }
+            >
+              Ask Open SWE to apply
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => askInChat(threadQuote(thread))}
+            >
+              Ask Open SWE
+            </Button>
+          )}
           <button
             type="button"
             onClick={onCollapse}

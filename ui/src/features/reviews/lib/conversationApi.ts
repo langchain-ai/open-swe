@@ -13,6 +13,8 @@ export interface ConversationAuthor {
   login: string
   avatar_url: string
   bot: boolean
+  /** Set when Open SWE posted through this person's GitHub account; `login` is then Open SWE. */
+  posted_by: string | null
 }
 
 interface ConversationItemBase {
