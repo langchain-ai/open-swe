@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from githubkit.auth import TokenAuthStrategy
+import httpx2
 from langgraph_sdk import get_client
 
 from openswe.dispatch import dispatch_agent_run
@@ -23,22 +23,21 @@ from openswe.expedited_review.channels import (
     still_internal,
 )
 from openswe.expedited_review.diff_image import render_diff_png
-from openswe.expedited_review.eligibility import ChangedFile, fetch_changed_files
+from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
     latest_review_states,
     review_authors,
 )
 from openswe.expedited_review.reviews import dismiss_approval
-from openswe.github.ci import fetch_pr
-from openswe.github.http import github_client
+from openswe.github.http import GitHubAppUnavailable, or_none
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.github.repositories import Repository
-from openswe.github.sdk import github_sdk
 from openswe.human_review import card as standard_card
 from openswe.human_review.events import ReviewDecisionCause
-from openswe.human_review.people import Outcome, repo_token
+from openswe.human_review.people import Outcome
 from openswe.human_review.requests import (
     ChannelChoice,
     HumanReviewParticipant,
@@ -107,12 +106,17 @@ async def transition(
         return row
 
 
-async def _files_for(request: HumanReviewRequest, token: str) -> list[ChangedFile]:
+async def _files_for(request: HumanReviewRequest) -> list[ChangedFile] | None:
+    """The PR's changed files; ``None`` when the App cannot read them."""
     pr = request.pull_request
-    files = await fetch_changed_files(
-        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
-    )
-    return files or []
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            return await ChangedFile.of_pull(pull)
+    except GitHubAppUnavailable:
+        logger.warning(
+            "No GitHub App token to read the changed files", extra={"request_id": str(request.id)}
+        )
+        return None
 
 
 async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile]) -> str | None:
@@ -154,9 +158,7 @@ async def _warn_target(
     pr = request.pull_request
     if not pr.base_ref:
         return card
-    default_branch = await Repository.resolve_default_branch(
-        pr.repo_full_name, token=await repo_token(pr.owner, pr.repo)
-    )
+    default_branch = await Repository.resolve_default_branch(pr.owner, pr.repo)
     if not default_branch or pr.base_ref == default_branch:
         return card
     warning = (
@@ -230,12 +232,7 @@ async def prompt_author_ready(approval: HumanReviewRequest) -> str | None:
     )
     if author is None or not author.slack_user_id:
         return "The author has no linked Slack identity; ask them to mark it ready on GitHub."
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
-        return "Could not read the diff for the author-only card; try again."
-    files = await fetch_changed_files(
-        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
-    )
+    files = await _files_for(approval)
     if files is None:
         return "Could not read the diff for the author-only card; try again."
     approval.slack_diff_file_id = await _diff_image_id(approval, files) or ""
@@ -286,26 +283,29 @@ async def post_standard_card(request: HumanReviewRequest) -> str:
 
 async def _channel_choices(approval: HumanReviewRequest) -> list[ChannelChoice]:
     pr = approval.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if (
-        token is not None
-        and (await RepoSettings.cached(pr.owner, pr.repo, token=token)).review_channel.strip()
-    ):
+    if (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip():
         return []
     return approval.slack_channel_choices or await own_choices(approval)
 
 
+async def _review_states(request: HumanReviewRequest) -> dict[str, str]:
+    pr = request.pull_request
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            return await latest_review_states(pull, pr.author) or {}
+    except GitHubAppUnavailable:
+        logger.warning(
+            "No GitHub App token to read review states", extra={"request_id": str(request.id)}
+        )
+        return {}
+
+
 async def _render_standard(
-    request: HumanReviewRequest, outcome: str | None, token: str | None
+    request: HumanReviewRequest, outcome: str | None
 ) -> tuple[str, list[Block]]:
     pr = request.pull_request
     author = await request.author_mention()
-    states: dict[str, str] = {}
-    if token is not None and outcome in (None, "merged"):
-        async with github_client(token=token) as client:
-            states = (
-                await latest_review_states(client, pr.owner, pr.repo, pr.number, pr.author) or {}
-            )
+    states = await _review_states(request) if outcome in (None, "merged") else {}
     if outcome is not None:
         return standard_card.closed_card(
             request, title=pr.title, author=author, outcome=outcome, review_states=states
@@ -355,10 +355,9 @@ async def _render_card(
     request: HumanReviewRequest, outcome: str | None, *, copy: bool
 ) -> tuple[str, list[Block]]:
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
     if request.kind == "standard":
-        return await _render_standard(request, outcome, token)
-    files = await _files_for(request, token) if token else []
+        return await _render_standard(request, outcome)
+    files = await _files_for(request) or []
     diff_image_id = request.slack_diff_file_id or None
     author = await request.author_mention()
     if outcome is None:
@@ -453,11 +452,7 @@ async def broadcast_configured(approval: HumanReviewRequest) -> None:
     if approval.sent_elsewhere or approval.approved or approval.awaiting_ready:
         return
     pr = approval.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
-        logger.warning("Could not resolve expedited review broadcast channel without a token")
-        return
-    configured = (await RepoSettings.cached(pr.owner, pr.repo, token=token)).review_channel.strip()
+    configured = (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip()
     if not configured:
         return
     channel = await SlackChannel.resolve(configured)
@@ -489,14 +484,12 @@ async def refresh_card(request: HumanReviewRequest, *, outcome: str | None = Non
         and not request.slack_message_ts
         and outcome is None
     ):
-        token = await repo_token(request.pull_request.owner, request.pull_request.repo)
-        if token is None:
-            logger.warning("Could not publish ready expedited card without a GitHub token")
+        files = await _files_for(request)
+        if files is None:
+            logger.warning("Could not publish ready expedited card without its changed files")
             return
         try:
-            message_ts = await post_card(
-                request, title=request.pull_request.title, files=await _files_for(request, token)
-            )
+            message_ts = await post_card(request, title=request.pull_request.title, files=files)
         except SlackRequestError as exc:
             logger.warning(
                 "Could not publish ready expedited card", extra={"slack_error": exc.code}
@@ -809,20 +802,17 @@ def idle_picks(
     ]
 
 
-async def _unrequest_github_review(request: HumanReviewRequest, login: str, token: str) -> None:
-    pr = request.pull_request
+async def _unrequest_github_review(
+    request: HumanReviewRequest, pull: PullRequestClient, login: str
+) -> None:
     try:
-        async with github_sdk(TokenAuthStrategy(token)) as client:
-            await client.rest.pulls.async_remove_requested_reviewers(
-                pr.owner, pr.repo, pr.number, data={"reviewers": [login]}
-            )
-    except Exception:
+        await pull.remove_requested_reviewers([login])
+    except httpx2.HTTPError:
         logger.warning(
             "GitHub review request removal did not complete",
             extra={"request_id": str(request.id)},
             exc_info=True,
         )
-        return
 
 
 async def _tell_withdrawn(
@@ -878,15 +868,27 @@ async def release_picks(
     if not any(reviewer.assigned_by_agent for reviewer in request.reviewers + request.picks):
         return request
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            return await _release_picks(request, pull, reason, cause=cause, covered=covered)
+    except GitHubAppUnavailable:
         logger.warning(
             "No GitHub App token to release Open SWE's reviewer picks",
             extra={"request_id": str(request.id)},
         )
         return request
-    async with github_client(token=token) as client:
-        reviewed = await review_authors(client, pr.owner, pr.repo, pr.number)
+
+
+async def _release_picks(
+    request: HumanReviewRequest,
+    pull: PullRequestClient,
+    reason: str,
+    *,
+    cause: ReviewDecisionCause,
+    covered: Callable[[str], bool] | None,
+) -> HumanReviewRequest:
+    pr = request.pull_request
+    reviewed = await review_authors(pull)
     if reviewed is None:
         logger.warning(
             "Could not read reviews to release Open SWE's reviewer picks",
@@ -923,7 +925,7 @@ async def release_picks(
             "Released a reviewer Open SWE picked",
             extra={"request_id": str(request.id), "github_login": reviewer.github_login},
         )
-        await _unrequest_github_review(request, reviewer.github_login, token)
+        await _unrequest_github_review(request, pull, reviewer.github_login)
         await _tell_withdrawn(request, reviewer, text)
     await request.log_decision(
         "reviewers_released",
@@ -959,7 +961,15 @@ async def drop_picks(
     if not dropped:
         return []
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            for pick in dropped:
+                await _unrequest_github_review(request, pull, pick.github_login)
+    except GitHubAppUnavailable:
+        logger.warning(
+            "No GitHub App token to withdraw review requests for dropped picks",
+            extra={"request_id": str(request.id)},
+        )
     for pick in dropped:
         logger.info(
             "Withdrew a pending reviewer pick",
@@ -969,14 +979,7 @@ async def drop_picks(
                 "expired": expired,
             },
         )
-        if token is not None:
-            await _unrequest_github_review(request, pick.github_login, token)
         await _tell_withdrawn(request, pick, message)
-    if token is None:
-        logger.warning(
-            "No GitHub App token to withdraw review requests for dropped picks",
-            extra={"request_id": str(request.id)},
-        )
     await request.log_decision(
         "reviewers_released",
         cause=cause,
@@ -995,19 +998,19 @@ async def withdraw_reviews(approval: HumanReviewRequest) -> None:
     Covers earlier cards too, so a dismissal GitHub refused is retried here.
     """
     pr = approval.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
+    try:
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            for stale in await HumanReviewRequest.with_standing_reviews(approval.pull_request_id):
+                async with HumanReviewRequest.locked(stale.id) as (_, row):
+                    if row is None or row.state in {"open", "merged"}:
+                        continue
+                    for vote in row.approvals:
+                        await dismiss_approval(row, vote, pull, row.detail)
+    except GitHubAppUnavailable:
         logger.warning(
             "No GitHub App token to dismiss expedited review approvals",
             extra={"approval_id": str(approval.id)},
         )
-        return
-    for stale in await HumanReviewRequest.with_standing_reviews(approval.pull_request_id):
-        async with HumanReviewRequest.locked(stale.id) as (_, row):
-            if row is None or row.state in {"open", "merged"}:
-                continue
-            for vote in row.approvals:
-                await dismiss_approval(row, vote, token, row.detail)
 
 
 async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
@@ -1020,10 +1023,11 @@ async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
     request = await HumanReviewRequest.active_for(owner, repo, number)
     if request is None:
         return
-    token = await repo_token(owner, repo)
-    payload = (
-        await fetch_pr(owner=owner, repo=repo, pr_number=number, token=token) if token else None
-    )
+    try:
+        async with PullRequestClient.as_app(owner, repo, number) as pull:
+            payload = await or_none(pull.pull())
+    except GitHubAppUnavailable:
+        payload = None
     if payload is None:
         logger.warning(
             "Could not read a closed pull request to settle its review card",

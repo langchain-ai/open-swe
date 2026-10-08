@@ -1,7 +1,6 @@
 """One GitHub pull request, its CODEOWNERS, and the reviews people submit, as a scenario boundary."""
 
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 from uuid import UUID
@@ -9,14 +8,13 @@ from uuid import UUID
 import httpx2
 
 from openswe.dashboard import repo_access
-from openswe.expedited_review import eligibility, readiness
+from openswe.expedited_review import readiness
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
-from openswe.github import ci, http, org_membership, sdk, token
+from openswe.github import app, http, org_membership, token
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
-from openswe.human_review import people as review_people
 from tests.support.scenarios.core import (
     Fake,
     Person,
@@ -28,26 +26,6 @@ from tests.support.scenarios.core import (
 
 type ReviewState = Literal["APPROVED", "CHANGES_REQUESTED", "COMMENTED"]
 GITHUB_REVIEW_REQUEST = "github_review_request"
-
-
-@dataclass
-class _Pulls:
-    github: GitHub
-
-    async def async_remove_requested_reviewers(
-        self, owner: str, repo: str, number: int, *, data: dict[str, list[str]]
-    ) -> None:
-        self.github.requested.difference_update(data["reviewers"])
-
-
-@dataclass
-class _Rest:
-    pulls: _Pulls
-
-
-@dataclass
-class _Client:
-    rest: _Rest
 
 
 @dataclass
@@ -105,22 +83,45 @@ class GitHub:
         self, client: object, method: str, url: str, **kwargs: object
     ) -> httpx2.Response:
         request = httpx2.Request(method, url)
-        if url.endswith("/requested_reviewers") and method == "POST":
-            body = kwargs.get("json")
-            if isinstance(body, dict) and isinstance(reviewers := body.get("reviewers"), list):
-                for login in map(str, reviewers):
-                    self.requested.add(login)
-                    # GitHub notifies whoever is requested, so it is a message they get.
-                    self.scenario.record(
-                        "message",
-                        "review requested on GitHub",
-                        target=login,
-                        label=GITHUB_REVIEW_REQUEST,
-                    )
+        path = url.split(f"/repos/{self.owner}/{self.repo}/", 1)[-1]
+        body = kwargs.get("json")
+        reviewers = body.get("reviewers") if isinstance(body, dict) else None
+        if path == f"pulls/{self.number}/requested_reviewers" and isinstance(reviewers, list):
+            logins = set(map(str, reviewers))
+            if method == "DELETE":
+                self.requested.difference_update(logins)
+                return httpx2.Response(200, json={}, request=request)
+            for login in sorted(logins):
+                self.requested.add(login)
+                # GitHub notifies whoever is requested, so it is a message they get.
+                self.scenario.record(
+                    "message",
+                    "review requested on GitHub",
+                    target=login,
+                    label=GITHUB_REVIEW_REQUEST,
+                )
             return httpx2.Response(201, json={}, request=request)
+        if path == f"pulls/{self.number}":
+            return httpx2.Response(200, json=self.pull, request=request)
+        if path.startswith("collaborators/") and path.endswith("/permission"):
+            return httpx2.Response(200, json={"permission": "write"}, request=request)
         return httpx2.Response(200, json=[], request=request)
 
-    async def _readiness(self, **_: object) -> Readiness:
+    @property
+    def pull(self) -> dict[str, object]:
+        return {
+            "number": self.number,
+            "title": self.title,
+            "body": "",
+            "state": "open",
+            "draft": False,
+            "merged": False,
+            "user": {"login": self.author.login, "id": 1},
+            "head": {"ref": "feature", "sha": "abc"},
+            "base": {"ref": "main"},
+        }
+
+    async def _readiness(self, *_: object) -> Readiness:
         snapshot = PullRequestSnapshot(
             state="open",
             merged=False,
@@ -135,50 +136,30 @@ class GitHub:
         )
         return Readiness(snapshot=snapshot, blockers=["checks are still running"])
 
-    @asynccontextmanager
-    async def _sdk(self, *_: object) -> AsyncIterator[_Client]:
-        yield _Client(_Rest(_Pulls(self)))
-
     @property
     def url(self) -> str:
         return f"https://github.com/{self.owner}/{self.repo}/pull/{self.number}"
 
     def fakes(self) -> list[tuple[object, Fake]]:
-        pr = {
-            "number": self.number,
-            "title": self.title,
-            "body": "",
-            "state": "open",
-            "draft": False,
-            "merged": False,
-            "user": {"login": self.author.login, "id": 1},
-            "head": {"ref": "feature", "sha": "abc"},
-            "base": {"ref": "main"},
-        }
         return [
-            (review_people.repo_token, returning("token")),
+            (app.get_github_app_installation_id_for_repo, returning(1)),
+            (app.get_github_app_installation_token, returning("token")),
             (token.resolve_github_token, returning(("token", None))),
             (repo_access.assert_repo_access, computing(lambda full_name, _token: str(full_name))),
-            (
-                eligibility.fetch_changed_files,
-                returning([ChangedFile(filename=f) for f in self.files]),
-            ),
             (http.github_request, self._request),
-            (ci.has_repo_write_permission, returning(True)),
-            (ci.fetch_pr, returning(pr)),
             (org_membership.team_members, returning([])),
             (
                 readiness.review_authors,
                 computing(lambda *_: {login.lower() for login in self.reviews}),
             ),
             (readiness.latest_review_states, computing(lambda *_: dict(self.reviews))),
-            (readiness.assess_readiness, self._readiness),
-            (sdk.github_sdk, self._sdk),
         ]
 
     def attribute_fakes(self) -> list[tuple[object, str, object]]:
         return [
             (CodeOwners, "fetch", returning(self.parsed_codeowners)),
+            (ChangedFile, "of_pull", returning([ChangedFile(filename=f) for f in self.files])),
+            (Readiness, "assess", self._readiness),
             (
                 Repository,
                 "get",

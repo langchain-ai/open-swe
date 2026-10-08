@@ -62,14 +62,14 @@ async def test_gateways_are_read_with_the_users_own_token(monkeypatch):
     def handle(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         return httpx.Response(
-            200, json={"items": [{"id": GATEWAY_ID, "name": "Open SWE", "tools": [{}, {}]}]}
+            200, json={"items": [{"id": GATEWAY_ID, "name": "Open SWE", "tool_count": 200}]}
         )
 
     monkeypatch.setattr(
         managed, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle))
     )
     assert await managed.list_gateways("Alice") == [
-        managed.Gateway(id=GATEWAY_ID, name="Open SWE", tool_count=2)
+        managed.Gateway(id=GATEWAY_ID, name="Open SWE", tool_count=200)
     ]
     assert requests[-1].headers["Authorization"] == "Bearer alice-langsmith-token"
     assert "X-LangSmith-Identity" not in requests[-1].headers

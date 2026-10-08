@@ -1,13 +1,12 @@
-from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
 from fastapi import HTTPException
 
+from openswe.dashboard import profiles
 from openswe.github import http as github_http
 from openswe.github import pull_request_status
-from openswe.threads import access as thread_access
 from openswe.threads import handlers
 from tests.conftest import patch_thread_module
 
@@ -18,10 +17,8 @@ def _response(status: int, payload: object) -> httpx2.Response:
     )
 
 
-@asynccontextmanager
-async def _client(**kwargs):
-    assert kwargs["token"] == "oauth-token"
-    yield object()
+def _github() -> github_http.GitHubClient:
+    return github_http.GitHubClient(MagicMock())
 
 
 def test_pull_request_identity_rejects_untrusted_path_components() -> None:
@@ -83,7 +80,6 @@ def test_normalize_checks_classifies_failures_and_pending() -> None:
 async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_http, "github_client", _client)
     graphql_pages: list[str | None] = []
 
     async def request(client, method, url, **kwargs):
@@ -207,7 +203,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
     monkeypatch.setattr(github_http, "github_request", request)
 
     result = await pull_request_status.get_pull_request_statuses(
-        [{"repo_full_name": "o/r", "number": 7}], "oauth-token"
+        _github(), [{"repo_full_name": "o/r", "number": 7}]
     )
 
     assert graphql_pages == [None, "next"]
@@ -266,7 +262,6 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
 async def test_one_inaccessible_pull_request_does_not_fail_the_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_http, "github_client", _client)
 
     async def request(client, method, url, **kwargs):
         if url == github_http.GITHUB_GRAPHQL:
@@ -276,11 +271,11 @@ async def test_one_inaccessible_pull_request_does_not_fail_the_response(
     monkeypatch.setattr(github_http, "github_request", request)
 
     result = await pull_request_status.get_pull_request_statuses(
+        _github(),
         [
             {"repo_full_name": "private/repo", "number": 1},
             {"repo_full_name": "bad/repo/segment", "number": 2},
         ],
-        "oauth-token",
     )
 
     assert len(result) == 2
@@ -295,7 +290,6 @@ async def test_one_inaccessible_pull_request_does_not_fail_the_response(
 async def test_partial_check_failure_cannot_appear_green(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(github_http, "github_client", _client)
 
     async def request(client, method, url, **kwargs):
         if url.endswith("/pulls/3"):
@@ -335,7 +329,7 @@ async def test_partial_check_failure_cannot_appear_green(
 
     result = (
         await pull_request_status.get_pull_request_statuses(
-            [{"repo_full_name": "o/r", "number": 3}], "oauth-token"
+            _github(), [{"repo_full_name": "o/r", "number": 3}]
         )
     )[0]
 
@@ -371,7 +365,7 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
 
     statuses = AsyncMock(return_value=[{"number": 1}, {"number": 2}])
     patch_thread_module(monkeypatch, "_readable_thread_metadata", readable)
-    patch_thread_module(monkeypatch, "_github_token_for_login", token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", token)
     patch_thread_module(monkeypatch, "get_pull_request_statuses", statuses)
 
     result = await handlers.get_dashboard_thread_pull_request_status(
@@ -379,21 +373,10 @@ async def test_thread_status_authorizes_read_access_before_token_or_metadata_use
     )
 
     assert order == ["readable", "token"]
-    statuses.assert_awaited_once_with(records, "oauth-token")
+    github, tracked = statuses.await_args.args
+    assert github.http.headers["Authorization"] == "Bearer oauth-token"
+    assert tracked == records
     assert result == {"pullRequests": [{"number": 1}, {"number": 2}]}
-
-
-async def test_thread_status_requires_the_users_oauth_token(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    token = AsyncMock(return_value=None)
-    patch_thread_module(monkeypatch, "get_valid_access_token", token)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await thread_access._github_token_for_login("owner")
-
-    assert exc_info.value.status_code == 401
-    token.assert_awaited_once_with("owner")
 
 
 async def test_thread_status_read_denial_does_not_resolve_oauth_token(
@@ -404,7 +387,7 @@ async def test_thread_status_read_denial_does_not_resolve_oauth_token(
 
     token = AsyncMock(return_value="oauth-token")
     patch_thread_module(monkeypatch, "_readable_thread_metadata", denied)
-    patch_thread_module(monkeypatch, "_github_token_for_login", token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", token)
 
     with pytest.raises(HTTPException) as exc_info:
         await handlers.get_dashboard_thread_pull_request_status("thread-1", "intruder")
