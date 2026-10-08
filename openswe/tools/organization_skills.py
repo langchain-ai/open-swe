@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.skill_store import store
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.mcp_exposure import expose_mcp
@@ -11,6 +12,7 @@ from openswe.tools.mcp_exposure import expose_mcp
 _WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("name", "skill.name"))
 
 
+@audit_tool()
 @expose_mcp(access="admin")
 @access(_WRITE)
 async def save_organization_skill(
@@ -35,6 +37,7 @@ async def save_organization_skill(
     return {"ok": True, "skill": skill, "created": created}
 
 
+@audit_tool()
 @expose_mcp(access="admin")
 @access(_WRITE)
 async def delete_organization_skill(name: str) -> dict[str, Any]:

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.user_preferences import get_user_preferences
@@ -101,6 +102,7 @@ async def api_list_threads(
 
 
 @router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
+@audit_endpoint
 async def api_upload_session(
     request: Request,
     session: dict[str, Any] = SESSION_DEP,
@@ -109,6 +111,7 @@ async def api_upload_session(
 
 
 @router.post("/threads/resolve-all")
+@audit_endpoint
 async def api_resolve_all_threads(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, int]:
@@ -145,6 +148,7 @@ async def api_list_pinned_threads(
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
+@audit_endpoint
 async def api_pin_thread(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -154,6 +158,7 @@ async def api_pin_thread(
 
 
 @router.delete("/threads/{thread_id}/pin", status_code=204)
+@audit_endpoint
 async def api_unpin_thread(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -360,6 +365,7 @@ async def api_get_thread_pr_diff(
 
 
 @router.patch("/threads/{thread_id}")
+@audit_endpoint
 async def api_rename_thread(
     thread_id: str,
     body: ThreadRenameBody,
@@ -374,6 +380,7 @@ async def api_rename_thread(
 
 
 @router.post("/threads/{thread_id}/share-to-workspace")
+@audit_endpoint
 async def api_share_thread_with_workspace(
     thread_id: str,
     session: dict[str, str] = SESSION_DEP,
@@ -382,6 +389,7 @@ async def api_share_thread_with_workspace(
 
 
 @router.post("/threads/{thread_id}/continue-private")
+@audit_endpoint
 async def api_continue_thread_privately(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -390,6 +398,7 @@ async def api_continue_thread_privately(
 
 
 @router.post("/threads/{thread_id}/resolve")
+@audit_endpoint
 async def api_resolve_thread(
     thread_id: str,
     body: ThreadResolveBody,
@@ -425,6 +434,7 @@ async def api_list_thread_runs(
 
 
 @router.post("/threads/{thread_id}/runs")
+@audit_endpoint
 async def api_create_thread_run(
     thread_id: str,
     request: Request,
@@ -441,6 +451,7 @@ async def api_create_thread_run(
 
 
 @router.post("/threads/{thread_id}/runs/{run_id}/cancel")
+@audit_endpoint
 async def api_cancel_thread_run(
     thread_id: str,
     run_id: str,
@@ -462,6 +473,7 @@ async def api_cancel_thread_run(
 
 
 @router.post("/threads/{thread_id}/cancel")
+@audit_endpoint
 async def api_cancel_thread(
     thread_id: str,
     principal: PrincipalDep,
@@ -472,6 +484,7 @@ async def api_cancel_thread(
 
 
 @router.post("/admin/threads/{thread_id}/cancel")
+@audit_endpoint
 async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -480,6 +493,7 @@ async def admin_cancel_thread(
 
 
 @router.delete("/threads/{thread_id}")
+@audit_endpoint
 async def api_delete_thread(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -527,6 +541,7 @@ async def api_thread_stream_events(
 
 
 @router.post("/threads/{thread_id}/commands")
+@audit_endpoint
 async def api_thread_commands(
     thread_id: str,
     request: Request,

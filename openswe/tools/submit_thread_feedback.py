@@ -6,6 +6,7 @@ from langchain.tools import ToolRuntime
 from pydantic import Field
 
 from openswe.analytics.feedback import record_feedback_submission
+from openswe.audit_logs.tools import audit_tool
 from openswe.middleware.model_selection import ModelSelectionState, SelectedRoute, normalize_route
 from openswe.run_config import RunConfig
 from openswe.thread_feedback import Feedback, feedback_store
@@ -21,6 +22,7 @@ class ThreadFeedbackResult(TypedDict):
     export_status: Literal["exported", "saved_without_export"]
 
 
+@audit_tool()
 async def submit_thread_feedback(
     rating: Literal["bad", "good"],
     runtime: ToolRuntime[None, ModelSelectionState],

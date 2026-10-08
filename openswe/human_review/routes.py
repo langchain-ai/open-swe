@@ -8,6 +8,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard import profiles, repo_access
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
@@ -172,6 +173,7 @@ async def api_human_review_availability(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review")
+@audit_endpoint
 async def api_request_human_review(
     owner: str,
     repo: str,
@@ -201,6 +203,7 @@ async def api_request_human_review(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review/dismiss")
+@audit_endpoint
 async def api_dismiss_human_review_request(
     owner: str,
     repo: str,

@@ -12,7 +12,7 @@ from openswe.analytics import segment
 from openswe.api_keys.models import ApiKey
 from openswe.audit_logs import middleware, store
 from openswe.audit_logs.context import current_audit_log
-from openswe.audit_logs.middleware import AuditLogMiddleware
+from openswe.audit_logs.middleware import AuditLogMiddleware, audit_endpoint
 from openswe.audit_logs.models import AuditLog, AuditLogEnrichments, AuditLogsCursor
 from openswe.audit_logs.routes import router
 from openswe.bridge import routes as bridge_routes
@@ -36,6 +36,7 @@ def app() -> FastAPI:
     settings_router = APIRouter()
 
     @settings_router.put("/settings/{resource_id}", dependencies=[Depends(oauth.require_session)])
+    @audit_endpoint
     async def save(resource_id: str, body: Settings) -> dict[str, bool]:
         await asyncio.sleep(0)
         if body.token == "fail":
@@ -45,7 +46,12 @@ def app() -> FastAPI:
         return {"ok": True}
 
     @application.post("/dashboard/api/machine")
+    @audit_endpoint
     async def machine(principal: PrincipalDep) -> dict[str, bool]:
+        return {"machine": principal.machine}
+
+    @application.post("/dashboard/api/untracked")
+    async def untracked(principal: PrincipalDep) -> dict[str, bool]:
         return {"machine": principal.machine}
 
     application.include_router(settings_router, prefix="/dashboard/api")
@@ -152,6 +158,7 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
         assert (
             await client.post(f"{prefix}/dashboard/api/bridges/{bridge_id}/heartbeat")
         ).status_code == 204
+        assert (await client.post(f"{prefix}/dashboard/api/untracked")).status_code == 200
         assert entries == []
         assert (
             await client.put(f"{prefix}/dashboard/api/settings/item", json={"token": "x"})

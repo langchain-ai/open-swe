@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.schedules import store as schedules
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable
@@ -43,6 +44,7 @@ async def list_automations() -> dict[str, Any]:
     return {"ok": True, "automations": await schedules.list_agent_schedules()}
 
 
+@audit_tool()
 @expose_mcp(access="admin")
 @access(_WRITE)
 async def create_automation(
@@ -80,6 +82,7 @@ async def create_automation(
     return {"ok": True, "automation": record}
 
 
+@audit_tool()
 @expose_mcp(access="admin")
 @access(_WRITE)
 async def update_automation(
@@ -122,6 +125,7 @@ async def update_automation(
     return {"ok": True, "automation": record}
 
 
+@audit_tool()
 @expose_mcp(access="admin")
 @access(_WRITE)
 async def trigger_automation(automation_id: str) -> dict[str, Any]:
@@ -133,6 +137,7 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
     return {"ok": True, **result}
 
 
+@audit_tool()
 @expose_mcp(access="admin")
 @access(_WRITE)
 async def delete_automation(automation_id: str) -> dict[str, Any]:

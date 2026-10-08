@@ -82,3 +82,28 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
     assert entry.user_id is None
     assert entry.enrichments.actor_login is None
     assert "exception-secret" not in entry.model_dump_json()
+
+
+async def test_opted_in_skill_tool_records_policy_refusal_without_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.tools import access as access_module
+    from openswe.tools import user_skills
+
+    entries: list[AuditLog] = []
+    monkeypatch.setattr(tools, "configurable", lambda: RunConfig(source="schedule"))
+
+    async def refuse() -> access_module.Access:
+        return access_module.Access()
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    monkeypatch.setattr(access_module, "resolve_access", refuse)
+    monkeypatch.setattr(tools, "append_safely", append)
+    result = await user_skills.save_user_skill("secret-skill", "secret-description")
+    assert result["ok"] is False
+    (entry,) = entries
+    assert entry.operation_name == "save_user_skill"
+    assert entry.operation_succeeded is False
+    assert "secret" not in entry.model_dump_json()

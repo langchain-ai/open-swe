@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.store import delete_value, get_value, now_iso, put_value
 
@@ -77,6 +78,7 @@ async def api_get_my_instructions(
 
 
 @router.put("/me/instructions")
+@audit_endpoint
 async def api_put_my_instructions(
     body: UserInstructionsUpdate,
     session: dict[str, Any] = SESSION_DEP,
@@ -86,6 +88,7 @@ async def api_put_my_instructions(
 
 
 @router.delete("/me/instructions")
+@audit_endpoint
 async def api_delete_my_instructions(
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:

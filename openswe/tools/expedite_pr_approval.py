@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from langgraph.config import get_config
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
@@ -90,6 +91,7 @@ async def _post_root_message(channel: SlackChannel, pr_ref: GitHubPrRef, title: 
     )
 
 
+@audit_tool()
 async def expedite_pr_approval(
     pr_url: str,
     action: Literal["start", "cancel"] = "start",
