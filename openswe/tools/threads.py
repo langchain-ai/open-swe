@@ -13,6 +13,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
@@ -953,6 +954,7 @@ def _unexpected_action_arguments(
     return sorted(provided - allowed)
 
 
+@audit_tool()
 async def manage_thread(
     thread_id: str,
     action: ThreadAction,
@@ -1089,6 +1091,7 @@ async def manage_thread(
         return _failure("Thread action failed")
 
 
+@audit_tool()
 async def start_thread(
     title: str,
     instructions: str,

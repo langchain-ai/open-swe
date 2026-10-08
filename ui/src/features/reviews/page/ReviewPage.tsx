@@ -139,7 +139,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
         ) : (
           <div className="flex min-h-0 flex-1">
             {navigatorInline && (
-              <div className="w-[248px] shrink-0 border-r border-border bg-[color-mix(in_oklab,var(--background)_97%,var(--foreground))]">
+              <div className="w-[248px] shrink-0 border-r border-border bg-background">
                 <Navigator pr={pr} />
               </div>
             )}

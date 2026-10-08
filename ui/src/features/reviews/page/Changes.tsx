@@ -450,7 +450,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
             options={options}
             // Each file is a card on the page's gutter, as on GitHub. The
             // outline is a shadow, so it adds nothing CodeView must measure.
-            className="review-code-view h-full overflow-y-auto [&_diffs-container]:mx-4 [&_diffs-container]:overflow-clip [&_diffs-container]:rounded-lg [&_diffs-container]:shadow-[0_0_0_1px_var(--border)]"
+            className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip [&_diffs-container]:shadow-[0_0_0_1px_var(--border)] sm:[&_diffs-container]:mx-4 sm:[&_diffs-container]:rounded-lg"
             renderCodeViewHeader={renderHeader}
             renderCustomHeader={renderCustomHeader}
             renderAnnotation={renderAnnotation}
