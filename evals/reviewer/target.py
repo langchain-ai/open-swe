@@ -185,7 +185,6 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
                 thread_id,
                 assistant_id=assistant_id,
                 input=run_input,
-                config={"configurable": configurable},
                 context=await remote_run_context(
                     configurable, thread_id=thread_id, assistant_id=assistant_id
                 ),

@@ -350,6 +350,9 @@ async def create_durable_run(
         create_kwargs["context"] = await remote_run_context(
             run_config["configurable"], thread_id=thread_id, assistant_id=assistant_id
         )
+        create_kwargs["config"] = {
+            key: value for key, value in run_config.items() if key != "configurable"
+        }
         run = await remote_client.runs.create(thread_id, assistant_id, **create_kwargs)
     else:
         run = await client.runs.create(thread_id, assistant_id, **create_kwargs)

@@ -19,6 +19,7 @@ class RemoteRunContext(TypedDict):
     """The run context a remote deployment builds its graph from."""
 
     run_token: str
+    invocation_id: NotRequired[str]
     snapshot_id: NotRequired[str]
 
 
@@ -52,7 +53,11 @@ def remote_runtime_client(assistant_id: str) -> LangGraphClient | None:
 async def remote_run_context(
     configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
 ) -> RemoteRunContext:
-    """The run token the remote run calls back with, and the snapshot its sandbox boots from."""
+    """Everything a remote run needs, since a run takes either context or configurable.
+
+    The configurable rides inside the signed token; the remote deployment calls back
+    with the token rather than reading it.
+    """
     token = sign_runtime_token(
         RemoteRun(
             thread_id=thread_id,
@@ -60,8 +65,11 @@ async def remote_run_context(
             configurable=_configurable.validate_python(configurable),
         )
     )
-    sandbox = await SandboxCreateConfig.resolve(RunConfig.parse(configurable).workspace_slug)
+    cfg = RunConfig.parse(configurable)
+    sandbox = await SandboxCreateConfig.resolve(cfg.workspace_slug)
     context: RemoteRunContext = {"run_token": token}
+    if cfg.invocation_id:
+        context["invocation_id"] = cfg.invocation_id
     if sandbox.snapshot_id:
         context["snapshot_id"] = sandbox.snapshot_id
     return context

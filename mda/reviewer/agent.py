@@ -47,6 +47,7 @@ class ReviewerRunContext(BaseModel):
     """What Open SWE dispatch passes as the run context."""
 
     run_token: str | None = None
+    invocation_id: str | None = None
     snapshot_id: str | None = None
 
 
@@ -81,7 +82,7 @@ def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             }
         ],
         middleware=[
-            BackendRunMiddleware(backend),
+            BackendRunMiddleware(backend, context.invocation_id),
             CodeInterpreterMiddleware(ptc=_PTC_TOOLS),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),

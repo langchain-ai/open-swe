@@ -99,16 +99,10 @@ class RunState(AgentState):
 
 class _RunConfigurable(BaseModel):
     thread_id: str
-    invocation_id: str | None = None
 
 
 class _Drained(BaseModel):
     messages: list[JsonValue]
-
-
-def _invocation_id() -> str:
-    configurable = _RunConfigurable.model_validate(get_config().get("configurable", {}))
-    return configurable.invocation_id or configurable.thread_id
 
 
 def prepared_run(state: RunState) -> PreparedRun | None:
@@ -126,15 +120,21 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     state_schema = RunState
 
-    def __init__(self, backend: OpenSweBackend) -> None:
+    def __init__(self, backend: OpenSweBackend, invocation_id: str | None) -> None:
         self._backend = backend
+        self._invocation_id = invocation_id
+
+    def _invocation(self) -> str:
+        if self._invocation_id is not None:
+            return self._invocation_id
+        return _RunConfigurable.model_validate(get_config().get("configurable", {})).thread_id
 
     async def abefore_agent(
         self,
         state: RunState,
         runtime: Runtime,
     ) -> dict[str, JsonValue] | None:
-        invocation = _invocation_id()
+        invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation and prepared_run(state) is not None:
             return None
         prepared = PreparedRun.model_validate(
