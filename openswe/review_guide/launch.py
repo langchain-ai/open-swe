@@ -241,7 +241,7 @@ async def dispatch_guide_run(
 
     A prefetch turn prepares chunks in the background: it shows nothing, so it
     leaves the session's status alone. ``approve_ts`` names a message whose
-    "Looks good" the turn records before the model runs.
+    "Next" the turn records before the model runs.
     """
     location = SlackThreadRef(
         channel_id=session.slack_channel_id, thread_ts=CODE_CHANNEL_SESSION_TS
