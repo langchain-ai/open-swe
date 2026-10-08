@@ -3,6 +3,8 @@ from openswe.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
     ChangedFile,
     EligibleDiff,
+    Exclusion,
+    ExpeditedDiff,
     Ineligible,
     assess_eligibility,
     fingerprint_matches,
@@ -64,3 +66,21 @@ def test_a_move_into_the_tests_tree_is_not_exempt() -> None:
 
     assert not moved.is_test
     assert isinstance(assess_eligibility([moved]), Ineligible)
+
+
+def test_excluded_hunks_leave_the_card_until_their_content_changes() -> None:
+    small = "@@ -1,1 +1,2 @@\n a\n+b"
+    big = "@@ -10,1 +11,30 @@\n x\n" + "\n".join(f"+gen{i}" for i in range(29))
+    file = ChangedFile(filename="src/app.py", additions=30, deletions=0, patch=f"{small}\n{big}")
+    exclusions = Exclusion(
+        path="src/app.py", hunks=[11], guideline="Generated", reason="r"
+    ).resolve([file])
+
+    assert isinstance(assess_eligibility([file]), Ineligible)
+    verdict = assess_eligibility([file], exclusions)
+    assert isinstance(verdict, EligibleDiff)
+    assert (verdict.changed_lines, verdict.excluded_lines) == (1, 29)
+    assert ExpeditedDiff.of([file], exclusions).shown[0].patch == small
+
+    edited = file.model_copy(update={"patch": f"{small}\n{big}\n+sneaky", "additions": 31})
+    assert isinstance(assess_eligibility([edited], exclusions), Ineligible)

@@ -10,11 +10,24 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database.orm import Base
+from openswe.expedited_review.eligibility import ExcludedHunk
 
 
 class SettingsChange(TypedDict):
     before: bool | int | Literal["[REDACTED]"] | None
     after: bool | int | Literal["[REDACTED]"] | None
+
+
+class ExpeditedExclusions(BaseModel):
+    """What an expedited card left off as qualifying under the target repo's APPROVALS.md."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pull_request: str
+    base_sha: str
+    head_sha: str
+    approvals_md_sha256: str
+    hunks: list[ExcludedHunk]
 
 
 class AuditLogEnrichments(BaseModel):
@@ -32,6 +45,7 @@ class AuditLogEnrichments(BaseModel):
     delegated_from_sandbox_id: str | None = None
     settings_scope: Literal["instance", "workspace"] | None = None
     settings_changes: dict[str, SettingsChange] | None = None
+    expedited_exclusions: ExpeditedExclusions | None = None
 
     @field_serializer("settings_changes")
     def _serialize_settings_changes(

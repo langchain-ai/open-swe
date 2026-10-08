@@ -82,7 +82,7 @@ async def merge_approved(
     if files is None:
         return MergeResult("error", "Could not read the pull request's changed files.")
     if not fingerprint_matches(files, approval.diff_fingerprint):
-        verdict = assess_eligibility(files)
+        verdict = assess_eligibility(files, approval.diff_exclusions)
         if isinstance(verdict, Ineligible):
             await retire(
                 approval,
@@ -97,9 +97,11 @@ async def merge_approved(
         if not keep_approval_reason.strip():
             return MergeResult(
                 "diff_changed",
-                "A commit since the card was posted changed the non-test diff the approver "
-                "saw. Nothing was discarded. If the change does not need the approver to look "
-                "again, call `merge_expedited_pr` again with `keep_approval_reason`; "
+                "A commit since the card was posted changed the non-test diff, either what the "
+                "approver saw or what you excluded under APPROVALS.md. Nothing was discarded. "
+                "A changed excluded hunk is drawn on the card again. If the change does not "
+                "need the approver to look again, call `merge_expedited_pr` again with "
+                "`keep_approval_reason`; "
                 "otherwise call `expedite_pr_approval` for a fresh card.",
             )
         kept = await _keep_approval(approval, verdict.fingerprint, keep_approval_reason, token)

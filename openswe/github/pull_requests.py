@@ -565,6 +565,7 @@ class PullRequestPayload(BaseModel):
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
     head_sha: str = Field("", validation_alias=AliasPath("head", "sha"))
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
+    base_sha: str = Field("", validation_alias=AliasPath("base", "sha"))
 
 
 class PullRequestEvent(BaseModel):

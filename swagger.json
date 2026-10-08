@@ -507,6 +507,16 @@
             ],
             "title": "Delegated From Sandbox Id"
           },
+          "expedited_exclusions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExpeditedExclusions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "request_method": {
             "anyOf": [
               {
@@ -1566,6 +1576,89 @@
           "enabled"
         ],
         "title": "EnabledReviewRepoUpdate",
+        "type": "object"
+      },
+      "ExcludedHunk": {
+        "additionalProperties": false,
+        "description": "A hunk, or a whole patchless file when ``header`` is empty, left off the card.",
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "guideline": {
+            "title": "Guideline",
+            "type": "string"
+          },
+          "header": {
+            "title": "Header",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "digest",
+          "header",
+          "additions",
+          "deletions",
+          "guideline",
+          "reason"
+        ],
+        "title": "ExcludedHunk",
+        "type": "object"
+      },
+      "ExpeditedExclusions": {
+        "additionalProperties": false,
+        "description": "What an expedited card left off as qualifying under the target repo's APPROVALS.md.",
+        "properties": {
+          "approvals_md_sha256": {
+            "title": "Approvals Md Sha256",
+            "type": "string"
+          },
+          "base_sha": {
+            "title": "Base Sha",
+            "type": "string"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "hunks": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedHunk"
+            },
+            "title": "Hunks",
+            "type": "array"
+          },
+          "pull_request": {
+            "title": "Pull Request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pull_request",
+          "base_sha",
+          "head_sha",
+          "approvals_md_sha256",
+          "hunks"
+        ],
+        "title": "ExpeditedExclusions",
         "type": "object"
       },
       "FeedbackResponse": {

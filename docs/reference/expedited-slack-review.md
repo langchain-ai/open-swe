@@ -37,6 +37,16 @@ are already in the Slack thread.
 - Test files sit outside both gates: they do not count toward the limit and they may
   arrive without a patch. CI judges tests, and counting them would price a small fix
   out of shipping with its tests.
+- Hunks that qualify under the target repository's `.open-swe/APPROVALS.md` (read at
+  the PR's base commit) sit outside both gates too, so a PR of any size qualifies when
+  all but a small part of it would be auto-approved. The agent names them in
+  `excluded` (path, hunk start lines or the whole file, the guideline, and why); the
+  backend trusts that judgment. Each call that excludes something writes every
+  excluded hunk, its guideline and reason, the base and head SHAs, and a hash of
+  APPROVALS.md to the audit log. The card lists exclusions by guideline with line
+  counts. They stay in the fingerprint: a commit that changes an excluded hunk is a
+  diff change, and the changed hunk no longer matches its exclusion, so the card draws
+  it.
 - The card draws the source diff. It draws the test diff too when the change is
   test-only or test lines are the majority, because otherwise there would be nothing
   to look at; when tests are the minority of a mostly-source change it names them
