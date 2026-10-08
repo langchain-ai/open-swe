@@ -126,6 +126,49 @@ async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
         assert pick.decision == "picked"
 
 
+async def test_a_second_unaccepted_pick_stays_and_the_author_hears_once() -> None:
+    from openswe.human_review.picking import WorkHours
+    from openswe.human_review.standard import expire_picks
+
+    author = User(identities=[UserIdentity(provider="slack", external_id="UAUTHOR")])
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada", author_user_id=author.id)
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    for decision in ("expired", "picked"):
+        user = User()
+        participant = HumanReviewParticipant(
+            user_id=user.id, decision=decision, assigned_by_agent=True
+        )
+        participant.user = user
+        participant.joined_at = datetime.now(UTC) - timedelta(hours=3)
+        request.participants.append(participant)
+    pick = request.picks[0]
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(WorkHours, "for_user", AsyncMock(return_value=WorkHours(None))),
+        patch.object(User, "get", AsyncMock(return_value=author)),
+        patch("openswe.human_review.standard._assignment_minutes", AsyncMock(return_value=120)),
+        patch("openswe.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("openswe.human_review.standard.repo_token", AsyncMock(return_value="token")),
+        patch("openswe.human_review.standard.review_authors", AsyncMock(return_value=set())),
+        patch("openswe.human_review.standard.Coverage.load", AsyncMock(return_value=None)),
+        patch("openswe.human_review.standard.drop_picks", AsyncMock()) as drop,
+        patch("openswe.human_review.standard.send_dm", AsyncMock(return_value=True)) as dm,
+    ):
+        assert await expire_picks(request) == "overdue"
+        assert await expire_picks(request) == "overdue"
+
+    assert pick.decision == "picked"
+    drop.assert_not_awaited()
+    dm.assert_awaited_once()
+    assert dm.await_args is not None and dm.await_args.args[0] == "UAUTHOR"
+
+
 async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
     from openswe.human_review.picking import Pick
     from openswe.human_review.standard import RequestResult, _auto_assign

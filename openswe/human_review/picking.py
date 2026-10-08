@@ -94,6 +94,20 @@ class WorkHours:
                 return start.astimezone(UTC)
         raise AssertionError("a work day starts within a week")
 
+    def after(self, start: datetime, duration: timedelta) -> datetime:
+        """When ``duration`` of work time has passed since ``start``."""
+        if self.zone is None:
+            return start + duration
+        cursor = self.next_start(start)
+        remaining = duration
+        while True:
+            local = cursor.astimezone(self.zone)
+            closing = datetime.combine(local.date(), WORK_END, tzinfo=self.zone)
+            if remaining <= closing - local:
+                return (local + remaining).astimezone(UTC)
+            remaining -= closing - local
+            cursor = self.next_start(closing)
+
     @classmethod
     async def for_user(cls, user: User) -> Self:
         if not user.slack_user_id:

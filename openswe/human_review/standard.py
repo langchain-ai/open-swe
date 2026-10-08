@@ -55,7 +55,7 @@ from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.notices import NoticeKind
 from openswe.human_review.people import Outcome, Participant, repo_token, resolve_writer
 from openswe.human_review.pick_messages import PickMessage
-from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
+from openswe.human_review.picking import Area, Coverage, Pick, Wait, WorkHours, choose_reviewer
 from openswe.human_review.requests import (
     HumanReviewParticipant,
     HumanReviewRequest,
@@ -95,6 +95,8 @@ SETTLED_KINDS: tuple[RequestKind, ...] = ("standard", "posted")
 # A deadline run may start a little before the wait its timer was set for has passed.
 _SCHEDULER_EARLINESS = timedelta(minutes=1)
 _DEADLINE_RETRY = timedelta(minutes=5)
+# Picks per code owner area, or assignment windows for an accepted reviewer, before the author hears.
+_ROUNDS_BEFORE_AUTHOR = 2
 SNOOZE_DURATIONS = {
     "30 minutes": timedelta(minutes=30),
     "1 hour": timedelta(hours=1),
@@ -250,22 +252,22 @@ async def _permalink(request: HumanReviewRequest) -> str:
     return await get_slack_permalink(request.slack_channel_id, request.slack_message_ts) or ""
 
 
+def _duration(span: timedelta) -> str:
+    days, minutes = divmod(max(0, int(span.total_seconds() // 60)), 1440)
+    hours, minutes = divmod(minutes, 60)
+    return (
+        ", ".join(
+            f"{value} {unit}{'s' if value != 1 else ''}"
+            for value, unit in ((days, "day"), (hours, "hour"), (minutes, "minute"))
+            if value
+        )
+        or "less than a minute"
+    )
+
+
 def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
     """Add two hours within local weekday 9am–6pm windows."""
-    cursor = start.astimezone(timezone)
-    remaining = timedelta(hours=2)
-    while True:
-        opening = datetime.combine(cursor.date(), time(9), timezone)
-        closing = datetime.combine(cursor.date(), time(18), timezone)
-        if cursor.weekday() >= 5 or cursor >= closing:
-            cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
-            continue
-        cursor = max(cursor, opening)
-        available = closing - cursor
-        if remaining <= available:
-            return (cursor + remaining).astimezone(UTC)
-        remaining -= available
-        cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
+    return WorkHours(timezone).after(start, timedelta(hours=2))
 
 
 async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
@@ -559,6 +561,7 @@ async def claim(
             "longer need to. Open SWE removed you as a reviewer.",
         )
     if accepting:
+        await _check_overdue(added, str(reviewer.user.id))
         return Outcome(
             f"You accepted the review of {label}. It merges once every reviewer approves on GitHub."
         )
@@ -708,13 +711,15 @@ async def assign(
                 row.run_config = {**row.run_config, _AUTO_ASSIGN_ASKED: True}
     await _request_github_review(added, github_login)
     minutes = await _assignment_minutes(added)
-    if not await _schedule(added, "pick_expiry", timedelta(minutes=minutes)):
+    now = datetime.now(UTC)
+    accept_by = (await WorkHours.for_user(user)).after(now, timedelta(minutes=minutes))
+    if not await _schedule(added, "pick_expiry", accept_by - now):
         logger.warning(
             "A reviewer pick will not rotate if it is never accepted",
             extra={"request_id": str(added.id), "github_login": github_login},
         )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
-    deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
+    deadline = f" Accept within {minutes} minutes of your work hours."
     permalink = await _permalink(added)
     where = "review card" if added.has_card else "Slack post"
     card = f" (<{permalink}|{where}>)" if permalink else ""
@@ -1319,23 +1324,7 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
             or row.run_config.get(marker)
         ):
             return "inactive"
-        waited_minutes = max(
-            0,
-            int(
-                (datetime.now(UTC) - (request.created_at or participant.joined_at)).total_seconds()
-                // 60
-            ),
-        )
-        days, minutes = divmod(waited_minutes, 1440)
-        hours, minutes = divmod(minutes, 60)
-        waited = (
-            ", ".join(
-                f"{value} {unit}{'s' if value != 1 else ''}"
-                for value, unit in ((days, "day"), (hours, "hour"), (minutes, "minute"))
-                if value
-            )
-            or "less than a minute"
-        )
+        waited = _duration(datetime.now(UTC) - (request.created_at or participant.joined_at))
         sent = await send_dm(
             participant.user.slack_user_id,
             f"Reminder: Open SWE picked you to review <{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> "
@@ -1353,21 +1342,31 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
 
 
 async def expire_picks(request: HumanReviewRequest) -> str:
-    """Rotate away from picks not accepted in time, when someone else could review instead.
+    """Rotate away from picks not accepted within their work hours, when someone else could review.
 
-    Reviewing on GitHub counts as accepting.
+    Reviewing on GitHub counts as accepting. An area's second pick is not rotated: it stays
+    assigned and the author is told the review is overdue.
     """
     minutes = await _assignment_minutes(request)
-    wait = timedelta(minutes=minutes) - _SCHEDULER_EARLINESS
+    window = timedelta(minutes=minutes)
     now = datetime.now(UTC)
     stale: list[HumanReviewParticipant] = []
+    next_due: datetime | None = None
     for pick in request.picks:
         snoozed = request.run_config.get(f"review_snoozed:{pick.user_id}")
         if isinstance(snoozed, str) and (until := datetime.fromisoformat(snoozed)) > now:
             await _schedule(request, "pick_expiry", until - now)
             continue
-        if pick.joined_at is None or now - pick.joined_at >= wait:
+        if pick.joined_at is None:
             stale.append(pick)
+            continue
+        due = (await WorkHours.for_user(pick.user)).after(pick.joined_at, window)
+        if now >= due - _SCHEDULER_EARLINESS:
+            stale.append(pick)
+        elif next_due is None or due < next_due:
+            next_due = due
+    if next_due is not None:
+        await _schedule(request, "pick_expiry", next_due - now)
     logger.info(
         "Checking reviewer picks for expiry",
         extra={
@@ -1405,6 +1404,22 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     if not idle:
         return "accepted"
     area = await _area_left_by(request, {p.github_login.lower() for p in idle})
+    if len(rounds := _rounds(request, area)) >= _ROUNDS_BEFORE_AUTHOR:
+        logger.info(
+            "Keeping unaccepted reviewer picks after their last round; telling the author",
+            extra={
+                "request_id": str(request.id),
+                "github_logins": [p.github_login for p in idle],
+                "rounds": len(rounds),
+            },
+        )
+        await _tell_author_overdue(
+            request,
+            idle,
+            f"Open SWE has asked {len(rounds)} reviewers in turn for this code, each for "
+            f"{_duration(window)} of their work hours, and nobody has reviewed it.",
+        )
+        return "overdue"
     choice = await choose_reviewer(request, area=area)
     if choice is None:
         logger.info(
@@ -1426,7 +1441,7 @@ async def expire_picks(request: HumanReviewRequest) -> str:
         request,
         {p.user_id for p in idle},
         f"You didn't accept the review of {label} *{escape(pr.title)}* within "
-        f"{minutes} minutes, so Open SWE released you from it.",
+        f"{minutes} minutes of your work hours, so Open SWE released you from it.",
         expired=True,
     )
     current = await HumanReviewRequest.get(request.id)
@@ -1440,6 +1455,93 @@ async def expire_picks(request: HumanReviewRequest) -> str:
     if not await _wake_picker(current, asked=False, trigger=trigger, suggestions=suggestions):
         return "rotation_failed"
     return "rotating"
+
+
+def _rounds(request: HumanReviewRequest, area: Area | None) -> list[HumanReviewParticipant]:
+    """Everyone Open SWE has picked for ``area``, or for the whole request without code owners."""
+    return [
+        p
+        for p in request.participants
+        if p.assigned_by_agent and (area is None or p.github_login.lower() in area.owners)
+    ]
+
+
+async def _tell_author_overdue(
+    request: HumanReviewRequest, assigned: list[HumanReviewParticipant], why: str
+) -> None:
+    """DM the author once per set of still-assigned reviewers that their review is overdue."""
+    marker = f"review_overdue:{','.join(sorted(str(p.user_id) for p in assigned))}"
+    if request.run_config.get(marker):
+        return
+    pr = request.pull_request
+    author = (
+        await User.get(pr.author_user_id)
+        if pr.author_user_id
+        else await User.for_login("github", pr.author)
+        if pr.author
+        else None
+    )
+    if author is None or not author.slack_user_id:
+        logger.info(
+            "Cannot tell the author a review is overdue: no linked Slack account",
+            extra={"request_id": str(request.id)},
+        )
+        return
+    who = ", ".join(mention(p.user) for p in assigned)
+    still = "is" if len(assigned) == 1 else "are"
+    waited = _duration(datetime.now(UTC) - (request.created_at or datetime.now(UTC)))
+    text = (
+        f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}> *{escape(pr.title)}* has waited {waited} "
+        f"for a review since it was requested. {why} {who} {still} still assigned, and Open SWE "
+        "is no longer asking anyone else for this code."
+    )
+    if not await send_dm(
+        author.slack_user_id, text, origin=request.notice_origin("review_overdue")
+    ):
+        return
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        if row is not None:
+            row.run_config = {**row.run_config, marker: True}
+
+
+async def _check_overdue(request: HumanReviewRequest, user_id: str) -> str:
+    """Tell the author when a reviewer Open SWE picked accepted but has not reviewed in time."""
+    try:
+        participant = request.participant(UUID(user_id))
+    except ValueError:
+        return "invalid_reviewer"
+    if (
+        participant is None
+        or participant.decision != "review"
+        or not participant.assigned_by_agent
+        or participant.joined_at is None
+    ):
+        return "not_assigned"
+    window = timedelta(minutes=await _assignment_minutes(request))
+    hours = await WorkHours.for_user(participant.user)
+    now = datetime.now(UTC)
+    due = hours.after(participant.joined_at, window * _ROUNDS_BEFORE_AUTHOR)
+    if now < due - _SCHEDULER_EARLINESS:
+        await _schedule(request, f"overdue:{user_id}", due - now)
+        return "scheduled"
+    pr = request.pull_request
+    token = await repo_token(pr.owner, pr.repo)
+    reviewed: set[str] | None = None
+    if token is not None:
+        async with github_client(token=token) as client:
+            reviewed = await review_authors(client, pr.owner, pr.repo, pr.number)
+    if reviewed is None:
+        await _schedule(request, f"overdue:{user_id}", _DEADLINE_RETRY)
+        return "retrying"
+    if participant.github_login.lower() in reviewed:
+        return "reviewed"
+    await _tell_author_overdue(
+        request,
+        [participant],
+        f"{mention(participant.user)} accepted the review but has not submitted one after "
+        f"{_duration(window * _ROUNDS_BEFORE_AUTHOR)} of their work hours.",
+    )
+    return "overdue"
 
 
 async def _area_left_by(request: HumanReviewRequest, leaving: set[str]) -> Area | None:
@@ -1518,6 +1620,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         return {"status": "reminded"}
     if step.startswith("remind:"):
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
+    if step.startswith("overdue:"):
+        return {"status": await _check_overdue(request, step.removeprefix("overdue:"))}
 
     if (request.kind == "posted" or step in ("unclaimed", "pick_expiry")) and skip_on_preview(
         "run_deadline"

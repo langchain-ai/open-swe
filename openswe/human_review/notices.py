@@ -12,6 +12,7 @@ NoticeKind = Literal[
     "review_reminder",
     "reviewer_released",
     "author_ready_prompt",
+    "review_overdue",
 ]
 
 
