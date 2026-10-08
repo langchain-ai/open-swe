@@ -14,6 +14,19 @@ export const mergeMethodLabels: Record<MergeMethod, string> = {
   rebase: "Rebase merge",
 }
 
+/** What the merge button says once a method is picked, in GitHub's words. */
+export const mergeMethodButtonLabels: Record<MergeMethod, string> = {
+  squash: "Squash and merge",
+  merge: "Merge",
+  rebase: "Rebase and merge",
+}
+
+export const mergeMethodDescriptions: Record<MergeMethod, string> = {
+  squash: "Combine every commit into one on the base branch.",
+  merge: "Add every commit to the base branch with a merge commit.",
+  rebase: "Replay every commit onto the base branch.",
+}
+
 export function readPreferredMergeMethod(): MergeMethod | null {
   if (typeof window === "undefined") return null
   try {
