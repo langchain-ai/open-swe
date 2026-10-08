@@ -1004,6 +1004,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 handoff = await infer_requested_model(
                     messages=state.get("messages") or [],
                     requested_models=self._requested_models,
+                    performance_model=self._routing_defaults.get("performance"),
                     decision=decision.classifier,
                     effort_decision=decision.effort_classifier,
                     slack_event_ts=(

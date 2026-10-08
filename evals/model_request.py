@@ -22,6 +22,7 @@ class Case:
 
 
 OPUS = ModelRequestIntent(requested_model="anthropic:claude-opus-5-5")
+PERFORMANCE = ModelRequestIntent(requested_model="openai:gpt-6.1-sol", requested_effort="low")
 NO_REQUEST = ModelRequestIntent()
 UNAVAILABLE = ModelRequestIntent(unavailable_model=True)
 CASES = (
@@ -30,6 +31,20 @@ CASES = (
     Case("typo", "/model Oppus\nFix the login bug", OPUS),
     Case("canonical ID", "Use anthropic:claude-opus-5-5 for this task", OPUS),
     Case("correction", "Use Sonnet; actually use Opus to fix the bug", OPUS),
+    Case("performance tier", "Use the performance model to fix the bug", PERFORMANCE),
+    Case("perf alias", "Use perf to fix the bug", PERFORMANCE),
+    Case("performance typo", "use perfromance model", PERFORMANCE),
+    Case("tier command", "/model:perf Fix the bug", PERFORMANCE),
+    Case("tier correction", "Use Opus; actually use perf to fix the bug", PERFORMANCE),
+    Case("model correction", "Use performance; actually use Opus to fix the bug", OPUS),
+    Case("tier conflict", "Use perf or Opus to fix the bug", NO_REQUEST),
+    Case("performance work", "Fix performance of model selection", NO_REQUEST),
+    Case("tier comparison", "Compare perf and balanced models", NO_REQUEST),
+    Case("tier negation", "Do not use the performance model", NO_REQUEST),
+    Case("quoted tier", 'Explain what "use perf" means', NO_REQUEST),
+    Case("forwarded tier", 'Bob wrote: "use perf". Summarize his request.', NO_REQUEST),
+    Case("tier code literal", 'Add a test for parsing the string "/model:perf"', NO_REQUEST),
+    Case("quality preference", "Use a better model to fix this", NO_REQUEST),
     Case("no choice", "Fix the login bug", NO_REQUEST),
     Case("task subject", "Fix the Opus integration", NO_REQUEST),
     Case("comparison", "Compare Opus and Sonnet latency", NO_REQUEST),
@@ -63,6 +78,7 @@ async def main() -> int:
         actual = await infer_requested_model(
             messages=[HumanMessage(content=case.request)],
             requested_models=available_requested_models(fable_enabled=case.fable_enabled),
+            performance_model=("openai:gpt-6.1-sol", "low"),
         )
         passed = actual == case.expected
         failures += not passed

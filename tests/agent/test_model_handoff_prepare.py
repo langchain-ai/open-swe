@@ -302,6 +302,64 @@ async def test_handoff_validates_and_persists_before_selecting_model(
         assert handoff.settings["requested_model"] == model
 
 
+@pytest.mark.parametrize(
+    ("choice", "effort", "configured_model", "expected_effort", "failure"),
+    [
+        ("performance", "no_request", "anthropic:claude-opus-5-5", "low", None),
+        ("performance", "max", "anthropic:claude-opus-5-5", "max", None),
+        ("anthropic:claude-opus-5-5", "no_request", "openai:gpt-6.1-sol", "high", None),
+        ("no_request", "no_request", "anthropic:claude-opus-5-5", "low", None),
+        ("performance", "no_request", "anthropic:claude-fable-5-1", None, "unavailable"),
+        ("performance", "no_request", None, None, "unavailable"),
+        ("performance", "max", "openai:gpt-6.1-sol", None, "not supported"),
+    ],
+)
+async def test_performance_handoff_resolves_configuration_before_validation(
+    handoff: Handoff,
+    monkeypatch: pytest.MonkeyPatch,
+    choice: str,
+    effort: str,
+    configured_model: str | None,
+    expected_effort: str | None,
+    failure: str | None,
+) -> None:
+    if configured_model is not None:
+        handoff.middleware._routing_defaults["performance"] = (configured_model, "low")
+    monkeypatch.setattr(
+        "openswe.model_request.select_jev_choices",
+        AsyncMock(return_value={"runtime_model": choice, "runtime_effort": effort}),
+    )
+    state: PrepareRunState = {
+        "messages": [
+            HumanMessage(
+                content='<input-message sender="slack:U1" kind="human" timestamp="2.0">Use perf</input-message>'
+            )
+        ]
+    }
+    if failure:
+        with pytest.raises(ValueError, match=failure):
+            await handoff.prepare(state)
+        handoff.store.assert_not_awaited()
+        return
+    expected_model = (
+        configured_model
+        if choice == "performance"
+        else "openai:gpt-6-luna"
+        if choice == "no_request"
+        else choice
+    )
+    for _ in range(2):
+        prepared = await handoff.prepare(state)
+        assert prepared["selected_model_id"] == expected_model
+        assert prepared["selected_effort"] == expected_effort
+    assert handoff.settings["requested_model"] == (
+        None if choice == "no_request" else expected_model
+    )
+    if choice != "no_request":
+        assert handoff.settings["effort"] == expected_effort
+        assert handoff.settings["model_routing_enabled"] is False
+
+
 async def test_later_run_traces_saved_choice_without_classification(
     handoff: Handoff, monkeypatch: pytest.MonkeyPatch
 ) -> None:
