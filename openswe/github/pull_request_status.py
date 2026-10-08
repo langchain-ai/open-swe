@@ -66,6 +66,33 @@ query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $
   }
 }
 """
+_ALL_REVIEW_THREADS_QUERY = """
+query PullRequestAllReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          path line startLine diffSide startDiffSide
+          comments(first: 100) {
+            nodes { id fullDatabaseId body pullRequestReview { fullDatabaseId } }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+_ADD_REVIEW_THREAD_MUTATION = """
+mutation($input: AddPullRequestReviewThreadInput!) {
+  addPullRequestReviewThread(input: $input) { thread { id } }
+}
+"""
+_UPDATE_REVIEW_COMMENT_MUTATION = """
+mutation($input: UpdatePullRequestReviewCommentInput!) {
+  updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id } }
+}
+"""
 _THREAD_COUNT_QUERY = """
 query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -272,7 +299,7 @@ class ReviewState:
     review_required: bool = False
 
 
-class _CursorLoop(Exception):
+class _CursorLoop(ValueError):
     """GitHub handed back a page cursor it had already given."""
 
 
@@ -296,11 +323,12 @@ def _next_cursor(connection: Mapping[str, Any], seen: set[str]) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class PullRequestClient:
-    """One pull request's reads on GitHub.
+    """One pull request's calls on GitHub; plain reads and writes raise like ``RepoClient``.
 
-    Every read answers ``None`` (or an unknown ``ReviewState``) when GitHub
-    could not answer, so one failed read degrades its part of a status rather
-    than the whole of it.
+    The status reads (``mergeability``, ``unresolved_threads``, ``review_state``,
+    ``review_decision``) and the statuses built from them answer ``None`` or an
+    unknown instead, so one failed read degrades its part of a status rather than
+    the whole of it.
     """
 
     repo: RepoClient
@@ -342,15 +370,86 @@ class PullRequestClient:
     def _log_extra(self) -> dict[str, object]:
         return {"pr_repo_full_name": self.repo.full_name, "pr_number": self.number}
 
-    async def pull(self) -> dict[str, Any] | None:
-        payload = await or_none(self.repo.get(f"pulls/{self.number}"))
-        return payload if isinstance(payload, dict) else None
+    async def pull(self) -> dict[str, Any]:
+        payload = await self.repo.get(f"pulls/{self.number}")
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the pull request without an object")
+        return payload
 
-    async def head_sha(self) -> str | None:
-        pull = await self.pull()
-        head = pull.get("head") if pull is not None else None
+    async def head_sha(self) -> str:
+        head = (await self.pull()).get("head")
         sha = head.get("sha") if isinstance(head, dict) else None
-        return sha if isinstance(sha, str) and sha else None
+        if not isinstance(sha, str) or not sha:
+            raise ValueError("GitHub answered the pull request without a head commit")
+        return sha
+
+    async def files(self, *, max_pages: int = 1) -> list[dict[str, Any]]:
+        """Changed files, up to ``max_pages`` pages of 100."""
+        return await self.repo.pages(f"pulls/{self.number}/files", max_pages=max_pages)
+
+    async def issue_comments(self) -> list[dict[str, Any]]:
+        """Top-level conversation comments."""
+        return await self.repo.pages(f"issues/{self.number}/comments")
+
+    async def comment(self, body: str) -> object:
+        """Add a top-level conversation comment."""
+        return await self.repo.post(f"issues/{self.number}/comments", {"body": body})
+
+    async def review_comments(
+        self, *, newest_first: bool = False, max_pages: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Inline review comments, oldest first unless ``newest_first``."""
+        params = {"sort": "created", "direction": "desc"} if newest_first else None
+        return await self.repo.pages(
+            f"pulls/{self.number}/comments", params=params, max_pages=max_pages
+        )
+
+    async def add_review_comment(self, comment: Mapping[str, object]) -> object:
+        """Post one inline comment now, outside any review."""
+        return await self.repo.post(f"pulls/{self.number}/comments", comment)
+
+    async def create_review(self, review: Mapping[str, object]) -> object:
+        """Start a review; without an ``event`` it stays pending for its author."""
+        return await self.repo.post(f"pulls/{self.number}/reviews", review)
+
+    async def submit_review(self, review_id: int, *, event: str, body: str) -> object:
+        payload: dict[str, object] = {"event": event}
+        if body:
+            payload["body"] = body
+        return await self.repo.post(f"pulls/{self.number}/reviews/{review_id}/events", payload)
+
+    async def delete_review(self, review_id: int) -> None:
+        await self.repo.delete(f"pulls/{self.number}/reviews/{review_id}")
+
+    async def review_threads(self) -> list[dict[str, Any]]:
+        """Every review thread with its position and comments, pending ones included."""
+        threads: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        while True:
+            pull = _graphql_pull(
+                await self.repo.graphql(
+                    _ALL_REVIEW_THREADS_QUERY, {"number": self.number, "cursor": cursor}
+                )
+            )
+            connection = pull.get("reviewThreads") if pull is not None else None
+            if not isinstance(connection, Mapping) or not isinstance(connection.get("nodes"), list):
+                raise ValueError("GitHub answered review threads without a list")
+            threads.extend(node for node in connection["nodes"] if isinstance(node, dict))
+            cursor = _next_cursor(connection, seen)
+            if cursor is None:
+                return threads
+
+    async def add_review_thread(self, thread: Mapping[str, object]) -> None:
+        """Add an inline comment to a pending review; ``thread`` is GraphQL's thread input."""
+        await self.repo.github.graphql(_ADD_REVIEW_THREAD_MUTATION, {"input": dict(thread)})
+
+    async def edit_pending_comment(self, comment_node_id: str, body: str) -> None:
+        """Edit a comment in a pending review, which REST cannot reach yet."""
+        await self.repo.github.graphql(
+            _UPDATE_REVIEW_COMMENT_MUTATION,
+            {"input": {"pullRequestReviewCommentId": comment_node_id, "body": body}},
+        )
 
     async def mergeable_pull(self) -> dict[str, Any] | None:
         """Read the pull request, waiting for GitHub to decide whether it merges.
@@ -359,7 +458,7 @@ class PullRequestClient:
         finishes; the first read only asks it to start.
         """
         for attempt in range(_MERGEABILITY_ATTEMPTS):
-            pull = await self.pull()
+            pull = await or_none(self.pull())
             if pull is None or pull.get("mergeable") is not None:
                 return pull
             if _live_state(pull) != "open" or attempt + 1 == _MERGEABILITY_ATTEMPTS:
@@ -367,12 +466,12 @@ class PullRequestClient:
             await asyncio.sleep(_MERGEABILITY_DELAY_SECONDS * (attempt + 1))
         return None
 
-    async def reviews(self) -> list[dict[str, Any]] | None:
-        return await or_none(self.repo.pages(f"pulls/{self.number}/reviews"))
+    async def reviews(self) -> list[dict[str, Any]]:
+        return await self.repo.pages(f"pulls/{self.number}/reviews")
 
     async def review_decision(self) -> ReviewDecision | None:
         """The standing decision across each reviewer's latest approval, change request or dismissal."""
-        reviews = await self.reviews()
+        reviews = await or_none(self.reviews())
         if reviews is None:
             return None
         latest: dict[str, tuple[int, str]] = {}
@@ -523,7 +622,7 @@ class PullRequestClient:
             {"repo_full_name": self.repo.full_name, "number": self.number}
         )
         result["url"] = f"https://github.com/{self.repo.full_name}/pull/{self.number}"
-        pull, review_threads = await asyncio.gather(self.pull(), self.unresolved_threads())
+        pull, review_threads = await asyncio.gather(or_none(self.pull()), self.unresolved_threads())
         if review_threads is not None:
             result.update(
                 {

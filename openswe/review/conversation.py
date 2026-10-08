@@ -76,7 +76,7 @@ class ConversationComment(BaseModel):
 
     @classmethod
     async def post(cls, pull: PullRequestClient, body: str) -> Self:
-        created = await pull.repo.post(f"issues/{pull.number}/comments", {"body": body})
+        created = await pull.comment(body)
         try:
             return cls.of(_GitHubIssueComment.model_validate(created))
         except ValidationError as exc:
@@ -141,9 +141,7 @@ class Conversation(BaseModel):
     @classmethod
     async def load(cls, pull: PullRequestClient) -> Self:
         raw_comments, raw_reviews, raw_review_comments = await asyncio.gather(
-            pull.repo.pages(f"issues/{pull.number}/comments"),
-            pull.repo.pages(f"pulls/{pull.number}/reviews"),
-            pull.repo.pages(f"pulls/{pull.number}/comments"),
+            pull.issue_comments(), pull.reviews(), pull.review_comments()
         )
         try:
             comments = _ISSUE_COMMENTS.validate_python(raw_comments)

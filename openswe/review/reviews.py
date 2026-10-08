@@ -18,7 +18,7 @@ from urllib.parse import urljoin, urlparse
 import httpx2
 from fastapi import HTTPException, Response
 from langgraph_sdk.errors import NotFoundError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from openswe.database import postgres
 from openswe.github.app import get_github_app_installation_token
@@ -371,7 +371,8 @@ async def get_pr_head_sha(owner: str, repo: str, pr_number: int) -> str:
     """
     try:
         async with GitHubClient.as_app() as github:
-            return await github.repo(owner, repo).pull_request(pr_number).head_sha() or ""
+            pull = github.repo(owner, repo).pull_request(pr_number)
+            return await or_none(pull.head_sha()) or ""
     except GitHubAppUnavailable:
         logger.warning(
             "No GitHub App token to read the PR head",
@@ -396,19 +397,12 @@ class SubmittedReview(BaseModel):
         pending = await PendingReview.load(pull, login=login)
         if event != "APPROVE" and not body and not (pending and pending.comments):
             raise HTTPException(422, "a comment or change request needs a body or line comments")
-        payload: dict[str, object] = {"event": event}
-        if body:
-            payload["body"] = body
         if pending is not None:
-            return cls.model_validate(
-                await pull.repo.post(f"pulls/{pull.number}/reviews/{pending.id}/events", payload)
-            )
-        head_sha = await pull.head_sha()
-        if head_sha is None:
-            raise HTTPException(502, "could not resolve PR head commit")
-        return cls.model_validate(
-            await pull.repo.post(f"pulls/{pull.number}/reviews", {**payload, "commit_id": head_sha})
-        )
+            return cls.model_validate(await pull.submit_review(pending.id, event=event, body=body))
+        review: dict[str, object] = {"event": event, "commit_id": await pull.head_sha()}
+        if body:
+            review["body"] = body
+        return cls.model_validate(await pull.create_review(review))
 
 
 DiffSideName = Literal["LEFT", "RIGHT"]
@@ -472,10 +466,7 @@ class PendingReview(BaseModel):
     @classmethod
     async def load(cls, pull: PullRequestClient, *, login: str) -> Self | None:
         """The viewer's pending review, which GitHub shows only to its author."""
-        reviews = [
-            _GithubReview.model_validate(raw)
-            for raw in await pull.repo.pages(f"pulls/{pull.number}/reviews")
-        ]
+        reviews = [_GithubReview.model_validate(raw) for raw in await pull.reviews()]
         pending = next(
             (
                 review
@@ -489,16 +480,7 @@ class PendingReview(BaseModel):
         if pending is None:
             return None
         # REST omits `line` on pending comments, and GraphQL keeps the side on the thread.
-        threads: list[_ReviewThread] = []
-        cursor: str | None = None
-        while True:
-            page = _ReviewThreadsData.model_validate(
-                await pull.repo.graphql(_REVIEW_THREADS, {"number": pull.number, "after": cursor})
-            ).connection()
-            threads.extend(page.nodes)
-            if not page.pageInfo.hasNextPage or not page.pageInfo.endCursor:
-                break
-            cursor = page.pageInfo.endCursor
+        threads = _REVIEW_THREADS.validate_python(await pull.review_threads())
         comments = [
             PendingReviewComment(
                 id=int(comment.fullDatabaseId),
@@ -532,18 +514,11 @@ class PendingReview(BaseModel):
             raise HTTPException(422, "comment body is required")
         pending = await cls.load(pull, login=login)
         if pending is None:
-            head_sha = await pull.head_sha()
-            if head_sha is None:
-                raise HTTPException(502, "could not resolve PR head commit")
-            # A review created without an event stays PENDING until it is submitted.
-            await pull.repo.post(
-                f"pulls/{pull.number}/reviews",
-                {"commit_id": head_sha, "comments": [comment.rest_payload()]},
+            await pull.create_review(
+                {"commit_id": await pull.head_sha(), "comments": [comment.rest_payload()]}
             )
         else:
-            await pull.repo.github.graphql(
-                _ADD_REVIEW_THREAD, {"input": comment.thread_input(pending.node_id)}
-            )
+            await pull.add_review_thread(comment.thread_input(pending.node_id))
         return await cls.reload(pull, login=login)
 
     @classmethod
@@ -559,10 +534,7 @@ class PendingReview(BaseModel):
         )
         if comment is None:
             raise HTTPException(404, "comment is not in your pending review")
-        await pull.repo.github.graphql(
-            _UPDATE_REVIEW_COMMENT,
-            {"input": {"pullRequestReviewCommentId": comment.node_id, "body": body}},
-        )
+        await pull.edit_pending_comment(comment.node_id, body)
         return await cls.reload(pull, login=login)
 
     @classmethod
@@ -570,7 +542,7 @@ class PendingReview(BaseModel):
         pending = await cls.load(pull, login=login)
         if pending is None:
             return False
-        await pull.repo.delete(f"pulls/{pull.number}/reviews/{pending.id}")
+        await pull.delete_review(pending.id)
         return True
 
 
@@ -583,25 +555,6 @@ class _GithubReview(BaseModel):
     node_id: str
     state: str
     user: _ReviewAuthor | None = None
-
-
-_REVIEW_THREADS = """
-query($owner: String!, $repo: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $after) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          path line startLine diffSide startDiffSide
-          comments(first: 100) {
-            nodes { id fullDatabaseId body pullRequestReview { fullDatabaseId } }
-          }
-        }
-      }
-    }
-  }
-}
-"""
 
 
 class _ThreadReview(BaseModel):
@@ -628,43 +581,7 @@ class _ReviewThread(BaseModel):
     comments: _ThreadComments = _ThreadComments()
 
 
-class _PageInfo(BaseModel):
-    hasNextPage: bool = False
-    endCursor: str | None = None
-
-
-class _ReviewThreads(BaseModel):
-    pageInfo: _PageInfo = _PageInfo()
-    nodes: list[_ReviewThread] = []
-
-
-class _ThreadsPullRequest(BaseModel):
-    reviewThreads: _ReviewThreads = _ReviewThreads()
-
-
-class _ThreadsRepository(BaseModel):
-    pullRequest: _ThreadsPullRequest | None = None
-
-
-class _ReviewThreadsData(BaseModel):
-    repository: _ThreadsRepository | None = None
-
-    def connection(self) -> _ReviewThreads:
-        pull = self.repository.pullRequest if self.repository else None
-        return pull.reviewThreads if pull else _ReviewThreads()
-
-
-_ADD_REVIEW_THREAD = """
-mutation($input: AddPullRequestReviewThreadInput!) {
-  addPullRequestReviewThread(input: $input) { thread { id } }
-}
-"""
-
-_UPDATE_REVIEW_COMMENT = """
-mutation($input: UpdatePullRequestReviewCommentInput!) {
-  updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id } }
-}
-"""
+_REVIEW_THREADS = TypeAdapter(list[_ReviewThread])
 
 
 class _CommentOwner(BaseModel):
@@ -681,12 +598,9 @@ class PostedReviewComment(BaseModel):
         """Post one line comment on the PR right away, outside any pending review."""
         if not comment.body.strip():
             raise HTTPException(422, "comment body is required")
-        head_sha = await pull.head_sha()
-        if head_sha is None:
-            raise HTTPException(502, "could not resolve PR head commit")
         return cls.model_validate(
-            await pull.repo.post(
-                f"pulls/{pull.number}/comments", {"commit_id": head_sha, **comment.rest_payload()}
+            await pull.add_review_comment(
+                {"commit_id": await pull.head_sha(), **comment.rest_payload()}
             )
         )
 
@@ -695,8 +609,7 @@ class PostedReviewComment(BaseModel):
         cls, pull: PullRequestClient, comment_id: int, *, viewer_login: str, body: str
     ) -> Self:
         """Edit an inline comment on this PR, which only its author may do."""
-        path = f"pulls/comments/{comment_id}"
-        owner = _CommentOwner.model_validate(await pull.repo.get(path))
+        owner = _CommentOwner.model_validate(await pull.repo.review_comment(comment_id))
         if (
             owner.user is None
             or owner.user.login.lower() != viewer_login.lower()
@@ -705,7 +618,7 @@ class PostedReviewComment(BaseModel):
             )
         ):
             raise HTTPException(403, "comment is not editable by this user")
-        return cls.model_validate(await pull.repo.patch(path, {"body": body}))
+        return cls.model_validate(await pull.repo.edit_review_comment(comment_id, body))
 
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -757,10 +670,10 @@ async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[st
     silently dropped.
     """
     async with GitHubClient.as_app() as github:
-        raw = await github.repo(owner, repo).pages(
-            f"pulls/{pr_number}/comments",
-            params={"sort": "created", "direction": "desc"},
-            max_pages=_MAX_REVIEW_COMMENT_PAGES,
+        raw = (
+            await github.repo(owner, repo)
+            .pull_request(pr_number)
+            .review_comments(newest_first=True, max_pages=_MAX_REVIEW_COMMENT_PAGES)
         )
     return {"comments": [_normalize_review_comment(item) for item in raw]}
 
@@ -813,8 +726,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     """
     async with GitHubClient.as_app() as github:
         repository = github.repo(owner, repo)
-        raw_pr = await repository.get(f"pulls/{pr_number}")
-        pr_payload = raw_pr if isinstance(raw_pr, dict) else {}
+        pr_payload = await repository.pull_request(pr_number).pull()
         details = _serialize_pr_details(pr_payload)
 
         thread = await _reviewer_thread_for(owner, repo, pr_number)
@@ -882,7 +794,6 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
 
 
 _PREVIEW_FILE_LIMIT = 10
-_PREVIEW_FILES_PER_PAGE = 100
 
 
 class PreviewFile(BaseModel):
@@ -1018,13 +929,10 @@ async def get_pull_request_preview(pull_request: PullRequestClient) -> PullReque
     """
     repository = pull_request.repo
     owner, repo, pr_number = repository.owner, repository.name, pull_request.number
-    pull_payload, file_payload, threads = await asyncio.gather(
-        repository.get(f"pulls/{pr_number}"),
-        repository.get(f"pulls/{pr_number}/files", {"per_page": str(_PREVIEW_FILES_PER_PAGE)}),
-        pull_request.unresolved_threads(),
+    pull_payload, raw_files, threads = await asyncio.gather(
+        pull_request.pull(), pull_request.files(), pull_request.unresolved_threads()
     )
-    pull = _GithubPreviewPull.model_validate(pull_payload if isinstance(pull_payload, dict) else {})
-    raw_files = file_payload if isinstance(file_payload, list) else []
+    pull = _GithubPreviewPull.model_validate(pull_payload)
     files = [
         PreviewFile(
             path=entry.filename,
@@ -1217,7 +1125,7 @@ async def _require_image_in_pr(owner: str, repo: str, pr_number: int, url: str) 
     actually appear in this PR's body are allowed.
     """
     async with GitHubClient.as_app() as github:
-        pr_payload = as_json_object(await github.repo(owner, repo).get(f"pulls/{pr_number}"))
+        pr_payload = await github.repo(owner, repo).pull_request(pr_number).pull()
     body = pr_payload.get("body")
     if not isinstance(body, str) or url not in body:
         raise HTTPException(403, "image not referenced by this PR")
@@ -1372,7 +1280,7 @@ async def trigger_review_scout(
     Also lists the review in ``login``'s sidebar, where it shows the build's progress.
     """
     async with GitHubClient.as_app() as github:
-        pr_payload = await github.repo(owner, repo).get(f"pulls/{pr_number}")
+        pr_payload = await github.repo(owner, repo).pull_request(pr_number).pull()
     target = await _scout_target(owner, repo, pr_number, pr_payload)
     if target is None:
         raise HTTPException(503, "the review scout needs a database and a pull request head")

@@ -360,8 +360,13 @@ class GitHubClient:
                 return items
             page += 1
 
-    async def graphql(self, query: str, variables: Mapping[str, object]) -> Mapping[str, Any]:
-        """The response's ``data``; GraphQL errors raise ``GraphQLError``."""
+    async def graphql(
+        self, query: str, variables: Mapping[str, object], *, partial: bool = False
+    ) -> Mapping[str, Any]:
+        """The response's ``data``; GraphQL errors raise ``GraphQLError`` unless ``partial``.
+
+        With ``partial``, fields GitHub could not resolve come back null beside the ones it did.
+        """
         payload = (
             await self.request(
                 "POST", GITHUB_GRAPHQL, json={"query": query, "variables": dict(variables)}
@@ -369,7 +374,7 @@ class GitHubClient:
         ).json()
         if not isinstance(payload, Mapping):
             raise ValueError("GitHub answered GraphQL without an object")
-        if payload.get("errors"):
+        if payload.get("errors") and not partial:
             raise GraphQLError(payload["errors"])
         data = payload.get("data")
         if not isinstance(data, Mapping):
@@ -504,6 +509,28 @@ class RepoClient:
         if isinstance(payload, list) and payload and isinstance(payload[0], dict):
             return payload[0]
         return None
+
+    async def info(self) -> dict[str, Any]:
+        """The repository itself: default branch, merge settings, visibility."""
+        payload = await self.github.get(f"repos/{self.full_name}")
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the repository without an object")
+        return payload
+
+    async def branch(self, name: str) -> dict[str, Any]:
+        payload = await self.get(f"branches/{quote(name, safe='')}")
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the branch without an object")
+        return payload
+
+    async def review_comment(self, comment_id: int) -> object:
+        return await self.get(f"pulls/comments/{comment_id}")
+
+    async def edit_review_comment(self, comment_id: int, body: str) -> object:
+        return await self.patch(f"pulls/comments/{comment_id}", {"body": body})
+
+    async def delete_review_comment(self, comment_id: int) -> None:
+        await self.delete(f"pulls/comments/{comment_id}")
 
     async def check_runs(self, sha: str) -> list[dict[str, Any]]:
         """The latest run of each check on ``sha``."""

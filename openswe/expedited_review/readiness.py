@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from openswe.baby_sit import aggregate_check_state
 from openswe.github.ci import CommitChecks, RequiredCheck
+from openswe.github.http import or_none
 from openswe.github.pull_request_status import Mergeability, PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 
@@ -87,7 +88,7 @@ class Readiness:
     @classmethod
     async def assess(cls, pull: PullRequestClient) -> Self | None:
         """Fetch the PR and everything that gates a vote; ``None`` when GitHub was unavailable."""
-        pr = await pull.pull()
+        pr = await or_none(pull.pull())
         if pr is None:
             return None
         head = pr.get("head")
@@ -106,7 +107,7 @@ class Readiness:
         if required is None:
             return None
         threads = await pull.unresolved_threads()
-        reviews = await pull.reviews()
+        reviews = await or_none(pull.reviews())
         mergeability = await pull.mergeability()
         if threads is None or reviews is None:
             return None
@@ -198,7 +199,7 @@ def _latest_reviews_by_user(reviews: list[dict[str, Any]], author: str) -> dict[
 
 async def review_authors(pull: PullRequestClient) -> set[str] | None:
     """Lowercased logins of everyone who submitted a review, comment-only ones included."""
-    reviews = await pull.reviews()
+    reviews = await or_none(pull.reviews())
     if reviews is None:
         return None
     authors: set[str] = set()
@@ -212,7 +213,7 @@ async def review_authors(pull: PullRequestClient) -> set[str] | None:
 
 async def latest_review_states(pull: PullRequestClient, author: str) -> dict[str, str] | None:
     """Each non-author reviewer's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state."""
-    reviews = await pull.reviews()
+    reviews = await or_none(pull.reviews())
     if reviews is None:
         return None
     return _latest_reviews_by_user(reviews, author)
