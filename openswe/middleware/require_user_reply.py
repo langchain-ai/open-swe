@@ -29,6 +29,9 @@ from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
+# Tools that post a card as the turn's final Slack reply.
+_CARD_TOOLS = frozenset({"request_service_connection", "connect_managed_tools"})
+
 ReplySurface = Literal["slack", "web"]
 
 SLACK_REPLY_SURFACE: ReplySurface = "slack"
@@ -122,7 +125,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
     def _discharges_turn(self, call: Mapping[str, Any]) -> bool:
         name = call.get("name")
         if name == self._no_reply_tool_name or (
-            self._tool_name == "slack_reply" and name == "request_service_connection"
+            self._tool_name == "slack_reply" and name in _CARD_TOOLS
         ):
             return True
         # An acknowledgement is not an answer, and the Slack prompt orders one
