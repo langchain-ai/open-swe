@@ -164,6 +164,8 @@ async def github_webhook(
         return {"status": "ignored", "reason": "Repository not in allowlist"}
 
     if event_type in common.GITHUB_CI_EVENTS:
+        if event_type == "workflow_run" and payload.get("action") == "completed":
+            background_tasks.add_task(_launch_automations, event_type, payload, delivery_id)
         background_tasks.add_task(
             service.process_github_ci_event,
             payload,

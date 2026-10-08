@@ -13,7 +13,10 @@ Args:
         - ``{"kind": "github", "repo": "owner/repo", "events": [...]}`` runs on
           events in that repository, passed to the run as untrusted context:
           "issues.opened", "pull_request.opened", "pull_request.closed"
-          (merged or not), and "pull_request.merged".
+          (merged or not), "pull_request.merged", and "workflow_run.completed".
+          Optional ``conclusion`` filters only workflow completion events; use
+          ``"conclusion": "failure"`` to investigate failed runs only. Omit it
+          to run on every conclusion. Other events in the trigger are unaffected.
         - ``{"kind": "slack", "channel": "C0123456789", "events": ["message.posted"]}``
           runs on new top-level messages in a Slack channel Open SWE is a
           member of, passed to the run as untrusted context. Optional filters:

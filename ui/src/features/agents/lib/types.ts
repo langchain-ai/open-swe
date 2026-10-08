@@ -241,6 +241,18 @@ export type GitHubTriggerEvent =
   | "pull_request.opened"
   | "pull_request.closed"
   | "pull_request.merged"
+  | "workflow_run.completed"
+
+export type WorkflowConclusion =
+  | "success"
+  | "failure"
+  | "neutral"
+  | "cancelled"
+  | "skipped"
+  | "timed_out"
+  | "action_required"
+  | "stale"
+  | "startup_failure"
 
 export type SlackTriggerEvent = "message.posted"
 export type SlackTriggerSenders = "anyone" | "people" | "bots"
@@ -249,7 +261,12 @@ export type LinearTriggerEvent = "issue.created" | "issue.labeled"
 /** One way an automation fires; `kind` names the provider, the rest are its filters. */
 export type AutomationTriggerConfig =
   | { kind: "schedule"; cron: string }
-  | { kind: "github"; repo: string; events: Array<GitHubTriggerEvent> }
+  | {
+      kind: "github"
+      repo: string
+      events: Array<GitHubTriggerEvent>
+      conclusion?: WorkflowConclusion | null
+    }
   | {
       kind: "slack"
       channel: string
@@ -280,6 +297,7 @@ export const AUTOMATION_EVENT_PROVIDERS = {
       "pull_request.opened": "PR opened",
       "pull_request.closed": "PR closed",
       "pull_request.merged": "PR merged",
+      "workflow_run.completed": "Workflow completed",
     } satisfies Record<GitHubTriggerEvent, string>,
   },
   slack: {

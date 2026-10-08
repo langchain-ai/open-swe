@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from openswe.api.app import app
 from openswe.github import webhook as github
+from openswe.schedules import store as schedules
 from openswe.webhooks import common
 from tests.conftest import post_signed_github_webhook
 
@@ -44,6 +45,34 @@ async def test_signed_ci_events_route_without_mention(
         "event_type": event_type,
         "delivery_id": "delivery-1",
     }
+
+
+@pytest.mark.parametrize("action", ["completed", "requested", "in_progress"])
+async def test_workflow_automation_dispatches_only_completed_runs(
+    action: str, registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deliveries: list[str] = []
+
+    async def launch(event_type: str, payload: dict[str, object], delivery_id: str) -> list[object]:
+        deliveries.append(delivery_id)
+        return []
+
+    async def process(*args: object) -> None:
+        return None
+
+    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", _SECRET)
+    monkeypatch.setattr(common, "is_repo_allowed", lambda _repo: True)
+    monkeypatch.setattr(github, "process_github_ci_event", process)
+    monkeypatch.setattr(schedules, "launch_github_automations", launch)
+    response = await _post(
+        "workflow_run",
+        {
+            "action": action,
+            "repository": {"owner": {"login": "acme"}, "name": "repo"},
+        },
+    )
+    assert response.status_code == 200
+    assert deliveries == (["delivery-1"] if action == "completed" else [])
 
 
 def test_ci_event_still_requires_valid_signature(monkeypatch: pytest.MonkeyPatch) -> None:

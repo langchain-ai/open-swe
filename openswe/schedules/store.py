@@ -63,7 +63,22 @@ _AGENT_ASSISTANT_ID = "agent"
 _SCHEDULER_ASSISTANT_ID = "scheduler"
 _CRON_FIELD_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 GitHubEvent = Literal[
-    "issues.opened", "pull_request.opened", "pull_request.closed", "pull_request.merged"
+    "issues.opened",
+    "pull_request.opened",
+    "pull_request.closed",
+    "pull_request.merged",
+    "workflow_run.completed",
+]
+WorkflowConclusion = Literal[
+    "success",
+    "failure",
+    "neutral",
+    "cancelled",
+    "skipped",
+    "timed_out",
+    "action_required",
+    "stale",
+    "startup_failure",
 ]
 # How a run's prompt names each GitHub event; "closed" also fires for merges.
 GITHUB_EVENT_DESCRIPTIONS: dict[GitHubEvent, str] = {
@@ -71,6 +86,7 @@ GITHUB_EVENT_DESCRIPTIONS: dict[GitHubEvent, str] = {
     "pull_request.opened": "a pull request was opened",
     "pull_request.closed": "a pull request was closed",
     "pull_request.merged": "a pull request was merged",
+    "workflow_run.completed": "a GitHub Actions workflow run completed",
 }
 SlackTriggerEvent = Literal["message.posted"]
 SLACK_EVENT_DESCRIPTIONS: dict[SlackTriggerEvent, str] = {
@@ -112,6 +128,11 @@ class GitHubTrigger(BaseModel):
     kind: Literal["github"] = "github"
     repo: str = Field(min_length=3)
     events: list[GitHubEvent] = Field(min_length=1)
+    conclusion: WorkflowConclusion | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Only workflow_run.completed events are filtered by conclusion.",
+    )
 
     @field_validator("repo")
     @classmethod
@@ -1216,6 +1237,8 @@ def _github_events(event_type: str, payload: dict[str, Any]) -> set[GitHubEvent]
     action = payload.get("action")
     if event_type == "issues" and action == "opened":
         return {"issues.opened"}
+    if event_type == "workflow_run" and action == "completed":
+        return {"workflow_run.completed"}
     if event_type != "pull_request":
         return set()
     if action == "opened":
@@ -1230,7 +1253,10 @@ def _github_events(event_type: str, payload: dict[str, Any]) -> set[GitHubEvent]
 async def _github_event_prompt(
     record: dict[str, Any], event_type: str, payload: dict[str, Any], event: GitHubEvent
 ) -> str:
-    subject_value = payload.get("issue" if event_type == "issues" else "pull_request")
+    subject_key = {"issues": "issue", "workflow_run": "workflow_run"}.get(
+        event_type, "pull_request"
+    )
+    subject_value = payload.get(subject_key)
     subject: dict[str, Any] = subject_value if isinstance(subject_value, dict) else {}
     author_value = subject.get("user")
     author: dict[str, Any] = author_value if isinstance(author_value, dict) else {}
@@ -1249,6 +1275,15 @@ async def _github_event_prompt(
             f"Base: {base.get('ref', '')}  Head: {head.get('ref', '')}",
             f"Merged: {'yes' if subject.get('merged') is True else 'no'}",
         ]
+    if event_type == "workflow_run":
+        lines = [
+            f"Workflow: {subject.get('name', '')}",
+            f"URL: {subject.get('html_url', '')}",
+            f"Run ID: {subject.get('id', '')}  Attempt: {subject.get('run_attempt', '')}",
+            f"Conclusion: {subject.get('conclusion', '')}",
+            f"Branch: {subject.get('head_branch', '')}  SHA: {subject.get('head_sha', '')}",
+            f"Event: {subject.get('event', '')}",
+        ]
     context = "\n".join(lines) + f"\n\n{subject.get('body') or ''}"
     registered = bool(await User.known_logins([login]))
     return prompt(
@@ -1260,7 +1295,7 @@ async def _github_event_prompt(
 
 
 async def _github_trigger_matches(
-    repo_full_name: str, events: set[GitHubEvent]
+    repo_full_name: str, events: set[GitHubEvent], conclusion: object = None
 ) -> list[tuple[dict[str, Any], GitHubEvent]]:
     """Enabled automations with a GitHub trigger on this repository for one of ``events``."""
     async with transaction() as conn:
@@ -1280,6 +1315,9 @@ async def _github_trigger_matches(
             if trigger.get("kind") == "github"
             and str((trigger.get("config") or {}).get("repo") or "").lower() == repo_full_name
             for event in (trigger.get("config") or {}).get("events") or []
+            if event != "workflow_run.completed"
+            or (trigger.get("config") or {}).get("conclusion") is None
+            or (trigger.get("config") or {}).get("conclusion") == conclusion
         }
         fired = sorted(event for event in events if event in configured)
         if fired:
@@ -1327,16 +1365,18 @@ async def launch_github_automations(
         )
         return []
     full_name = f"{owner_login}/{repo_name}".lower()
-    matches = await _github_trigger_matches(full_name, events)
+    workflow_run = payload.get("workflow_run")
+    conclusion = workflow_run.get("conclusion") if isinstance(workflow_run, dict) else None
+    matches = await _github_trigger_matches(full_name, events, conclusion)
     if not matches:
         logger.info(
             "No GitHub automations matched the delivery",
             extra={"github_delivery": delivery_id, "github_repo": full_name},
         )
         return []
-    # Pull request events on a public repository run only for org members; issue
-    # automations keep firing for any author, as before, with a narrowed token.
-    if event_type == "pull_request" and await enforce_public_repo_org_gate(payload, event_type):
+    if event_type in {"pull_request", "workflow_run"} and await enforce_public_repo_org_gate(
+        payload, event_type
+    ):
         return []
     results: list[dict[str, Any]] = []
     private = repo_private_from_payload(payload)
