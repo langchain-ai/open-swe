@@ -1052,10 +1052,8 @@ test.describe("Human review in Slack", () => {
       );
     await expect
       .poll(replyState, { timeout: 60_000 })
-      .toContain("<kind>reviewer_pick</kind>");
-    expect(await replyState()).toContain(
-      `<review_request_id>${posted.id}</review_request_id>`,
-    );
+      .toContain("kind: reviewer_pick");
+    expect(await replyState()).toContain(`review_request_id: ${posted.id}`);
   });
 
   test("a reviewer the agent picks in their night hears nothing until their work day starts", async ({

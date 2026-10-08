@@ -235,7 +235,7 @@ async def _target(header: SessionUploadHeader, login: str) -> _Target:
 
 
 def _upload_note(target: _Target) -> list[HumanMessage]:
-    data: dict[str, object] = {"repository": target.full_name, "branch": target.branch}
+    data: dict[str, str] = {"repository": target.full_name, "branch": target.branch}
     if target.pr_url is not None:
         data["pull_request"] = target.pr_url
     notes: list[HumanMessage] = []

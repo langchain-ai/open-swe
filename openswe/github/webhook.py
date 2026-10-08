@@ -4,7 +4,7 @@ Helpers and constants stay in common.py; they are accessed through the module
 object (``common.X``) so tests that monkeypatch them keep working.
 """
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -19,6 +19,8 @@ from openswe.human_review.lifecycle import close_for_pull_request
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import settle_pull_request, settle_repository
 from openswe.input_messages import (
+    EnvelopeData,
+    FieldValue,
     PersonIdentity,
     RunInput,
     SystemIdentity,
@@ -138,7 +140,7 @@ def _github_human_run_input(
     content: str,
     *,
     user_id: object = None,
-    data: dict[str, object] | None = None,
+    data: EnvelopeData | None = None,
 ) -> RunInput:
     person = _github_person(login, user_id)
     return {
@@ -156,7 +158,7 @@ def _github_human_run_input(
     }
 
 
-def _github_webhook_run_input(content: str, *, data: dict[str, object]) -> RunInput:
+def _github_webhook_run_input(content: str, *, data: EnvelopeData) -> RunInput:
     actor: SystemIdentity = {
         "id": "system:github-webhook",
         "display_name": "GitHub webhook",
@@ -186,7 +188,7 @@ def _github_issue_run_input(
     description: str,
     trigger_login: str,
     trigger_user_id: object,
-    issue_data: dict[str, object],
+    issue_data: Mapping[str, FieldValue | None],
     trusted: Collection[str],
 ) -> RunInput:
     actor: SystemIdentity = {
@@ -244,7 +246,7 @@ def _github_issue_run_input(
 
 def _pr_data(
     repo_config: dict[str, str], pr_number: int, pr_url: str, base_sha: str, head_sha: str
-) -> dict[str, object]:
+) -> EnvelopeData:
     return {
         "pull_request": {
             "repository": f"{repo_config.get('owner')}/{repo_config.get('name')}",

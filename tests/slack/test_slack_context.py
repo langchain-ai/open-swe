@@ -877,10 +877,12 @@ def test_reply_to_a_review_notice_names_it_and_the_target_thread() -> None:
         [{"ts": "9.0", "text": "why me?", "user": "U123"}], replying_to=notice
     )
 
-    trigger = str(contents[-1])
-    assert "<replying_to>" in trigger
-    assert "<kind>reviewer_pick</kind>" in trigger
-    assert "<target_thread_id>thread-impl</target_thread_id>" in trigger
+    trigger = cast(list[dict[str, str]], contents[-1])[0]["text"]
+    assert (
+        "<replying_to>\nkind: reviewer_pick\nreview_request_id: 0198\n"
+        "pr_url: https://github.com/o/r/pull/1\ntext: Open SWE picked you to review o/r#1\n"
+        "target_thread_id: thread-impl\n</replying_to>"
+    ) in trigger
 
 
 @pytest.mark.parametrize("explicit_mention", [True, False])
