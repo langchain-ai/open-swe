@@ -100,13 +100,13 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
     ("enabled", "binding", "available"),
     [
         (False, {}, False),
-        (True, {}, True),
-        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True),
+        (True, {}, False),
+        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, False),
         (True, {"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False),
         (True, {"sandbox_id": "bridge:legacy-cli"}, False),
     ],
 )
-async def test_task_tools_require_owner_opt_in_and_supported_sandbox(
+async def test_task_tools_remain_disabled_regardless_of_owner_opt_in_and_sandbox(
     saved_thread_scope: dict[str, object],
     enabled: bool,
     binding: dict[str, str],

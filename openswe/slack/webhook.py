@@ -38,7 +38,7 @@ from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from openswe.slack.channels import SlackChannel
-from openswe.slack.dm import dm_thread_title, is_concierge_thread, is_dm_channel
+from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
@@ -654,6 +654,11 @@ async def process_slack_mention(
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 
+async def start_slack_run(request: SlackRequest, repo: common.SlackRepoResolution | None) -> bool:
+    """Process ``request`` without the error reply ``process_slack_mention`` posts; whether a run started."""
+    return await _process_slack_mention_impl(request, repo)
+
+
 async def _notify_slack_processing_error(
     request: SlackRequest, repo: Repo | None, exc: BaseException
 ) -> None:
@@ -1155,10 +1160,33 @@ async def _process_slack_mention_impl(
         )
         if section
     )
+    # A thread started under a DM Open SWE sent for another thread is about that thread's work.
+    dm_origin = (
+        await DmOrigin.of(channel_id, thread_ts)
+        if is_first_mention
+        and not concierge_mode
+        and event_ts != thread_ts
+        and is_dm_channel(channel_context)
+        else None
+    )
+    dm_origin_section = (
+        prompt(
+            "slack/dm-origin",
+            origin=dm_origin,
+            permalink=await slack_utils.get_slack_permalink(*dm_origin.location) or "",
+            agent_thread_id=await common.lookup_slack_thread_id(
+                langgraph_client, *dm_origin.location
+            )
+            or "",
+        )
+        if dm_origin is not None
+        else ""
+    )
     turn_context = "\n\n".join(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
+            dm_origin_section,
             prompt("runs/slack-review-request")
             if event_ts != thread_ts
             and context_thread_ts == thread_ts

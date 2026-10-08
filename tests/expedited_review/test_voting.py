@@ -206,7 +206,9 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     approval = await open_approval(awaiting_ready=True)
     private_messages: list[tuple[str, object]] = []
 
-    async def deliver(user: str, text: str, *, blocks: object) -> tuple[str, str]:
+    async def deliver(
+        user: str, text: str, *, blocks: object, origin: object = None
+    ) -> tuple[str, str]:
         private_messages.append((user, blocks))
         return "D_ADA", "4.0"
 
