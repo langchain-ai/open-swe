@@ -14,7 +14,7 @@ from openswe.human_review.clicks import answer_click
 from openswe.human_review.lifecycle import dismiss_request
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import SNOOZE_DURATIONS, claim, decline, snooze
+from openswe.human_review.standard import SNOOZE_DURATIONS, ReviewSnooze, claim, decline, snooze
 from openswe.prompts import prompt
 from openswe.slack.blocks import (
     Block,
@@ -51,6 +51,7 @@ DECLINE_REASONS = (
     "Other",
 )
 _CHOICE = "choice"
+_SCOPE = "scope"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,10 +80,28 @@ class PickModal:
             "label": plain_text(self.question),
             "element": select,
         }
+        blocks: list[Block] = [question]
+        if self.action == "snooze":
+            current = option("This review", "one")
+            blocks.append(
+                {
+                    "type": "input",
+                    "block_id": _SCOPE,
+                    "label": plain_text("Reviews to snooze"),
+                    "element": static_select(
+                        action_id=_SCOPE,
+                        options=[current, option("All my pending reviews", "all")],
+                        initial=current,
+                    ),
+                    "hint": plain_text(
+                        "Only requests you haven't accepted yet; not future requests."
+                    ),
+                }
+            )
         return modal(
             callback_id=self.callback_id,
             title=self.title,
-            blocks=[question],
+            blocks=blocks,
             submit=self.submit,
             close="Cancel",
             private_metadata=context.model_dump_json(),
@@ -163,6 +182,9 @@ async def handle_pick_modal_submission(
         logger.warning("Invalid reviewer pick modal context", exc_info=True)
         return ignored("Invalid pick modal context")
     selected = interaction.view.state.input(_CHOICE, _CHOICE).selected_option
+    scope = interaction.view.state.input(_SCOPE, _SCOPE).selected_option
+    if scope is not None and (pick_modal.action != "snooze" or scope.value not in {"one", "all"}):
+        return ignored("Invalid pick modal scope")
     if (
         context.user_id != interaction.user.id
         or selected is None
@@ -177,6 +199,7 @@ async def handle_pick_modal_submission(
         thread_ts=context.thread_ts,
         slack_user_id=interaction.user.id,
         choice=selected.value,
+        snooze_all=scope is not None and scope.value == "all",
         message=context.message,
     )
     return {}
@@ -190,6 +213,7 @@ async def _process(
     thread_ts: str,
     slack_user_id: str,
     choice: str = "",
+    snooze_all: bool = False,
     message: PickMessage | None = None,
 ) -> None:
     if message is not None:
@@ -197,12 +221,25 @@ async def _process(
     handled: list[Outcome] = []
 
     async def handle(request: HumanReviewRequest) -> Outcome:
+        affected = [request]
         if action == "dismiss":
             outcome = await dismiss_request(request, slack_user_id)
         else:
             user = await User.for_person({"id": f"slack:{slack_user_id}"})
             if action == "decline":
                 outcome = await decline(request, user, choice)
+            elif action == "snooze" and snooze_all and user is not None:
+                batch = ReviewSnooze(user, choice)
+                affected = await batch.pending()
+                summary = (
+                    f"Snoozed {len(affected)} pending reviews for {choice}; "
+                    "your picks stay reserved until then."
+                    if affected
+                    else "No pending reviews were snoozed."
+                )
+                if batch.failed:
+                    summary += f" Could not snooze {batch.failed} reviews; please try again."
+                outcome = Outcome(summary)
             elif action == "snooze":
                 outcome = await snooze(request, user, choice)
             else:
@@ -214,8 +251,18 @@ async def _process(
             pr_url=request.pull_request.url,
             outcome=outcome.message,
         )
-        origin = request.dm_origin
-        await note_for_thread_owner(*(origin.location if origin else (channel_id, thread_ts)), note)
+        for changed in affected:
+            origin = changed.dm_origin
+            changed_note = prompt(
+                "slack/review-request-clicked",
+                action=action,
+                choice=choice,
+                pr_url=changed.pull_request.url,
+                outcome=outcome.message,
+            )
+            await note_for_thread_owner(
+                *(origin.location if origin else (channel_id, thread_ts)), changed_note
+            )
         if channel_id.startswith("D"):
             await note_for_concierge(slack_user_id, channel_id, note)
         handled.append(outcome)

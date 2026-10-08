@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -124,6 +125,104 @@ async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
         assert pick.joined_at is not None and pick.joined_at > datetime.now(UTC)
         assert await expire_picks(request) == "accepted"
         assert pick.decision == "picked"
+
+
+@pytest.mark.parametrize("failed", [False, True])
+async def test_bulk_snooze_rechecks_pending_picks_and_shares_one_deadline(failed: bool) -> None:
+    from openswe.human_review.standard import ReviewSnooze, expire_picks
+
+    user, other = User(), User()
+    requests: list[HumanReviewRequest] = []
+    for number in range(8):
+        pr = PullRequest(owner="lc", repo=f"repo-{number}", number=number, author="ada")
+        request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+        request.pull_request = pr
+        pick = HumanReviewParticipant(user_id=user.id, decision="picked", assigned_by_agent=True)
+        pick.user = user
+        request.participants.append(pick)
+        requests.append(request)
+    rows = {request.id: request for request in requests}
+
+    @asynccontextmanager
+    async def locked(request_id: UUID) -> AsyncIterator[tuple[None, HumanReviewRequest | None]]:
+        row = rows[request_id]
+        if failed and row is requests[0]:
+            raise RuntimeError("Database unavailable for this pick")
+        if row is requests[2]:
+            row.participants[0].decision = "review"
+        elif row is requests[3]:
+            row.state = "cancelled"
+        elif row is requests[4]:
+            row.pull_request.state = "closed"
+        elif row is requests[5]:
+            row.participants[0].user_id = other.id
+            row.participants[0].user = other
+        elif row is requests[6]:
+            row.participants.clear()
+        yield None, None if row is requests[7] else row
+
+    with (
+        patch.object(HumanReviewRequest, "assigned_to", AsyncMock(return_value=requests)),
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch("openswe.human_review.standard._schedule", AsyncMock(return_value=True)),
+        patch("openswe.human_review.standard._assignment_minutes", AsyncMock(return_value=120)),
+    ):
+        snooze = ReviewSnooze(user, "2 days")
+        affected = await snooze.pending()
+        assert affected == requests[int(failed) : 2]
+        assert snooze.failed == int(failed)
+        assert snooze.until > datetime.now(UTC)
+        for request in affected:
+            assert request.participants[0].joined_at == snooze.until
+            assert request.run_config[f"review_snoozed:{user.id}"] == snooze.until.isoformat()
+            assert await expire_picks(request) == "accepted"
+            assert request.participants[0].decision == "picked"
+        for request in requests[2:]:
+            assert request.run_config == {}
+            assert all(participant.joined_at is None for participant in request.participants)
+
+
+@pytest.mark.parametrize(
+    ("scope", "actor", "queued", "snooze_all"),
+    [
+        (None, "U_BOB", True, False),
+        ("one", "U_BOB", True, False),
+        ("all", "U_BOB", True, True),
+        ("all", "U_ALICE", False, False),
+        ("everyone", "U_BOB", False, False),
+    ],
+)
+async def test_snooze_modal_validates_scope_and_owner(
+    scope: str | None, actor: str, queued: bool, snooze_all: bool
+) -> None:
+    from fastapi import BackgroundTasks
+
+    from openswe.human_review.slack import PickModalContext, handle_pick_modal_submission
+    from openswe.slack.payloads import SlackInteraction
+
+    values = {"choice": {"choice": {"selected_option": {"value": "1 hour"}}}}
+    if scope is not None:
+        values["scope"] = {"scope": {"selected_option": {"value": scope}}}
+    interaction = SlackInteraction.model_validate(
+        {
+            "user": {"id": actor},
+            "view": {
+                "callback_id": "human_review_snooze",
+                "private_metadata": PickModalContext(
+                    request_id=str(User().id),
+                    channel_id="D_BOB",
+                    thread_ts="1.0",
+                    user_id="U_BOB",
+                ).model_dump_json(),
+                "state": {"values": values},
+            },
+        }
+    )
+    tasks = BackgroundTasks()
+    await handle_pick_modal_submission(interaction, tasks)
+    assert len(tasks.tasks) == int(queued)
+    if queued:
+        assert tasks.tasks[0].kwargs["snooze_all"] is snooze_all
 
 
 async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
@@ -431,10 +530,19 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         (4, ada, True, "cancelled", "standard"),
         (5, ada, True, "open", "posted"),
         (6, ada, True, "open", "standard"),
+        (7, ada, True, "open", "standard"),
+        (8, grace, True, "open", "standard"),
+        (9, ada, True, "cancelled", "standard"),
+        (10, ada, True, "open", "posted"),
+        (11, ada, True, "open", "standard"),
     ]
     for number, user, assigned, state, kind in cases:
         pr = await PullRequest(
-            owner="o", repo="hidden" if number == 6 else "r", number=number, title=f"PR {number}"
+            owner="o",
+            repo="hidden" if number == 6 else "r",
+            number=number,
+            title=f"PR {number}",
+            state="closed" if number == 11 else "open",
         ).save()
         await HumanReviewRequest(
             pull_request_id=pr.id,
@@ -443,7 +551,9 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             state=state,
             participants=[
                 HumanReviewParticipant(
-                    user_id=user.id, decision="review", assigned_by_agent=assigned
+                    user_id=user.id,
+                    decision="picked" if number >= 7 else "review",
+                    assigned_by_agent=assigned,
                 )
             ],
         ).save()
@@ -471,3 +581,5 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [row.number for row in result.pull_requests] == [1]
+    pending = await HumanReviewRequest.assigned_to(ada.id, decision="picked")
+    assert {row.pull_request.number for row in pending} == {7, 10}
