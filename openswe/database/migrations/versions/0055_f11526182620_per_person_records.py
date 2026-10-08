@@ -30,6 +30,7 @@ def upgrade() -> None:
             last_run_at timestamptz,
             moved integer NOT NULL DEFAULT 0,
             waiting integer NOT NULL DEFAULT 0,
+            last_moved_at timestamptz NOT NULL DEFAULT clock_timestamp(),
             completed_at timestamptz
         )
     """)

@@ -1,6 +1,8 @@
 import pytest
+from sqlalchemy import text
 
 from openswe.dashboard.profiles import PROFILES
+from openswe.database.postgres import transaction
 from openswe.database.store_imports import StoreImport, run_store_import
 from openswe.users.import_records import import_user_records
 from openswe.users.models import User
@@ -28,13 +30,19 @@ async def test_import_moves_known_people_and_keeps_postgres_values(
     assert list(fake_store.values(["profiles"])) == ["carol"]
 
 
-async def test_an_import_runs_until_a_pass_finds_nothing_left() -> None:
-    passes = [StoreImport(moved=3), StoreImport(waiting=1), StoreImport(), StoreImport(moved=9)]
+async def test_an_import_retires_only_after_a_quiet_day() -> None:
+    passes = [StoreImport(moved=3), StoreImport(), StoreImport(), StoreImport(moved=9)]
 
     async def run() -> StoreImport:
         return passes.pop(0)
 
-    for _ in range(4):
-        await run_store_import("test", run)
+    await run_store_import("test", run)
+    await run_store_import("test", run)
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE store_import SET last_moved_at = last_moved_at - interval '2 days'")
+        )
+    await run_store_import("test", run)
+    await run_store_import("test", run)
 
     assert passes == [StoreImport(moved=9)]

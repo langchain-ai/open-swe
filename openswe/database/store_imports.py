@@ -1,9 +1,10 @@
 """Run each LangGraph Store import on one replica at a time until it is done.
 
-An import keeps running at startup until a pass finds nothing left to move: a
-pass that moved records gets one more, which catches what old replicas wrote
-to the Store during the rolling deploy. ``store_import`` records each import's
-progress, and its row lock keeps two replicas from running the same import.
+An import keeps running at startup until a pass finds nothing left to move a
+day after it last moved anything (or first ran). Old replicas keep writing to
+the Store until a rollout finishes, so only a pass well after that may retire
+the import. ``store_import`` records each import's progress, and its row lock
+keeps two replicas from running the same import.
 """
 
 import logging
@@ -49,8 +50,12 @@ async def run_store_import(name: str, run: Callable[[], Awaitable[StoreImport]])
         await conn.execute(
             text(
                 "UPDATE store_import SET last_run_at = clock_timestamp(), "
-                "moved = moved + :moved, waiting = :waiting, completed_at = CASE "
-                "WHEN :moved = 0 AND :waiting = 0 THEN clock_timestamp() END WHERE name = :name"
+                "moved = moved + :moved, waiting = :waiting, "
+                "last_moved_at = CASE WHEN :moved > 0 THEN clock_timestamp() "
+                "ELSE last_moved_at END, "
+                "completed_at = CASE WHEN :moved = 0 AND :waiting = 0 "
+                "AND last_moved_at < clock_timestamp() - interval '1 day' "
+                "THEN clock_timestamp() END WHERE name = :name"
             ),
             {"name": name, "moved": result.moved, "waiting": result.waiting},
         )
