@@ -1,7 +1,7 @@
 """The run hooks that tie this runtime's model loop to the Open SWE backend.
 
-The backend prepares each run (diff, rendered review prompt, model choice) and
-owns everything with credentials. These hooks fetch that preparation once per
+The backend prepares each run (diff, rendered review prompt) and owns
+everything with credentials. These hooks fetch that preparation once per
 run, check the pull request out in this deployment's sandbox, apply the
 preparation to every model call, and give the backend its per-call and
 end-of-run turns.
@@ -28,7 +28,6 @@ from managed_deepagents import ManagedRuntime
 from pydantic import BaseModel, JsonValue
 
 from open_swe_reviewer.backend import BackendCallError, OpenSweBackend
-from open_swe_reviewer.models import ModelSpec, build_model
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +91,6 @@ class PreparedRun(BaseModel):
     system_prompt: str
     work_dir: str
     checkout: CheckoutSpec | None
-    model: ModelSpec
-    subagent_model: ModelSpec
-    use_gateway: bool
 
 
 class RunState(AgentState):
@@ -168,10 +164,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if prepared is None:
             return await handler(request)
         return await handler(
-            request.override(
-                model=build_model(prepared.model, use_gateway=prepared.use_gateway),
-                system_message=_with_prompt(request, prepared.system_prompt),
-            )
+            request.override(system_message=_with_prompt(request, prepared.system_prompt))
         )
 
     async def aafter_agent(
@@ -185,23 +178,3 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # The backend's completion webhook settles a check this run left open.
             logger.warning("Settling the review check run failed", exc_info=True)
         return None
-
-
-class SubagentRunMiddleware(AgentMiddleware[RunState]):
-    """Run the reviewer subagent on the subagent model the backend picked."""
-
-    state_schema = RunState
-
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        prepared = prepared_run(request.state)
-        if prepared is None:
-            return await handler(request)
-        return await handler(
-            request.override(
-                model=build_model(prepared.subagent_model, use_gateway=prepared.use_gateway)
-            )
-        )

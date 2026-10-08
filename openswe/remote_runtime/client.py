@@ -20,6 +20,7 @@ class RemoteRunContext(TypedDict):
     run_token: str
     invocation_id: NotRequired[str]
     snapshot_id: NotRequired[str]
+    models: NotRequired[dict[str, JsonValue]]
 
 
 class RemoteRuntimeConfigurationError(RuntimeError):
@@ -65,11 +66,13 @@ async def remote_run_context(
         )
     )
     # The webapp must not import the agent stack at startup.
+    from openswe.remote_runtime.reviewer import run_models
     from openswe.sandboxes.lifecycle import SandboxCreateConfig
 
     cfg = RunConfig.parse(configurable)
     sandbox = await SandboxCreateConfig.resolve(cfg.workspace_slug)
-    context: RemoteRunContext = {"run_token": token}
+    models = await run_models(cfg)
+    context: RemoteRunContext = {"run_token": token, "models": models.model_dump(mode="json")}
     if cfg.invocation_id:
         context["invocation_id"] = cfg.invocation_id
     if sandbox.snapshot_id:

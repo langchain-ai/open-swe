@@ -101,15 +101,20 @@ class CheckoutSpec(BaseModel):
     diff_text: str
 
 
+class RunModels(BaseModel):
+    """The models a remote run builds its graph with, chosen when the run is dispatched."""
+
+    model: ModelSpec
+    subagent_model: ModelSpec
+    use_gateway: bool
+
+
 class PreparedRun(BaseModel):
     """A prepared run as the remote graph receives it; never carries credentials."""
 
     system_prompt: str
     work_dir: str
     checkout: CheckoutSpec | None
-    model: ModelSpec
-    subagent_model: ModelSpec
-    use_gateway: bool
 
 
 class _RunContext(BaseModel):
@@ -189,6 +194,15 @@ def _model_spec(choice: ReviewerModelChoice) -> ModelSpec:
     return ModelSpec(model_id=choice.model_id, kwargs=_json.validate_python(dict(choice.kwargs)))
 
 
+async def run_models(cfg: RunConfig) -> RunModels:
+    models = await resolve_reviewer_models(cfg)
+    return RunModels(
+        model=_model_spec(models.main),
+        subagent_model=_model_spec(models.subagent),
+        use_gateway=models.use_gateway,
+    )
+
+
 def _checkout_spec(cfg: RunConfig, diff_text: str) -> CheckoutSpec | None:
     if cfg.repo is None or not cfg.head_sha:
         return None
@@ -232,15 +246,11 @@ async def prepare_run(run: RemoteRun) -> PreparedRun:
         review_approval_policy=approval_policy if isinstance(approval_policy, str) else None,
     )
     await put_value(_RUN_CONTEXT_NAMESPACE, run.thread_id, context.model_dump())
-    models = await resolve_reviewer_models(cfg)
     return PreparedRun(
         system_prompt=f"{system_prompt}\n\n"
         + prompt("reviewer/remote-tool-names", prefix=f"{MCP_SERVER_NAME}_"),
         work_dir=REMOTE_WORK_DIR,
         checkout=_checkout_spec(cfg, context.diff_text),
-        model=_model_spec(models.main),
-        subagent_model=_model_spec(models.subagent),
-        use_gateway=models.use_gateway,
     )
 
 

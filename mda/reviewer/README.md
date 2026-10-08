@@ -3,11 +3,11 @@
 Open SWE's pull request reviewer packaged as a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project. The model loop, its checkpoints and its sandbox run here. The Open SWE backend keeps everything else:
 
 - the reviewer tools, an MCP server at `/remote-runtime/mcp` that the factory attaches with MDA's MCP support; MDA names them `openswe_{tool}`, and the prepared prompt says so
-- run hooks at `POST /remote-runtime/hooks/{prepare,drain,settle}`: run preparation (diff, rendered review prompt, model choice), the follow-up queue and the check-run settle
+- run hooks at `POST /remote-runtime/hooks/{prepare,drain,settle}`: run preparation (diff, rendered review prompt), the follow-up queue and the check-run settle
 
 `fetch_review_diff` runs here because it writes into this deployment's sandbox.
 
-Dispatch signs a run token into the context of each reviewer run it starts here, and every call back presents it. The backend reads the thread, repository and pull request from the token, never from tool arguments. This deployment holds no GitHub, Slack or database credentials.
+Dispatch signs a run token into the context of each reviewer run it starts here, and every call back presents it. The context also carries the models dispatch picked, so the main loop, the subagent and summarization all run on them. The backend reads the thread, repository and pull request from the token, never from tool arguments. This deployment holds no GitHub, Slack or database credentials.
 
 MDA creates the sandbox. The factory in `agent.py` boots it from the workspace snapshot that dispatch passes as the run's `snapshot_id` context, and the run's first step clones the pull request's repository into `/workspace` and writes the review diff there. Only public repositories are supported: the clone is unauthenticated.
 

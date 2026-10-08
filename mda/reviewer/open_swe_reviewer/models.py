@@ -1,4 +1,4 @@
-"""Chat models for the models the backend picked for a run.
+"""Chat models for the models Open SWE picked when it dispatched a run.
 
 The backend sends model ids and provider settings, never credentials; keys come
 from this deployment's environment, and gateway routing mirrors the backend's.
@@ -29,6 +29,12 @@ _kwargs = TypeAdapter(dict[str, JsonValue])
 class ModelSpec(BaseModel):
     model_id: str
     kwargs: dict[str, JsonValue]
+
+
+class RunModels(BaseModel):
+    model: ModelSpec
+    subagent_model: ModelSpec
+    use_gateway: bool
 
 
 def _gateway_overrides(provider: str) -> dict[str, JsonValue]:

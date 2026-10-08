@@ -15,10 +15,12 @@ from managed_deepagents import (
     define_sandbox,
 )
 from open_swe_reviewer.backend import MCP_SERVER_NAME, OpenSweBackend
-from open_swe_reviewer.middleware import BackendRunMiddleware, SubagentRunMiddleware
+from open_swe_reviewer.middleware import BackendRunMiddleware
+from open_swe_reviewer.models import RunModels, build_model
 from open_swe_reviewer.tools import runtime_spec, sandbox_tools
 from pydantic import BaseModel
 
+_DEFAULT_MODEL = "anthropic:claude-opus-5-5"
 # Matches the in-process reviewer's cap on model calls per run.
 _MODEL_CALL_LIMIT = 5_000
 # Callable from code mode, so large results can be filtered or written to files without
@@ -49,6 +51,7 @@ class ReviewerRunContext(BaseModel):
     run_token: str | None = None
     invocation_id: str | None = None
     snapshot_id: str | None = None
+    models: RunModels | None = None
 
 
 def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
@@ -58,11 +61,13 @@ def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     )
     backend = OpenSweBackend(context.run_token)
     subagent = runtime_spec()["subagent"]
+    models = context.models
     return define_deep_agent(
         name="reviewer",
-        # Every model call runs on the model the backend picked for the run; this one
-        # only backs deepagents' own summarization.
-        model="anthropic:claude-opus-5-5",
+        # Runs without a context (state reads, assistant reads) never call a model.
+        model=build_model(models.model, use_gateway=models.use_gateway)
+        if models is not None
+        else _DEFAULT_MODEL,
         context_schema=ReviewerRunContext,
         tools=sandbox_tools(),
         mcp=[backend.mcp()],
@@ -75,10 +80,10 @@ def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 "name": subagent["name"],
                 "description": subagent["description"],
                 "system_prompt": subagent["system_prompt"],
-                "middleware": [
-                    SubagentRunMiddleware(),
-                    ModelRetryMiddleware(retry_on=(TimeoutError,)),
-                ],
+                "model": build_model(models.subagent_model, use_gateway=models.use_gateway)
+                if models is not None
+                else _DEFAULT_MODEL,
+                "middleware": [ModelRetryMiddleware(retry_on=(TimeoutError,))],
             }
         ],
         middleware=[
