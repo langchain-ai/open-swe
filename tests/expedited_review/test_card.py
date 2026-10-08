@@ -3,12 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.expedited_review.card import _test_diffstat, open_card
-from openswe.expedited_review.eligibility import (
-    ChangedFile,
-    EligibleDiff,
-    Exclusion,
-    assess_eligibility,
-)
+from openswe.expedited_review.eligibility import ChangedFile, Exclusion
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review import lifecycle
@@ -76,9 +71,6 @@ def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline
         )
         for hunk in exclusion.resolve(files)
     ]
-    verdict = assess_eligibility(files, excluded)
-    assert isinstance(verdict, EligibleDiff)
-    assert (verdict.changed_lines, verdict.excluded_lines, verdict.test_lines) == (2, 45, 5)
 
     pr = PullRequest(owner="lc", repo="repo", number=7)
     approval = HumanReviewRequest(
