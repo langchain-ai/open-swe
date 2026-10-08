@@ -20,10 +20,6 @@ from openswe.utils.thread_participants import resolve_thread_participant_logins
 logger = logging.getLogger(__name__)
 
 _PROFILE_SETTING_KEYS = (
-    "default_model",
-    "reasoning_effort",
-    "default_subagent_model",
-    "subagent_reasoning_effort",
     "auto_fix_ci",
     "draft_prs",
     "review_draft_prs",

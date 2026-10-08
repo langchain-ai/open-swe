@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import (
@@ -26,13 +26,6 @@ from openswe.dashboard.oauth import (
     require_session,
 )
 from openswe.dashboard.oauth_refresh import refresh_guard
-from openswe.dashboard.options import (
-    DEPRECATED_MODEL_IDS,
-    NON_DEFAULT_MODEL_IDS,
-    SUPPORTED_MODEL_IDS,
-    model_supports_effort,
-    provider_fallback_pair,
-)
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.store import now_iso
 from openswe.users import User, UserPreferences, UserPreferencesPatch
@@ -45,15 +38,10 @@ GITHUB_OAUTH_TOKENS = UserRecords("github_oauth_token")
 
 
 class ProfileUpdate(BaseModel):
-    default_model: str
-    reasoning_effort: str
-    default_subagent_model: str | None = None
-    subagent_reasoning_effort: str | None = None
     default_repo: str | None = None
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
-    model_routing_enabled: bool | None = None
     recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     preserve_sandbox_memory: bool | None = None
@@ -72,75 +60,19 @@ class ProfileUpdate(BaseModel):
     experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
-    @model_validator(mode="after")
-    def _normalize_stale_model_pairs(self) -> ProfileUpdate:
-        model, effort = _normalize_stale_model_pair(
-            self.default_model,
-            self.reasoning_effort,
-        )
-        self.default_model = model
-        if effort is not None:
-            self.reasoning_effort = effort
-        if self.default_subagent_model is not None:
-            self.default_subagent_model, self.subagent_reasoning_effort = (
-                _normalize_stale_model_pair(
-                    self.default_subagent_model,
-                    self.subagent_reasoning_effort,
-                )
-            )
-        return self
-
-    def validate_pairing(self) -> None:
-        if self.default_model in NON_DEFAULT_MODEL_IDS:
-            raise ValueError(f"{self.default_model!r} cannot be a default model")
-        if self.default_subagent_model in NON_DEFAULT_MODEL_IDS:
-            raise ValueError(f"{self.default_subagent_model!r} cannot be a default model")
-        if not model_supports_effort(self.default_model, self.reasoning_effort):
-            raise ValueError(
-                f"effort {self.reasoning_effort!r} not supported by {self.default_model!r}"
-            )
-        if self.default_subagent_model is None and self.subagent_reasoning_effort is None:
-            return
-        if self.default_subagent_model is None:
-            raise ValueError("subagent reasoning effort set without a model")
-        if self.default_subagent_model not in SUPPORTED_MODEL_IDS:
-            raise ValueError(f"unsupported subagent model: {self.default_subagent_model}")
-        if self.subagent_reasoning_effort is None or not model_supports_effort(
-            self.default_subagent_model,
-            self.subagent_reasoning_effort,
-        ):
-            raise ValueError(
-                f"effort {self.subagent_reasoning_effort!r} not supported by "
-                f"{self.default_subagent_model!r}"
-            )
-
-
-def _normalize_stale_model_pair(model: str, effort: str | None) -> tuple[str, str | None]:
-    if model in SUPPORTED_MODEL_IDS or effort is None:
-        return model, effort
-    fallback = provider_fallback_pair(model, effort)
-    if fallback is None:
-        return model, effort
-    return fallback
-
 
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
-    value.pop("create_prs", None)
-    value.pop("dm_session_enabled", None)
-    for model_field, effort_field in (
-        ("default_model", "reasoning_effort"),
-        ("default_subagent_model", "subagent_reasoning_effort"),
+    for field in (
+        "create_prs",
+        "dm_session_enabled",
+        "default_model",
+        "reasoning_effort",
+        "default_subagent_model",
+        "subagent_reasoning_effort",
+        "model_routing_enabled",
     ):
-        model = value.get(model_field)
-        effort = value.get(effort_field)
-        if model in DEPRECATED_MODEL_IDS or model in NON_DEFAULT_MODEL_IDS:
-            value.pop(model_field, None)
-            value.pop(effort_field, None)
-        elif isinstance(model, str):
-            value[model_field], value[effort_field] = _normalize_stale_model_pair(
-                model, effort if isinstance(effort, str) else None
-            )
+        value.pop(field, None)
     return value
 
 
@@ -159,24 +91,15 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
     Only touches the profile record — the OAuth token record is untouched, so a concurrent re-login can't be clobbered by this write
     and vice versa.
     """
-    existing = await get_profile(login) or {}
+    existing = normalize_profile_for_response(await get_profile(login) or {})
     value: dict[str, Any] = {
         **existing,
         "login": login,
         "email": email or existing.get("email", ""),
-        "default_model": update.default_model,
-        "reasoning_effort": update.reasoning_effort,
-        "default_subagent_model": update.default_subagent_model,
-        "subagent_reasoning_effort": update.subagent_reasoning_effort,
         "default_repo": update.default_repo,
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
-        "model_routing_enabled": (
-            update.model_routing_enabled
-            if "model_routing_enabled" in update.model_fields_set
-            else existing.get("model_routing_enabled")
-        ),
         "recent_thread_context_enabled": (
             update.recent_thread_context_enabled
             if "recent_thread_context_enabled" in update.model_fields_set
@@ -429,7 +352,6 @@ async def put_my_profile(
     update: ProfileUpdate,
     session: dict[str, Any] = _SESSION_DEP,
 ) -> dict[str, Any]:
-    update.validate_pairing()
     login = session["sub"]
     preferences = await User.update_preferences(
         login,

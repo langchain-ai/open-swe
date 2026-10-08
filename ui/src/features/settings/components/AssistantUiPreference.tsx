@@ -2,7 +2,6 @@ import { SettingsRow } from "@/components/AppShell"
 import { Switch } from "@/components/ui/switch"
 import {
   useExperimentalAssistantUi,
-  useOptions,
   usePatchProfile,
   useProfile,
 } from "@/lib/profile"
@@ -14,12 +13,10 @@ import {
 
 export function AssistantUiPreference() {
   const profile = useProfile()
-  const options = useOptions()
   const save = usePatchProfile()
   const enabled = useExperimentalAssistantUi()
   const preferStream = useStreamPreference()
-  const defaults = options.data
-  const disabled = !profile.isSuccess || !defaults
+  const disabled = !profile.isSuccess
 
   return (
     <>
@@ -45,17 +42,12 @@ export function AssistantUiPreference() {
             checked={enabled}
             disabled={disabled}
             onCheckedChange={(value) => {
-              if (!defaults) return
-              save.patch(
-                { experimental_assistant_ui: value },
-                defaults.default_agent_model,
-                defaults.default_agent_reasoning_effort
-              )
+              save.patch({ experimental_assistant_ui: value })
             }}
           />
         }
       />
-      {(profile.error || options.error) && (
+      {profile.error && (
         <p role="alert" className="px-4 py-2 text-xs text-destructive">
           Could not load the conversation preference. Please try again.
         </p>

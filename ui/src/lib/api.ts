@@ -278,15 +278,10 @@ export interface Profile {
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
-  default_model?: string
-  reasoning_effort?: string
-  default_subagent_model?: string | null
-  subagent_reasoning_effort?: string | null
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
@@ -305,15 +300,10 @@ export interface ProfileUpdate {
   experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
-  default_model: string
-  reasoning_effort: string
-  default_subagent_model?: string | null
-  subagent_reasoning_effort?: string | null
   default_repo?: string | null
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  model_routing_enabled?: boolean | null
   recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   preserve_sandbox_memory?: boolean
@@ -357,7 +347,7 @@ export interface WorkspaceSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
-  /** Tri-state adaptive model routing toggle; user preference overrides this org default. */
+  /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
   model_routing_enabled?: boolean | null
   /** Tri-state LLM Gateway toggle; null inherits the LANGSMITH_GATEWAY_ENABLED default. */
   gateway_enabled?: boolean | null

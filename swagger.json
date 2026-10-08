@@ -3780,10 +3780,6 @@
             ],
             "title": "Concierge Mode"
           },
-          "default_model": {
-            "title": "Default Model",
-            "type": "string"
-          },
           "default_repo": {
             "anyOf": [
               {
@@ -3794,17 +3790,6 @@
               }
             ],
             "title": "Default Repo"
-          },
-          "default_subagent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Subagent Model"
           },
           "draft_prs": {
             "anyOf": [
@@ -3863,17 +3848,6 @@
             ],
             "title": "Experimental Task Coordination"
           },
-          "model_routing_enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Routing Enabled"
-          },
           "pr_failure_reactions": {
             "anyOf": [
               {
@@ -3918,10 +3892,6 @@
             ],
             "title": "Preserve Sandbox Memory"
           },
-          "reasoning_effort": {
-            "title": "Reasoning Effort",
-            "type": "string"
-          },
           "recent_thread_context_enabled": {
             "default": false,
             "title": "Recent Thread Context Enabled",
@@ -3942,23 +3912,8 @@
             "default": false,
             "title": "Slack Onboarding Dismissed",
             "type": "boolean"
-          },
-          "subagent_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Subagent Reasoning Effort"
           }
         },
-        "required": [
-          "default_model",
-          "reasoning_effort"
-        ],
         "title": "ProfileUpdate",
         "type": "object"
       },

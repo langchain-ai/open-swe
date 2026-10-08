@@ -152,6 +152,11 @@ async def test_unavailable_thread_scope_fails_closed(
         {"login": "bob"},
         {"encrypted_gh_token": "secret"},
         {"admin": True},
+        {"default_model": "openai:gpt-6.1-sol"},
+        {"reasoning_effort": "high"},
+        {"default_subagent_model": "openai:gpt-6.1-sol"},
+        {"subagent_reasoning_effort": "low"},
+        {"model_routing_enabled": True},
         {"default_model": "unknown-model"},
         {"default_model": "openai:gpt-5.5"},
         {"default_model": "anthropic:claude-fable-5-1"},
@@ -252,7 +257,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
         "default_repo": "org/private",
         "base_branch": "develop",
         "branch_prefix": "alice/",
-        "model_routing_enabled": False,
     }
     user_records.seed(
         "profile",
@@ -317,6 +321,6 @@ async def test_sole_writer_save_does_not_publish_stored_settings(
         "Alice",
         {"default_model": "openai:gpt-6-sol", "reasoning_effort": "secret-effort"},
     )
-    result = await save_user_settings({"default_model": "anthropic:claude-opus-5-5"})
+    result = await save_user_settings({"branch_prefix": "alice/"})
     assert result == {"ok": True}
-    assert user_records.get("profile", "Alice")["default_model"] == "anthropic:claude-opus-5-5"
+    assert user_records.get("profile", "Alice")["branch_prefix"] == "alice/"
