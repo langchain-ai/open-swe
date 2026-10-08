@@ -24,6 +24,7 @@ from openswe.schedules.store import (
     SlackTrigger,
 )
 from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
+from openswe.webhooks import common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"
@@ -546,9 +547,16 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
     assert "Merged: yes" in merge_prompt
 
 
+@pytest.mark.parametrize("private", [False, True])
 async def test_workflow_completion_filters_conclusion_and_deduplicates(
-    fake_client: _FakeClient, auth: None
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch, private: bool
 ) -> None:
+    monkeypatch.setattr(common, "PUBLIC_REPO_ORG_GATE", "langchain-ai")
+
+    async def is_member(login: str, org: str) -> bool:
+        return login == "alice" and org == "langchain-ai"
+
+    monkeypatch.setattr(common, "is_user_active_org_member", is_member)
     on_failure = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
@@ -575,7 +583,12 @@ async def test_workflow_completion_filters_conclusion_and_deduplicates(
     )
     payload = {
         "action": "completed",
-        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe", "private": True},
+        "repository": {
+            "owner": {"login": "langchain-ai"},
+            "name": "open-swe",
+            "private": private,
+        },
+        "sender": {"login": "outside-user"},
         "workflow_run": {
             "name": "Nightly",
             "conclusion": "success",
@@ -586,6 +599,10 @@ async def test_workflow_completion_filters_conclusion_and_deduplicates(
             "run_attempt": 2,
         },
     }
+    if not private:
+        assert await schedules.launch_github_automations("workflow_run", payload, "success") == []
+        assert fake_client.runs.created == []
+        payload["sender"]["login"] = "alice"
     assert [
         r["schedule_id"]
         for r in await schedules.launch_github_automations("workflow_run", payload, "success")

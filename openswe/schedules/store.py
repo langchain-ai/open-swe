@@ -1374,9 +1374,9 @@ async def launch_github_automations(
             extra={"github_delivery": delivery_id, "github_repo": full_name},
         )
         return []
-    # Pull request events on a public repository run only for org members; issue
-    # automations keep firing for any author, as before, with a narrowed token.
-    if event_type == "pull_request" and await enforce_public_repo_org_gate(payload, event_type):
+    if event_type in {"pull_request", "workflow_run"} and await enforce_public_repo_org_gate(
+        payload, event_type
+    ):
         return []
     results: list[dict[str, Any]] = []
     private = repo_private_from_payload(payload)
