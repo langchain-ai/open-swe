@@ -3,6 +3,7 @@ openswe/federation/github_oidc.py
   s_8c15db54e0c42b::t_3ae6ee59683629 99,102-105,107
 openswe/rollout_events.py
   s_8c15db54e0c42b::t_f1c033350b4775 3-4,50-90,103,105
+  s_8c15db54e0c42b::t_7d099ccda9d578 15-16
 tests/webhooks/test_rollout_webhook.py
   s_8c15db54e0c42b::t_71fe63586ca9e1 1,4,7,9,14-17,20-43,48-51,57-58,62-68,74,76-94,99,102-103,107,114
 openswe/config.py
