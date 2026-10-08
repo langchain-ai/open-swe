@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shlex
 from typing import Annotated
@@ -9,6 +10,7 @@ from harbor.models.agent.context import AgentContext
 
 RELEASES = "https://github.com/langchain-ai/open-swe/releases/latest/download"
 FORWARDED_ENV = ("OPEN_SWE_API_KEY", "OPEN_SWE_BACKEND_URL")
+STOP_OSWE = "pkill -INT -x oswe; timeout 30 sh -c 'while pgrep -x oswe; do sleep 1; done' || true"
 
 
 class OpenSWEOptions(InstalledAgentOptions):
@@ -28,7 +30,7 @@ class OpenSWE(BaseInstalledAgent):
         return "oswe --version"
 
     async def install(self, environment: BaseEnvironment) -> None:
-        await self.ensure_system_dependencies(environment, ("curl", "tar", "git"))
+        await self.ensure_system_dependencies(environment, ("curl", "tar", "git", "procps"))
         arch = '$(uname -m | sed "s/x86_64/x64/;s/aarch64/arm64/")'
         await self.exec_as_root(
             environment,
@@ -47,9 +49,13 @@ class OpenSWE(BaseInstalledAgent):
             if self.model_name
             else ""
         )
-        await self.exec_as_agent(
-            environment,
-            f"oswe run {model}{self.build_cli_flags()} {shlex.quote(instruction)} "
-            "2>&1 | tee /logs/agent/oswe.txt",
-            env={key: os.environ[key] for key in FORWARDED_ENV if key in os.environ},
-        )
+        try:
+            await self.exec_as_agent(
+                environment,
+                f"oswe run {model}{self.build_cli_flags()} {shlex.quote(instruction)} "
+                "2>&1 | tee /logs/agent/oswe.txt",
+                env={key: os.environ[key] for key in FORWARDED_ENV if key in os.environ},
+            )
+        except asyncio.CancelledError:
+            await self.exec_as_root(environment, STOP_OSWE)
+            raise
