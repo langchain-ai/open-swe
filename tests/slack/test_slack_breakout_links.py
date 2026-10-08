@@ -29,4 +29,11 @@ async def test_mark_broken_out_links_breakout_from_source_thread(
     await breakout_links.mark_broken_out("C1", "100.0", "105.0", target, "200.0")
 
     react.assert_awaited_once_with("C1", "105.0", breakout_links.BREAKOUT_REACTION)
-    reply.assert_awaited_once_with("C1", "100.0", expected, unfurl_links=False, unfurl_media=False)
+    reply.assert_awaited_once_with(
+        "C1",
+        "100.0",
+        expected,
+        blocks=[{"type": "context", "elements": [{"type": "mrkdwn", "text": expected}]}],
+        unfurl_links=False,
+        unfurl_media=False,
+    )
