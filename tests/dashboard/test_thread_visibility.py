@@ -72,12 +72,13 @@ def test_review_chat_is_hidden_without_hiding_normal_pr_threads():
         "source": "dashboard",
         "pr_url": "https://github.com/langchain-ai/open-swe/pull/3795",
         "title": "A renamed review chat",
-        "unlisted": True,
+        "review_chat": True,
+        "unlisted": False,
     }
     assert not listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
     assert summary.thread_is_readable(metadata, "alice")
     assert summary.thread_is_promptable(metadata, "alice")
-    metadata["unlisted"] = False
+    metadata["review_chat"] = False
     assert listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
 
 
