@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -45,9 +44,9 @@ export function PullRequestLabels({
       }
       return previous
     },
-    onError: (error, _change, previous) => {
+    meta: { errorTitle: "Couldn't update label" },
+    onError: (_error, _change, previous) => {
       queryClient.setQueryData(queryKey, previous)
-      toast.error(error.message)
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey }),
   })
