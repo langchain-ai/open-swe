@@ -113,7 +113,9 @@ export function PullRequestCard({
       onClick={openFromCard}
       className={cn(
         "cursor-pointer rounded-lg border bg-surface-level-1 p-4 transition-colors",
-        selected ? "border-strong" : "border-default hover:border-strong",
+        selected
+          ? "border-brand"
+          : "border-default hover:bg-surface-level-1-hover",
         outcome && "opacity-60"
       )}
     >

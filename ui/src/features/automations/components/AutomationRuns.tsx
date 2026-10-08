@@ -130,7 +130,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
     <Link
       to="/agents/$threadId"
       params={{ threadId: run.id }}
-      className="flex items-center gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:border-strong"
+      className="flex items-center gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:bg-surface-level-1-hover"
     >
       {run.status === "running" ? (
         <Spinner size="xs" className="shrink-0 text-icon-brand" />

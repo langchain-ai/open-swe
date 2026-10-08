@@ -21,7 +21,7 @@ export function AutomationTemplates() {
               key={template.id}
               to="/agents/automations/new"
               search={{ template: template.id }}
-              className="flex flex-col rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:border-strong"
+              className="flex flex-col rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:bg-surface-level-1-hover"
             >
               <div className="flex items-center gap-2">
                 <Icon

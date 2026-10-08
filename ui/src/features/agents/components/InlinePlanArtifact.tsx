@@ -40,7 +40,7 @@ export function InlinePlanArtifact({ threadId }: { threadId: string }) {
             params: { threadId },
           })
         }
-        className="block h-[250px] w-full overflow-hidden rounded-xl border border-default bg-surface-level-1 text-left shadow-sm transition-[border-color,box-shadow] outline-none hover:border-strong hover:shadow-md focus-visible:ring-2 focus-visible:ring-focus"
+        className="block h-[250px] w-full overflow-hidden rounded-xl border border-default bg-surface-level-1 text-left shadow-sm transition-shadow outline-none hover:shadow-md focus-visible:ring-2 focus-visible:ring-focus"
       >
         {html ? (
           <PlanArtifactFrame

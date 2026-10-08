@@ -389,7 +389,7 @@ function PullRequestLink({
   const scopes = onFix ? fixScopes(pullRequest, health) : []
 
   return (
-    <div className="@container flex min-w-0 items-center gap-1 rounded-xl border border-strong bg-surface-level-1 p-1 text-xs text-secondary shadow-sm">
+    <div className="@container flex min-w-0 items-center gap-1 rounded-xl border border-default bg-surface-level-1 p-1 text-xs text-secondary shadow-sm">
       <HoverCard openDelay={250} closeDelay={100}>
         <HoverCardTrigger asChild>
           <a

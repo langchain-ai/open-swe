@@ -614,7 +614,7 @@ export function AutomationEditor({
               onLinear={() =>
                 setDrafts((current) => [...current, linearDraft()])
               }
-              className="flex items-center gap-1.5 self-start rounded-lg border border-dashed border-default px-3 py-2 text-xs text-secondary transition-colors hover:border-strong hover:text-primary"
+              className="flex items-center gap-1.5 self-start rounded-lg border border-dashed border-default px-3 py-2 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary"
             >
               <PlusIcon size={14} weight="regular" />
               Add trigger
@@ -704,7 +704,7 @@ function EventChips<E extends string>({
               "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors disabled:pointer-events-none",
               on
                 ? "border-brand bg-brand-subtle text-primary"
-                : "border-default text-secondary hover:border-strong hover:text-primary"
+                : "border-default text-secondary hover:bg-surface-level-1-hover hover:text-primary"
             )}
           >
             {on && (

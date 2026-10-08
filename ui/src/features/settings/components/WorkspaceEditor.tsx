@@ -45,7 +45,7 @@ export function Chips({
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className={`${className} hover:border-strong hover:text-primary`}
+            className={`${className} hover:bg-surface-level-1-hover hover:text-primary`}
           >
             {labelFor?.(value) ?? value}
           </a>

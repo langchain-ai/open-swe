@@ -279,7 +279,7 @@ function RightPanelEmptyState(props: {
   }
 
   const cardShellClass = "rounded-lg border border-default bg-surface-level-2"
-  const highlightedCardClass = "border-strong bg-surface-level-2-hover"
+  const highlightedCardClass = "bg-surface-level-2-hover"
 
   return (
     <div
@@ -320,7 +320,7 @@ function RightPanelEmptyState(props: {
                   )
                 }
                 className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:border-strong hover:bg-surface-level-2-hover",
+                  "relative flex w-full cursor-pointer flex-col items-start p-space-4 text-left transition hover:bg-surface-level-2-hover",
                   cardShellClass,
                   isHighlighted(action) && highlightedCardClass
                 )}
