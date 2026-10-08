@@ -99,7 +99,7 @@ def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline
     assert "`src/app.py`  +1 −1" in texts
     assert texts[-3:-1] == [
         "*Tests (not shown)*\n`tests/test_app.py`  +5 −0",
-        "*Qualifies under `.open-swe/APPROVALS.md` (not shown)*\n"
+        "*Open SWE judged these auto-approvable under `.open-swe/APPROVALS.md` (not shown)*\n"
         "_Generated constants_: `src/app.py` 1 hunk +12 −0\n"
         "_Logging config_: `src/app.py` 1 hunk +3 −0\n"
         "_Release notes_: `CHANGELOG.md` +30 −0",

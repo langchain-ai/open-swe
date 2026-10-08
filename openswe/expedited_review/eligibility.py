@@ -215,36 +215,49 @@ class ExpeditedDiff:
     def __init__(self, files: list[ChangedFile], exclusions: Sequence[ExcludedHunk] = ()) -> None:
         reviewed, self.tests = ChangedFile.split(files)
         self.total_lines = ChangedFile.total_lines(files)
-        by_path: dict[str, dict[str, ExcludedHunk]] = {}
+        by_path: dict[str, list[ExcludedHunk]] = {}
         for entry in exclusions:
-            by_path.setdefault(entry["path"], {})[entry["digest"]] = entry
+            by_path.setdefault(entry["path"], []).append(entry)
         self.shown: list[ChangedFile] = []
         self.excluded: list[ExcludedHunk] = []
         partial: set[str] = set()
         for file in reviewed:
-            wanted = by_path.get(file.filename)
+            wanted = list(by_path.get(file.filename, ()))
             if not wanted:
                 self.shown.append(file)
                 continue
             if file.patch is None:
-                if (hit := wanted.get(file.whole_digest)) is not None:
-                    self.excluded.append(hit)
+                if any(entry["digest"] == file.whole_digest for entry in wanted):
+                    self.excluded.append(wanted[0])
                 else:
                     self.shown.append(file)
                 continue
             hunks = file.hunks
-            kept: list[Hunk] = []
-            for hunk in hunks:
-                if (hit := wanted.get(hunk.digest)) is not None:
-                    self.excluded.append(hit)
-                else:
-                    kept.append(hunk)
+            hits = self._match(hunks, wanted)
+            kept = [hunk for index, hunk in enumerate(hunks) if index not in hits]
+            self.excluded.extend(hits.values())
             if len(kept) == len(hunks):
                 self.shown.append(file)
             elif kept:
                 self.shown.append(file.keeping(kept))
                 partial.add(file.filename)
         self.partially_shown = frozenset(partial)
+
+    @staticmethod
+    def _match(hunks: list[Hunk], wanted: list[ExcludedHunk]) -> dict[int, ExcludedHunk]:
+        """Each exclusion hides one hunk: its own position first, else a shifted identical body."""
+        hits: dict[int, ExcludedHunk] = {}
+        for exact in (True, False):
+            for index, hunk in enumerate(hunks):
+                if index in hits:
+                    continue
+                for position, entry in enumerate(wanted):
+                    if entry["digest"] == hunk.digest and (
+                        not exact or entry["header"] == hunk.header
+                    ):
+                        hits[index] = wanted.pop(position)
+                        break
+        return hits
 
     @property
     def excluded_lines(self) -> int:

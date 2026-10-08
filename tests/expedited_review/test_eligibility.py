@@ -89,3 +89,17 @@ def test_excluded_hunks_leave_the_card_until_their_content_changes() -> None:
     verdict = assess_eligibility([unparsed], exclusions)
     assert isinstance(verdict, Ineligible)
     assert "30 of the pull request's 40" in verdict.reason
+
+
+def test_one_exclusion_hides_only_the_hunk_it_named_among_identical_bodies() -> None:
+    body = " x\n+import os"
+    file = ChangedFile(
+        filename="src/app.py",
+        additions=2,
+        patch=f"@@ -1,1 +1,2 @@\n{body}\n@@ -40,1 +41,2 @@\n{body}",
+    )
+    exclusions = Exclusion(path="src/app.py", hunks=[41], guideline="g", reason="r").resolve([file])
+
+    diff = ExpeditedDiff([file], exclusions)
+    assert diff.excluded_lines == 1
+    assert diff.shown[0].patch == f"@@ -1,1 +1,2 @@\n{body}"

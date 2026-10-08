@@ -110,7 +110,7 @@ def _excluded_summary(diff: ExpeditedDiff) -> list[Block]:
         counts[0] += 1
         counts[1] += entry["additions"]
         counts[2] += entry["deletions"]
-    heading = "*Qualifies under `.open-swe/APPROVALS.md` (not shown)*\n"
+    heading = "*Open SWE judged these auto-approvable under `.open-swe/APPROVALS.md` (not shown)*\n"
     budget = SECTION_TEXT_MAX_CHARS - len(heading) - _OVERFLOW_NOTE_RESERVE
     lines: list[str] = []
     for guideline, paths in stats.items():

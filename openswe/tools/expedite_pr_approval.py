@@ -111,7 +111,11 @@ async def _resolve_exclusions(
         stored = await PullRequest.get(pr_ref.owner, pr_ref.repo, pr_ref.number)
         if stored is not None:
             _audit_pull_request(stored.id)
-    audited.hunks = [hunk for exclusion in excluded for hunk in exclusion.resolve(files)]
+    unique: dict[tuple[str, str, str], ExcludedHunk] = {}
+    for exclusion in excluded:
+        for hunk in exclusion.resolve(files):
+            unique.setdefault((hunk["path"], hunk["header"], hunk["digest"]), hunk)
+    audited.hunks = list(unique.values())
     return audited.hunks
 
 

@@ -45,7 +45,8 @@ are already in the Slack thread.
   excluded hunk, its guideline and reason, the base and head SHAs, and a hash of
   APPROVALS.md to the audit log. The card lists exclusions by guideline with line
   counts, and a PR whose drawn, excluded and test lines do not add up to its total is
-  refused, so no change is ever neither drawn nor listed. They stay in the fingerprint: a commit that changes an excluded hunk is a
+  refused, so no change is ever neither drawn nor listed. Each exclusion hides exactly
+  one hunk, so identical hunk bodies elsewhere in the file stay drawn. They stay in the fingerprint: a commit that changes an excluded hunk is a
   diff change, and the changed hunk no longer matches its exclusion, so the card draws
   it.
 - The card draws the source diff. It draws the test diff too when the change is
