@@ -119,29 +119,28 @@ async def _diff_image_id(approval: HumanReviewRequest, files: list[ChangedFile])
         return None
     try:
         png = await asyncio.to_thread(render_diff_png, shown)
-    except Exception:
-        logger.warning(
-            "Failed to render expedited review diff image; posting the text diff",
+    except Exception as exc:
+        logger.exception(
+            "Failed to render expedited review diff image",
             extra={"approval_id": str(approval.id)},
-            exc_info=True,
         )
-        return None
+        raise SlackRequestError("expedited_diff_render_failed") from exc
     try:
         file_id = await upload_slack_thread_file(
             None, None, f"diff-{approval.head_sha[:12]}.png", png, title="Diff"
         )
     except SlackRequestError as exc:
-        logger.warning(
+        logger.exception(
             "Failed to upload expedited review diff image",
             extra={"approval_id": str(approval.id), "slack_error": exc.code},
         )
-        return None
+        raise
     if not await wait_for_slack_file(file_id):
-        logger.warning(
+        logger.error(
             "Slack did not finish processing the expedited review diff image",
             extra={"approval_id": str(approval.id), "slack_file_id": file_id},
         )
-        return None
+        raise SlackRequestError("expedited_diff_processing_failed")
     return file_id
 
 
