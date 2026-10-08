@@ -1452,6 +1452,13 @@
         "title": "CreateResponseRequest",
         "type": "object"
       },
+      "CredentialKind": {
+        "enum": [
+          "oauth",
+          "secret"
+        ],
+        "type": "string"
+      },
       "CustomToolCallItem": {
         "properties": {
           "call_id": {
@@ -1659,6 +1666,73 @@
           "arguments"
         ],
         "title": "FunctionCallItem",
+        "type": "object"
+      },
+      "Gateway": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tool_count"
+        ],
+        "title": "Gateway",
+        "type": "object"
+      },
+      "GatewayStatus": {
+        "description": "What one person sees for a gateway: ready, or what to connect first.",
+        "properties": {
+          "gateway": {
+            "$ref": "#/components/schemas/Gateway"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/MissingCredential"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "tool_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Count"
+          },
+          "workspaces": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workspaces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "gateway",
+          "workspaces",
+          "ready"
+        ],
+        "title": "GatewayStatus",
         "type": "object"
       },
       "GitHubTrigger": {
@@ -2376,6 +2450,57 @@
         "title": "MCPToolDescription",
         "type": "object"
       },
+      "ManagedConnectResponse": {
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "connected"
+        ],
+        "title": "ManagedConnectResponse",
+        "type": "object"
+      },
+      "ManagedToolsView": {
+        "description": "The managed tools gateways the caller's workspaces use, and what each still needs.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "gateways": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayStatus"
+            },
+            "title": "Gateways",
+            "type": "array"
+          },
+          "langsmith_connected": {
+            "default": false,
+            "title": "Langsmith Connected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configured",
+          "gateways"
+        ],
+        "title": "ManagedToolsView",
+        "type": "object"
+      },
       "MarkReadyAction": {
         "properties": {
           "action": {
@@ -2758,6 +2883,29 @@
           "secret"
         ],
         "title": "MintedApiKey",
+        "type": "object"
+      },
+      "MissingCredential": {
+        "description": "A service in the gateway this person has not connected yet.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "display_name",
+          "kind"
+        ],
+        "title": "MissingCredential",
         "type": "object"
       },
       "ModelList": {
@@ -7246,6 +7394,17 @@
             ],
             "title": "Human Review Auto Assign Minutes"
           },
+          "managed_tools_gateway_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Tools Gateway Id"
+          },
           "model_routing_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -10027,6 +10186,37 @@
         ]
       }
     },
+    "/dashboard/api/managed-tools/gateways": {
+      "get": {
+        "description": "Gateways an admin can pick for a workspace, read with the admin's own LangSmith login.",
+        "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Gateway"
+                  },
+                  "title": "Response Api List Managed Tools Gateways Dashboard Api Managed Tools Gateways Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Managed Tools Gateways",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/mcps": {
       "get": {
         "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
@@ -10638,6 +10828,88 @@
         "tags": [
           "dashboard",
           "notion"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools": {
+      "get": {
+        "operationId": "api_my_managed_tools_dashboard_api_my_managed_tools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedToolsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api My Managed Tools",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/my-managed-tools/{gateway}/connect/{slug}": {
+      "post": {
+        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools__gateway__connect__slug__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Connect Managed Tool",
+        "tags": [
+          "dashboard"
         ]
       }
     },
