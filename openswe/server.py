@@ -799,7 +799,9 @@ async def _mcp_code_mode(
     ptc_tools.extend(
         tool
         for tool in additional_tools
-        if (tool if isinstance(tool, str) else tool.name) not in DEEP_AGENT_TOOL_NAMES
+        if (tool if isinstance(tool, str) else tool.name)
+        not in (DEEP_AGENT_TOOL_NAMES - {"read_file", "write_file"})
+        | {"background_execute", "slack_reply", "slack_no_reply_needed", "cli_result"}
         and is_valid_ptc_tool_name(tool if isinstance(tool, str) else tool.name)
     )
     if not ptc_tools:
@@ -1946,7 +1948,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 if _registered_tool_name(tool) not in excluded_tools
             ],
             *[tool for tool in notion_tools if tool.name not in excluded_tools],
-            *[name for name in client_tool_names if name not in excluded_tools],
+            *[
+                name
+                for name in ("read_file", "write_file")
+                if name not in excluded_tools and name not in client_tool_names
+            ],
         ],
     )
     integration_reserved_names = {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names}
