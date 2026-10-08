@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.database.store_imports import StoreImport
 from openswe.store import Namespace, delete_value, search_all_entries
 from openswe.users.models import UserIdentity
 from openswe.utils.json_types import JsonObject
@@ -97,14 +98,14 @@ class UserRecords:
                 delete(UserRecord).where(self._where(login, key)).returning(UserRecord.value)
             )
 
-    async def import_store(self, namespace: Namespace, *, nested: bool = False) -> int:
-        """Move Store records into this kind; returns how many moved.
+    async def import_store(self, namespace: Namespace, *, nested: bool = False) -> StoreImport:
+        """Move Store records into this kind.
 
         A flat namespace is keyed by login; a ``nested`` one is ``[*namespace, login]``
         keyed by this kind's key. A record already in PostgreSQL wins, and one whose
         login has no ``users`` row stays in the Store for the next startup.
         """
-        moved = 0
+        moved = waiting = 0
         for entry in await search_all_entries(namespace):
             item_namespace = entry.namespace or list(namespace)
             if len(item_namespace) != len(namespace) + nested:
@@ -119,7 +120,8 @@ class UserRecords:
                     "Store record waits for its users row",
                     extra={"record_kind": self.kind, "github_login": login},
                 )
+                waiting += 1
                 continue
             await delete_value(item_namespace, entry.key)
             moved += 1
-        return moved
+        return StoreImport(moved, waiting)

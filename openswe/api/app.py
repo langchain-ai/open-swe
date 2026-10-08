@@ -41,6 +41,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
+    from openswe.database.store_imports import run_store_import
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.transcript import listener as transcript_listener
@@ -81,7 +82,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         # Profiles, preferences, instructions, and tokens used to be Store
         # records keyed by GitHub login; this moves them into user_record.
-        await import_user_records()
+        await run_store_import("user_records", import_user_records)
     except Exception:  # noqa: BLE001
         # Startup continues: people whose records are still in the Store see
         # default settings and reconnect until an import succeeds.
