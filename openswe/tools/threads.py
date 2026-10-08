@@ -174,6 +174,7 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     result.pop("messages", None)
     result.pop("sandboxId", None)
     result.pop("sandboxBridgeClient", None)
+    result.pop("sandboxBridgeOnline", None)
     result["webUrl"] = _web_link(item)
     langsmith = _langsmith_identifiers(item.get("traceUrl"), locator)
     if any(value is not None for value in langsmith.values()):

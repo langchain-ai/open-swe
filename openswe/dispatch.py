@@ -236,6 +236,30 @@ def _slack_channel_metadata(configurable: object) -> dict[str, str]:
     return {key: value for key, value in values.items() if value}
 
 
+def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
+    """The workspace a thread's follow-up run carries; ``environment`` is the pre-workspace key."""
+    for key in ("workspace", "environment"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
+    """Config for a system-started run that continues a thread where its last run left off."""
+    configurable: dict[str, Any] = {"thread_id": thread_id}
+    for key in ("source", "repo", "github_login", "triggering_user_email"):
+        value = metadata.get(key)
+        if value is not None:
+            configurable["user_email" if key == "triggering_user_email" else key] = value
+    workspace = thread_workspace(metadata)
+    if workspace is not None:
+        configurable["workspace"] = workspace
+        configurable["environment"] = workspace
+    configurable.update(SourceContext.from_metadata(metadata).dump())
+    return configurable
+
+
 def prepare_run_config(
     config: LangGraphRunConfig | None,
     metadata: dict[str, Any] | None,
@@ -347,7 +371,7 @@ async def create_durable_run(
         from openswe.slack.thinking import sync_slack_background_status
 
         await sync_slack_background_status(
-            client, thread_id, resume=True, source_context=source_context
+            client, thread_id, resume=True, run_id=run["run_id"], source_context=source_context
         )
     logger.info(
         "Dispatched %s run on thread %s (source=%s, run=%s)",

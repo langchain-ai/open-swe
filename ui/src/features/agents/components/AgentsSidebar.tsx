@@ -1,4 +1,4 @@
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -7,19 +7,14 @@ import {
   DownloadSimpleIcon,
   FolderIcon,
   FolderOpenIcon,
-  GitPullRequestIcon,
-  LightningIcon,
   MagnifyingGlassIcon,
   NotePencilIcon,
   PlusIcon,
-  RobotIcon,
   TrashIcon,
   PushPinIcon,
   PushPinSlashIcon,
-  SparkleIcon,
   StackIcon,
 } from "@phosphor-icons/react"
-import { Radar } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -38,6 +33,7 @@ import type {
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { SidebarNav } from "@/features/agents/components/SidebarNav"
 import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
 import {
   SidebarSectionAction,
@@ -116,11 +112,6 @@ import {
 } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
-import {
-  getLastSectionLocation,
-  sectionOf,
-  useHrefLinkOptions,
-} from "@/lib/appLocation"
 import { reportError } from "@/lib/errorReporting"
 import { usePendingVariables } from "@/lib/optimistic"
 
@@ -137,14 +128,6 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
   updatedAt: number
   activeThread?: AgentThread
 }
-
-const NAV = [
-  { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
-  { to: "/agents/automations", label: "Automations", icon: LightningIcon },
-  { to: "/agents/bots", label: "Bots", icon: RobotIcon },
-  { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
-  { to: "/incidents", label: "Incidents", icon: Radar },
-] as const
 
 /** Threads shown per repo before the group needs a "Show more". */
 const REPO_PREVIEW_COUNT = 5
@@ -245,10 +228,6 @@ export function AgentsSidebar({
   } = useSidebarPrefs()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const activeSection = useRouterState({
-    select: (state) => sectionOf(state.location.pathname),
-  })
-  const sectionLinkTarget = useHrefLinkOptions()
   const [updateState, setUpdateState] = useState<DesktopUpdateState>({
     status: "idle",
   })
@@ -283,12 +262,14 @@ export function AgentsSidebar({
     repoMode,
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
+    owned: prefs.filters.ownedOnly,
     sort: prefs.sortChats,
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
+    owned: prefs.filters.ownedOnly,
     enabled: repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
@@ -634,6 +615,14 @@ export function AgentsSidebar({
         >
           Show automations
         </MenuCheckboxItem>
+        <MenuCheckboxItem
+          checked={prefs.filters.ownedOnly}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, ownedOnly: checked })
+          }
+        >
+          Only my threads
+        </MenuCheckboxItem>
         <MenuCheckboxItem checked={prefs.compact} onCheckedChange={setCompact}>
           Compact rows
         </MenuCheckboxItem>
@@ -661,6 +650,7 @@ export function AgentsSidebar({
       pinned={pinnedRepoKeys.has(group.key)}
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
+      owned={prefs.filters.ownedOnly}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
@@ -805,33 +795,10 @@ export function AgentsSidebar({
             className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
             onScroll={measureScrollEdges}
           >
-            <nav
-              className={cn(
-                "flex flex-col gap-0.5",
-                isDesktop ? "pb-3" : "pb-4"
-              )}
-            >
-              {NAV.map((item) => {
-                const Icon = item.icon
-                const active = activeSection === item.to
-                return (
-                  <Link
-                    key={item.to}
-                    {...sectionLinkTarget(
-                      active ? item.to : getLastSectionLocation(item.to)
-                    )}
-                    onClick={layout.closeOnMobile}
-                    className={cn(
-                      "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-sidebar-row-hover",
-                      active && "bg-sidebar-row-hover font-medium"
-                    )}
-                  >
-                    <Icon className="size-4" />
-                    {item.label}
-                  </Link>
-                )
-              })}
-            </nav>
+            <SidebarNav
+              className={isDesktop ? "pb-3" : "pb-4"}
+              onNavigate={layout.closeOnMobile}
+            />
             {sourcesLoading && allItems.length === 0 && (
               <ThreadListSkeleton compact={prefs.compact} />
             )}
@@ -1100,6 +1067,7 @@ function RepoGroup({
   pinned,
   includeResolved,
   includeAutomations,
+  owned,
   sort,
   activeThreadId,
   openThread,
@@ -1120,6 +1088,7 @@ function RepoGroup({
   pinned: boolean
   includeResolved: boolean
   includeAutomations: boolean
+  owned: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
@@ -1141,6 +1110,7 @@ function RepoGroup({
     repoFullName: group.repoFullName,
     includeResolved,
     includeAutomations,
+    owned,
     sort,
     enabled: !collapsed,
   })

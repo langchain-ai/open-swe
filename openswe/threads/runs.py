@@ -89,11 +89,7 @@ from openswe.users import User
 from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
-from openswe.utils.thread_participants import (
-    PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    merge_participants,
-)
+from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.utils.thread_settings import thread_model_choice
 from openswe.workspaces.routing import resolve_workspace
@@ -308,8 +304,7 @@ async def create_dashboard_thread_record(
         "visibility": visibility,
         "thread_category": "interactive",
         "trigger_kind": "user",
-        PARTICIPANT_LOGINS_KEY: merge_participants(None, login),
-        PARTICIPANT_EMAILS_KEY: merge_participants(None, email),
+        **await participant_metadata({}, login=login, email=email),
         "title": initial_title,
         "base_branch": profile.get("base_branch") or "main",
         "branch_prefix": profile.get("branch_prefix"),
@@ -672,6 +667,13 @@ async def _sandbox_handoff(
     if (await langgraph_client().threads.get(thread_id)).get("status") == "busy":
         raise HTTPException(409, "stop the run before moving this thread")
     source = metadata.get(HANDOFF_FROM_KEY) or current
+    if (
+        bridge is None
+        and Bridge.bridge_id_of(source)
+        and not await BridgeStore.is_connected(source)
+    ):
+        # A checkout no Mac is serving stays behind; the cloud starts from what was pushed.
+        source = None
     update[HANDOFF_FROM_KEY] = None if source == update["sandbox_id"] else source
     return update
 
@@ -771,7 +773,13 @@ async def _attributed_run_messages(
         notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
     if sandbox_handoff is not None:
         to_cloud = sandbox_handoff.get("sandbox_id") is None
-        notices.append((_SANDBOX_HANDOFF_SYSTEM, prompt("runs/sandbox-handoff", to_cloud=to_cloud)))
+        carried = sandbox_handoff.get(HANDOFF_FROM_KEY) is not None
+        notices.append(
+            (
+                _SANDBOX_HANDOFF_SYSTEM,
+                prompt("runs/sandbox-handoff", to_cloud=to_cloud, carried=carried),
+            )
+        )
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
     if pr_url and history_read and not persisted_message_ids:
         notices.append(
@@ -945,8 +953,7 @@ async def _enrich_run_start_command(
         # Continuing on the web promotes a `/oswe` question thread for good.
         "unlisted": False,
         "model_selection": model_selection,
-        PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
-        PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
+        **await participant_metadata(metadata, login=login, email=email),
         "injected_dynamic_context_hashes": sorted(injected),
         **(sandbox_handoff or {}),
     }
@@ -1226,8 +1233,7 @@ async def steer_running_thread(
         metadata={
             "updated_at_ms": now_ms,
             "feedback_last_activity_at_ms": now_ms,
-            PARTICIPANT_LOGINS_KEY: merge_participants(metadata.get(PARTICIPANT_LOGINS_KEY), login),
-            PARTICIPANT_EMAILS_KEY: merge_participants(metadata.get(PARTICIPANT_EMAILS_KEY), email),
+            **await participant_metadata(metadata, login=login, email=email),
         },
     )
     try:

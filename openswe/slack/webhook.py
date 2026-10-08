@@ -33,12 +33,12 @@ from openswe.input_messages import (
     system_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.prompts import load_prompt
+from openswe.prompts import prompt
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
 from openswe.slack.channels import SlackChannel
-from openswe.slack.dm import dm_thread_title, is_concierge_thread, is_dm_channel
+from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
@@ -56,16 +56,17 @@ from openswe.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
 from openswe.utils.thread_ops import queue_message_for_thread
+from openswe.utils.thread_participants import slack_participant_ids
 from openswe.utils.thread_settings import load_thread_settings
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace, workspace_for_repo
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
 
-_CODE_CHANNEL_CONTEXT = load_prompt("runs/slack-code-channel.md")
-_CONCIERGE_CONTEXT = load_prompt("runs/slack-concierge.md")
-_KITCHEN_CONTEXT = load_prompt("runs/slack-kitchen.md")
-_NON_KITCHEN_CONTEXT = load_prompt("runs/slack-non-kitchen.md")
-_MESSAGE_UPDATE_PREAMBLE = load_prompt("runs/slack-message-update.md")
+_CODE_CHANNEL_CONTEXT = prompt("runs/slack-code-channel")
+_CONCIERGE_CONTEXT = prompt("runs/slack-concierge")
+_KITCHEN_CONTEXT = prompt("runs/slack-kitchen")
+_NON_KITCHEN_CONTEXT = prompt("runs/slack-non-kitchen")
+_MESSAGE_UPDATE_PREAMBLE = prompt("runs/slack-message-update")
 
 
 def _is_explicit_slack_request(
@@ -653,6 +654,11 @@ async def process_slack_mention(
         await _notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 
+async def start_slack_run(request: SlackRequest, repo: common.SlackRepoResolution | None) -> bool:
+    """Process ``request`` without the error reply ``process_slack_mention`` posts; whether a run started."""
+    return await _process_slack_mention_impl(request, repo)
+
+
 async def _notify_slack_processing_error(
     request: SlackRequest, repo: Repo | None, exc: BaseException
 ) -> None:
@@ -1154,11 +1160,34 @@ async def _process_slack_mention_impl(
         )
         if section
     )
+    # A thread started under a DM Open SWE sent for another thread is about that thread's work.
+    dm_origin = (
+        await DmOrigin.of(channel_id, thread_ts)
+        if is_first_mention
+        and not concierge_mode
+        and event_ts != thread_ts
+        and is_dm_channel(channel_context)
+        else None
+    )
+    dm_origin_section = (
+        prompt(
+            "slack/dm-origin",
+            origin=dm_origin,
+            permalink=await slack_utils.get_slack_permalink(*dm_origin.location) or "",
+            agent_thread_id=await common.lookup_slack_thread_id(
+                langgraph_client, *dm_origin.location
+            )
+            or "",
+        )
+        if dm_origin is not None
+        else ""
+    )
     turn_context = "\n\n".join(
         section
         for section in (
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
-            load_prompt("runs/slack-review-request.md")
+            dm_origin_section,
+            prompt("runs/slack-review-request")
             if event_ts != thread_ts
             and context_thread_ts == thread_ts
             and any(
@@ -1243,7 +1272,9 @@ async def _process_slack_mention_impl(
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.
-        slack_participant_user_ids=[*logins_by_user_id] if not is_first_mention else [],
+        slack_participant_user_ids=slack_participant_ids(context_messages)
+        if not is_first_mention
+        else [],
         visibility=visibility,
         owner_login=mapped_login or "",
         owner_type="system" if allowed_bot else "user",

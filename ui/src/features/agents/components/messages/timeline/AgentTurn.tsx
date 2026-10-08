@@ -21,6 +21,7 @@ import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
+import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
 import { ServiceConnectionCard } from "@/features/agents/components/chat/ServiceConnectionCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
@@ -248,6 +249,15 @@ export function AgentTurn({
 
       case "connection-item":
         return <ServiceConnectionCard key={item.key} />
+
+      case "managed-tools-item":
+        return (
+          <ManagedToolsConnectionCard
+            key={item.key}
+            cardId={item.chunk.toolCallId}
+            offer={item.offer}
+          />
+        )
 
       case "iframe-item":
         return item.chunk.display ? (

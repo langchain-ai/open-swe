@@ -27,7 +27,7 @@ from openswe.input_messages import (
     system_input,
     system_introduction,
 )
-from openswe.prompts import load_prompt, prompt
+from openswe.prompts import prompt
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
@@ -121,7 +121,7 @@ def build_github_pr_review_prompt(
     head_sha: str,
 ) -> str:
     """Build the reviewer instruction text; PR metadata is serialized separately."""
-    return load_prompt("runs/github-pr-review.md")
+    return prompt("runs/github-pr-review")
 
 
 def _github_person(login: str, user_id: object = None) -> PersonIdentity:
@@ -278,6 +278,12 @@ async def trigger_pr_review_from_ref(
     if not pr_metadata:
         return {"success": False, "error": "Could not fetch pull request metadata"}
 
+    if pr_metadata.get("draft"):
+        return {
+            "success": False,
+            "error": f"{pr_ref.url} is a draft. " + prompt("tools/human-review-blocked"),
+        }
+
     repo_private = common.repo_private_from_pr_metadata(pr_metadata)
     repo_id = common.repo_id_from_pr_metadata(pr_metadata)
     app_token, app_token_expires_at = await common.reviewer_token_for_repo(
@@ -336,7 +342,9 @@ async def trigger_pr_review_from_ref(
         token=app_token,
     )
 
-    prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+    review_prompt = build_github_pr_review_prompt(
+        repo_config, pr_ref.number, pr_url, base_sha, head_sha
+    )
     configurable = await common.build_reviewer_configurable(
         source=source,
         github_login=github_login,
@@ -358,13 +366,13 @@ async def trigger_pr_review_from_ref(
     review_input = (
         _github_human_run_input(
             github_login,
-            prompt,
+            review_prompt,
             user_id=github_user_id,
             data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha),
         )
         if github_login
         else _github_webhook_run_input(
-            prompt, data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+            review_prompt, data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
         )
     )
     run = await common.dispatch_agent_run(

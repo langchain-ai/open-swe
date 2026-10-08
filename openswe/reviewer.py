@@ -59,7 +59,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.prompts import apply_tool_descriptions, load_prompt, prompt
+from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
     changed_files,
@@ -108,13 +108,13 @@ from openswe.utils.api_standards_skill import fetch_api_standards_skill
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 
-REVIEWER_SUBAGENT_SYSTEM_PROMPT = load_prompt("reviewer/subagent.md")
+REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 
 
 def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
     return {
         "name": "reviewer",
-        "description": load_prompt("reviewer/subagent-description.md"),
+        "description": prompt("reviewer/subagent-description"),
         "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
         "model": model,
         # Subagents compile into their own graphs, so the reviewer's own

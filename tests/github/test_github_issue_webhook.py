@@ -413,6 +413,26 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     assert "&lt;/body_&gt;" in message_content
 
 
+def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
+    monkeypatch.setattr(
+        webhook_common,
+        "get_github_app_installation_token_with_expiry",
+        AsyncMock(return_value=("app-token", None)),
+    )
+    monkeypatch.setattr(
+        webhook_common, "fetch_github_pr_metadata", AsyncMock(return_value={"draft": True})
+    )
+    ref = GitHubPrRef(
+        owner="langchain-ai",
+        repo="open-swe",
+        number=1244,
+        url="https://github.com/langchain-ai/open-swe/pull/1244",
+    )
+    result = asyncio.run(github_webhooks.trigger_pr_review_from_ref(ref, source="slack"))
+    assert result["success"] is False
+    assert ref.url in result["error"]
+
+
 def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     captured: dict[str, object] = {}
     auto_review_checked = False
@@ -643,8 +663,9 @@ def test_process_github_issue_followup_keeps_the_threads_workspace(monkeypatch) 
     captured: dict[str, object] = {}
 
     class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
+        async def create(self, *args, **kwargs) -> dict[str, str]:
             captured["configurable"] = kwargs["config"]["configurable"]
+            return {"run_id": "run-1"}
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
@@ -724,8 +745,9 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
     captured: dict[str, object] = {}
 
     class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
+        async def create(self, *args, **kwargs) -> dict[str, str]:
             captured["run_created"] = True
+            return {"run_id": "run-1"}
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()

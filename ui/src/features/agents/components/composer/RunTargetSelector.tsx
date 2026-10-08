@@ -48,7 +48,7 @@ export function RunTargetSelector({
         <span>{value === "local" ? "This Mac" : "Cloud"}</span>
         <ComposerControlChevron />
       </MenuTrigger>
-      <MenuPopup align="start" className="w-44" sideOffset={7}>
+      <MenuPopup align="start" className="w-44" side="top" sideOffset={7}>
         <MenuGroup>
           <MenuGroupLabel>Work in</MenuGroupLabel>
           <MenuItem onClick={() => onChange("local")}>
@@ -178,7 +178,7 @@ export function LocalWorkspaceSelector({
         <span>{label}</span>
         <ComposerControlChevron />
       </MenuTrigger>
-      <MenuPopup align="start" className="w-52" sideOffset={7}>
+      <MenuPopup align="start" className="w-52" side="top" sideOffset={7}>
         <MenuGroup>
           <MenuGroupLabel>Workspace</MenuGroupLabel>
           <MenuItem onClick={() => onChange("local")}>

@@ -52,6 +52,31 @@ describe("buildRenderItems", () => {
     ])
   })
 
+  it("shows a managed tools offer as a card, and a failed one as a tool call", () => {
+    const offer = {
+      status: "connection_required",
+      gateway: { id: "gw-1", name: "Engineering" },
+      missing: [{ slug: "linear", display_name: "Linear", kind: "oauth" }],
+    }
+    const card: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "managed-1",
+      title: "Connect managed tools",
+      toolKind: "managed-tools",
+      status: "completed",
+      output: JSON.stringify({ success: true, ...offer }),
+    }
+    const failed: ToolExecutionChunk = {
+      ...card,
+      toolCallId: "managed-2",
+      output: JSON.stringify({ success: false, error: "Not private" }),
+    }
+    expect(buildRenderItems([card, failed])).toEqual([
+      { type: "managed-tools-item", key: "tool-managed-1", chunk: card, offer },
+      { type: "tool-item", key: "tool-managed-2", chunk: failed },
+    ])
+  })
+
   it("keeps iframe output as a dedicated inline item", () => {
     expect(buildRenderItems([iframeChunk()])).toEqual([
       {

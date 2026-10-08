@@ -121,6 +121,7 @@ async def api_resolve_all_threads(
 async def api_list_thread_repos(
     include_resolved: bool = False,
     include_automations: bool = False,
+    owned: bool = False,
     all: bool = False,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
@@ -131,6 +132,7 @@ async def api_list_thread_repos(
         email=session.get("email"),
         include_resolved=include_resolved,
         include_automations=include_automations,
+        owned=owned,
         include_all=all,
     )
 
@@ -175,6 +177,7 @@ async def api_list_threads_page(
     bot: Annotated[str | None, Query(max_length=80)] = None,
     repo: str | None = None,
     ownerless: bool = False,
+    owned: bool = False,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
     session: dict[str, Any] = SESSION_DEP,
@@ -204,6 +207,7 @@ async def api_list_threads_page(
         bot=bot,
         repo=repo,
         ownerless=ownerless,
+        owned=owned,
         sort_by=sort_by,
         hierarchy=hierarchy,
     )
