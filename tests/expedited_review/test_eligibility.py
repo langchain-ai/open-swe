@@ -127,3 +127,5 @@ def test_generated_files_never_count_and_regenerating_them_keeps_the_votes() -> 
     assert (card.changed_lines, card.generated_lines) == (1, 600)
     regenerated = swagger.model_copy(update={"additions": 401})
     assert fingerprint_matches([source, regenerated], card.fingerprint)
+    assert not ChangedFile(filename=".github/openapi.yaml").is_generated
+    assert not ChangedFile(filename="dist/app.min.js").is_generated

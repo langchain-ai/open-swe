@@ -45,15 +45,9 @@ _TEST_PATH = re.compile(
     r"|_test\.[^/.]+$"
     r"|\.(?:test|spec)\.[^/.]+$"
 )
-# Derived from other files in the PR, so they never decide anything on their own.
-_GENERATED_PATH = re.compile(
-    r"(?:^|/)(?:swagger|openapi)\.(?:json|ya?ml)$"
-    r"|(?:^|/)(?:__generated__|generated)/"
-    r"|\.generated\.[^/]+$"
-    r"|\.min\.(?:js|css)$"
-    r"|\.pb\.go$|_pb2(?:_grpc)?\.pyi?$"
-    r"|\.snap$"
-)
+# Declarative output derived from the PR's source, so it never decides anything on its own.
+# Generated code (bundles, protobuf stubs) can run, so it is drawn like any other code.
+_GENERATED_PATH = re.compile(r"(?:^|/)(?:swagger|openapi)\.(?:json|ya?ml)$|\.snap$")
 _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
@@ -134,7 +128,14 @@ class ChangedFile(BaseModel):
 
     @property
     def is_generated(self) -> bool:
-        return not self.is_test and self._stays_within(_GENERATED_PATH)
+        return not self.is_test and not self.must_be_read and self._stays_within(_GENERATED_PATH)
+
+    @property
+    def must_be_read(self) -> bool:
+        return any(
+            _UNEXCLUDABLE_PATH.search(name)
+            for name in (self.filename, self.previous_filename or "")
+        )
 
     @property
     def changed_lines(self) -> int:
@@ -189,10 +190,7 @@ class Exclusion(BaseModel):
             raise ValueError(f"`{self.path}` is not changed by the pull request")
         if file.is_test or file.is_generated:
             return []
-        if any(
-            _UNEXCLUDABLE_PATH.search(name)
-            for name in (file.filename, file.previous_filename or "")
-        ):
+        if file.must_be_read:
             raise ValueError(
                 f"`{self.path}` cannot be excluded: CI workflows, migrations, dependency "
                 "manifests, environment files, and auth, credential, secret or token code "
