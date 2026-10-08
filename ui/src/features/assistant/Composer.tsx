@@ -109,7 +109,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
 
   return (
     <ComposerPrimitive.Root className="w-full">
-      <ComposerPrimitive.AttachmentDropzone className="rounded-3xl border border-default bg-surface-level-1 p-3 shadow-xs focus-within:border-focus data-[dragging=true]:border-brand">
+      <ComposerPrimitive.AttachmentDropzone className="rounded-3xl border border-default bg-surface-level-1 p-3 shadow-xs data-[dragging=true]:border-brand">
         <div className="flex flex-wrap gap-2 empty:hidden">
           <ComposerPrimitive.Attachments>
             {() => <Attachment />}

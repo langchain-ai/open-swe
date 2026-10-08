@@ -781,7 +781,7 @@ export const ChatComposer = memo(function ChatComposer({
         className={cn(
           "relative z-10 flex flex-col rounded-xl border bg-elevated px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-slow hover:shadow-lg",
           compact ? "min-h-[88px]" : "min-h-[106px]",
-          dragKind ? "border-brand" : "border-default focus-within:border-focus"
+          dragKind ? "border-brand" : "border-default"
         )}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
