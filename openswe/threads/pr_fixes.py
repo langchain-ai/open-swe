@@ -290,6 +290,7 @@ async def _find_or_create_pr_thread(
     *,
     prompt: str,
     title: str,
+    unlisted: bool = False,
 ) -> str:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
@@ -307,7 +308,12 @@ async def _find_or_create_pr_thread(
     thread_id = str(thread["thread_id"])
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"pr_url": url, "pr_number": number, "source_context": {"pr_number": number}},
+        metadata={
+            "pr_url": url,
+            "pr_number": number,
+            "source_context": {"pr_number": number},
+            "unlisted": unlisted,
+        },
     )
     await _link_pr_thread(owner, repo, number, thread_id)
     return thread_id
@@ -365,6 +371,7 @@ async def start_pull_request_thread(
             email,
             prompt=prompt,
             title=intent.thread_title(full_name, number),
+            unlisted=isinstance(intent, OpenThreadIntent),
         )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
@@ -376,7 +383,12 @@ async def start_pull_request_thread(
         async with agent_thread_pr_state_lock(client, thread_id):
             await client.threads.update(
                 thread_id=thread_id,
-                metadata={"resolved": False, "resolved_at_ms": None, "auto_resolved_by_prs": False},
+                metadata={
+                    "resolved": False,
+                    "resolved_at_ms": None,
+                    "auto_resolved_by_prs": False,
+                    "unlisted": False,
+                },
             )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
@@ -417,6 +429,7 @@ async def dispatch_pull_request_prompt(
             owner, repo, number, login, None, prompt=prompt, title=title
         )
         await before_dispatch(thread_id)
+        await client.threads.update(thread_id=thread_id, metadata={"unlisted": False})
         current = await client.threads.get(thread_id)
         configurable = await _build_dashboard_configurable(
             thread_id, login, thread_metadata(current)

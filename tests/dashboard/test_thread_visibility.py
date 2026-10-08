@@ -71,12 +71,13 @@ def test_review_chat_is_hidden_without_hiding_normal_pr_threads():
     metadata = {
         "source": "dashboard",
         "pr_url": "https://github.com/langchain-ai/open-swe/pull/3795",
-        "title": "Discuss langchain-ai/open-swe#3795",
+        "title": "A renamed review chat",
+        "unlisted": True,
     }
     assert not listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
     assert summary.thread_is_readable(metadata, "alice")
     assert summary.thread_is_promptable(metadata, "alice")
-    metadata["title"] = "Fix sidebar"
+    metadata["unlisted"] = False
     assert listing._metadata_matches_filters(metadata, resolved=None, source=None, query=None)
 
 
