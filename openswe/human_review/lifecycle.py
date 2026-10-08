@@ -6,6 +6,7 @@ just acted, a GitHub event arrived, or one of the request's deadlines passed.
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -43,6 +44,7 @@ from openswe.human_review.requests import (
     HumanReviewRequest,
     RequestState,
 )
+from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import Block, block_payload, context, escape, section
 from openswe.slack.cards import origin_footer, repost_thread_card
@@ -59,6 +61,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
+from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
 
@@ -631,7 +634,12 @@ async def dismiss_request(request: HumanReviewRequest, slack_user_id: str) -> Ou
 async def dismiss_by(request: HumanReviewRequest, by: str, reason: str) -> bool:
     """Take the card down for ``by``, as a Dismiss click would; ``False`` if already closed."""
     detail = f": {escape(reason.strip())}" if reason.strip() else ""
-    return await retire(request, "cancelled", f"dismissed by {by}{detail}") is not None
+    outcome = f"dismissed by {by}{detail}"
+    updated = await retire(request, "cancelled", outcome)
+    if updated is None:
+        return False
+    await release_picks(updated, f"it was {outcome}")
+    return True
 
 
 async def refresh_card_in_thread(
@@ -754,8 +762,50 @@ async def _unrequest_github_review(request: HumanReviewRequest, login: str, toke
         return
 
 
-async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReviewRequest:
-    """Take reviewers Open SWE picked who have not reviewed off the pull request, and tell them."""
+async def _tell_withdrawn(
+    request: HumanReviewRequest, participant: HumanReviewParticipant, text: str
+) -> None:
+    """Replace the buttons on their pick DMs with ``text``; DM it only when no pick DM is known."""
+    slack_user_id = participant.user.slack_user_id
+    if not slack_user_id:
+        return
+    origin = request.dm_origin
+    messages = participant.pick_messages
+    if not messages:
+        await send_dm(
+            slack_user_id,
+            text,
+            blocks=block_payload(
+                [
+                    section(text),
+                    *await origin_footer(request.thread_id, origin.location if origin else None),
+                ]
+            ),
+            origin=origin,
+        )
+        return
+    status = f":no_entry_sign: {text}"
+    for message in messages:
+        await message.show(status)
+    note = prompt(
+        "slack/review-pick-withdrawn",
+        recipient=f"<@{slack_user_id}>",
+        pr_url=request.pull_request.url,
+        text=text,
+    )
+    if origin is not None:
+        await note_for_thread_owner(*origin.location, note)
+    await note_for_concierge(slack_user_id, messages[-1].channel_id, note)
+
+
+async def release_picks(
+    request: HumanReviewRequest, reason: str, *, covered: Callable[[str], bool] | None = None
+) -> HumanReviewRequest:
+    """Take reviewers Open SWE picked who have not reviewed off the pull request, and tell them.
+
+    With ``covered``, only those whose GitHub login it accepts. Once the request is closed, picks
+    who reviewed without accepting lose their buttons too.
+    """
     if not any(reviewer.assigned_by_agent for reviewer in request.reviewers + request.picks):
         return request
     pr = request.pull_request
@@ -777,47 +827,42 @@ async def release_picks(request: HumanReviewRequest, reason: str) -> HumanReview
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None:
             return request
-        released = idle_picks(row.reviewers + row.picks, reviewed)
+        released = [
+            reviewer
+            for reviewer in idle_picks(row.reviewers + row.picks, reviewed)
+            if covered is None or covered(reviewer.github_login)
+        ]
         for reviewer in released:
             row.participants.remove(reviewer)
-    if not released:
-        return request
     current = await HumanReviewRequest.get(request.id) or request
+    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    if current.state != "open":
+        for pick in (p for p in current.picks if p.pick_messages):
+            await _tell_withdrawn(
+                current, pick, f"The review request for {label} closed: {reason}."
+            )
+    if not released:
+        return current
     if current.state == "open":
         await refresh_card(current)
-    label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+    text = (
+        f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
+        "Open SWE removed you as a reviewer."
+    )
     for reviewer in released:
         logger.info(
             "Released a reviewer Open SWE picked",
             extra={"request_id": str(request.id), "github_login": reviewer.github_login},
         )
         await _unrequest_github_review(request, reviewer.github_login, token)
-        if reviewer.user.slack_user_id:
-            text = (
-                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer."
-            )
-            origin = request.dm_origin
-            await send_dm(
-                reviewer.user.slack_user_id,
-                text,
-                blocks=block_payload(
-                    [
-                        section(text),
-                        *await origin_footer(
-                            request.thread_id, origin.location if origin else None
-                        ),
-                    ]
-                ),
-                origin=origin,
-            )
+        await _tell_withdrawn(request, reviewer, text)
     return await HumanReviewRequest.get(request.id) or current
 
 
 async def drop_picks(
     request: HumanReviewRequest, user_ids: set[UUID], message: str, *, expired: bool = False
 ) -> list[HumanReviewParticipant]:
-    """Withdraw pending picks of ``user_ids`` from the card and GitHub, and DM each ``message``.
+    """Withdraw pending picks of ``user_ids`` from the card and GitHub, showing each ``message``.
 
     An ``expired`` pick stays on the request so it is never picked for it again.
     """
@@ -845,21 +890,7 @@ async def drop_picks(
         )
         if token is not None:
             await _unrequest_github_review(request, pick.github_login, token)
-        if pick.user.slack_user_id:
-            origin = request.dm_origin
-            await send_dm(
-                pick.user.slack_user_id,
-                message,
-                blocks=block_payload(
-                    [
-                        section(message),
-                        *await origin_footer(
-                            request.thread_id, origin.location if origin else None
-                        ),
-                    ]
-                ),
-                origin=origin,
-            )
+        await _tell_withdrawn(request, pick, message)
     if token is None:
         logger.warning(
             "No GitHub App token to withdraw review requests for dropped picks",

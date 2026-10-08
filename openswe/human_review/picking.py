@@ -190,6 +190,15 @@ class Coverage:
     def of(self, login: str) -> list[Area]:
         return [area for area in self.areas if login.lower() in area.owners]
 
+    def overlap(self, login: str, other: str) -> bool:
+        """Whether ``login`` and ``other`` own any of the same changed code."""
+        return bool(set(self.of(login)) & set(self.of(other)))
+
+    def satisfied(self, login: str, approvers: Collection[str]) -> bool:
+        """Whether ``login`` owns some area and ``approvers`` cover every area they own."""
+        left = self.uncovered(approvers)
+        return bool(theirs := self.of(login)) and not any(area in left for area in theirs)
+
     def owned(self) -> Counter[str]:
         """How many changed files each owner owns."""
         counts: Counter[str] = Counter()

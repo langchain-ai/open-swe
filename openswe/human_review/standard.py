@@ -53,6 +53,7 @@ from openswe.human_review.lifecycle import (
 )
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, repo_token, resolve_writer
+from openswe.human_review.pick_messages import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from openswe.prompts import prompt
@@ -67,7 +68,7 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
 )
-from openswe.slack.dm import send_dm
+from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
@@ -516,21 +517,35 @@ async def _add_reviewer(
     return current
 
 
-async def claim(request: HumanReviewRequest, user: User | None) -> Outcome:
+async def claim(
+    request: HumanReviewRequest, user: User | None, *, from_pick: bool = False
+) -> Outcome:
     """Someone signs up from the card, or accepts Open SWE's pick of them; any number may.
 
-    Whoever else Open SWE picked and is still waiting on no longer needs to.
+    Pending picks for code the reviewer also owns no longer need to review; with no code owners,
+    none do. ``from_pick`` is the Accept on a pick DM, which only a still-pending pick may use.
     """
     reviewer = await resolve_writer(request, user)
     if isinstance(reviewer, Outcome):
         return reviewer
     accepting = any(pick.user_id == reviewer.user.id for pick in request.picks)
+    if from_pick and not accepting:
+        current = request.participant(reviewer.user.id)
+        if current is None or current.decision != "review":
+            return Outcome("Open SWE no longer needs you to review this pull request.")
     added = await _add_reviewer(request, reviewer, picked=False)
     if isinstance(added, Outcome):
         return added
     pr = added.pull_request
     label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
-    if others := {pick.user_id for pick in added.picks}:
+    coverage = await Coverage.load(added) if added.picks else None
+    if others := {
+        pick.user_id
+        for pick in added.picks
+        if coverage is None
+        or not coverage.areas
+        or coverage.overlap(pick.github_login, reviewer.github_login)
+    }:
         await drop_picks(
             added,
             others,
@@ -694,27 +709,14 @@ async def assign(
         )
     why = f" {escape(reason.strip())}" if reason.strip() else ""
     deadline = f" Accept within {minutes} minutes, or Open SWE will ask someone else."
-    accept = actions(accept_button(added), decline_button(added), snooze_button(added))
     permalink = await _permalink(added)
-    if user.slack_user_id:
-        where = "review card" if added.has_card else "Slack post"
-        card = f" (<{permalink}|{where}>)" if permalink else ""
-        dm_text = (
-            f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
-        )
-        origin = added.dm_origin
-        await send_dm(
-            user.slack_user_id,
-            dm_text,
-            blocks=block_payload(
-                [
-                    section(dm_text),
-                    accept,
-                    *await origin_footer(added.thread_id, origin.location if origin else None),
-                ]
-            ),
-            origin=origin,
-        )
+    where = "review card" if added.has_card else "Slack post"
+    card = f" (<{permalink}|{where}>)" if permalink else ""
+    await _send_pick_dm(
+        added,
+        user,
+        f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}",
+    )
     await _schedule(added, f"remind:{user.id}", timedelta(0))
     return RequestResult(
         success=True,
@@ -722,6 +724,32 @@ async def assign(
         channel=added.slack_channel_id,
         permalink=permalink,
     )
+
+
+async def _send_pick_dm(request: HumanReviewRequest, user: User, text: str) -> None:
+    """DM a pick's buttons and remember the message, so it can be edited when the pick ends."""
+    if not user.slack_user_id:
+        return
+    origin = request.dm_origin
+    location = await send_dm_with_location(
+        user.slack_user_id,
+        text,
+        blocks=block_payload(
+            [
+                section(text),
+                actions(accept_button(request), decline_button(request), snooze_button(request)),
+                *await origin_footer(request.thread_id, origin.location if origin else None),
+            ]
+        ),
+        origin=origin,
+    )
+    if location is None:
+        return
+    channel_id, ts = location
+    async with HumanReviewRequest.locked(request.id) as (_, row):
+        participant = row.participant(user.id) if row is not None else None
+        if participant is not None:
+            participant.add_pick_message(PickMessage(channel_id=channel_id, ts=ts, text=text))
 
 
 class PendingPick(BaseModel):
@@ -845,6 +873,8 @@ async def _settle_posted(
             request, ", ".join(f"@{login}" for login in sorted(approvers)) + " approved it"
         )
         return
+    if approvers and (coverage := await Coverage.load(request)) is not None:
+        request = await _release_covered(request, sorted(approvers), coverage)
     await _pick_remaining_owners(request, sorted(approvers))
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
@@ -939,6 +969,7 @@ async def settle(request: HumanReviewRequest) -> bool:
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
         coverage = await Coverage.load(request)
         if coverage is not None and coverage.uncovered(approvers):
+            request = await _release_covered(request, approvers, coverage)
             await _pick_remaining_owners(request, approvers)
         else:
             picked = len(request.reviewers) + len(request.picks)
@@ -1086,6 +1117,18 @@ async def _auto_assign(
         )
     woken = await _wake_picker(request, asked=asked, trigger=None, suggestions=[])
     return AutoAssignResult("woken" if woken else "failed")
+
+
+async def _release_covered(
+    request: HumanReviewRequest, approvers: list[str], coverage: Coverage
+) -> HumanReviewRequest:
+    """Release Open SWE's picks whose code owner areas all have an approval, wherever it came from."""
+    names = ", ".join(f"@{login}" for login in approvers)
+    return await release_picks(
+        request,
+        f"{names} approved the code you were asked to review",
+        covered=lambda login: coverage.satisfied(login, approvers),
+    )
 
 
 async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[str]) -> None:
@@ -1446,25 +1489,9 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         if remaining > timedelta(0):
             await _schedule(request, step, remaining)
             return {"status": "snoozed"}
-        if participant.user.slack_user_id:
-            text = f"Your review snooze ended: {request.pull_request.url}."
-            origin = request.dm_origin
-            await send_dm(
-                participant.user.slack_user_id,
-                text,
-                blocks=block_payload(
-                    [
-                        section(text),
-                        actions(
-                            accept_button(request), decline_button(request), snooze_button(request)
-                        ),
-                        *await origin_footer(
-                            request.thread_id, origin.location if origin else None
-                        ),
-                    ]
-                ),
-                origin=origin,
-            )
+        await _send_pick_dm(
+            request, participant.user, f"Your review snooze ended: {request.pull_request.url}."
+        )
         return {"status": "reminded"}
     if step.startswith("remind:"):
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}

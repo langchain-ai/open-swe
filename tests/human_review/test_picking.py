@@ -60,6 +60,11 @@ async def test_the_largest_code_owner_area_comes_first_and_an_approval_leaves_th
     assert coverage.areas[0].owners == {"grace", "ada"}
     assert coverage.uncovered(["Grace"]) == [coverage.areas[1]]
     assert coverage.uncovered(["grace", "default"]) == []
+    assert coverage.overlap("ada", "Grace")
+    assert not coverage.overlap("ada", "default")
+    assert coverage.satisfied("ada", ["Grace"])
+    assert not coverage.satisfied("default", ["Grace"])
+    assert not coverage.satisfied("nobody", ["Grace", "default"])
 
 
 @pytest.mark.parametrize("status", [403, 429, 500, 404, 200])

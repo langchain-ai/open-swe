@@ -30,6 +30,7 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.human_review.pick_messages import PickMessage
 from openswe.slack.client import lookup_slack_thread_id
 from openswe.slack.dm import DmOrigin
 from openswe.users import User
@@ -71,7 +72,18 @@ class HumanReviewParticipant(Base):
     github_review_sha: Mapped[str] = mapped_column(server_default="", default="")
     assigned_by_agent: Mapped[bool] = mapped_column(server_default="false", default=False)
     joined_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    # DMs carrying this pick's buttons, edited in place when the pick ends.
+    slack_pick_messages: Mapped[list[JsonObject]] = mapped_column(
+        JSONB, server_default="[]", default_factory=list
+    )
     user: Mapped[User] = relationship(init=False)
+
+    @property
+    def pick_messages(self) -> list[PickMessage]:
+        return [PickMessage.model_validate(message) for message in self.slack_pick_messages]
+
+    def add_pick_message(self, message: PickMessage) -> None:
+        self.slack_pick_messages = [*self.slack_pick_messages, message.model_dump()]
 
     @property
     def github_login(self) -> str:

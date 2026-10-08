@@ -1,7 +1,6 @@
 """Slack interactivity for human review cards and picks: I'll review, Accept, Decline, Snooze, and Dismiss."""
 
 import logging
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
@@ -13,27 +12,21 @@ from openswe.human_review import card
 from openswe.human_review.clicks import answer_click
 from openswe.human_review.lifecycle import dismiss_request
 from openswe.human_review.people import Outcome
+from openswe.human_review.pick_messages import PickMessage
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import SNOOZE_DURATIONS, claim, decline, snooze
 from openswe.prompts import prompt
 from openswe.slack.blocks import (
-    Block,
-    ButtonElement,
     InputBlock,
     ModalView,
-    actions,
-    block_payload,
-    context,
     modal,
     option,
     plain_text,
-    section,
     static_select,
     view_payload,
 )
-from openswe.slack.client import open_slack_modal, update_slack_message
+from openswe.slack.client import open_slack_modal
 from openswe.slack.dm import note_for_concierge
-from openswe.slack.http import SlackRequestError
 from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.slack.responses import FeedbackResponse, WebhookResponse, accepted, ignored
 from openswe.slack.thread_notes import note_for_thread_owner
@@ -87,28 +80,6 @@ class PickModal:
             close="Cancel",
             private_metadata=context.model_dump_json(),
         )
-
-
-class PickMessage(BaseModel):
-    """The message a pick's buttons sit on, which shows a click's progress before the slow work."""
-
-    channel_id: str
-    ts: str
-    text: str
-
-    async def show(self, status: str, buttons: Sequence[ButtonElement] = ()) -> None:
-        blocks: list[Block] = [section(self.text), context(status)]
-        if buttons:
-            blocks.append(actions(*buttons))
-        try:
-            await update_slack_message(
-                self.channel_id, self.ts, self.text, blocks=block_payload(blocks)
-            )
-        except SlackRequestError as exc:
-            logger.warning(
-                "Could not update a reviewer pick message",
-                extra={"slack_channel": self.channel_id, "slack_error": exc.code},
-            )
 
 
 _PENDING = {
@@ -206,7 +177,7 @@ async def _process(
             elif action == "snooze":
                 outcome = await snooze(request, user, choice)
             else:
-                outcome = await claim(request, user)
+                outcome = await claim(request, user, from_pick=message is not None)
         note = prompt(
             "slack/review-request-clicked",
             action=action,
