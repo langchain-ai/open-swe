@@ -67,6 +67,11 @@ class AuditLogMiddleware:
             if (
                 isinstance(route, APIRoute)
                 and (path := _route_path(scope, route)).startswith("/dashboard/api/")
+                and path
+                not in {
+                    "/dashboard/api/analytics/page",
+                    "/dashboard/api/bridges/{bridge_id}/heartbeat",
+                }
                 and entry.enrichments.actor_kind is not None
             ):
                 entry.operation_name = route.name.removeprefix("api_")[:128]
