@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { pullRequestTopic } from "@/features/reviews/lib/cache"
 import {
   getReviewConversation,
   postReviewConversationComment,
@@ -262,6 +263,9 @@ export function ReviewConversation({
   const query = useQuery({
     queryKey: reviewConversationQueryKey(owner, repo, number),
     queryFn: () => getReviewConversation(owner, repo, number),
+    meta: {
+      invalidatedBy: [pullRequestTopic({ repo: `${owner}/${repo}`, number })],
+    },
   })
   const transformImageUrl = useCallback(
     (src: string) => reviewImageProxyUrl(owner, repo, number, src),

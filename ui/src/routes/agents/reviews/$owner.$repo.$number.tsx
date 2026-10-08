@@ -12,6 +12,7 @@ import {
   markReviewViewed,
   reviewChatQuery,
 } from "@/features/agents/lib/queries"
+import { pullRequestTopic } from "@/features/reviews/lib/cache"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
@@ -73,11 +74,11 @@ function ReviewDetailPage() {
     queryKey: ["review", owner, repo, prNumber],
     queryFn: () => api.getReview(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ||
-      query.state.data?.walkthrough_running
-        ? 5000
-        : false,
+    meta: {
+      invalidatedBy: [
+        pullRequestTopic({ repo: `${owner}/${repo}`, number: prNumber }),
+      ],
+    },
   })
   const diff = useQuery({
     queryKey: ["reviewDiff", owner, repo, prNumber],

@@ -114,7 +114,7 @@ async def api_pull_request_details(
     if not token:
         raise HTTPException(401, "GitHub token unavailable, re-login required")
     async with GitHubClient.connect(token=token) as github:
-        return await github.repo(owner, repo).pull_request(number).load_open()
+        return await github.repo(owner, repo).pull_request(number).load()
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/action")
