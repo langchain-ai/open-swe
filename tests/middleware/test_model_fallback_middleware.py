@@ -1,18 +1,28 @@
 """Tests for ModelFallbackMiddleware."""
 
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
 import openai
 import pytest
+from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware, wrap_model_call
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import InMemorySaver
 
 from openswe.middleware.model_fallback import (
+    MODEL_OUTAGE_MESSAGE,
     ModelFallbackMiddleware,
+    ModelOutageError,
+    is_model_outage,
 )
+from openswe.middleware.require_cli_result import RequireCliResultMiddleware
+from openswe.middleware.require_user_reply import SLACK_REPLY_SURFACE, RequireUserReplyMiddleware
 
 
 def _openai_5xx() -> openai.APIStatusError:
@@ -195,6 +205,7 @@ class TestModelFallbackMiddleware:
 
         assert result is good_response
         assert len(calls) == 3
+        assert not is_model_outage(good_response.result[0])
         # Attempts alternate primary -> fallback -> primary.
         assert calls[0] is request
         assert calls[1] is cast(MagicMock, request.override).return_value
@@ -215,6 +226,8 @@ class TestModelFallbackMiddleware:
         assert len(calls) == 3
         assert isinstance(result, AIMessage)
         assert "retrigger" in result.text
+        assert is_model_outage(result)
+        assert not is_model_outage(AIMessage(content=result.content))
 
     @pytest.mark.asyncio
     async def test_async_exhaustion_raises_when_message_disabled(self) -> None:
@@ -231,3 +244,69 @@ class TestModelFallbackMiddleware:
             await middleware.awrap_model_call(_make_request(), handler)
 
         assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("source", "recovers"),
+    [("slack", False), ("cli", False), ("schedule", False), ("schedule", True)],
+)
+async def test_terminal_outage_ends_without_checkpointing_reply_nudges(
+    monkeypatch: pytest.MonkeyPatch, source: str, recovers: bool
+) -> None:
+    from openswe.slack.tools import reply
+
+    posted = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(reply, "slack_reply", posted)
+    calls = 0
+
+    @wrap_model_call
+    async def unavailable(
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        nonlocal calls
+        calls += 1
+        if recovers and calls == 2:
+            return ModelResponse(result=[AIMessage(content="Assessment completed")])
+        raise _openai_5xx()
+
+    middleware: list[AgentMiddleware] = [
+        ModelFallbackMiddleware(FakeListChatModel(responses=["unused"]), backoff_schedule=(0.0,)),
+        unavailable,
+    ]
+    if source == "slack":
+        middleware.append(
+            RequireUserReplyMiddleware(
+                "slack_reply", "slack_no_reply_needed", initial_surface=SLACK_REPLY_SURFACE
+            )
+        )
+    elif source == "cli":
+        middleware.append(RequireCliResultMiddleware("cli_result"))
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=middleware,
+        checkpointer=InMemorySaver(),
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": source, "source": source}}
+    inputs = {"messages": [HumanMessage(content="Assess this merged PR")]}
+    if source == "schedule" and not recovers:
+        with pytest.raises(ModelOutageError):
+            await graph.ainvoke(inputs, config)
+    else:
+        results = [
+            event["data"]["input"]
+            async for event in graph.astream_events(inputs, config)
+            if event["event"] == "on_tool_start" and event["name"] == "cli_result"
+        ]
+        if source == "cli":
+            assert results == [{"stdout": MODEL_OUTAGE_MESSAGE, "exit_code": 1}]
+        elif source == "slack":
+            posted.assert_awaited_once()
+            assert posted.await_args is not None
+            assert posted.await_args.args[:2] == (MODEL_OUTAGE_MESSAGE, "final")
+    checkpoint = await graph.aget_state(config)
+    assert len(checkpoint.values["messages"]) == 2
+    assert is_model_outage(checkpoint.values["messages"][-1]) is not recovers
+    assert checkpoint.values.get("reply_nudges", 0) == 0
+    assert checkpoint.values.get("cli_result_nudges", 0) == 0
+    assert calls == 2

@@ -24,6 +24,7 @@ from openswe.input_messages import (
     visible_dynamic_context_hashes,
 )
 from openswe.middleware.message_content import content_to_text
+from openswe.middleware.model_fallback import is_model_outage
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 
@@ -162,7 +163,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
 
         result = await slack_reply(text, "final", state=dict(state))
         logger.warning(
-            "Posted the model's final message on its behalf after it ignored the reply tool",
+            "Posted the model's final message on its behalf",
             extra={"reply_tool": self._tool_name, "reply_fallback_result": result},
         )
 
@@ -189,6 +190,9 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             return None
         if current_reply_surface(state) != SLACK_REPLY_SURFACE:
             return None
+        if is_model_outage(last):
+            await self._post_on_behalf(state)
+            return {"reply_nudges": 0}
         if self._satisfied(messages):
             return {"reply_nudges": 0}
         nudges = state.get("reply_nudges") or 0

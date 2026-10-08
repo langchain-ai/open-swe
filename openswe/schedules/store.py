@@ -90,6 +90,7 @@ _RATE_WINDOW = timedelta(hours=1)
 _DELIVERY_CLAIM_SCOPE = "automation_delivery"
 _DELIVERY_CLAIM_TTL = timedelta(hours=24)
 _NEW_CRON_GRACE = timedelta(minutes=5)
+MODEL_OUTAGE_RETRY_DELAY_SECONDS = 60
 
 
 def _normalized_repo(value: str) -> str:
@@ -1099,6 +1100,8 @@ async def _launch_agent_schedule_record(
     test_run: bool = False,
     prompt: str | None = None,
     token_repositories: list[str] | None = None,
+    outage_retry: bool = False,
+    after_seconds: int | None = None,
 ) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
@@ -1140,6 +1143,8 @@ async def _launch_agent_schedule_record(
     metadata = _agent_run_metadata(
         record, thread_id, repo_config, test_run=test_run, admin_thread=admin_thread
     )
+    run_prompt = str(record["prompt"]) if prompt is None else prompt
+    metadata["schedule_prompt"] = run_prompt
     if token_repositories is not None:
         metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = token_repositories
     if admin_thread:
@@ -1160,7 +1165,7 @@ async def _launch_agent_schedule_record(
         thread_id,
         _AGENT_ASSISTANT_ID,
         input=build_run_input(
-            str(record["prompt"]) if prompt is None else prompt,
+            run_prompt,
             input_context,
             systems=[
                 {
@@ -1171,10 +1176,12 @@ async def _launch_agent_schedule_record(
             ],
         ),
         source="schedule",
+        metadata={"schedule_id": schedule_id, "schedule_outage_retry": outage_retry},
         thread_title=None,
         config=run_config,
         client=client,
         stream_resumable=True,
+        after_seconds=after_seconds,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     # The run is durable now; bookkeeping failures must not release delivery claims.
@@ -1197,8 +1204,7 @@ async def _launch_agent_schedule_record(
                 "last_thread_id": thread_id,
                 "last_run_id": run_id,
                 "last_triggered_at": now_iso(),
-                "last_error": None,
-                "last_error_at": None,
+                **({"last_error": None, "last_error_at": None} if not outage_retry else {}),
             },
         )
     except Exception:
@@ -1209,6 +1215,65 @@ async def _launch_agent_schedule_record(
         "thread_id": thread_id,
         "run_id": run_id,
     }
+
+
+async def handle_schedule_model_outage(
+    thread_id: str,
+    run_id: str,
+    status: str,
+    metadata: dict[str, object],
+) -> dict[str, str]:
+    """Record an exhausted model outage and redispatch its original event once."""
+    from openswe.middleware.model_fallback import MODEL_OUTAGE_MESSAGE
+
+    schedule_id = metadata.get("schedule_id")
+    if not isinstance(schedule_id, str):
+        return {"status": "ignored", "reason": "missing schedule_id"}
+    record = await get_agent_schedule(schedule_id)
+    if record is None:
+        return {"status": "ignored", "reason": "automation no longer exists"}
+    if status == "success":
+        if record.get("last_run_id") == run_id:
+            await _put_run_state(record, {"last_error": None, "last_error_at": None})
+        return {"status": "ok"}
+    claim_key = f"{schedule_id}:{run_id}"
+    if not await event_claims.claim("automation_model_outage", claim_key, ttl=_DELIVERY_CLAIM_TTL):
+        return {"status": "ignored", "reason": "automation outage already handled"}
+    try:
+        await _put_run_state(
+            record, {"last_error": MODEL_OUTAGE_MESSAGE, "last_error_at": now_iso()}
+        )
+        if metadata.get("schedule_outage_retry") is True:
+            return {"status": "ok", "reason": "automation outage retry exhausted"}
+        thread = await langgraph_client().threads.get(thread_id)
+        original = thread_metadata(thread)
+        original_prompt = original.get("schedule_prompt")
+        if not isinstance(original_prompt, str):
+            raise ValueError("automation outage retry has no original prompt")
+        owner, name = original.get("repo_owner"), original.get("repo_name")
+        repo = f"{owner}/{name}" if isinstance(owner, str) and isinstance(name, str) else None
+        repositories = original.get(GITHUB_TOKEN_REPOSITORIES_KEY)
+        result = await _launch_agent_schedule_record(
+            record,
+            repo=repo,
+            test_run=original.get("schedule_test") is True,
+            prompt=original_prompt,
+            token_repositories=(
+                [value for value in repositories if isinstance(value, str)]
+                if isinstance(repositories, list)
+                else None
+            ),
+            outage_retry=True,
+            after_seconds=MODEL_OUTAGE_RETRY_DELAY_SECONDS,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to retry automation after model outage",
+            extra={"schedule_id": schedule_id, "run_id": run_id},
+        )
+        await event_claims.release("automation_model_outage", claim_key)
+        raise
+    return {"status": str(result["status"]), "reason": "automation model outage"}
 
 
 def _github_events(event_type: str, payload: dict[str, Any]) -> set[GitHubEvent]:

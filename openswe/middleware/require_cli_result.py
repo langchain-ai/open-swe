@@ -7,14 +7,17 @@ from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.tools import tool
 from langgraph.runtime import Runtime
 
+from openswe.bridge.cli_result import cli_result
 from openswe.input_messages import (
     SystemIdentity,
     build_input_messages,
     visible_dynamic_context_hashes,
 )
 from openswe.middleware.message_content import content_to_text
+from openswe.middleware.model_fallback import is_model_outage
 from openswe.middleware.require_user_reply import reported_failure, turn_tail
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
@@ -45,6 +48,7 @@ class RequireCliResultMiddleware(OpenSWEMiddleware):
         super().__init__()
         self._tool_name = tool_name
         self._max_retries = max_retries
+        self._result_tool = tool(tool_name)(cli_result)
 
     def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:  # noqa: ARG002
         return {"cli_result_nudges": 0}
@@ -83,6 +87,11 @@ class RequireCliResultMiddleware(OpenSWEMiddleware):
         last = messages[-1] if messages else None
         if not isinstance(last, AIMessage) or last.tool_calls:
             return None
+        if is_model_outage(last):
+            await self._result_tool.ainvoke(
+                {"stdout": content_to_text(last.content), "exit_code": 1}
+            )
+            return {"cli_result_nudges": 0}
         if self._satisfied(messages):
             return {"cli_result_nudges": 0}
         nudges = state.get("cli_result_nudges") or 0

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -5,6 +6,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe import completion
+from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.input_messages import build_run_input
+from openswe.middleware.model_fallback import MODEL_OUTAGE_MESSAGE, ModelOutageError
+from openswe.schedules import store as schedules
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
@@ -26,6 +31,117 @@ class _FakeThreads:
 class _FakeClient:
     def __init__(self, metadata: dict[str, Any]) -> None:
         self.threads = _FakeThreads(metadata)
+
+
+@pytest.mark.parametrize("retry_status", ["error", "success"])
+async def test_schedule_outage_retries_original_event_only_once(
+    monkeypatch: pytest.MonkeyPatch, retry_status: str
+) -> None:
+    original_prompt = "Assess the merged pull request: https://github.com/acme/widgets/pull/42"
+    record: dict[str, object] = {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "name": "Merged PR assessment",
+        "prompt": "The automation was edited after this event fired",
+        "enabled": True,
+        "last_run_id": "a-newer-event-fired-while-run-1-was-retrying",
+    }
+    client = _FakeClient(
+        {
+            "source": "schedule",
+            "schedule_prompt": original_prompt,
+            "repo_owner": "acme",
+            "repo_name": "widgets",
+            GITHUB_TOKEN_REPOSITORIES_KEY: ["acme/widgets"],
+        }
+    )
+    dispatched: list[dict[str, object]] = []
+    claims: set[str] = set()
+
+    async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
+        if key in claims:
+            return False
+        claims.add(key)
+        return True
+
+    async def put_run_state(record: dict[str, object], patch: dict[str, object]) -> None:
+        record.update(patch)
+
+    async def dispatch(*args: object, **kwargs: object) -> dict[str, str]:
+        assert record["last_error"] == MODEL_OUTAGE_MESSAGE
+        assert record["last_error_at"]
+        dispatched.append(kwargs)
+        return {"run_id": "run-2"}
+
+    monkeypatch.setattr(completion, "langgraph_client", lambda: client)
+    monkeypatch.setattr(schedules, "langgraph_client", lambda: client)
+    monkeypatch.setattr(schedules, "get_agent_schedule", AsyncMock(return_value=record))
+    monkeypatch.setattr(schedules, "_put_run_state", put_run_state)
+    monkeypatch.setattr(schedules.WORKSPACES, "slug_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(schedules, "require_repo_access_for_workspace", AsyncMock())
+    monkeypatch.setattr(schedules, "create_thread", AsyncMock())
+    monkeypatch.setattr(schedules, "create_durable_run", dispatch)
+    monkeypatch.setattr(schedules.event_claims, "claim", claim)
+    monkeypatch.setattr(events, "worker_finished", AsyncMock(return_value=False))
+    monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", AsyncMock())
+    monkeypatch.setattr(completion.TaskMessage, "deliver_to", AsyncMock())
+    monkeypatch.setattr(completion.EventSubscription, "deliver_to", AsyncMock())
+    monkeypatch.setattr(
+        completion, "_handle_successful_run", AsyncMock(return_value={"status": "ok"})
+    )
+    metadata = {"schedule_id": record["id"], "schedule_outage_retry": False}
+    payload = {
+        "thread_id": "t1",
+        "run_id": "run-1",
+        "status": "error",
+        "error": {"error": ModelOutageError.__name__},
+        "metadata": metadata,
+    }
+
+    result = await completion.handle_run_completion(payload)
+    await completion.handle_run_completion(payload)
+
+    assert result["status"] == "started"
+    assert len(dispatched) == 1
+    assert dispatched[0]["after_seconds"] == schedules.MODEL_OUTAGE_RETRY_DELAY_SECONDS
+    assert dispatched[0]["input"] == build_run_input(
+        original_prompt,
+        {"sender_id": f"system:schedule:{record['id']}", "surface": "automation", "kind": "system"},
+        systems=[
+            {
+                "id": f"system:schedule:{record['id']}",
+                "display_name": "Merged PR assessment",
+                "platform": "open-swe",
+            }
+        ],
+    )
+    config = dispatched[0]["config"]
+    assert isinstance(config, dict)
+    assert config["configurable"]["repo"] == {"owner": "acme", "name": "widgets"}
+    assert dispatched[0]["metadata"] == {
+        "schedule_id": record["id"],
+        "schedule_outage_retry": True,
+    }
+    assert client.threads.updates[0]["schedule_prompt"] == original_prompt
+    assert client.threads.updates[0][GITHUB_TOKEN_REPOSITORIES_KEY] == ["acme/widgets"]
+    assert record["last_run_id"] == "run-2"
+    assert record["last_error"] == MODEL_OUTAGE_MESSAGE
+    assert record["last_error_at"]
+    await completion.handle_run_completion(
+        {
+            **payload,
+            "thread_id": "t2",
+            "run_id": "run-2",
+            "status": retry_status,
+            "metadata": {**metadata, "schedule_outage_retry": True},
+        }
+    )
+    assert len(dispatched) == 1
+    if retry_status == "success":
+        assert record["last_error"] is None
+        assert record["last_error_at"] is None
+    else:
+        assert record["last_error"] == MODEL_OUTAGE_MESSAGE
+        assert record["last_error_at"]
 
 
 def _slack_metadata() -> dict[str, Any]:
