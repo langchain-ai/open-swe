@@ -83,6 +83,7 @@ function sanitizeFilters(value: unknown): SidebarFilters {
       typeof raw.includeResolved === "boolean"
         ? raw.includeResolved
         : DEFAULT_SIDEBAR_FILTERS.includeResolved,
+    ownedOnly: raw.ownedOnly === true,
   }
 }
 

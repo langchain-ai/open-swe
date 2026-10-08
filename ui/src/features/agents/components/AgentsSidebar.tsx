@@ -283,12 +283,14 @@ export function AgentsSidebar({
     repoMode,
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
+    owned: prefs.filters.ownedOnly,
     sort: prefs.sortChats,
     enabled: true,
   })
   const sidebarReposQuery = useSidebarRepos({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
+    owned: prefs.filters.ownedOnly,
     enabled: repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
@@ -634,6 +636,14 @@ export function AgentsSidebar({
         >
           Show automations
         </MenuCheckboxItem>
+        <MenuCheckboxItem
+          checked={prefs.filters.ownedOnly}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, ownedOnly: checked })
+          }
+        >
+          Only my threads
+        </MenuCheckboxItem>
         <MenuCheckboxItem checked={prefs.compact} onCheckedChange={setCompact}>
           Compact rows
         </MenuCheckboxItem>
@@ -661,6 +671,7 @@ export function AgentsSidebar({
       pinned={pinnedRepoKeys.has(group.key)}
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
+      owned={prefs.filters.ownedOnly}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
@@ -1100,6 +1111,7 @@ function RepoGroup({
   pinned,
   includeResolved,
   includeAutomations,
+  owned,
   sort,
   activeThreadId,
   openThread,
@@ -1120,6 +1132,7 @@ function RepoGroup({
   pinned: boolean
   includeResolved: boolean
   includeAutomations: boolean
+  owned: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
@@ -1141,6 +1154,7 @@ function RepoGroup({
     repoFullName: group.repoFullName,
     includeResolved,
     includeAutomations,
+    owned,
     sort,
     enabled: !collapsed,
   })

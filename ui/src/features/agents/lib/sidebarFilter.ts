@@ -4,12 +4,14 @@ export interface SidebarFilters {
   sources: Array<AgentSource>
   includeAutomations: boolean
   includeResolved: boolean
+  ownedOnly: boolean
 }
 
 export const DEFAULT_SIDEBAR_FILTERS: SidebarFilters = {
   sources: [],
   includeAutomations: false,
   includeResolved: false,
+  ownedOnly: false,
 }
 
 interface FilterableThread {
@@ -52,6 +54,7 @@ export function hasActiveFilters(filters: SidebarFilters): boolean {
   return (
     filters.sources.length > 0 ||
     filters.includeAutomations !== DEFAULT_SIDEBAR_FILTERS.includeAutomations ||
-    filters.includeResolved !== DEFAULT_SIDEBAR_FILTERS.includeResolved
+    filters.includeResolved !== DEFAULT_SIDEBAR_FILTERS.includeResolved ||
+    filters.ownedOnly
   )
 }

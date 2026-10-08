@@ -373,7 +373,7 @@ async def _request_review(
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers := request_blockers(readiness.snapshot):
         return _failure(
-            "The pull request cannot be put up for review: "
+            f"{pr_ref.url} cannot be put up for review: "
             + "; ".join(blockers)
             + ". "
             + prompt("tools/human-review-blocked")
