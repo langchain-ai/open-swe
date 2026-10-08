@@ -13,6 +13,7 @@ import type { ReactNode } from "react"
 
 import type {
   FileTreeDirectoryHandle,
+  FileTreeRowDecorationRenderer,
   GitStatus,
   GitStatusEntry,
 } from "@pierre/trees"
@@ -320,9 +321,29 @@ function ReviewFileTreeExplorer({
     [files]
   )
 
+  const byPath = useMemo(
+    () => new Map(files.map((file) => [file.path, file])),
+    [files]
+  )
+  const renderRowDecoration = useCallback<FileTreeRowDecorationRenderer>(
+    ({ item }) => {
+      const file = byPath.get(item.path)
+      if (!file) return null
+      return {
+        text: `+${file.additions} −${file.deletions}`,
+        title: `${file.additions} lines added, ${file.deletions} lines deleted`,
+        parts: [
+          { text: `+${file.additions}`, color: "light-dark(#059669, #34d399)" },
+          { text: ` −${file.deletions}`, color: "var(--destructive)" },
+        ],
+      }
+    },
+    [byPath]
+  )
   const [filter, setFilter] = useState("")
 
   const { model } = useFileTree({
+    renderRowDecoration,
     paths,
     gitStatus,
     flattenEmptyDirectories: true,
