@@ -182,6 +182,23 @@ async def registry_db(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+async def incident_db(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[None]:
+    if (
+        request.node.path.name in {"test_agent_incidents.py", "test_incidents_api.py"}
+        or request.node.path.parent.name == "incidents"
+    ):
+        uri = os.environ.get(_TEST_POSTGRES_URI_SETTING)
+        if not uri:
+            pytest.skip(f"{_TEST_POSTGRES_URI_SETTING} is required for incident persistence")
+        async with isolated_database(uri, monkeypatch):
+            yield
+    else:
+        yield
+
+
 @pytest.fixture
 async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[bool]:
     """``registry_db`` when a database is configured; otherwise the unconfigured path.

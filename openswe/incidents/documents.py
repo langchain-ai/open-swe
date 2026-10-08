@@ -7,13 +7,13 @@ from fastapi import HTTPException
 from openswe.incidents import service
 from openswe.incidents.document_models import IncidentHistory
 from openswe.incidents.models import Incident, IncidentId, IncidentReport
-from openswe.store import TypedStore, get_value, now_iso, put_value
+from openswe.incidents.persistence import SUMMARIES, IncidentRepository, IncidentSummary
+from openswe.store import now_iso
 from openswe.ui_invalidations import Topic
 
-HISTORY = TypedStore[IncidentHistory, IncidentId](
-    ["incidents", "history"], IncidentHistory, invalidates=Topic.INCIDENTS
+HISTORY = IncidentRepository[IncidentHistory, IncidentId](
+    "history", IncidentHistory, invalidates=Topic.INCIDENTS
 )
-SUMMARIES = ["incidents", "summaries"]
 
 
 async def require_access(incident_id: IncidentId) -> Incident:
@@ -63,8 +63,8 @@ def _linked_markdown(markdown: str, evidence: list[dict[str, Any]]) -> str:
 
 
 async def _saved_markdown(record: Incident) -> str | None:
-    summary = await get_value(SUMMARIES, record.id)
-    return summary["markdown"] if summary else None
+    summary = await SUMMARIES.get(record.id)
+    return summary.markdown if summary else None
 
 
 async def document_context(incident_id: IncidentId) -> dict[str, Any]:
@@ -112,7 +112,7 @@ async def update_from_report(record: Incident, report: IncidentReport) -> None:
     markdown = f"# {record.title or record.channel_name or 'Incident'}\n\n" + _findings(report)
     markdown = _linked_markdown(markdown, [item.model_dump() for item in report.evidence])
     await preserve_metadata(record)
-    await put_value(SUMMARIES, record.id, {"markdown": markdown})
+    await SUMMARIES.put(record.id, IncidentSummary(markdown=markdown))
     await Topic.INCIDENTS.invalidate(key=record.id)
 
 
