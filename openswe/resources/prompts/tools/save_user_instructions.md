@@ -1,19 +1,23 @@
 Save the triggering user's standing instructions: their personal memory.
 
-Use this whenever the user asks you to remember something for their future
-runs: a behavioural preference ("always …", "never …", "from now on …"), or
-a fact about how they work, such as which repository they mean by a nickname
-("the GTM agent repo is `langchain-ai/ai-sdr`"). It is personal, not shared:
-only this user's future runs use it, and nobody else's. If the user wants
-guidance for everyone, or personal versus shared scope is unclear, ask before
-calling this tool.
+Do not call this by default. Call it only when the user asks you to remember
+something for them personally ("remember this for me", "save it to my personal
+memory", "from now on, when I say …"), whether a behavioural preference or a
+fact about how they work, such as which repository they mean by a nickname. A
+bare "remember this", or anything that could be meant for the whole team, is
+not enough: ask whether they want it in their personal memory or as shared
+guidance before calling this tool.
+
+It is personal, not shared: only this user's future runs act on it, never
+anyone else's.
 
 Where it surfaces: as `standing_instructions` in this user's `person` context
-block, in every thread they post in from any surface (Slack, the dashboard,
-GitHub). It applies only to work done for their requests, never to other
-people's messages, though anyone else in that thread can read it. It does not
-reach threads this user never posts in, such as automations or other people's
-threads.
+block, in every thread they post in from any surface (Slack DMs, Slack
+channels, the dashboard, GitHub). That includes shared contexts: in a thread
+with other participants, or a public channel, everyone who can read the thread
+can read it, even though it applies only to work done for this user's requests.
+It does not reach threads this user never posts in, such as automations or
+other people's threads. Never save anything sensitive here.
 
 Do not save one-off task details or the current conversation, which belong to
 this thread alone, or preferences about other users.
