@@ -1,4 +1,4 @@
-"""The reader's "Looks good": approve what is on screen, then show what comes next.
+"""The reader's "Next": approve what is on screen, then show what comes next.
 
 Only the button approves. A click approves what it was clicked on right away,
 then posts the reader's next planned chunk, or Other once every chunk is done,
@@ -12,7 +12,7 @@ import logging
 from collections import Counter
 
 from openswe.prompts import prompt
-from openswe.review_guide.buttons import LOOKS_GOOD
+from openswe.review_guide.buttons import NEXT
 from openswe.review_guide.github import fetch_head
 from openswe.review_guide.launch import dispatch_guide_run
 from openswe.review_guide.messages import post_with_buttons, refresh_progress, retire
@@ -36,7 +36,7 @@ async def _turn_running(thread_id: str) -> bool:
 async def approve_click(
     session: ReviewGuideSession, walk: Walk, message_ts: str
 ) -> Approval | None:
-    """Record "Looks good" on ``message_ts`` if it is still on screen; returns what it approved."""
+    """Record "Next" on ``message_ts`` if it is still on screen; returns what it approved."""
     shown = walk.on_screen
     approval = walk.approve(message_ts)
     if approval is None or shown is None:
@@ -45,16 +45,16 @@ async def approve_click(
         Counter(line_key(ref.path, ref.sign, ref.text) for ref in approval.lines)
     )
     await session.save_walk(walk)
-    await retire(session.slack_channel_id, shown.message_ts, shown.message_text, "✓ Looks good")
+    await retire(session.slack_channel_id, shown.message_ts, shown.message_text, "✓ Seen")
     return approval
 
 
 async def _guide_turn(session: ReviewGuideSession, approve_ts: str = "") -> None:
-    await dispatch_guide_run(session, prompt("review-guide/looks-good"), approve_ts=approve_ts)
+    await dispatch_guide_run(session, prompt("review-guide/next"), approve_ts=approve_ts)
 
 
 async def _post(session: ReviewGuideSession, walk: Walk, shown: OnScreen) -> bool:
-    message_ts = await post_with_buttons(session, shown.message_text, [LOOKS_GOOD])
+    message_ts = await post_with_buttons(session, shown.message_text, [NEXT])
     if not message_ts:
         return False
     shown.message_ts = message_ts
@@ -64,12 +64,10 @@ async def _post(session: ReviewGuideSession, walk: Walk, shown: OnScreen) -> boo
 
 
 async def advance(channel_id: str, message_ts: str) -> None:
-    """Handle a click on "Looks good" on the message at ``message_ts``."""
+    """Handle a click on "Next" on the message at ``message_ts``."""
     session = await ReviewGuideSession.for_channel(channel_id)
     if session is None or session.closed:
-        logger.info(
-            "Ignoring Looks good in a closed review guide", extra={"slack_channel": channel_id}
-        )
+        logger.info("Ignoring Next in a closed review guide", extra={"slack_channel": channel_id})
         return
     # A turn in flight owns the walk, and a pause waits for the pull request's new head.
     if session.paused_message_ts or await _turn_running(session.thread_id):
@@ -78,7 +76,7 @@ async def advance(channel_id: str, message_ts: str) -> None:
     walk = session.walk
     if walk is None or await approve_click(session, walk, message_ts) is None:
         logger.info(
-            "Ignoring Looks good on a message no longer on screen",
+            "Ignoring Next on a message no longer on screen",
             extra={"agent_thread_id": session.thread_id},
         )
         return

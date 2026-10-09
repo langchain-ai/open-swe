@@ -850,34 +850,56 @@ async def _release_picks(
             extra={"request_id": str(request.id), "github_login": reviewer.github_login},
         )
         await _unrequest_github_review(request, pull, reviewer.github_login)
-        if reviewer.user.slack_user_id:
-            text = (
-                f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
-                "Open SWE removed you as a reviewer."
-            )
-            origin = request.dm_origin
-            await send_dm(
-                reviewer.user.slack_user_id,
-                text,
-                blocks=block_payload(
-                    [
-                        section(text),
-                        *await origin_footer(
-                            request.thread_id, origin.location if origin else None
-                        ),
-                    ]
-                ),
-                origin=origin,
-            )
+        await _close_pick(
+            request,
+            reviewer,
+            f"You no longer need to review {label} *{escape(pr.title)}*: {reason}. "
+            "Open SWE removed you as a reviewer.",
+        )
     return await HumanReviewRequest.get(request.id) or current
 
 
-async def drop_picks(
-    request: HumanReviewRequest, user_ids: set[UUID], message: str, *, expired: bool = False
-) -> list[HumanReviewParticipant]:
-    """Withdraw pending picks of ``user_ids`` from the card and GitHub, and DM each ``message``.
+async def _close_pick(
+    request: HumanReviewRequest, participant: HumanReviewParticipant, text: str
+) -> None:
+    """Say on a pending pick's DM why it ended, which does not notify; otherwise DM ``text``."""
+    slack_user_id = participant.user.slack_user_id
+    if not slack_user_id:
+        return
+    # Someone who accepted may be partway through the review, so they get a notification.
+    message = participant.pick_message if participant.decision != "review" else None
+    if message is not None and await message.show(text):
+        await note_for_concierge(
+            slack_user_id,
+            message.channel_id,
+            prompt("slack/concierge-dm-edited", text=message.text, status=text),
+        )
+        return
+    origin = request.dm_origin
+    await send_dm(
+        slack_user_id,
+        text,
+        blocks=block_payload(
+            [
+                section(text),
+                *await origin_footer(request.thread_id, origin.location if origin else None),
+            ]
+        ),
+        origin=origin,
+    )
 
-    An ``expired`` pick stays on the request so it is never picked for it again.
+
+async def drop_picks(
+    request: HumanReviewRequest,
+    user_ids: set[UUID],
+    message: str | None,
+    *,
+    expired: bool = False,
+) -> list[HumanReviewParticipant]:
+    """Withdraw pending picks of ``user_ids`` from the card and GitHub, and tell each ``message``.
+
+    An ``expired`` pick stays on the request so it is never picked for it again. Without a
+    ``message`` nobody is told, for a pick the person ended themselves.
     """
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None:
@@ -909,21 +931,8 @@ async def drop_picks(
                 "expired": expired,
             },
         )
-        if pick.user.slack_user_id:
-            origin = request.dm_origin
-            await send_dm(
-                pick.user.slack_user_id,
-                message,
-                blocks=block_payload(
-                    [
-                        section(message),
-                        *await origin_footer(
-                            request.thread_id, origin.location if origin else None
-                        ),
-                    ]
-                ),
-                origin=origin,
-            )
+        if message is not None:
+            await _close_pick(request, pick, message)
     current = await HumanReviewRequest.get(request.id)
     if current is not None and current.state == "open":
         await refresh_card(current)

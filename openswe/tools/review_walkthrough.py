@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Self
 
-from openswe.review_guide.buttons import APPROVE, LOOKS_GOOD, MARK_READY
+from openswe.review_guide.buttons import APPROVE, MARK_READY, NEXT
 from openswe.review_guide.context import GuideContext, GuideUnavailableError
 from openswe.review_guide.github import fetch_head
 from openswe.review_guide.messages import Stage, refresh_progress, retire
@@ -96,8 +96,8 @@ class _State:
             await retire(self.channel_id, shown.message_ts, shown.message_text, note)
 
     async def post(self, shown: OnScreen) -> dict[str, Any]:
-        """Put ``shown`` on screen with its "Looks good" button, replacing what was there."""
-        posted = await slack_reply(shown.message_text, "progress", options=[LOOKS_GOOD])
+        """Put ``shown`` on screen with its "Next" button, replacing what was there."""
+        posted = await slack_reply(shown.message_text, "progress", options=[NEXT])
         if posted["success"] is not True:
             return posted
         replaced = self.walk.withdraw()

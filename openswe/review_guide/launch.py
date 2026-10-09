@@ -61,6 +61,7 @@ class GuideStart(BaseModel):
     team_id: str = ""
     workspace_slug: str | None = None
     invite: list[str] = []
+    is_private: bool = False
 
 
 class StartedGuide(BaseModel):
@@ -95,7 +96,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         else "reviewer"
     )
     client = langgraph_client()
-    thread_id = await _fork(client, start.source_thread_id, login)
+    thread_id = await _fork(client, start.source_thread_id, login, is_private=start.is_private)
     try:
         channel_id = await create_code_channel(
             name=f"Review {start.repo}#{start.number}: {head.title}"[:200],
@@ -103,6 +104,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             origin_channel_id=start.origin_channel_id,
             origin_message_ts=start.origin_message_ts,
             team_id=start.team_id,
+            is_private=start.is_private,
         )
     except SlackRequestError as exc:
         raise GuideStartError(f"Slack could not create the code channel: {exc}") from exc
@@ -184,7 +186,9 @@ class _SourceMetadata(BaseModel):
     proxy_config: object = Field(default=None, alias=SANDBOX_PROXY_CONFIG_METADATA_KEY)
 
 
-async def _fork(client: LangGraphClient, source_thread_id: str, login: str) -> str:
+async def _fork(
+    client: LangGraphClient, source_thread_id: str, login: str, *, is_private: bool = False
+) -> str:
     """A copy of the asking thread that shares its sandbox, so the walkthrough knows its work.
 
     The copy keeps every checkpoint but none of the source's other metadata: its
@@ -201,7 +205,7 @@ async def _fork(client: LangGraphClient, source_thread_id: str, login: str) -> s
             thread_id=copied.thread_id,
             metadata={
                 **dict.fromkeys(copied.metadata),
-                "visibility": "public",
+                "visibility": "private" if is_private else "public",
                 "owner_type": "user",
                 "owner_login": login,
                 "created_at_ms": int(time.time() * 1000),
@@ -234,7 +238,7 @@ async def dispatch_guide_run(
 ) -> None:
     """Start a walkthrough turn no person typed, so it cannot approve the pull request.
 
-    ``approve_ts`` names a message whose "Looks good" the turn records before the model runs.
+    ``approve_ts`` names a message whose "Next" the turn records before the model runs.
     """
     location = SlackThreadRef(
         channel_id=session.slack_channel_id, thread_ts=CODE_CHANNEL_SESSION_TS

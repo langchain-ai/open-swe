@@ -1,1 +1,0 @@
-The reader clicked "Looks good" and the plan had nothing ready to show them next. Show what comes next: `walkthrough_show_chunk` when a chunk is left for them, otherwise place the next one with `walkthrough_plan_chunk` and show it; `walkthrough_show_other` once every line is in a done chunk or Other; `walkthrough_end` once Other is approved.

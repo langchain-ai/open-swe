@@ -1,4 +1,4 @@
-Show the reader a chunk from the plan with your explanation, its code and a "Looks good" button.
+Show the reader a chunk from the plan with your explanation, its code and a "Next" button.
 
 - `number`: the chunk to show, as the walkthrough status numbers them, for when the reader asks to jump ahead or go back. Leave it out to show the reader's next chunk.
 

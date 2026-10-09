@@ -2,7 +2,7 @@
 
 - The progress message is the channel's summary message, which Slack shows in
   the thread the channel came from.
-- A chunk's "Looks good" button is taken away once the chunk is settled, so only
+- A chunk's "Next" button is taken away once the chunk is settled, so only
   what is on screen ever offers it.
 - A pull request update pauses the walkthrough with a note, until the reader
   says to go on.
