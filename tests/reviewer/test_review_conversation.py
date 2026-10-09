@@ -201,6 +201,9 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
     )
     assert [c.id for c in resolved.comments] == [21, 22]
     assert resolved.comments[0].body == "note 21"
+    # Open SWE's marker is anyone's to paste; it must not credit the comment to a bot.
+    author = resolved.comments[0].author
+    assert author is not None and (author.login, author.bot) == ("carol", False)
     assert (outdated.id, outdated.node_id, outdated.resolved, outdated.outdated) == (
         23,
         None,

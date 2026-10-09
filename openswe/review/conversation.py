@@ -107,48 +107,7 @@ class _ThreadState(BaseModel):
     comments: _ThreadRootComments = _ThreadRootComments()
 
 
-class _PageInfo(BaseModel):
-    hasNextPage: bool = False
-    endCursor: str | None = None
-
-
-class _ThreadStatesPage(BaseModel):
-    pageInfo: _PageInfo = _PageInfo()
-    nodes: list[_ThreadState] = []
-
-
-class _ThreadStatesPullRequest(BaseModel):
-    reviewThreads: _ThreadStatesPage = _ThreadStatesPage()
-
-
-class _ThreadStatesRepository(BaseModel):
-    pullRequest: _ThreadStatesPullRequest
-
-
-class _ThreadStatesData(BaseModel):
-    repository: _ThreadStatesRepository
-
-
-_THREAD_STATES = """
-query($owner: String!, $repo: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $after) {
-        pageInfo { hasNextPage endCursor }
-        nodes { id isResolved isOutdated comments(first: 1) { nodes { fullDatabaseId } } }
-      }
-    }
-  }
-}
-"""
-
-_RESOLVE_THREAD = """
-mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }
-"""
-
-_UNRESOLVE_THREAD = """
-mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }
-"""
+_THREAD_STATES = TypeAdapter(list[_ThreadState])
 
 
 @contextmanager
@@ -312,25 +271,12 @@ class ReviewThread(BaseModel):
     @staticmethod
     async def states(pull: PullRequestClient) -> dict[int, _ThreadState]:
         """Each thread's node id and resolution, keyed by its first comment's id."""
-        states: dict[int, _ThreadState] = {}
-        cursor: str | None = None
-        while True:
-            data = _ThreadStatesData.model_validate(
-                await pull.repo.graphql(_THREAD_STATES, {"number": pull.number, "after": cursor})
-            )
-            page = data.repository.pullRequest.reviewThreads
-            for thread in page.nodes:
-                if thread.comments.nodes:
-                    states[int(thread.comments.nodes[0].fullDatabaseId)] = thread
-            if not page.pageInfo.hasNextPage or not page.pageInfo.endCursor:
-                return states
-            cursor = page.pageInfo.endCursor
-
-    @staticmethod
-    async def set_resolved(pull: PullRequestClient, node_id: str, resolved: bool) -> None:
-        await pull.repo.github.graphql(
-            _RESOLVE_THREAD if resolved else _UNRESOLVE_THREAD, {"id": node_id}
-        )
+        threads = _THREAD_STATES.validate_python(await pull.review_threads())
+        return {
+            int(thread.comments.nodes[0].fullDatabaseId): thread
+            for thread in threads
+            if thread.comments.nodes
+        }
 
 
 _ISSUE_COMMENTS = TypeAdapter(list[_GitHubIssueComment])
@@ -492,8 +438,8 @@ async def api_set_review_thread_resolution(
 ) -> None:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
     async with GitHubClient.as_user(session["sub"]) as github:
-        await ReviewThread.set_resolved(
-            github.repo(owner, repo).pull_request(pr_number),
-            thread_node_id,
-            resolution.resolved,
+        await (
+            github.repo(owner, repo)
+            .pull_request(pr_number)
+            .set_thread_resolved(thread_node_id, resolution.resolved)
         )
