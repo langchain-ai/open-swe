@@ -154,8 +154,16 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             base_sha=cfg.base_sha,
             head_sha=cfg.head_sha,
         )
-        workspace = await _workspace(backend, cfg)
-        if workspace.complete:
+        try:
+            workspace = await _workspace(backend, cfg)
+        except PlanMovedError:
+            # A newer head's scout owns the plan now.
+            logger.info(
+                "Review scout head is stale; nothing to plan",
+                extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+            )
+            workspace = None
+        if workspace is None or workspace.complete:
             return {
                 "work_dir": work_dir,
                 "rendered_system_prompt": "",
@@ -225,7 +233,12 @@ class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
         try:
             workspace = await _workspace(get_cached_sandbox_backend(self._thread_id), cfg)
             settled = await workspace.settle()
-        except CheckoutError, PlannerUnavailableError, PlanMovedError:
+        except PlanMovedError:
+            logger.info(
+                "Review scout head is stale; leaving the plan to the newer head", extra=extra
+            )
+            return
+        except CheckoutError, PlannerUnavailableError:
             logger.exception("Review scout could not finish its plan", extra=extra)
             return
         if summary := state.get("human_input_summary", ""):

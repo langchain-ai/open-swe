@@ -3,7 +3,8 @@
 Any agent with a checkout of the PR can plan: the review scout in the
 background, or a review guide that got ahead of it. Opening the workspace
 carries the stored plan to the checkout's head first, so planners only ever
-place lines that are new there.
+place lines that are new there. Only a checkout at the PR's current head may
+carry it; one pinned before a push raises ``PlanMovedError``.
 """
 
 from collections.abc import Callable
@@ -12,6 +13,8 @@ from typing import Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
+from openswe.github.http import GitHubAppUnavailable
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.walkthrough.checkout import PinnedCheckout
 from openswe.walkthrough.diff import FileChange
@@ -32,6 +35,16 @@ from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
 class PlannerUnavailableError(RuntimeError):
     """The checkout is not pinned to the pull request yet."""
+
+
+async def _current_head(pull_request: PullRequest) -> str:
+    try:
+        async with PullRequestClient.as_app(
+            pull_request.owner, pull_request.repo, pull_request.number
+        ) as pull:
+            return await pull.head_sha()
+    except GitHubAppUnavailable as exc:
+        raise PlannerUnavailableError("GitHub is unavailable; try again next turn") from exc
 
 
 @dataclass
@@ -71,6 +84,9 @@ class PlanWorkspace:
         stored = await Walkthrough.get(pull_request.id)
         if stored is not None and stored.head_sha == head_sha:
             return stored.plan
+        # A checkout pinned before a push must not carry a newer plan back to its old head.
+        if stored is not None and await _current_head(pull_request) != head_sha:
+            raise PlanMovedError("the pull request moved on; start from its new head")
         plan = (
             stored.plan.carried_to(head_sha, changes)
             if stored is not None

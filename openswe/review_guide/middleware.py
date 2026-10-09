@@ -36,7 +36,7 @@ from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.walkthrough.checkout import PinnedCheckout
 from openswe.walkthrough.plan import LineRef
 from openswe.walkthrough.planner import PlanWorkspace
-from openswe.walkthrough.record import Walkthrough
+from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,18 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 extra={"agent_thread_id": self._thread_id, "slack_error": str(exc)},
             )
         await resume(session)
-        workspace = await PlanWorkspace.open(pr, checkout)
+        try:
+            workspace = await PlanWorkspace.open(pr, checkout)
+        except PlanMovedError:
+            # A push landed after the head was read; the update pauses the walkthrough.
+            logger.info(
+                "Review walkthrough head moved while its turn started",
+                extra={"agent_thread_id": self._thread_id, "pr_number": pr.number},
+            )
+            return {
+                "review_guide_rules": rules,
+                "messages": [HumanMessage(content=prompt("review-guide/moved-mid-turn"))],
+            }
         if not workspace.complete:
             await self._plan_in_background(session, head)
         walk = session.walk
