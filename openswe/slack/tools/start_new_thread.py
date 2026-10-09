@@ -310,6 +310,11 @@ async def slack_breakout_thread(
             "next_step": "Share the dashboard_url with the requester; the thread is web-only.",
         }
 
+    if channel_id:
+        destination_channel = await SlackChannel.resolve(channel_id)
+        if destination_channel is None:
+            return {"success": False, "error": "Requested breakout channel was not found"}
+        channel_id = destination_channel.id
     destination = await resolve_breakout_destination(
         source_channel, channel_id, workspace=cfg.workspace_slug
     )
