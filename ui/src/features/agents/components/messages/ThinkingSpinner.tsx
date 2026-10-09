@@ -1,3 +1,5 @@
+import { ThinkingState } from "@langchain/macaw-components/ThinkingState"
+
 export function ThinkingSpinner({
   isActive,
   settingUpSandbox = false,
@@ -10,17 +12,13 @@ export function ThinkingSpinner({
   if (!isActive) return null
 
   return (
-    <div
-      className="my-2 flex items-center gap-2"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      <span className="shimmer-text text-xs">
-        {settingUpSandbox
+    <ThinkingState
+      className="my-2"
+      label={
+        settingUpSandbox
           ? "Agent is setting up the environment…"
-          : (label ?? "Working…")}
-      </span>
-    </div>
+          : (label ?? "Working…")
+      }
+    />
   )
 }
