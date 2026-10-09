@@ -1,6 +1,7 @@
 """PostgreSQL regressions for clicks on an expedited review card."""
 
 import re
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -563,3 +564,37 @@ async def test_author_dm_success_is_quiet_only_when_the_status_card_updates(
     updated.return_value = True
     await click("D_ADA")
     assert "nope" in ephemeral.call_args.args[2]
+
+
+async def test_failed_pending_restore_preserves_rejected_vote(
+    harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    approval = await open_approval(awaiting_ready=True)
+    answers: list[Outcome] = []
+
+    async def answer(
+        request_id: str,
+        *,
+        handle: Callable[[HumanReviewRequest], Awaitable[Outcome]],
+        **kwargs: object,
+    ) -> Outcome:
+        outcome = await handle(approval)
+        answers.append(outcome)
+        return outcome
+
+    monkeypatch.setattr(voting, "answer_click", answer)
+    monkeypatch.setattr(
+        voting,
+        "update_slack_message",
+        AsyncMock(side_effect=[True, SlackRequestError("ratelimited")]),
+    )
+    await voting.process_vote(
+        str(approval.id),
+        decision="ready",
+        person={"id": "slack:U_GRACE"},
+        channel_id="C1",
+        thread_ts="1.0",
+        message_ts="2.0",
+        message_blocks=[{"type": "actions"}],
+    )
+    assert answers[0].message == "Only the pull request's author can mark it ready for review."

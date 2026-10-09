@@ -240,22 +240,42 @@ async def process_vote(
                 await update_slack_message(channel_id, message_ts, message_text, blocks=pending)
             except SlackRequestError:
                 logger.warning("Could not acknowledge expedited review click", exc_info=True)
+        original = (
+            approval.state,
+            approval.awaiting_ready,
+            approval.approved,
+            approval.sent_elsewhere,
+        )
+        completed = False
         try:
-            return await apply(approval)
+            outcome = await apply(approval)
+            completed = True
+            return outcome
         finally:
             if message_ts and message_blocks:
-                current = await HumanReviewRequest.get(approval.id)
-                if current is not None:
-                    if current.state == "open" and current.awaiting_ready:
+                try:
+                    current = await HumanReviewRequest.get(approval.id)
+                    if current is not None and (
+                        (
+                            current.state,
+                            current.awaiting_ready,
+                            current.approved,
+                            current.sent_elsewhere,
+                        )
+                        == original
+                        or (current.awaiting_ready and current.state == "open")
+                    ):
                         await update_slack_message(
                             channel_id, message_ts, message_text, blocks=message_blocks
                         )
-                    else:
+                    elif current is not None and not completed:
                         await ReviewCard(current).refresh(
                             outcome=current.detail or current.state
                             if current.state != "open"
                             else None,
                         )
+                except Exception:
+                    logger.warning("Could not restore expedited review click", exc_info=True)
 
     async def apply(approval: HumanReviewRequest) -> Outcome:
         if channel_id == approval.slack_dm_channel_id:
