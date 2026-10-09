@@ -1,8 +1,3 @@
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
 import type { OpenPullRequest } from "@/lib/api"
 
 const inlineLimit = 3
@@ -14,7 +9,7 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
   return (
     <div className="space-y-1 text-xs">
       {pr.failingChecks.length > 0 && (
-        <p className="text-destructive">
+        <p className="text-error-secondary">
           {pr.failingChecks.slice(0, inlineLimit).map((name, index) => (
             <span key={`${name}-${index}`}>
               {index > 0 && <span aria-hidden="true"> · </span>}
@@ -24,32 +19,26 @@ export function PullRequestChecks({ pr }: { pr: OpenPullRequest }) {
         </p>
       )}
       {overflow.length > 0 && (
-        <Collapsible className="text-destructive">
-          <CollapsibleTrigger className="cursor-pointer">
-            +{overflow.length} more
-          </CollapsibleTrigger>
-          <CollapsibleContent keepMounted>
-            <ul className="mt-1 space-y-1">
-              {overflow.map((name, index) => (
-                <li key={`${name}-${index}`}>{name}</li>
-              ))}
-            </ul>
-          </CollapsibleContent>
-        </Collapsible>
+        <details className="text-error-secondary">
+          <summary className="cursor-pointer">+{overflow.length} more</summary>
+          <ul className="mt-1 space-y-1">
+            {overflow.map((name, index) => (
+              <li key={`${name}-${index}`}>{name}</li>
+            ))}
+          </ul>
+        </details>
       )}
       {pr.pendingChecks.length > 0 && (
-        <Collapsible className="text-muted-foreground">
-          <CollapsibleTrigger className="cursor-pointer">
+        <details className="text-secondary">
+          <summary className="cursor-pointer">
             {pr.pendingChecks.length} pending
-          </CollapsibleTrigger>
-          <CollapsibleContent keepMounted>
-            <ul className="mt-1">
-              {pr.pendingChecks.map((name, index) => (
-                <li key={`${name}-${index}`}>{name}</li>
-              ))}
-            </ul>
-          </CollapsibleContent>
-        </Collapsible>
+          </summary>
+          <ul className="mt-1">
+            {pr.pendingChecks.map((name, index) => (
+              <li key={`${name}-${index}`}>{name}</li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   )

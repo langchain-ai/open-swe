@@ -6,9 +6,9 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import directory, queries
-from agent.database import analytics as database
-from agent.database import postgres
+from openswe.analytics import directory, queries
+from openswe.database import analytics as database
+from openswe.database import postgres
 from tests.analytics.conftest import initialize_database
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)

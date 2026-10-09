@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-threads_tool = importlib.import_module("agent.tools.threads")
+from openswe.message_queue import QueuedMessage
+
+threads_tool = importlib.import_module("openswe.tools.threads")
 
 
 def _actor(*, login: str = "octocat", admin: bool = False) -> object:
@@ -133,15 +135,13 @@ class _DetailClient:
             ]
 
         self.runs = SimpleNamespace(list=AsyncMock(side_effect=_list_runs))
-        self.store = SimpleNamespace(
-            get_item=AsyncMock(return_value={"value": {"messages": [{"content": "queued"}]}})
-        )
 
 
 async def test_get_thread_counts_pending_run_outside_history_window(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    await QueuedMessage.put("thread-1", "queued")
     client = _DetailClient()
 
     async def _list_runs(*args: object, **kwargs: object) -> list[dict[str, object]]:
@@ -182,8 +182,8 @@ async def test_get_thread_counts_pending_run_outside_history_window(
 
     # The recent-history fetch (bounded to _MAX_RUNS + 1) has no pending run
     # in it, but the thread still has one pending, counted via the
-    # independent status="pending" fetch. The legacy queue also has one
-    # ("queued" in _DetailClient.store), so the total is 2.
+    # independent status="pending" fetch. The message queue also has one, so
+    # the total is 2.
     assert result["queued_message_count"] == 2
 
 
@@ -334,35 +334,40 @@ async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPat
     cancel.assert_not_awaited()
 
 
-async def test_manage_thread_queues_message_for_busy_thread(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("result", "mode"),
+    [
+        ({"run_id": "run-2", "queued": True}, "queued"),
+        ({"run_id": "run-1", "message_id": "m-1", "steered": True}, "steered"),
+    ],
+)
+async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
+    monkeypatch: pytest.MonkeyPatch, result: dict[str, object], mode: str
 ) -> None:
-    proxy = AsyncMock()
+    reply = json.dumps({"id": 1, "type": "success", "result": result}).encode()
+    proxy = AsyncMock(return_value=(200, reply, "application/json"))
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
         threads_tool,
         "get_dashboard_thread",
         AsyncMock(return_value={"id": "thread-1", "planMode": False}),
     )
-    monkeypatch.setattr(
-        threads_tool,
-        "send_dashboard_message",
-        AsyncMock(return_value={"id": "thread-1", "status": "running", "messages": []}),
-    )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
 
-    result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
+    sent = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
-    assert result["success"] is True
-    assert result["mode"] == "queued"
-    proxy.assert_not_awaited()
+    assert sent == {"success": True, "mode": mode, "run_id": result["run_id"]}
 
 
 async def test_manage_thread_starts_idle_message_with_fixed_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     proxy = AsyncMock(
-        return_value=(200, b'{"type":"success","run_id":"run-1"}', "application/json")
+        return_value=(
+            200,
+            b'{"id":1,"type":"success","result":{"run_id":"run-1"}}',
+            "application/json",
+        )
     )
     monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
     monkeypatch.setattr(
@@ -370,17 +375,13 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
         "get_dashboard_thread",
         AsyncMock(return_value={"id": "thread-1", "planMode": True}),
     )
-    monkeypatch.setattr(
-        threads_tool,
-        "send_dashboard_message",
-        AsyncMock(side_effect=HTTPException(409, "thread is idle")),
-    )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
 
     result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
     assert result["success"] is True
     assert result["mode"] == "started"
+    assert result["run_id"] == "run-1"
     awaited = proxy.await_args
     assert awaited is not None
     command = json.loads(awaited.args[2])

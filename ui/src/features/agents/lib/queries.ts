@@ -1,4 +1,9 @@
 import {
+  threadFamily,
+  sidebarRefreshInterval,
+  sidebarThreadForMode,
+} from "./sidebarThreads"
+import {
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -29,22 +34,28 @@ import type {
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
-import { INVALIDATION_TOPICS } from "@/lib/invalidations/topics"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { chatRoutes } from "@/lib/chatRoutes"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { reportError } from "@/lib/errorReporting"
+import { useProfile } from "@/lib/profile"
 
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
   pinned: ["agent-threads", "lists", "pinned"] as const,
-  repos: (params: { includeResolved: boolean; includeAutomations: boolean }) =>
-    ["agent-threads", "lists", "repos", params] as const,
+  repos: (params: {
+    includeResolved: boolean
+    includeAutomations: boolean
+    owned: boolean
+  }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   pullRequestStatus: (threadId: string) =>
     ["agent-threads", threadId, "pull-request-status"] as const,
+  queuedMessages: (threadId: string) =>
+    ["agent-threads", threadId, "queued-messages"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -66,8 +77,12 @@ function patchAgentThread(
   threadId: string,
   patch: Partial<AgentThread>
 ): void {
-  const update = (thread: AgentThread) =>
-    thread.id === threadId ? { ...thread, ...patch } : thread
+  const update = (thread: AgentThread): AgentThread =>
+    thread.id === threadId
+      ? { ...thread, ...patch }
+      : thread.taskWorkers
+        ? { ...thread, taskWorkers: thread.taskWorkers.map(update) }
+        : thread
   queryClient.setQueryData<AgentThread>(
     agentThreadKeys.detail(threadId),
     (prev) => (prev ? update(prev) : prev)
@@ -124,18 +139,21 @@ function findCachedAgentThread(
     ) ??
     queryClient
       .getQueryData<Array<AgentThread>>(agentThreadKeys.pinned)
-      ?.find(matches) ??
+      ?.flatMap(threadFamily)
+      .find(matches) ??
     queryClient
       .getQueriesData<InfiniteData<ThreadsPage>>({
         queryKey: ["agent-threads", "lists", "infinite-pages"],
       })
       .flatMap(([, data]) => data?.pages.flatMap((page) => page.items) ?? [])
+      .flatMap(threadFamily)
       .find(matches) ??
     queryClient
       .getQueriesData<ThreadsPage>({
         queryKey: ["agent-threads", "lists", "page"],
       })
       .flatMap(([, data]) => data?.items ?? [])
+      .flatMap(threadFamily)
       .find(matches)
   )
 }
@@ -166,7 +184,24 @@ function updateThreadPageResolved(
   resolved: boolean
 ): ThreadsPage {
   const thread = page.items.find((item) => item.id === threadId)
-  if (!thread) return page
+  if (!thread)
+    return {
+      ...page,
+      items: page.items.map((item) =>
+        item.taskWorkers
+          ? {
+              ...item,
+              taskWorkers: item.taskWorkers.flatMap((worker) =>
+                worker.id !== threadId
+                  ? [worker]
+                  : params.resolved != null && params.resolved !== resolved
+                    ? []
+                    : [{ ...worker, resolved }]
+              ),
+            }
+          : item
+      ),
+    }
   if (params.resolved != null && params.resolved !== resolved) {
     return {
       ...page,
@@ -274,10 +309,12 @@ export function markAgentThreadViewed(
   queryClient: QueryClient,
   threadId: string
 ): void {
-  const view = (thread: AgentThread) =>
+  const view = (thread: AgentThread): AgentThread =>
     thread.id === threadId && !thread.viewed
       ? { ...thread, viewed: true, viewedAt: Date.now() }
-      : thread
+      : thread.taskWorkers
+        ? { ...thread, taskWorkers: thread.taskWorkers.map(view) }
+        : thread
   const viewList = (threads: Array<AgentThread>) => threads.map(view)
 
   // Patched as already-stale: the detail GET is what marks the thread viewed
@@ -340,8 +377,12 @@ export function setAgentThreadResolved(
   threadId: string,
   resolved: boolean
 ): void {
-  const update = (thread: AgentThread) =>
-    thread.id === threadId ? { ...thread, resolved } : thread
+  const update = (thread: AgentThread): AgentThread =>
+    thread.id === threadId
+      ? { ...thread, resolved }
+      : thread.taskWorkers
+        ? { ...thread, taskWorkers: thread.taskWorkers.map(update) }
+        : thread
   const cachedThread = findCachedAgentThread(queryClient, threadId)
 
   queryClient.setQueryData<AgentThread>(
@@ -427,7 +468,7 @@ export function useWorkspaceOptions(enabled = true) {
     queryFn: api.listWorkspaceOptions,
     staleTime: 60_000,
     enabled,
-    meta: { invalidatedBy: [INVALIDATION_TOPICS.workspaces] },
+    meta: { invalidatedBy: [invalidationTopic("workspaces")] },
   })
 }
 
@@ -559,7 +600,7 @@ export function useSeedAgentThreadDetails(
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    for (const thread of threads) {
+    for (const thread of threads.flatMap(threadFamily)) {
       if (thread.id === activeThreadId) continue
       // Seed as already-stale: the detail GET is what marks a thread viewed
       // server-side, so opening a seeded entry must still refetch despite the
@@ -576,41 +617,48 @@ export const SIDEBAR_PAGE_SIZE = 10
 function sidebarPageParams({
   includeAutomations,
   includeResolved,
+  owned,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
+  owned: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
+    hierarchy: false,
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
+    ...(owned ? { owned } : {}),
   }
 }
 
 export function useSidebarPinnedThreads({ enabled = true } = {}) {
+  const hierarchy = useProfile().data?.experimental_task_coordination === true
   return useQuery({
     queryKey: agentThreadKeys.pinned,
     queryFn: agentsApi.listPinnedThreads,
     enabled,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
+    select: (threads) =>
+      threads.map((thread) => sidebarThreadForMode(thread, hierarchy)),
     refetchInterval: (query) =>
-      query.state.data?.some((thread) => thread.status === "running")
-        ? 2000
-        : false,
+      sidebarRefreshInterval(query.state.data, hierarchy),
   })
 }
 
 export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   enabled = true,
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   enabled?: boolean
 }) {
-  const params = { includeAutomations, includeResolved }
+  const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
     queryKey: agentThreadKeys.repos(params),
@@ -633,7 +681,10 @@ export function useSidebarActiveThread({
   includeResolved?: boolean
   enabled?: boolean
 }): AgentThread | undefined {
-  const loaded = loadedThreads.some((thread) => thread.id === activeThreadId)
+  const hierarchy = useProfile().data?.experimental_task_coordination === true
+  const loaded = loadedThreads
+    .flatMap((thread) => (hierarchy ? threadFamily(thread) : [thread]))
+    .some((thread) => thread.id === activeThreadId)
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
@@ -641,7 +692,11 @@ export function useSidebarActiveThread({
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
-      current.state.data?.status === "running" ? 2000 : false,
+      sidebarRefreshInterval(
+        current.state.data ? [current.state.data] : [],
+        hierarchy
+      ),
+    select: (thread) => sidebarThreadForMode(thread, hierarchy),
     retry: false,
   })
   return !loaded && (!query.data?.resolved || includeResolved)
@@ -654,12 +709,17 @@ function useSidebarThreadPages(
   enabled: boolean
 ) {
   const hydrated = useSidebarPrefsHydrated()
+  const hierarchy = useProfile().data?.experimental_task_coordination === true
+  params = { ...params, hierarchy }
   const query = useInfiniteThreadsPages(params, {
     enabled: enabled && hydrated,
     pollWhileRunning: true,
   })
   return {
-    items: query.data?.pages.flatMap((page) => page.items) ?? [],
+    items:
+      query.data?.pages.flatMap((page) =>
+        page.items.map((thread) => sidebarThreadForMode(thread, hierarchy))
+      ) ?? [],
     hasMore: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
     isPending: query.isPending,
@@ -675,15 +735,17 @@ export function sidebarRecentsParams({
   repoMode,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
 }: {
   repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
-    ...sidebarPageParams({ includeAutomations, includeResolved }),
+    ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
   }
@@ -693,12 +755,14 @@ export function useSidebarRecents({
   repoMode,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
   enabled = true,
 }: {
   repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -707,6 +771,7 @@ export function useSidebarRecents({
       repoMode,
       includeAutomations,
       includeResolved,
+      owned,
       sort,
     }),
     enabled
@@ -717,18 +782,20 @@ export function useSidebarRepoThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
-      ...sidebarPageParams({ includeAutomations, includeResolved }),
+      ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
       ...(repoFullName ? { repo: repoFullName } : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
@@ -736,11 +803,15 @@ export function useSidebarRepoThreads({
   )
 }
 
+// Run costs land through a deferred refresh 15s+ after a run ends (see
+// `agent_cost._RETRY_DELAYS_SECONDS`), after the running-state poll has stopped.
+const RUN_COST_REFETCH_DELAYS_MS = [20_000, 60_000, 120_000]
+
 export function useAgentThread(threadId: string) {
   const queryClient = useQueryClient()
   const queryKey = agentThreadKeys.detail(threadId)
 
-  return useQuery({
+  const query = useQuery({
     queryKey,
     queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
@@ -760,6 +831,21 @@ export function useAgentThread(threadId: string) {
     // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
+
+  const isRunning = query.data?.status === "running"
+  const { refetch } = query
+  const wasRunning = useRef(isRunning)
+  useEffect(() => {
+    const settled = wasRunning.current && !isRunning
+    wasRunning.current = isRunning
+    if (!settled) return
+    const timers = RUN_COST_REFETCH_DELAYS_MS.map((delay) =>
+      window.setTimeout(() => void refetch(), delay)
+    )
+    return () => timers.forEach(window.clearTimeout)
+  }, [isRunning, refetch])
+
+  return query
 }
 
 export function useAgentThreadPullRequestStatus(
@@ -774,6 +860,15 @@ export function useAgentThreadPullRequestStatus(
     refetchInterval: 30_000,
     refetchOnWindowFocus: "always",
     retry: false,
+  })
+}
+
+export function useAgentThreadQueuedMessages(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.queuedMessages(threadId),
+    queryFn: () => agentsApi.getThreadQueuedMessages(threadId),
+    enabled: Boolean(threadId),
+    meta: { invalidatedBy: [invalidationTopic("thread-queues", threadId)] },
   })
 }
 
@@ -1240,19 +1335,43 @@ export function useInfiniteThreadsPages(
         }
       : {}),
   })
-  const runningOffsets =
-    pagesQuery.data?.pages
-      .filter((page) =>
-        page.items.some((thread) => thread.status === "running")
-      )
-      .map((page) => page.offset) ?? []
+  const refreshPages =
+    pagesQuery.data?.pages.filter((page) =>
+      sidebarRefreshInterval(page.items, params.hierarchy)
+    ) ?? []
   const pollOffsets =
-    runningOffsets.length > 0 ? [...new Set([0, ...runningOffsets])] : []
+    refreshPages.length > 0
+      ? [...new Set([0, ...refreshPages.map((page) => page.offset)])]
+      : []
+  const idleRefreshedAt = useRef(0)
+  const discoverIdlePages = () => {
+    if (Date.now() - idleRefreshedAt.current < 30_000) return false
+    idleRefreshedAt.current = Date.now()
+    return true
+  }
+  const refreshInterval = sidebarRefreshInterval(
+    refreshPages.flatMap((page) => page.items),
+    params.hierarchy
+  )
   useQuery({
     queryKey: ["agent-thread-page-poll", params, pollOffsets],
     queryFn: async () => {
+      const offsets = discoverIdlePages()
+        ? pollOffsets
+        : [
+            ...new Set([
+              0,
+              ...refreshPages
+                .filter(
+                  (page) =>
+                    sidebarRefreshInterval(page.items, params.hierarchy) ===
+                    2000
+                )
+                .map((page) => page.offset),
+            ]),
+          ]
       const refreshed = await Promise.all(
-        pollOffsets.map((offset) =>
+        offsets.map((offset) =>
           agentsApi.listThreadsPage({ ...params, offset })
         )
       )
@@ -1298,7 +1417,7 @@ export function useInfiniteThreadsPages(
       options.pollWhileRunning &&
       pollOffsets.length > 0
     ),
-    refetchInterval: 2000,
+    refetchInterval: refreshInterval,
   })
   return pagesQuery
 }
@@ -1317,9 +1436,11 @@ export function useThreadsPage(
     enabled: options.enabled,
     placeholderData: (prev) => prev,
     refetchInterval: (query) =>
-      options.pollWhileRunning &&
-      query.state.data?.items.some((thread) => thread.status === "running")
-        ? 2000
+      options.pollWhileRunning
+        ? sidebarRefreshInterval(
+            query.state.data?.items,
+            params.hierarchy ?? false
+          )
         : false,
     ...(options.staleWhileRevalidate
       ? {

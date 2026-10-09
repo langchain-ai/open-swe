@@ -1,6 +1,17 @@
-import { Badge } from "@/components/ui/badge"
-import { statusVariants } from "../lib/status"
+import { Badge } from "@langchain/macaw-components/Badge"
 
-export function StatusPill({ status }: { status: string }) {
-  return <Badge variant={statusVariants[status] ?? "muted"}>{status}</Badge>
+import { statusColors } from "../lib/status"
+
+export function StatusPill({
+  status,
+  size = "sm",
+}: {
+  status: string
+  size?: "xs" | "sm"
+}) {
+  return (
+    <Badge size={size} color={statusColors[status] ?? "secondary"}>
+      {status}
+    </Badge>
+  )
 }

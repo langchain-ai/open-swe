@@ -5,7 +5,12 @@ import {
   useAui,
   useAuiState,
 } from "@assistant-ui/react"
-import { ArrowUp, Plus, Square, X } from "lucide-react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Select } from "@langchain/macaw-components/Select"
+import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
+import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
+import { StopIcon } from "@phosphor-icons/react/dist/ssr/Stop"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"
@@ -27,18 +32,24 @@ function Attachment() {
   )
   const image = attachment.content?.find((part) => part.type === "image")
   return (
-    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-xl border border-border p-2 text-xs">
+    <AttachmentPrimitive.Root className="flex items-center gap-2 rounded-xl border border-default p-2 text-xs">
       {(file || image?.image) && (
         <img
           ref={previewRef}
           src={image?.image}
           alt={attachment.name}
-          className="size-12 rounded object-cover"
+          className="size-12 rounded-sm object-cover"
         />
       )}
-      <span>{attachment.name}</span>
-      <AttachmentPrimitive.Remove aria-label={`Remove ${attachment.name}`}>
-        <X className="size-4" />
+      <span className="text-primary">{attachment.name}</span>
+      <AttachmentPrimitive.Remove asChild>
+        <IconButton
+          icon={XIcon}
+          label={`Remove ${attachment.name}`}
+          color="secondary"
+          variant="plain"
+          size="xs"
+        />
       </AttachmentPrimitive.Remove>
     </AttachmentPrimitive.Root>
   )
@@ -98,7 +109,7 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
 
   return (
     <ComposerPrimitive.Root className="w-full">
-      <ComposerPrimitive.AttachmentDropzone className="rounded-3xl border border-border bg-card p-3 shadow-xs focus-within:border-muted-foreground/40 data-[dragging=true]:border-primary">
+      <ComposerPrimitive.AttachmentDropzone className="rounded-3xl border border-default bg-surface-level-1 p-3 shadow-xs data-[dragging=true]:border-brand">
         <div className="flex flex-wrap gap-2 empty:hidden">
           <ComposerPrimitive.Attachments>
             {() => <Attachment />}
@@ -114,14 +125,18 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
                 : "Send a message…"
           }
           rows={2}
-          className="max-h-48 min-h-14 w-full resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none"
+          className="max-h-48 min-h-14 w-full resize-none bg-transparent px-2 py-2 text-sm leading-6 text-primary outline-none placeholder:text-placeholder"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <ComposerPrimitive.AddAttachment
-            aria-label="Attach images"
-            className="rounded-full p-2 hover:bg-muted"
-          >
-            <Plus className="size-4" />
+          <ComposerPrimitive.AddAttachment asChild>
+            <IconButton
+              icon={PlusIcon}
+              label="Attach images"
+              color="secondary"
+              variant="plain"
+              size="md"
+              round
+            />
           </ComposerPrimitive.AddAttachment>
           <ModelPicker
             models={models}
@@ -137,64 +152,64 @@ export function Composer({ initialRepo }: { initialRepo?: string | null }) {
             }
             disabled={disabled}
             requireImageSupport={hasAttachments}
-            triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+            triggerClassName="max-w-48 rounded-full px-2 py-1.5 text-xs text-secondary hover:bg-surface-level-2"
           />
           {!thread && (
             <>
-              <select
+              <Select
                 aria-label="Repository"
+                hideSearch={false}
+                searchPlaceholder="Search repositories…"
                 value={typeof config?.repo === "string" ? config.repo : ""}
-                onChange={(event) =>
-                  update({
-                    repo: event.target.value || null,
-                    repo_explicitly_none: !event.target.value,
-                  })
+                onChange={(repo) =>
+                  update({ repo: repo || null, repo_explicitly_none: !repo })
                 }
-                className="max-w-40 bg-transparent text-xs"
-              >
-                <option value="">No repository</option>
-                {repos.data?.repositories.map((repo) => (
-                  <option key={repo.full_name} value={repo.full_name}>
-                    {repo.full_name}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: "", label: "No repository" },
+                  ...(repos.data?.repositories.map((repo) => ({
+                    value: repo.full_name,
+                  })) ?? []),
+                ]}
+                triggerClassName="max-w-48"
+              />
               {workspaces.length > 0 && (
-                <select
+                <Select
                   aria-label="Workspace"
                   value={
                     typeof config?.environment === "string"
                       ? config.environment
                       : (workspaceQuery.data?.default_slug ?? "")
                   }
-                  onChange={(event) =>
-                    update({ environment: event.target.value })
-                  }
-                  className="max-w-32 bg-transparent text-xs"
-                >
-                  {workspaces.map((workspace) => (
-                    <option key={workspace.slug} value={workspace.slug}>
-                      {workspace.slug}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(environment) => {
+                    if (environment) update({ environment })
+                  }}
+                  options={workspaces.map((workspace) => ({
+                    value: workspace.slug,
+                  }))}
+                  triggerClassName="max-w-32"
+                />
               )}
             </>
           )}
           <div className="ml-auto">
             {running ? (
-              <ComposerPrimitive.Cancel
-                aria-label="Stop run"
-                className="rounded-full bg-primary p-2.5 text-primary-foreground disabled:opacity-40"
-              >
-                <Square className="size-3.5 fill-current" />
+              <ComposerPrimitive.Cancel asChild>
+                <IconButton
+                  icon={StopIcon}
+                  iconWeight="fill"
+                  label="Stop run"
+                  size="md"
+                  round
+                />
               </ComposerPrimitive.Cancel>
             ) : (
-              <ComposerPrimitive.Send
-                aria-label="Send message"
-                className="rounded-full bg-primary p-2.5 text-primary-foreground disabled:opacity-30"
-              >
-                <ArrowUp className="size-4" />
+              <ComposerPrimitive.Send asChild>
+                <IconButton
+                  icon={ArrowUpIcon}
+                  label="Send message"
+                  size="md"
+                  round
+                />
               </ComposerPrimitive.Send>
             )}
           </div>

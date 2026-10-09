@@ -1,10 +1,10 @@
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMemo, useRef, useState, type ComponentProps } from "react"
 
 import {
   SlackChannelRow,
   slackChannelMatches,
 } from "@/components/SlackChannelCombobox"
-import { Textarea } from "@/components/ui/textarea"
 import {
   detectSlackChannelTrigger,
   slackChannelReference,
@@ -99,6 +99,12 @@ export function SlackChannelTextarea({
     onKeyDown?.(event)
   }
 
+  const handleChange = (next: string, caret: number | null) => {
+    onValueChange(next)
+    setCursor(caret)
+    setActiveIndex(0)
+  }
+
   const field = {
     ...props,
     ref,
@@ -106,11 +112,6 @@ export function SlackChannelTextarea({
     role: open ? "combobox" : undefined,
     "aria-expanded": open ? true : undefined,
     "aria-autocomplete": "list" as const,
-    onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-      onValueChange(event.target.value)
-      setCursor(event.target.selectionStart)
-      setActiveIndex(0)
-    },
     onSelect: syncCursor,
     onKeyDown: handleKeyDown,
     onBlur: (event: React.FocusEvent<HTMLTextAreaElement>) => {
@@ -122,15 +123,29 @@ export function SlackChannelTextarea({
   return (
     <div className="relative w-full">
       {bare ? (
-        <textarea className={className} {...field} />
+        <textarea
+          className={className}
+          {...field}
+          onChange={(event) =>
+            handleChange(event.target.value, event.target.selectionStart)
+          }
+        />
       ) : (
-        <Textarea className={className} {...field} />
+        <Textarea
+          autoResize
+          className={className}
+          size="md"
+          {...field}
+          onChange={(next) =>
+            handleChange(next, ref.current?.selectionStart ?? null)
+          }
+        />
       )}
       {open && (
         <div
           role="listbox"
           aria-label="Slack channels"
-          className="absolute top-full left-0 z-50 mt-1 w-full max-w-sm overflow-hidden rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+          className="absolute top-full left-0 z-50 mt-space-1 w-full max-w-sm overflow-hidden rounded-lg border border-default bg-elevated p-space-1 text-primary shadow-md"
         >
           {matches.map((channel) => (
             <button
@@ -139,8 +154,8 @@ export function SlackChannelTextarea({
               role="option"
               aria-selected={channel.id === active?.id}
               className={cn(
-                "relative flex min-h-7 w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-left text-xs/relaxed select-none [&_svg]:size-3.5 [&_svg]:shrink-0",
-                channel.id === active?.id && "bg-accent text-accent-foreground"
+                "relative flex min-h-7 w-full cursor-default items-center gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs/relaxed select-none",
+                channel.id === active?.id && "bg-elevated-hover text-primary"
               )}
               // Keep focus in the textarea so the caret the insertion anchors to survives.
               onMouseDown={(event) => event.preventDefault()}

@@ -4,16 +4,16 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from agent.github.comments import fetch_pr_comments_since_last_tag
-from agent.slack import move as slack_move
-from agent.slack import webhook
-from agent.slack.request import SlackRequest
-from agent.slack.tools import move_thread
+from openswe.github.comments import fetch_pr_comments_since_last_tag
+from openswe.slack import move as slack_move
+from openswe.slack import webhook
+from openswe.slack.request import SlackRequest
+from openswe.slack.tools import move_thread
 
 
 @pytest.mark.asyncio
 async def test_github_batch_ends_at_authorized_event(monkeypatch):
-    from agent.github import comments
+    from openswe.github import comments
 
     event = {
         "body": "@open-swe Alice's request",
@@ -54,7 +54,7 @@ async def test_github_batch_ends_at_authorized_event(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_review_batch_keeps_same_second_inline_and_ignores_non_owner_tags(monkeypatch):
-    from agent.github import comments
+    from openswe.github import comments
 
     event = {
         "body": "@open-swe address review",
@@ -110,7 +110,7 @@ async def test_review_batch_keeps_same_second_inline_and_ignores_non_owner_tags(
 
 @pytest.mark.asyncio
 async def test_edited_github_trigger_keeps_context_since_previous_tag(monkeypatch):
-    from agent.github import comments
+    from openswe.github import comments
 
     event = {
         "body": "@open-swe revised request",

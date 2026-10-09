@@ -1,4 +1,6 @@
-import { useMutation } from "@tanstack/react-query"
+import { useState } from "react"
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type OpenPullRequest } from "@/lib/api"
@@ -16,9 +18,18 @@ function refusal(pr: OpenPullRequest): string | null {
 
 /** Posts a review card in the repository's Slack review channel. */
 export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
+  const availability = useQuery({
+    queryKey: ["human-review-availability", pr],
+    queryFn: () => api.humanReviewAvailability(pr),
+    enabled: pr.reviewDecision !== "approved",
+    staleTime: 60_000,
+  })
+  const [channel, setChannel] = useState<string | null>(null)
+  const needsChannel = availability.isSuccess && !availability.data.available
   const blocked = refusal(pr)
   const requestReview = useMutation({
-    mutationFn: () => api.requestHumanReview(pr),
+    mutationFn: () =>
+      api.requestHumanReview(pr, needsChannel ? (channel ?? "") : ""),
     meta: {
       errorTitle: `Could not request a review of ${pullRequestKey(pr)}`,
     },
@@ -52,11 +63,29 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         ? "Retry review request"
         : "Request review in Slack"
   return (
-    <span title={blocked ?? undefined}>
+    <span
+      className="inline-flex items-center gap-2"
+      onClick={(event) => event.stopPropagation()}
+      title={blocked ?? undefined}
+    >
+      {needsChannel && !requestReview.isSuccess && (
+        <SlackChannelCombobox
+          value={channel}
+          onValueChange={setChannel}
+          placeholder="Choose a review channel"
+          aria-label="Review channel"
+          eligible={(option) => option.is_member}
+          disabled={requestReview.isPending}
+        />
+      )}
       <PullRequestActionButton
         label={label}
         disabled={
-          blocked !== null || requestReview.isPending || requestReview.isSuccess
+          blocked !== null ||
+          !availability.isSuccess ||
+          (needsChannel && !channel) ||
+          requestReview.isPending ||
+          requestReview.isSuccess
         }
         onClick={() => requestReview.mutate()}
       />

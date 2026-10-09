@@ -1,12 +1,12 @@
-"""Tests for agent.utils.repo and Linear webhook repo override behavior."""
+"""Tests for openswe.utils.repo and Linear webhook repo override behavior."""
 
 import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.dashboard.workspace_settings import WorkspaceSettings
-from agent.utils.repo import extract_repo_from_text
+from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.utils.repo import extract_repo_from_text
 
 
 class TestExtractRepoFromText:
@@ -38,12 +38,12 @@ class TestLinearWebhookRepoOverride:
 
     @pytest.mark.asyncio
     async def test_comment_repo_overrides_team_mapping(self, _base_payload: dict) -> None:
-        from agent.linear.routes import linear_webhook
+        from openswe.linear.routes import linear_webhook
 
         with (
-            patch("agent.webhooks.common.verify_linear_signature", return_value=True),
-            patch("agent.webhooks.common.is_repo_allowed", return_value=True),
-            patch("agent.webhooks.common.BackgroundTasks"),
+            patch("openswe.webhooks.common.verify_linear_signature", return_value=True),
+            patch("openswe.webhooks.common.is_repo_allowed", return_value=True),
+            patch("openswe.webhooks.common.BackgroundTasks"),
         ):
             mock_request = AsyncMock()
             mock_request.body.return_value = json.dumps(_base_payload).encode()
@@ -61,7 +61,7 @@ class TestLinearWebhookRepoOverride:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_default_repo_with_standard_comment_payload(self) -> None:
-        from agent.linear.routes import linear_webhook
+        from openswe.linear.routes import linear_webhook
 
         payload = {
             "type": "Comment",
@@ -80,14 +80,14 @@ class TestLinearWebhookRepoOverride:
         }
 
         with (
-            patch("agent.webhooks.common.verify_linear_signature", return_value=True),
+            patch("openswe.webhooks.common.verify_linear_signature", return_value=True),
             patch(
-                "agent.webhooks.common.get_workspace_settings",
+                "openswe.webhooks.common.get_workspace_settings",
                 AsyncMock(
                     return_value=WorkspaceSettings({"default_repo": "langchain-ai/open-swe"})
                 ),
             ),
-            patch("agent.webhooks.common.is_repo_allowed", return_value=True),
+            patch("openswe.webhooks.common.is_repo_allowed", return_value=True),
         ):
             mock_request = AsyncMock()
             mock_request.body.return_value = json.dumps(payload).encode()

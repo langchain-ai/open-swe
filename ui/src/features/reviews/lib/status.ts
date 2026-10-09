@@ -1,4 +1,7 @@
+import type { BadgeProps } from "@langchain/macaw-components/Badge"
+
 import type { OpenPullRequest } from "@/lib/api"
+import type { PullRequestThreadActionName } from "./threadActions"
 
 export function pullRequestKey(pr: { repo: string; number: number }) {
   return `${pr.repo}#${pr.number}`
@@ -55,17 +58,15 @@ export function statusDetail(pr: OpenPullRequest): string | null {
   return null
 }
 
-export type StatusVariant = "destructive" | "success" | "warning" | "info"
-
-export const statusVariants: Record<string, StatusVariant> = {
-  Conflicted: "destructive",
-  Failing: "destructive",
-  "Changes Requested": "destructive",
+export const statusColors: Record<string, BadgeProps["color"]> = {
+  Conflicted: "error",
+  Failing: "error",
+  "Changes Requested": "error",
   Approved: "success",
   Pending: "warning",
   "Review required": "warning",
   "Status unavailable": "warning",
-  Reviewable: "info",
+  Reviewable: "primary",
 }
 
 export function isConflicted(pr: OpenPullRequest) {
@@ -80,6 +81,17 @@ export function hasFailingChecks(pr: OpenPullRequest) {
 // there.
 export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
+}
+
+/** What Open SWE could fix on this PR, conflicts first since they block the rest. */
+export function pullRequestFixes(
+  pr: OpenPullRequest
+): Array<PullRequestThreadActionName> {
+  return [
+    ...(isConflicted(pr) ? (["fix-conflicts"] as const) : []),
+    ...(hasFailingChecks(pr) ? (["fix-checks"] as const) : []),
+    ...(hasUnresolvedConversations(pr) ? (["address-comments"] as const) : []),
+  ]
 }
 
 // A conflicted branch cannot be updated by GitHub; the Fix action covers it.
