@@ -1,93 +1,93 @@
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
-import { gzipSync } from "node:zlib"
-import { expect, test } from "@playwright/test"
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { gzipSync } from "node:zlib";
+import { expect, test } from "@playwright/test";
 import {
   SAME_ORIGIN_HEADERS,
   SAME_USER,
   dismissOnboardingIfShown,
   loginAs,
-} from "./helpers/dashboard"
+} from "./helpers/dashboard";
 
-const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`
+const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 const transcript = readFileSync(
   resolve(__dirname, "..", "fixtures", "claude-session.jsonl"),
-  "utf8"
-)
+  "utf8",
+);
 
 interface Block {
-  type: string
-  text?: string
-  id?: string
-  name?: string
-  input?: { command?: string }
-  tool_use_id?: string
-  content?: unknown
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: { command?: string };
+  tool_use_id?: string;
+  content?: unknown;
 }
 
 interface TranscriptRecord {
-  type: string
-  message?: { content: string | Block[] }
-  attachment?: { type: string; prompt?: string }
+  type: string;
+  message?: { content: string | Block[] };
+  attachment?: { type: string; prompt?: string };
 }
 
 const records = transcript
   .split("\n")
   .filter((line) => line.trim())
-  .map((line) => JSON.parse(line) as TranscriptRecord)
+  .map((line) => JSON.parse(line) as TranscriptRecord);
 
 const humanPrompts = records.flatMap((record) => {
   if (record.type === "user" && typeof record.message?.content === "string")
-    return [record.message.content]
+    return [record.message.content];
   if (
     record.type === "attachment" &&
     record.attachment?.type === "queued_command"
   )
-    return [record.attachment.prompt ?? ""]
-  return []
-})
+    return [record.attachment.prompt ?? ""];
+  return [];
+});
 
 const assistantBlocks = records.flatMap((record) =>
   record.type === "assistant" && Array.isArray(record.message?.content)
     ? record.message.content
-    : []
-)
+    : [],
+);
 const assistantTexts = assistantBlocks.flatMap((block) =>
-  block.type === "text" && block.text ? [block.text] : []
-)
-const toolUses = assistantBlocks.filter((block) => block.type === "tool_use")
+  block.type === "text" && block.text ? [block.text] : [],
+);
+const toolUses = assistantBlocks.filter((block) => block.type === "tool_use");
 const toolResults = new Map(
   records.flatMap((record) =>
     record.type === "user" && Array.isArray(record.message?.content)
       ? record.message.content.flatMap((block) =>
           block.type === "tool_result" && typeof block.content === "string"
             ? [[block.tool_use_id ?? "", block.content] as const]
-            : []
+            : [],
         )
-      : []
-  )
-)
+      : [],
+  ),
+);
 
 function jsonlUpload(header: Record<string, string>, body: string): Buffer {
-  return Buffer.from(`${JSON.stringify(header)}\n${body}`)
+  return Buffer.from(`${JSON.stringify(header)}\n${body}`);
 }
 
 function normalized(text: string): string {
-  return text.replace(/\s+/g, " ").trim()
+  return text.replace(/\s+/g, " ").trim();
 }
 
 test("an uploaded Claude Code session opens as a thread with its whole conversation", async ({
   page,
   playwright,
 }) => {
-  expect(humanPrompts.length).toBeGreaterThan(1)
-  expect(assistantTexts.length).toBeGreaterThan(0)
-  expect(toolUses.length).toBeGreaterThan(1)
+  expect(humanPrompts.length).toBeGreaterThan(1);
+  expect(assistantTexts.length).toBeGreaterThan(0);
+  expect(toolUses.length).toBeGreaterThan(1);
 
-  const api = await playwright.request.newContext({ baseURL: harness })
-  let threadId: string | undefined
+  const api = await playwright.request.newContext({ baseURL: harness });
+  let threadId: string | undefined;
   try {
-    await loginAs(page, SAME_USER)
+    await loginAs(page, SAME_USER);
     const unpushed = await page.request.post("/dashboard/api/threads/uploads", {
       headers: {
         ...SAME_ORIGIN_HEADERS,
@@ -95,11 +95,11 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
       },
       data: jsonlUpload(
         { type: "claude", repo: "fakeorg/demo", branch: "never-pushed" },
-        transcript
+        transcript,
       ),
-    })
-    expect(unpushed.status()).toBe(422)
-    expect(await unpushed.text()).toContain("push it first")
+    });
+    expect(unpushed.status()).toBe(422);
+    expect(await unpushed.text()).toContain("push it first");
 
     const seeded = await api.post("/control/pull-request", {
       data: {
@@ -108,9 +108,9 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
         title: "Environment rewrite",
         files: { "environments.md": "setup and init scripts\n" },
       },
-    })
-    expect(seeded.ok(), await seeded.text()).toBeTruthy()
-    const { number } = (await seeded.json()) as { number: number }
+    });
+    expect(seeded.ok(), await seeded.text()).toBeTruthy();
+    const { number } = (await seeded.json()) as { number: number };
 
     const upload = await page.request.post("/dashboard/api/threads/uploads", {
       headers: {
@@ -125,97 +125,97 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
             pr_url: `https://github.com/fakeorg/demo/pull/${number}`,
             visibility: "private",
           },
-          transcript
-        )
+          transcript,
+        ),
       ),
-    })
-    expect(upload.ok(), await upload.text()).toBeTruthy()
-    threadId = (await upload.json()).id as string
+    });
+    expect(upload.ok(), await upload.text()).toBeTruthy();
+    threadId = (await upload.json()).id as string;
 
     const summary = await (
       await page.request.get(`/dashboard/api/threads/${threadId}`)
-    ).json()
+    ).json();
     expect(summary).toMatchObject({
       title: "Environment system rewrite",
       repoFullName: "fakeorg/demo",
       branch: "environment-rewrite",
       visibility: "private",
-    })
-    const thread = await (await api.get(`/threads/${threadId}`)).json()
-    expect(thread.metadata.pr_number).toBe(number)
+    });
+    const thread = await (await api.get(`/threads/${threadId}`)).json();
+    expect(thread.metadata.pr_number).toBe(number);
 
-    const state = await (await api.get(`/threads/${threadId}/state`)).json()
+    const state = await (await api.get(`/threads/${threadId}/state`)).json();
     const messages = state.values.messages as Array<{
-      type: string
-      tool_calls?: Array<{ id: string }>
-      tool_call_id?: string
-    }>
+      type: string;
+      tool_calls?: Array<{ id: string }>;
+      tool_call_id?: string;
+    }>;
     expect(
       messages.flatMap((message) =>
-        (message.tool_calls ?? []).map((call) => call.id)
-      )
-    ).toEqual(toolUses.map((use) => use.id))
+        (message.tool_calls ?? []).map((call) => call.id),
+      ),
+    ).toEqual(toolUses.map((use) => use.id));
     expect(
       messages
         .filter((message) => message.type === "tool")
         .map((message) => message.tool_call_id)
-        .sort()
-    ).toEqual(toolUses.map((use) => use.id).sort())
+        .sort(),
+    ).toEqual(toolUses.map((use) => use.id).sort());
 
-    await page.goto("/agents")
-    await dismissOnboardingIfShown(page)
-    await page.goto(`/agents/${threadId}`)
+    await page.goto("/agents");
+    await dismissOnboardingIfShown(page);
+    await page.goto(`/agents/${threadId}`);
 
     const people = page
       .getByTestId("user-message")
-      .filter({ hasNot: page.getByTestId("system-message-toggle") })
-    await expect(people).toHaveCount(humanPrompts.length)
+      .filter({ hasNot: page.getByTestId("system-message-toggle") });
+    await expect(people).toHaveCount(humanPrompts.length);
     for (const [index, prompt] of humanPrompts.entries()) {
-      await expect(people.nth(index)).toContainText(prompt)
+      await expect(people.nth(index)).toContainText(prompt);
     }
     await expect(
-      page.getByRole("status").filter({ hasText: "Working" })
-    ).toHaveCount(0)
+      page.getByRole("status").filter({ hasText: "Working" }),
+    ).toHaveCount(0);
 
     for (const text of assistantTexts) {
-      const firstSentence = text.split("\n")[0].replace(/[*`]/g, "")
+      const firstSentence = text.split("\n")[0].replace(/[*`]/g, "");
       await expect(
-        page.getByText(firstSentence, { exact: false })
-      ).toBeVisible()
+        page.getByText(firstSentence, { exact: false }),
+      ).toBeVisible();
     }
 
-    const folds = page.getByRole("button", { name: /^Worked · \d+ actions?$/ })
-    const foldLabels = await folds.allTextContents()
+    const folds = page.getByRole("button", { name: /^Worked · \d+ actions?$/ });
+    const foldLabels = await folds.allTextContents();
     expect(
       foldLabels.reduce(
         (total, label) => total + Number(/(\d+) action/.exec(label)?.[1] ?? 0),
-        0
-      )
-    ).toBe(toolUses.length)
+        0,
+      ),
+    ).toBe(toolUses.length);
     for (let index = 0; index < foldLabels.length; index++) {
-      await folds.nth(index).click()
+      await folds.nth(index).click();
     }
-    const rows = page.getByRole("button", { name: /^Shell / })
-    await expect(rows).toHaveCount(toolUses.length)
+    const rows = page.getByRole("button", { name: /^Shell / });
+    await expect(rows).toHaveCount(toolUses.length);
     const shown = (await rows.locator("p").allTextContents()).map((label) =>
-      label.replace(/^Shell\s*/, "").replace(/\.\.\.$/, "")
-    )
+      label.replace(/^Shell\s*/, "").replace(/\.\.\.$/, ""),
+    );
     for (const [index, use] of toolUses.entries()) {
-      expect(shown[index].length).toBeGreaterThan(20)
+      expect(shown[index].length).toBeGreaterThan(20);
       expect(normalized(use.input?.command ?? "")).toContain(
-        normalized(shown[index])
-      )
+        normalized(shown[index]),
+      );
     }
 
-    const firstOutput = toolResults.get(toolUses[0].id ?? "") ?? ""
-    await rows.first().click()
+    const firstOutput = toolResults.get(toolUses[0].id ?? "") ?? "";
+    await rows.first().click();
     await expect(
       page
         .getByText(firstOutput.split("\n")[0].trim(), { exact: false })
-        .first()
-    ).toBeVisible()
+        .first(),
+    ).toBeVisible();
   } finally {
-    if (threadId) await api.delete(`/threads/${threadId}`)
-    await api.dispose()
+    if (threadId) await api.delete(`/threads/${threadId}`);
+    await api.dispose();
   }
-})
+});

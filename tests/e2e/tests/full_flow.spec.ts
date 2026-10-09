@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test"
+import { test, expect } from "@playwright/test";
 
 // Full happy path, driven entirely through the mock Slack + GitHub UIs:
 //   user asks in Slack -> real agent implements in a local sandbox -> opens a PR
@@ -6,48 +6,48 @@ import { test, expect } from "@playwright/test"
 // Only the LLM is faked; all agent code runs for real via langgraph dev.
 test.describe("Open SWE full flow", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/mock/slack")
-    await page.locator("#reset").click()
-    await expect(page.locator("#thread")).toContainText("No messages yet")
-  })
+    await page.goto("/mock/slack");
+    await page.locator("#reset").click();
+    await expect(page.locator("#thread")).toContainText("No messages yet");
+  });
 
   test("Slack request → implements → opens PR → links it back in the thread", async ({
     page,
   }) => {
     await page
       .locator("#text")
-      .fill("<@U0BOT> please add a greet() helper and open a PR")
-    await page.locator("#send").click()
+      .fill("<@U0BOT> please add a greet() helper and open a PR");
+    await page.locator("#send").click();
 
     // The user's message lands in the thread.
     await expect(
-      page.locator(".msg").filter({ hasText: "add a greet() helper" })
-    ).toBeVisible()
+      page.locator(".msg").filter({ hasText: "add a greet() helper" }),
+    ).toBeVisible();
 
     // The agent replies in the SAME thread with a link to the PR it opened.
     const reply = page
       .locator(".msg.bot")
-      .filter({ hasText: "Add greet() helper" })
-    await expect(reply).toBeVisible()
-    const prLink = reply.locator('a[href*="/pull/"]')
-    await expect(prLink).toBeVisible()
+      .filter({ hasText: "Add greet() helper" });
+    await expect(reply).toBeVisible();
+    const prLink = reply.locator('a[href*="/pull/"]');
+    await expect(prLink).toBeVisible();
 
     // Follow the link → the PR page shows what GitHub would show.
-    await prLink.click()
-    await expect(page.locator("#pr-title")).toContainText("Add greet() helper")
-    await expect(page.locator("#pr-state")).toHaveText("open")
-    await expect(page.locator("#pr-head")).toHaveText("add-greet")
+    await prLink.click();
+    await expect(page.locator("#pr-title")).toContainText("Add greet() helper");
+    await expect(page.locator("#pr-state")).toHaveText("open");
+    await expect(page.locator("#pr-head")).toHaveText("add-greet");
     await expect(
-      page.locator('#pr-files li[data-file="greet.py"]')
-    ).toBeVisible()
+      page.locator('#pr-files li[data-file="greet.py"]'),
+    ).toBeVisible();
 
     // The PR list view shows it too.
-    await page.goto("/mock/github")
+    await page.goto("/mock/github");
     await expect(page.locator('.pr[data-pr="1"]')).toContainText(
-      "Add greet() helper"
-    )
-    await expect(page.locator('.pr[data-pr="1"]')).toContainText("greet.py")
-  })
+      "Add greet() helper",
+    );
+    await expect(page.locator('.pr[data-pr="1"]')).toContainText("greet.py");
+  });
 
   test("Slack DM request without a bot mention still starts a run", async ({
     page,
@@ -59,22 +59,22 @@ test.describe("Open SWE full flow", () => {
         mention_bot: false,
         channel_type: "im",
       },
-    })
-    const sent = await send.json()
+    });
+    const sent = await send.json();
     expect(sent.webhook).toMatchObject({
       status: "accepted",
       message: "Slack mention queued",
-    })
+    });
 
     await expect(
-      page.locator(".msg").filter({ hasText: "add a greet() helper" })
-    ).toBeVisible()
+      page.locator(".msg").filter({ hasText: "add a greet() helper" }),
+    ).toBeVisible();
     const reply = page
       .locator(".msg.bot")
-      .filter({ hasText: "Add greet() helper" })
-    await expect(reply).toBeVisible()
-    await expect(reply.locator('a[href*="/pull/"]')).toBeVisible()
-  })
+      .filter({ hasText: "Add greet() helper" });
+    await expect(reply).toBeVisible();
+    await expect(reply.locator('a[href*="/pull/"]')).toBeVisible();
+  });
 
   test("Slack breakout request starts a new top-level Open SWE thread", async ({
     page,
@@ -82,24 +82,24 @@ test.describe("Open SWE full flow", () => {
     await page
       .locator("#text")
       .fill(
-        "<@U0BOT> please break out adding a greet() helper into a separate thread"
-      )
-    await page.locator("#send").click()
+        "<@U0BOT> please break out adding a greet() helper into a separate thread",
+      );
+    await page.locator("#send").click();
 
     const breakout = page
       .locator(".msg.bot")
-      .filter({ hasText: /`\/breakout`: Add greet\(\) helper/ })
-    await expect(breakout).toBeVisible({ timeout: 60_000 })
-    const breakoutThreadTs = await breakout.getAttribute("data-thread-ts")
-    expect(breakoutThreadTs).toBeTruthy()
+      .filter({ hasText: /`\/breakout`: Add greet\(\) helper/ });
+    await expect(breakout).toBeVisible({ timeout: 60_000 });
+    const breakoutThreadTs = await breakout.getAttribute("data-thread-ts");
+    expect(breakoutThreadTs).toBeTruthy();
 
     const breakoutThreadMessages = page.locator(
-      `.msg.bot[data-thread-ts="${breakoutThreadTs}"]`
-    )
+      `.msg.bot[data-thread-ts="${breakoutThreadTs}"]`,
+    );
     await expect(
-      breakoutThreadMessages.locator('a[href*="/agents/"]').first()
+      breakoutThreadMessages.locator('a[href*="/agents/"]').first(),
     ).toBeVisible({
       timeout: 60_000,
-    })
-  })
-})
+    });
+  });
+});
