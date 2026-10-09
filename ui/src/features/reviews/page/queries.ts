@@ -4,15 +4,13 @@ import type { QueryClient, QueryKey } from "@tanstack/react-query"
 import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker"
 
 import { api } from "@/lib/api"
-import { BROWSER_CACHE_MAX_AGE_MS } from "@/lib/query"
-import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { useSession } from "@/lib/session"
+import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
 import {
-  pullRequestStatusQuery,
-  pullRequestTopic,
-} from "@/features/reviews/lib/cache"
-import {
+  reviewDetailQuery,
   reviewKeys,
+  sharedReviewOptions,
+  statusRef,
   type PullRequestRef,
 } from "@/features/reviews/lib/reviewKeys"
 import { getReviewConversation } from "@/features/reviews/lib/conversationApi"
@@ -33,44 +31,19 @@ import {
 
 export type { PullRequestRef }
 
-// Every file header and note observes these, so each one scrolling in would
-// otherwise revalidate them; a missing PR stays missing, so 4xx isn't retried.
-// The backend says when the PR or its review changes, so nothing polls.
-function shared(pr: PullRequestRef) {
-  return {
-    gcTime: BROWSER_CACHE_MAX_AGE_MS,
-    staleTime: 60_000,
-    retry: (failures: number, error: Error) => {
-      const status = error instanceof DashboardRequestError ? error.status : 0
-      return failures < 1 && !(status >= 400 && status < 500)
-    },
-    meta: { invalidatedBy: [pullRequestTopic(statusRef(pr))] },
-  } as const
-}
-
-/** The PR as the status cache and its topic name it: `repo` is `owner/name`. */
-function statusRef({ owner, repo, number }: PullRequestRef) {
-  return { repo: `${owner}/${repo}`, number }
-}
-
 export const reviewQueries = {
-  detail: (pr: PullRequestRef) =>
-    queryOptions({
-      queryKey: reviewKeys.detail(pr),
-      queryFn: () => api.getReview(pr.owner, pr.repo, pr.number),
-      ...shared(pr),
-    }),
+  detail: reviewDetailQuery,
   diff: (pr: PullRequestRef) =>
     queryOptions({
       queryKey: reviewKeys.diff(pr),
       queryFn: () => api.getReviewDiff(pr.owner, pr.repo, pr.number),
-      ...shared(pr),
+      ...sharedReviewOptions(pr),
     }),
   conversation: (pr: PullRequestRef) =>
     queryOptions({
       queryKey: reviewKeys.conversation(pr),
       queryFn: () => getReviewConversation(pr),
-      ...shared(pr),
+      ...sharedReviewOptions(pr),
     }),
 }
 

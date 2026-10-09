@@ -216,6 +216,7 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
         <AgentThreadPage
           threadId={meta.data.thread_id}
           composerDraft={chatDraft}
+          ownsTitle={false}
         />
       </div>
     </ReviewChatActionsContext.Provider>

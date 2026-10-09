@@ -1,5 +1,5 @@
 import { Button } from "@langchain/macaw-components/Button"
-import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useLayoutEffect, useRef } from "react"
 
@@ -10,11 +10,7 @@ import { SideSheet } from "@/components/SideSheet"
 import { useSidebarControls } from "@/components/sidebar-layout"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
-import {
-  agentThreadKeys,
-  markReviewViewed,
-} from "@/features/agents/lib/queries"
-import type { AgentThread } from "@/features/agents/lib/types"
+import { markReviewViewed } from "@/features/agents/lib/queries"
 import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
@@ -31,12 +27,6 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
   const chatThreadId = useReviewChat(pr).data?.thread_id
-  // The chat's thread view retitles the tab with its own name; watch for that and take it back.
-  const chatTitle = useQuery({
-    queryKey: agentThreadKeys.detail(chatThreadId ?? ""),
-    queryFn: skipToken,
-    select: (thread: AgentThread) => thread.title,
-  }).data
   const open = useReviewPage((state) => state.open)
   const navigatorOpen = useReviewPage((state) => state.navigatorOpen)
   const navigatorOverlay = useReviewPage((state) => state.navigatorOverlay)
@@ -70,7 +60,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   )
   useEffect(() => {
     document.title = title
-  }, [title, chatTitle])
+  }, [title])
 
   // Re-marked when a walkthrough lands, since its arrival is what made the row unread.
   const walkthroughSha = detail.data?.walkthrough?.head_sha
