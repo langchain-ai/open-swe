@@ -150,6 +150,17 @@ async def expedite_pr_approval(
         await ReviewCard(approval).retire("cancelled", "cancelled by the agent")
         return {"success": True, "cancelled": True}
 
+    latest = await HumanReviewRequest.latest_expedited_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    if (
+        latest is not None
+        and latest.state == "cancelled"
+        and latest.detail.startswith("dismissed by ")
+    ):
+        return _failure(
+            "The previous expedited review was dismissed. Do not automatically create "
+            "another card for this pull request; ask for a standard review instead."
+        )
+
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
     channel_id, thread_ts = own_channel, own_thread
     target: SlackChannel | None = None
@@ -200,6 +211,13 @@ async def expedite_pr_approval(
             return _failure(str(exc))
     verdict = assess_eligibility(files, exclusions)
     if isinstance(verdict, Ineligible):
+        active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        if active is not None and active.kind == "expedited" and active.thread_id == thread_id:
+            await retire(
+                active,
+                "superseded",
+                f"No longer eligible for expedited review: {verdict.reason}.",
+            )
         return _failure(
             f"Not eligible for expedited review: {verdict.reason}. "
             f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests and "
