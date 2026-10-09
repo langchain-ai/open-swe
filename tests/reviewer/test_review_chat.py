@@ -57,13 +57,15 @@ def test_chat_general_purpose_subagent_is_read_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_review_chat_rejects_thread_not_postable_for_this_pr(monkeypatch) -> None:
-    async def no_accessible_threads(*args):
-        return []
+async def test_review_chat_proxies_only_its_own_shared_thread() -> None:
+    chat = review_chat_api.PullRequestChat(owner="Acme", repo="Repo", pr_number=7)
+    other_pr = review_chat_api.PullRequestChat(owner="acme", repo="repo", pr_number=8)
+    assert (
+        chat.thread_id
+        == review_chat_api.PullRequestChat(owner="acme", repo="repo", pr_number=7).thread_id
+    )
 
-    monkeypatch.setattr(review_chat_api.pr_fixes, "find_pr_threads", no_accessible_threads)
-    with pytest.raises(HTTPException) as error:
-        await review_chat_api.proxy_review_chat_commands(
-            "acme", "repo", 7, "octocat", "foreign-thread", b"{}"
-        )
-    assert error.value.status_code == 404
+    for foreign in ("foreign-thread", other_pr.thread_id):
+        with pytest.raises(HTTPException) as error:
+            await chat.commands("octocat", foreign, b"{}")
+        assert error.value.status_code == 404

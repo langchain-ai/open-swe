@@ -6,7 +6,7 @@ interface TaskEventSource {
   version: 1
   task_id: string
   sender_thread_id: string
-  sender_role: "worker" | "coordinator"
+  sender_role: "worker" | "coordinator" | "observer"
   sender_label: string | null
   content: string
 }

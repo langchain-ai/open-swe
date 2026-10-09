@@ -1782,10 +1782,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         manage_thread,
         *(
             [spawn_worker]
-            if task_coordination and task_coordination.enabled and not task_coordination.is_worker
+            if task_coordination and task_coordination.enabled and task_coordination.coordinates
             else []
         ),
-        *([task_status, message_task_thread, control_worker] if task_coordination else []),
+        *([task_status, message_task_thread] if task_coordination else []),
+        *([control_worker] if task_coordination and task_coordination.coordinates else []),
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
         switch_to_performance_model,

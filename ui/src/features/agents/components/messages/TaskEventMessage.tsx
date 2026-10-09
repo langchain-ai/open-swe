@@ -17,6 +17,12 @@ const COMPLETION_LABELS = {
   string
 >
 
+const ROLE_LABELS = {
+  coordinator: "Coordinator",
+  worker: "Worker",
+  observer: "Observer",
+} satisfies Record<TaskEventMetadata["sender_role"], string>
+
 export function TaskEventMessage({
   event,
   messageId,
@@ -28,7 +34,7 @@ export function TaskEventMessage({
 }) {
   const label =
     event.sender_label ??
-    `${event.sender_role === "worker" ? "Worker" : "Coordinator"} ${event.sender_thread_id.slice(0, 8)}`
+    `${ROLE_LABELS[event.sender_role]} ${event.sender_thread_id.slice(0, 8)}`
   const status =
     event.kind === "message" ? "Message" : COMPLETION_LABELS[event.status]
 

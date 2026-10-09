@@ -495,6 +495,7 @@ export interface AgentSubagentSummary {
 export type TaskMembership =
   | { role: "coordinator"; taskId: string }
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
+  | { role: "observer"; taskId: string }
 
 export interface AgentThread {
   taskMembership?: TaskMembership

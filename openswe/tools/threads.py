@@ -6,7 +6,7 @@ import logging
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypedDict
 
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
@@ -78,7 +78,9 @@ _MAX_MESSAGE_CHARS = 20_000
 _MAX_TITLE_CHARS = 80
 _MAX_COMMENT_CHARS = 20_000
 _MAX_DETAIL_MESSAGE_CHARS = 4_000
+_DEFAULT_TRANSCRIPT_MESSAGES = 50
 _MAX_TRANSCRIPT_MESSAGES = 100
+_MAX_TOOL_TEXT_CHARS = 2_000
 _MAX_TRANSCRIPT_CHARS = 50_000
 _MAX_RUNS = 25
 _MAX_INSPECTION_CONTENT_CHARS = 50_000
@@ -411,43 +413,159 @@ def _message_id(message: Any) -> str | None:
     return str(value) if value else None
 
 
-def _transcript(state: Any) -> dict[str, Any]:
-    messages = _state_messages(state)
-    visible: list[dict[str, Any]] = []
-    omitted = 0
-    used_chars = 0
-    for message in messages:
+def _tool_result_text(content: object) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = [
+            block if isinstance(block, str) else str(block.get("text") or "")
+            for block in content
+            if isinstance(block, str)
+            or (isinstance(block, Mapping) and block.get("type") == "text")
+        ]
+        return "\n\n".join(part.strip() for part in parts if part.strip())
+    return "" if content is None else json.dumps(content, default=str, ensure_ascii=False)
+
+
+def _optional_str(value: object) -> str | None:
+    return str(value) if value else None
+
+
+@dataclass(frozen=True)
+class _TranscriptMessage:
+    id: str | None
+    role: Literal["user", "assistant", "tool_result"]
+    text: str
+    timestamp: str | None
+    sender_id: str | None = None
+    tool_calls: tuple[tuple[str, str], ...] = ()
+    tool: str | None = None
+    tool_call_id: str | None = None
+    status: str | None = None
+
+    @classmethod
+    def parse(cls, message: object, *, include_tools: bool) -> _TranscriptMessage | None:
         kind = _message_kind(message)
-        if kind not in {"human", "user", "ai", "assistant"}:
-            omitted += 1
-            continue
         content = _message_content(message)
-        text = _plain_message_text(content)
-        if not text:
-            omitted += 1
-            continue
-        if len(visible) >= _MAX_TRANSCRIPT_MESSAGES or used_chars >= _MAX_TRANSCRIPT_CHARS:
-            omitted += 1
-            continue
-        remaining = _MAX_TRANSCRIPT_CHARS - used_chars
-        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
-        visible.append(
-            {
-                "id": _message_id(message),
-                "role": "user" if kind in {"human", "user"} else "assistant",
-                "text": returned_text,
-                "truncated": len(returned_text) < len(text),
-                "sender_id": message_sender_id(content),
-                "timestamp": _message_timestamp(message),
-            }
-        )
-        used_chars += len(returned_text)
+        timestamp = _message_timestamp(message)
+        if kind in {"human", "user", "ai", "assistant"}:
+            text = _plain_message_text(content) or ""
+            raw_calls = _value(message, "tool_calls") if include_tools else None
+            calls = tuple(
+                (
+                    str(call.get("name") or ""),
+                    json.dumps(call.get("args") or {}, default=str, ensure_ascii=False),
+                )
+                for call in (raw_calls if isinstance(raw_calls, list) else [])
+                if isinstance(call, Mapping)
+            )
+            if not text and not calls:
+                return None
+            return cls(
+                id=_message_id(message),
+                role="user" if kind in {"human", "user"} else "assistant",
+                text=text,
+                timestamp=timestamp,
+                sender_id=message_sender_id(content),
+                tool_calls=calls,
+            )
+        if kind == "tool" and include_tools:
+            return cls(
+                id=_message_id(message),
+                role="tool_result",
+                text=_tool_result_text(content),
+                timestamp=timestamp,
+                tool=_optional_str(_value(message, "name")),
+                tool_call_id=_optional_str(_value(message, "tool_call_id")),
+                status=_optional_str(_value(message, "status")),
+            )
+        return None
+
+    def matches(self, needle: str) -> bool:
+        values = [self.text, self.tool or "", *(part for call in self.tool_calls for part in call)]
+        return any(needle in value.lower() for value in values)
+
+    def render(self, budget: int) -> tuple[dict[str, object], int]:
+        """Render within `budget` characters; returns the entry and characters used."""
+        cap = _MAX_TOOL_TEXT_CHARS if self.role == "tool_result" else _MAX_DETAIL_MESSAGE_CHARS
+        text = self.text[: min(cap, budget)]
+        used = len(text)
+        truncated = len(text) < len(self.text)
+        entry: dict[str, object] = {
+            "id": self.id,
+            "role": self.role,
+            "text": text,
+            "timestamp": self.timestamp,
+        }
+        if self.role == "tool_result":
+            entry.update(tool=self.tool, tool_call_id=self.tool_call_id, status=self.status)
+        else:
+            entry["sender_id"] = self.sender_id
+        if self.tool_calls:
+            calls: list[dict[str, object]] = []
+            for name, args in self.tool_calls:
+                returned_args = args[: max(0, min(_MAX_TOOL_TEXT_CHARS, budget - used))]
+                used += len(returned_args)
+                truncated = truncated or len(returned_args) < len(args)
+                calls.append({"name": name, "args": returned_args})
+            entry["tool_calls"] = calls
+        entry["truncated"] = truncated
+        return entry, used
+
+
+class _TranscriptPage(TypedDict):
+    messages: list[dict[str, object]]
+    message_count: int
+    matched_count: int
+    returned_count: int
+    omitted_count: int
+    truncated: bool
+    next_before: str | None
+
+
+def _transcript(
+    state: object,
+    *,
+    query: str | None = None,
+    before: str | None = None,
+    limit: int = _DEFAULT_TRANSCRIPT_MESSAGES,
+    include_tools: bool = False,
+) -> _TranscriptPage:
+    """Return the newest matching messages, oldest first, with a cursor to older ones."""
+    messages = _state_messages(state)
+    window = messages
+    if before:
+        cutoff = next((i for i, m in enumerate(messages) if _message_id(m) == before), None)
+        if cutoff is None:
+            raise ValueError(f"before={before!r} is not a message id in this thread")
+        window = messages[:cutoff]
+    needle = query.strip().lower() if query else ""
+    candidates = [
+        parsed
+        for message in window
+        if (parsed := _TranscriptMessage.parse(message, include_tools=include_tools))
+        and (not needle or parsed.matches(needle))
+    ]
+    limit = max(1, min(limit, _MAX_TRANSCRIPT_MESSAGES))
+    returned: list[dict[str, object]] = []
+    used_chars = 0
+    for candidate in reversed(candidates):
+        if len(returned) >= limit or used_chars >= _MAX_TRANSCRIPT_CHARS:
+            break
+        entry, used = candidate.render(_MAX_TRANSCRIPT_CHARS - used_chars)
+        returned.append(entry)
+        used_chars += used
+    returned.reverse()
+    older = len(candidates) - len(returned)
+    omitted = len(messages) - len(returned)
     return {
-        "messages": visible,
+        "messages": returned,
         "message_count": len(messages),
-        "returned_count": len(visible),
+        "matched_count": len(candidates),
+        "returned_count": len(returned),
         "omitted_count": omitted,
-        "truncated": omitted > 0 or any(item["truncated"] for item in visible),
+        "truncated": omitted > 0 or any(entry["truncated"] for entry in returned),
+        "next_before": candidates[older].id if older and returned else None,
     }
 
 
@@ -737,6 +855,10 @@ def _available_actions(
 @sandbox_only
 async def get_thread(
     thread_id: str,
+    query: str | None = None,
+    before: str | None = None,
+    limit: int = _DEFAULT_TRANSCRIPT_MESSAGES,
+    include_tools: bool = False,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `get_thread` tool."""
@@ -782,6 +904,16 @@ async def get_thread(
         logger.exception("Could not load thread %s", thread_id)
         return _failure("Could not load thread")
 
+    try:
+        transcript = _transcript(
+            thread_state,
+            query=query,
+            before=before.strip() if before else None,
+            limit=limit,
+            include_tools=include_tools,
+        )
+    except ValueError as exc:
+        return _failure(str(exc))
     metadata = thread_metadata(thread)
     latest_run = runs[0] if runs else None
     plan = _compact_plan(plan_content or {}, plan_comments)
@@ -811,7 +943,7 @@ async def get_thread(
         "latest_run": _run_detail(latest_run),
         "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
-        "transcript": _transcript(thread_state),
+        "transcript": transcript,
         "state": _state_summary(thread_state),
         "queued_message_count": queued_count,
         "cost": cost,

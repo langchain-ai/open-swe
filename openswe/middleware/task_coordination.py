@@ -58,6 +58,11 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     def is_worker(self) -> bool:
         return self.context is not None and self.context.membership.role == "worker"
 
+    @property
+    def coordinates(self) -> bool:
+        """Leads its task, or would lead the one its first delegation founds."""
+        return self.context is None or self.context.membership.role == "coordinator"
+
     async def abefore_model(
         self, state: AgentState, runtime: Runtime
     ) -> dict[str, list[RunMessage]] | None:

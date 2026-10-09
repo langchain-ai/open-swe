@@ -132,6 +132,11 @@ class _LinkedPullRequest(BaseModel):
     pr_url: str | None = None
 
 
+class _ReviewChatThread(BaseModel):
+    review_chat_pr_url: str | None = None
+    review_chat_implementer_thread_id: str | None = None
+
+
 class DashboardImageBody(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -766,7 +771,6 @@ async def _attributed_run_messages(
     email: str | None,
     client: Any,
     sandbox_handoff: Mapping[str, Any] | None = None,
-    review_chat_pr_url: str | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -817,11 +821,16 @@ async def _attributed_run_messages(
         notices.append(
             (_PULL_REQUEST_THREAD_SYSTEM, prompt("runs/pull-request-thread", url=pr_url))
         )
-    if isinstance(review_chat_pr_url, str):
+    review_chat = _ReviewChatThread.model_validate(metadata)
+    if review_chat.review_chat_pr_url:
         notices.append(
             (
                 _PULL_REQUEST_THREAD_SYSTEM,
-                prompt("runs/pull-request-review-chat", url=review_chat_pr_url),
+                prompt(
+                    "runs/pull-request-review-chat",
+                    url=review_chat.review_chat_pr_url,
+                    implementer_thread_id=review_chat.review_chat_implementer_thread_id,
+                ),
             )
         )
     structured = build_input_messages(
@@ -962,7 +971,6 @@ async def _enrich_run_start_command(
         email=email,
         client=client,
         sandbox_handoff=sandbox_handoff,
-        review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.

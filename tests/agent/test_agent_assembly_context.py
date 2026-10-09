@@ -127,9 +127,9 @@ async def test_task_tools_remain_disabled_regardless_of_owner_opt_in_and_sandbox
     assert ("control_worker" in names) is available
 
 
-@pytest.mark.parametrize("role", ["coordinator", "worker"])
+@pytest.mark.parametrize("role", ["coordinator", "worker", "observer"])
 async def test_existing_task_keeps_controls_after_opt_out(
-    saved_thread_scope, role: Literal["coordinator", "worker"]
+    saved_thread_scope, role: Literal["coordinator", "worker", "observer"]
 ):
     from openswe.tasks.store import Task, TaskContext, TaskMembership
     from openswe.users import User, UserPreferences
@@ -154,7 +154,8 @@ async def test_existing_task_keeps_controls_after_opt_out(
     assert isinstance(tools, list)
     names = {_registered_tool_name(tool) for tool in tools}
     assert "spawn_worker" not in names
-    assert {"control_worker", "message_task_thread", "task_status"} <= names
+    assert {"message_task_thread", "task_status"} <= names
+    assert ("control_worker" in names) is (role == "coordinator")
 
 
 @pytest.mark.asyncio

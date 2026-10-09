@@ -1,5 +1,3 @@
-import { useContext } from "react"
-import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import type { SendAgentMessageVariables } from "@/features/agents/lib/queries"
@@ -66,7 +64,6 @@ export function describeSendError(error: unknown): string {
 export function useSubmitAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
   const source = useThreadSource()
-  const review = useContext(ReviewChatActionsContext)
 
   return useMutation({
     meta: { errorTitle: "Couldn't send message" },
@@ -120,14 +117,7 @@ export function useSubmitAgentMessage(threadId: string) {
       void source
         .startRun({
           message: { id, text: vars.content, images: vars.images },
-          configurable: {
-            ...configurable,
-            ...(review
-              ? {
-                  review_chat_pr_url: `https://github.com/${review.owner}/${review.repo}/pull/${review.number}`,
-                }
-              : {}),
-          },
+          configurable,
           ...(vars.enqueue ? { enqueue: true } : {}),
         })
         .catch((error: unknown) => {

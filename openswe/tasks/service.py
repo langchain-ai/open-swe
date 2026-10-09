@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from fastapi import HTTPException
 from langchain_core.tools import InjectedToolCallId
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
@@ -107,9 +108,22 @@ async def authorized_metadata(actor: Actor, thread_id: str | None = None) -> Thr
     return metadata
 
 
+async def shared_metadata(actor: Actor, thread_id: str | None = None) -> ThreadMetadata:
+    """A thread the actor may read and post in without owning it, as an observer's chat is."""
+    if not actor.thread_id or not actor.login:
+        raise PermissionError("An authenticated user and thread are required")
+    await enforce_github_login_gate(actor.login)
+    target_id = thread_id or actor.thread_id
+    metadata = Thread.model_validate(await langgraph_client().threads.get(target_id)).metadata
+    assert_thread_readable(metadata.json_metadata(), actor.login, actor.email)
+    assert_thread_postable(metadata.json_metadata(), actor.login, actor.email)
+    return metadata
+
+
 async def authorized_context(actor: Actor, *, coordinator: bool = False) -> store.TaskContext:
-    metadata = await authorized_metadata(actor)
     context = await store.TaskMembership.context_for_thread(actor.thread_id)
+    observer = context is not None and context.membership.role == "observer"
+    metadata = await (shared_metadata(actor) if observer else authorized_metadata(actor))
     if context is None:
         raise ValueError("No task exists yet; spawn_worker creates it on first delegation")
     workspace = metadata.workspace or metadata.environment
@@ -451,10 +465,22 @@ async def task_status(
 ) -> dict[str, object]:
     actor = await Actor.resolve(actor)
     context = await authorized_context(actor)
+    observer = context.membership.role == "observer"
     workers = []
     for delegation in await store.TaskDelegation.for_task(context.task.id):
         try:
-            await authorized_metadata(actor, delegation.worker_thread_id)
+            if observer:
+                await shared_metadata(actor, delegation.worker_thread_id)
+            else:
+                await authorized_metadata(actor, delegation.worker_thread_id)
+        except HTTPException:
+            if not observer:
+                raise
+            logger.info(
+                "Observer cannot see a worker thread",
+                extra={"worker_thread_id": delegation.worker_thread_id},
+            )
+            continue
         except NotFoundError:
             logger.info(
                 "Worker thread creation is incomplete",
@@ -490,9 +516,12 @@ async def message_task_thread(
         recipient = worker_thread_id
     else:
         if worker_thread_id is not None:
-            raise PermissionError("Workers can only message their coordinator")
+            raise PermissionError("Workers and observers can only message their coordinator")
         recipient = context.task.require_coordinator()
-        await authorized_metadata(actor, recipient)
+        if context.membership.role == "observer":
+            await shared_metadata(actor, recipient)
+        else:
+            await authorized_metadata(actor, recipient)
     await record_event(
         context.task,
         recipient,

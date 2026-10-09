@@ -14,6 +14,7 @@ __all__ = [
     "baby_sit_lock_thread_id",
     "github_issue_thread_id",
     "linear_issue_thread_id",
+    "pr_chat_thread_id",
     "pr_comment_thread_id",
     "review_chat_thread_id",
     "review_style_thread_id",
@@ -51,8 +52,13 @@ def pr_comment_thread_id(owner: str, repo: str, pr_number: int) -> str:
 
 
 def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> str:
-    """The one chat a user has about a PR. Per-user: chats are not shared."""
+    """A user's review of a PR, listed in their sidebar. Per-user: pins and unread state."""
     return _url_uuid(f"{owner}/{repo}/pr/{pr_number}/chat/{login.lower()}")
+
+
+def pr_chat_thread_id(owner: str, repo: str, pr_number: int) -> str:
+    """The review page's chat about a PR, shared by everyone who reviews it."""
+    return _url_uuid(f"{owner.lower()}/{repo.lower()}/pr/{pr_number}/shared-chat")
 
 
 def review_style_thread_id(owner: str, repo: str) -> str:

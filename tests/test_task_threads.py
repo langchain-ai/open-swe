@@ -255,6 +255,42 @@ async def test_cli_bridge_rejects_delegation_before_reserving_a_worker(
     assert not client.created_runs
 
 
+@pytest.mark.usefixtures("registry_db")
+async def test_observer_relays_to_the_coordinator_only_where_its_sender_could_post(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observer = str(uuid4())
+    client.metadata[observer] = {
+        "owner_type": "user",
+        "owner_login": "chat-opener",
+        "visibility": "public",
+        "source": "dashboard",
+        "workspace": "default",
+    }
+    founded = await store.Task.add_observer(
+        COORDINATOR, observer, title="Fix login", workspace="default"
+    )
+    rejoined = await store.Task.add_observer(
+        COORDINATOR, observer, title="Fix login", workspace="default"
+    )
+    assert rejoined.id == founded.id
+    context = await store.TaskMembership.context_for_thread(COORDINATOR)
+    assert context is not None and context.membership.role == "coordinator"
+    monkeypatch.setattr(TaskMessage, "deliver", AsyncMock())
+    reviewer = service.Actor(observer, "reviewer")
+
+    relayed = await service.message_task_thread(reviewer, "Rename the flag", request_id="call-1")
+
+    assert relayed["recipient_thread_id"] == COORDINATOR
+    with pytest.raises(PermissionError, match="coordinator"):
+        await service.message_task_thread(
+            reviewer, "Rename the flag", request_id="call-2", worker_thread_id=COORDINATOR
+        )
+    client.metadata[COORDINATOR]["visibility"] = "private"
+    with pytest.raises(HTTPException):
+        await service.message_task_thread(reviewer, "Rename the flag", request_id="call-3")
+
+
 async def test_public_thread_does_not_allow_using_owners_credentials(client: MagicMock) -> None:
     with pytest.raises(PermissionError, match="thread owner"):
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))

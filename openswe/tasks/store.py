@@ -4,13 +4,14 @@ from typing import Literal
 from uuid import UUID, uuid7
 
 from sqlalchemy import ForeignKey, Text, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from openswe.database import postgres
 from openswe.database.orm import Base
 from openswe.workspaces.rows import WorkspaceRow
 
-type TaskRole = Literal["coordinator", "worker"]
+type TaskRole = Literal["coordinator", "worker", "observer"]
 
 
 class Task(Base):
@@ -42,30 +43,11 @@ class Task(Base):
     ) -> tuple[Task, TaskDelegation]:
         postgres.require_configured()
         async with postgres.session() as session:
-            await session.execute(
-                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-                {"key": f"task-delegation:{coordinator_thread_id}"},
-            )
-            workspace_row = await session.scalar(
-                select(WorkspaceRow).where(WorkspaceRow.slug == workspace)
-            )
-            if workspace_row is None:
-                raise ValueError("The task's workspace no longer exists")
+            await cls._lock_founding(session, coordinator_thread_id)
+            workspace_row = await cls._workspace_row(session, workspace)
             membership = await session.get(TaskMembership, coordinator_thread_id)
             if membership is None:
-                task = cls(
-                    coordinator_thread_id=coordinator_thread_id,
-                    title=title,
-                    workspace_id=workspace_row.id,
-                )
-                task.workspace = workspace_row
-                session.add(task)
-                await session.flush()
-                session.add(
-                    TaskMembership(
-                        thread_id=coordinator_thread_id, task_id=task.id, role="coordinator"
-                    )
-                )
+                task = await cls._found(session, coordinator_thread_id, title, workspace_row)
             else:
                 task = await session.get(cls, membership.task_id, with_for_update={"of": cls})
                 if (
@@ -97,6 +79,73 @@ class Task(Base):
             )
             session.add(delegation)
             return task, delegation
+
+    @classmethod
+    async def add_observer(
+        cls, member_thread_id: str, observer_thread_id: str, *, title: str, workspace: str
+    ) -> Task:
+        """Join the member's task as an observer, founding one it leads if it has none.
+
+        An observer that already watches another task follows the member to this one.
+        """
+        postgres.require_configured()
+        async with postgres.session() as session:
+            await cls._lock_founding(session, member_thread_id)
+            membership = await session.get(TaskMembership, member_thread_id)
+            if membership is None:
+                workspace_row = await cls._workspace_row(session, workspace)
+                task = await cls._found(session, member_thread_id, title, workspace_row)
+            else:
+                task = await session.get(cls, membership.task_id)
+                if task is None:
+                    raise RuntimeError("Task membership has no task")
+            observer = await session.get(TaskMembership, observer_thread_id)
+            if observer is None:
+                session.add(
+                    TaskMembership(thread_id=observer_thread_id, task_id=task.id, role="observer")
+                )
+            elif observer.role != "observer":
+                raise PermissionError("The thread already has another role in a task")
+            else:
+                observer.task_id = task.id
+            return task
+
+    @staticmethod
+    async def _lock_founding(session: AsyncSession, coordinator_thread_id: str) -> None:
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"task-delegation:{coordinator_thread_id}"},
+        )
+
+    @staticmethod
+    async def _workspace_row(session: AsyncSession, workspace: str) -> WorkspaceRow:
+        workspace_row = await session.scalar(
+            select(WorkspaceRow).where(WorkspaceRow.slug == workspace)
+        )
+        if workspace_row is None:
+            raise ValueError("The task's workspace no longer exists")
+        return workspace_row
+
+    @classmethod
+    async def _found(
+        cls,
+        session: AsyncSession,
+        coordinator_thread_id: str,
+        title: str,
+        workspace_row: WorkspaceRow,
+    ) -> Task:
+        task = cls(
+            coordinator_thread_id=coordinator_thread_id,
+            title=title,
+            workspace_id=workspace_row.id,
+        )
+        task.workspace = workspace_row
+        session.add(task)
+        await session.flush()
+        session.add(
+            TaskMembership(thread_id=coordinator_thread_id, task_id=task.id, role="coordinator")
+        )
+        return task
 
 
 class TaskMembership(Base):

@@ -267,6 +267,79 @@ def test_transcript_filters_private_and_tool_content() -> None:
     assert transcript["truncated"] is True
 
 
+def test_transcript_pages_back_from_newest_messages() -> None:
+    state = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": f"message {index}", "id": f"m{index}"}
+                for index in range(120)
+            ]
+        }
+    }
+
+    pages: list[list[str]] = []
+    before: str | None = None
+    while True:
+        transcript = threads_tool._transcript(state, before=before)
+        pages.append([str(message["id"]) for message in transcript["messages"]])
+        before = transcript["next_before"]
+        if before is None:
+            break
+
+    assert pages == [
+        [f"m{index}" for index in range(70, 120)],
+        [f"m{index}" for index in range(20, 70)],
+        [f"m{index}" for index in range(20)],
+    ]
+    with pytest.raises(ValueError):
+        threads_tool._transcript(state, before="missing")
+
+
+def test_transcript_query_and_tool_entries() -> None:
+    state = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": "Fix the flaky test", "id": "user-1"},
+                {
+                    "type": "ai",
+                    "content": "",
+                    "id": "ai-1",
+                    "tool_calls": [
+                        {"name": "execute", "args": {"command": "pytest -x"}, "id": "call-1"}
+                    ],
+                },
+                {
+                    "type": "tool",
+                    "content": "1 failed: test_race",
+                    "name": "execute",
+                    "tool_call_id": "call-1",
+                    "id": "tool-1",
+                },
+                {"type": "ai", "content": "The race is fixed", "id": "ai-2"},
+            ]
+        }
+    }
+
+    assert [m["id"] for m in threads_tool._transcript(state)["messages"]] == ["user-1", "ai-2"]
+    assert [m["id"] for m in threads_tool._transcript(state, query="RACE")["messages"]] == ["ai-2"]
+
+    with_tools = threads_tool._transcript(state, query="race", include_tools=True)
+
+    assert [m["id"] for m in with_tools["messages"]] == ["tool-1", "ai-2"]
+    assert with_tools["messages"][0] == {
+        "id": "tool-1",
+        "role": "tool_result",
+        "text": "1 failed: test_race",
+        "timestamp": None,
+        "tool": "execute",
+        "tool_call_id": "call-1",
+        "status": None,
+        "truncated": False,
+    }
+    call = threads_tool._transcript(state, query="pytest", include_tools=True)["messages"]
+    assert call[0]["tool_calls"] == [{"name": "execute", "args": '{"command": "pytest -x"}'}]
+
+
 def test_admin_thread_actions_require_admin() -> None:
     options = {
         "admin_thread": True,

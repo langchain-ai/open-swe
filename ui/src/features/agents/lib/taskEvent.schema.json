@@ -12,7 +12,8 @@
     "TaskRole": {
       "enum": [
         "coordinator",
-        "worker"
+        "worker",
+        "observer"
       ],
       "type": "string"
     }
