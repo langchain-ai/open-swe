@@ -394,7 +394,7 @@ async def configure_sandbox_proxy(
     base_proxy_config: dict[str, Any] | None = None,
     thread_id: str | None = None,
 ) -> None:
-    """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
+    """Inject GitHub, thread-tool and LangSmith credentials, preserving custom proxy settings."""
     api_key = _get_langsmith_api_key()
     if not api_key:
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
@@ -411,6 +411,7 @@ async def configure_sandbox_proxy(
         or rule.get("name")
         not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
     ]
+    from openswe.sandboxes.langsmith_access import langsmith_proxy_rule
     from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
 
     preserved_rules = [
@@ -418,10 +419,21 @@ async def configure_sandbox_proxy(
         for rule in preserved_rules
         if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
     ]
-    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
+    thread_rules = (
+        [
+            rule
+            for rule in (
+                await tool_proxy_rule(thread_id, sandbox_name),
+                await langsmith_proxy_rule(thread_id),
+            )
+            if rule
+        ]
+        if thread_id
+        else []
+    )
     proxy_config["rules"] = [
         *_github_proxy_rules(github_token),
-        *([tools_rule] if tools_rule else []),
+        *thread_rules,
         *preserved_rules,
     ]
     payload = {"proxy_config": proxy_config}

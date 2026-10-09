@@ -55,6 +55,12 @@ async def sandbox_host_thread_id(thread_id: str) -> str:
     return host if isinstance(host, str) and host else thread_id
 
 
+async def sandbox_host_metadata(thread_id: str) -> dict[str, object]:
+    """Metadata of the thread whose capability the sandbox carries."""
+    host = await get_client().threads.get(await sandbox_host_thread_id(thread_id))
+    return host.get("metadata") or {}
+
+
 def tools_endpoint_configured() -> bool:
     return bool(ENV.DASHBOARD_JWT_SECRET.optional() and tools_base_url())
 
@@ -100,8 +106,7 @@ async def tool_proxy_rule(thread_id: str, sandbox_id: str) -> dict[str, object] 
     if access is None:
         return None
     url, token = access
-    host = await get_client().threads.get(await sandbox_host_thread_id(thread_id))
-    workspace = (host.get("metadata") or {}).get("workspace")
+    workspace = (await sandbox_host_metadata(thread_id)).get("workspace")
     settings = await get_workspace_settings(workspace if isinstance(workspace, str) else "default")
     env_vars = {TOOLS_URL_ENV: url}
     if settings.sandbox_openai_enabled:

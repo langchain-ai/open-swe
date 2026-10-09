@@ -199,6 +199,49 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert rule["headers"][0]["value"] == first_token
 
 
+@pytest.mark.parametrize(
+    ("metadata", "injected"),
+    [
+        ({"visibility": "private", "owner_type": "user", "owner_login": "alice"}, True),
+        ({"visibility": "public", "owner_type": "user", "owner_login": "alice"}, False),
+        ({"visibility": "private", "owner_type": "system", "owner_login": "alice"}, False),
+    ],
+)
+async def test_only_private_owner_sandboxes_get_langsmith_key(
+    monkeypatch: pytest.MonkeyPatch, metadata: dict[str, str], injected: bool
+) -> None:
+    from openswe.sandboxes import langsmith_access
+    from openswe.sandboxes.providers import langsmith
+
+    monkeypatch.setenv("LANGSMITH_API_KEY", "test-sandbox-api-key")
+    patch_proxy = AsyncMock()
+    monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": metadata})
+    monkeypatch.setattr(tool_access, "get_client", lambda: client)
+    mint = AsyncMock(return_value="lsv2_pt_alice")
+    monkeypatch.setattr(langsmith_access, "langsmith_sandbox_api_key", mint)
+
+    await langsmith.configure_sandbox_proxy(
+        "sandbox-a",
+        "test-github-token",
+        thread_id="thread-a",
+        base_proxy_config={"rules": [{"name": langsmith_access.LANGSMITH_RULE}]},
+    )
+
+    rules = patch_proxy.call_args.args[2]["proxy_config"]["rules"]
+    langsmith_rules = [rule for rule in rules if rule["name"] == langsmith_access.LANGSMITH_RULE]
+    if not injected:
+        assert langsmith_rules == []
+        mint.assert_not_awaited()
+        return
+    [rule] = langsmith_rules
+    mint.assert_awaited_once_with("alice")
+    assert rule["match_hosts"] == ["api.smith.langchain.com", "api.host.langchain.com"]
+    assert rule["headers"] == [{"name": "X-Api-Key", "type": "opaque", "value": "lsv2_pt_alice"}]
+    assert rule["env_vars"]["LANGSMITH_API_KEY"] == langsmith_access.LANGSMITH_API_KEY_PLACEHOLDER
+
+
 async def test_restores_idle_context_ignoring_legacy_plan_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

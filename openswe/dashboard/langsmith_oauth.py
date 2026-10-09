@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlparse
 
 import httpx2
+from pydantic import BaseModel, ValidationError
 
 from openswe.config import ENV
 from openswe.dashboard.oauth import pkce_s256_challenge
@@ -271,6 +272,12 @@ async def langsmith_status(login: str) -> dict[str, object]:
 
 
 async def disconnect_langsmith(login: str) -> None:
+    cached = await LANGSMITH_SANDBOX_KEYS.pop(login)
+    if cached is not None:
+        try:
+            await _revoke_sandbox_key(login, SandboxKey.model_validate(cached))
+        except LangSmithOAuthError, ValidationError:
+            logger.warning("Could not revoke LangSmith sandbox key", exc_info=True)
     await delete_credential(LANGSMITH_KEY, login)
 
 
@@ -325,3 +332,80 @@ async def langsmith_access_token(login: str) -> str | None:
             login, data, client_id=credential.client_id, token_endpoint=token_endpoint
         )
         return str(data["access_token"])
+
+
+LANGSMITH_SANDBOX_KEYS = UserRecords("langsmith_sandbox_key")
+_PAT_PATH = "/api/v1/orgs/current/personal-access-tokens"
+_SANDBOX_KEY_TTL = timedelta(hours=3)
+# Longer than the sandbox proxy's hourly refresh, so an injected key never lapses mid-run.
+_SANDBOX_KEY_MIN_REMAINING = timedelta(minutes=70)
+
+
+class SandboxKey(BaseModel):
+    """A personal access token minted as the user for CLIs that only take API keys."""
+
+    id: str
+    encrypted_key: str
+    expires_at: datetime
+
+    @property
+    def fresh(self) -> bool:
+        return self.expires_at - datetime.now(UTC) > _SANDBOX_KEY_MIN_REMAINING
+
+
+async def _pat_request(
+    access_token: str, method: str, path: str, *, json: dict[str, object] | None = None
+) -> httpx2.Response:
+    try:
+        async with httpx2.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            response = await client.request(
+                method,
+                langsmith_issuer() + path,
+                headers={"Authorization": f"Bearer {access_token}"},
+                json=json,
+            )
+    except httpx2.RequestError as exc:
+        raise LangSmithOAuthError(503, "LangSmith API key request failed: network error") from exc
+    if not response.is_success:
+        raise _error(response, "LangSmith API key request failed")
+    return response
+
+
+async def _revoke_sandbox_key(login: str, key: SandboxKey) -> None:
+    access_token = await langsmith_access_token(login)
+    if access_token is not None:
+        await _pat_request(access_token, "DELETE", f"{_PAT_PATH}/{key.id}")
+
+
+async def langsmith_sandbox_api_key(login: str) -> str | None:
+    """A short-lived API key acting as the user, reused until near expiry; None if unlinked."""
+    if not langsmith_oauth_configured():
+        return None
+    access_token = await langsmith_access_token(login)
+    if access_token is None:
+        await LANGSMITH_SANDBOX_KEYS.delete(login)
+        return None
+    cached = await LANGSMITH_SANDBOX_KEYS.get(login)
+    if cached is not None:
+        try:
+            key = SandboxKey.model_validate(cached)
+        except ValidationError:
+            logger.warning("Discarding malformed LangSmith sandbox key", exc_info=True)
+        else:
+            if key.fresh and (secret := decrypt_token(key.encrypted_key)):
+                return secret
+    expires_at = datetime.now(UTC) + _SANDBOX_KEY_TTL
+    response = await _pat_request(
+        access_token,
+        "POST",
+        _PAT_PATH,
+        json={"description": "Open SWE sandbox", "expires_at": expires_at.isoformat()},
+    )
+    data = response.json()
+    secret = data.get("key") if isinstance(data, dict) else None
+    pat_id = data.get("id") if isinstance(data, dict) else None
+    if not isinstance(secret, str) or not secret or not isinstance(pat_id, str):
+        raise LangSmithOAuthError(502, "LangSmith returned no API key")
+    key = SandboxKey(id=pat_id, encrypted_key=encrypt_token(secret), expires_at=expires_at)
+    await LANGSMITH_SANDBOX_KEYS.put(login, key.model_dump(mode="json"))
+    return secret
