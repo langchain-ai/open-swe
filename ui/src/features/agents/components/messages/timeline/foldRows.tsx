@@ -2,6 +2,7 @@ import {
   CaretDownIcon,
   CaretRightIcon,
 } from "@langchain/macaw-components/icons"
+import { LoadingIndicator } from "@langchain/macaw-components/ThinkingState"
 import { cn } from "@/lib/utils"
 
 /**
@@ -34,6 +35,9 @@ export function TurnFoldRow({
         onClick={onToggle}
         className="flex cursor-pointer items-center gap-space-1 rounded-md px-space-1 text-xs text-secondary tabular-nums transition-colors duration-normal select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       >
+        {active && (
+          <LoadingIndicator className="mr-space-1 size-3" speed="slow" />
+        )}
         <span className={active ? "shimmer-text" : undefined}>{label}</span>
         <Caret size={12} weight="bold" aria-hidden />
       </button>
