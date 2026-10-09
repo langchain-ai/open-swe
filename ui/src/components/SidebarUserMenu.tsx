@@ -1,18 +1,19 @@
+import {
+  GearRegularIcon,
+  MoonRegularIcon,
+  SignOutRegularIcon,
+  SunRegularIcon,
+} from "@langchain/macaw-components/icons"
+import { Avatar } from "@langchain/macaw-components/Avatar"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { DesktopIcon } from "@phosphor-icons/react/dist/ssr/Desktop"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
-import {
-  IoCopyOutline,
-  IoDesktopOutline,
-  IoLogOutOutline,
-  IoMoonOutline,
-  IoSettingsOutline,
-  IoSunnyOutline,
-} from "react-icons/io5"
 
 import type { SessionUser } from "@/lib/api"
 import type { Theme } from "@/lib/theme"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { api } from "@/lib/api"
 import {
   getDatadogSessionLink,
@@ -26,11 +27,11 @@ import { cn } from "@/lib/utils"
 const THEME_OPTIONS: Array<{
   value: Theme
   label: string
-  icon: typeof IoSunnyOutline
+  icon: IconComponent
 }> = [
-  { value: "light", label: "Light", icon: IoSunnyOutline },
-  { value: "dark", label: "Dark", icon: IoMoonOutline },
-  { value: "system", label: "System", icon: IoDesktopOutline },
+  { value: "light", label: "Light", icon: SunRegularIcon },
+  { value: "dark", label: "Dark", icon: MoonRegularIcon },
+  { value: "system", label: "System", icon: DesktopIcon },
 ]
 
 interface SidebarUserMenuProps {
@@ -99,8 +100,6 @@ export function SidebarUserMenu({
     window.setTimeout(() => setDatadogCopyStatus("idle"), 1500)
   }
 
-  const initials = (user.login || "?").slice(0, 2).toUpperCase()
-
   return (
     <div ref={ref} className="relative">
       <button
@@ -108,18 +107,18 @@ export function SidebarUserMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-sidebar-accent"
+        className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none hover:bg-surface-level-2-hover"
       >
-        <Avatar className="size-7">
-          {user.avatar_url && (
-            <AvatarImage src={user.avatar_url} alt={user.login} />
-          )}
-          <AvatarFallback>{initials}</AvatarFallback>
-        </Avatar>
+        <Avatar
+          className="size-7 text-xs"
+          imageUrl={user.avatar_url ?? undefined}
+          label={user.login || "?"}
+          shape="circle"
+        />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-xs font-medium">{user.login}</span>
           {user.email && (
-            <span className="truncate text-[10px] text-muted-foreground">
+            <span className="truncate text-xxs text-secondary">
               {user.email}
             </span>
           )}
@@ -128,10 +127,10 @@ export function SidebarUserMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-default bg-elevated p-1 text-primary shadow-md"
         >
           <div className="px-2 py-1.5">
-            <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+            <span className="text-xxs font-medium tracking-wide text-tertiary uppercase">
               Theme
             </span>
             <div className="mt-1.5 grid grid-cols-3 gap-1">
@@ -145,28 +144,28 @@ export function SidebarUserMenu({
                     onClick={() => setTheme(option.value)}
                     aria-pressed={active}
                     className={cn(
-                      "flex flex-col items-center gap-1 rounded-sm border px-1 py-1.5 text-[10px] transition-colors",
+                      "flex flex-col items-center gap-space-1 rounded-sm border px-space-1 py-1.5 text-xxs transition-colors",
                       active
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-transparent text-muted-foreground hover:bg-muted"
+                        ? "border-brand-subtle bg-brand-subtle text-brand-primary"
+                        : "border-transparent text-secondary hover:bg-elevated-hover"
                     )}
                   >
-                    <Icon className="size-3.5" />
+                    <Icon size={14} weight="regular" />
                     {option.label}
                   </button>
                 )
               })}
             </div>
           </div>
-          <div className="my-1 h-px bg-border" />
+          <div className="my-space-1 border-t border-default" />
           {datadogInitialized && (
             <button
               type="button"
               role="menuitem"
               onClick={() => void copyDatadogSessionLink()}
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
+              className="flex w-full items-center gap-space-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-elevated-hover"
             >
-              <IoCopyOutline className="size-3.5" />
+              <CopyIcon size={14} weight="regular" />
               {datadogCopyStatus === "copied"
                 ? "Copied Datadog link"
                 : datadogCopyStatus === "error"
@@ -179,9 +178,9 @@ export function SidebarUserMenu({
               to="/my-settings"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-muted"
+              className="flex w-full items-center gap-space-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-elevated-hover"
             >
-              <IoSettingsOutline className="size-3.5" />
+              <GearRegularIcon size={14} />
               Settings
             </Link>
           )}
@@ -189,9 +188,9 @@ export function SidebarUserMenu({
             type="button"
             role="menuitem"
             onClick={() => void onLogout()}
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
+            className="flex w-full items-center gap-space-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-elevated-hover"
           >
-            <IoLogOutOutline className="size-3.5" />
+            <SignOutRegularIcon size={14} />
             Sign out
           </button>
         </div>

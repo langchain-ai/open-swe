@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
+from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
@@ -34,6 +35,8 @@ from openswe.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SOURCE = "dashboard"
+# Set on a thread the upload_session tool reserved until `oswe upload` seeds it.
+SESSION_UPLOAD_PENDING_KEY = "session_upload_pending"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
@@ -162,6 +165,9 @@ def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
     _assert_thread_promptable(metadata, login)
+    # A run here would start without the history `oswe upload` is about to seed.
+    if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
+        raise HTTPException(409, "this thread is waiting for its session upload")
     if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
         email, login=login
     ):
@@ -412,6 +418,16 @@ async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bo
         return False
 
 
+def _run_costs(metadata: Mapping[str, Any]) -> dict[str, float]:
+    return {
+        key.removeprefix(RUN_COST_KEY_PREFIX): float(cost)
+        for key, cost in metadata.items()
+        if key.startswith(RUN_COST_KEY_PREFIX)
+        and isinstance(cost, (int, float))
+        and not isinstance(cost, bool)
+    }
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -458,6 +474,7 @@ async def _thread_summary(
         else None
     )
 
+    run_costs = _run_costs(metadata)
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
@@ -509,6 +526,8 @@ async def _thread_summary(
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
+        "costUsd": sum(run_costs.values()) if run_costs else None,
+        "runCosts": run_costs,
         "sourceUrl": thread_source_url(metadata),
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),

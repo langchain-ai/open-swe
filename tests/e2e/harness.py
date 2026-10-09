@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -76,6 +76,7 @@ from langgraph_sdk import get_client  # noqa: E402
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from openswe.slack.client import lookup_slack_thread_id  # noqa: E402
+from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
@@ -195,25 +196,6 @@ async def control_state() -> JSONResponse:
     )
 
 
-@app.post("/control/slack-run-complete")
-async def control_slack_run_complete() -> JSONResponse:
-    """Deliver the platform completion event omitted by the local runtime."""
-    from openswe.completion import handle_run_completion
-    from openswe.slack.client import lookup_slack_thread_run_mapping
-
-    client = get_client(url=BASE_URL)
-    channel = CURRENT_THREAD["channel"]
-    thread_ts = CURRENT_THREAD["thread_ts"]
-    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
-    mapping = await lookup_slack_thread_run_mapping(client, channel, thread_ts)
-    if not thread_id or not mapping:
-        raise HTTPException(409, "Run mapping not ready")
-    run = await client.runs.get(thread_id, mapping["run_id"])
-    if run["status"] != "success":
-        raise HTTPException(409, "Run has not completed")
-    return JSONResponse(await handle_run_completion(dict(run)))
-
-
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
     """Snapshot captures/deletes the workspace tools asked the platform for."""
@@ -280,6 +262,23 @@ async def control_repo_merge_methods(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "repo": f"{owner}/{name}", **flags})
 
 
+@app.post("/control/session-upload")
+async def control_reserve_session_upload(request: Request) -> JSONResponse:
+    """Reserve an upload thread as the remote MCP's ``upload_session`` tool does.
+
+    The E2E deployment mounts no remote MCP, so a spec reserves here and then
+    uploads through the real ``/threads/uploads`` route as ``oswe upload`` does."""
+    from openswe.threads.session_upload import SessionUploadHeader, reserve_session_upload
+
+    body = await request.json()
+    login = str(body.pop("login"))
+    email = body.pop("email", None)
+    reservation = await reserve_session_upload(
+        SessionUploadHeader.model_validate(body), login, email=email
+    )
+    return JSONResponse(reservation.model_dump())
+
+
 @app.post("/control/pull-request")
 async def control_seed_pull_request(request: Request) -> JSONResponse:
     """Seed an open pull request the PR search returns, without running the agent.
@@ -327,26 +326,42 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/control/walkthrough")
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
-    """Store a one-step walkthrough for a fake pull request's current head, as a scout would."""
-    from openswe.review.walkthrough import FileLines, StepDraft, Walkthrough
+    """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
+    from openswe.github.pull_requests import PullRequest
+    from openswe.walkthrough.diff import parse
+    from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+    from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
     pull = _seeded_pull(body)
-    await Walkthrough.replace(
-        pull["owner"],
-        pull["repo"],
-        pull["number"],
+    changes = parse(
+        "\n".join(
+            f"diff --git a/{file['filename']} b/{file['filename']}\n"
+            f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
+            for file in pull["files"]
+        )
+    )
+    plan = Plan(
         head_sha=pull["head_sha"],
-        merge_base_sha=fakes.base_sha(pull),
-        scout_thread_id="",
-        steps=[
-            StepDraft(
-                title=str(body.get("title") or "Seeded step"),
-                files=[FileLines(path=file["filename"]) for file in pull["files"]],
+        chunks=[
+            PlanChunk(
+                title=str(body.get("title") or "Seeded chunk"),
+                lines=[LineRef.of(line) for change in changes for line in change.lines],
             )
         ],
-        human_input_summary=str(body.get("human_input") or ""),
     )
+    pull_request = await PullRequest(
+        owner=pull["owner"], repo=pull["repo"], number=pull["number"]
+    ).ensure()
+    await Walkthrough.dismiss(pull["owner"], pull["repo"], pull["number"])
+    await Walkthrough.install(
+        pull_request.id,
+        plan,
+        merge_base_sha=fakes.base_sha(pull),
+        changes=changes,
+        replacing=None,
+    )
+    await Walkthrough.set_human_input(pull_request.id, str(body.get("human_input") or ""))
     return JSONResponse({"ok": True})
 
 
@@ -451,10 +466,27 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                     }
                     for vote in approval.participants
                 ],
+                "pull_request_id": str(approval.pull_request_id),
+                "excluded_hunks": approval.excluded_hunks,
             }
             for approval in approvals
         ]
     )
+
+
+@app.get("/control/audit-logs")
+async def control_audit_logs(operation_name: str) -> JSONResponse:
+    """The last day's audit entries for one operation, newest first."""
+    from openswe.audit_logs.store import list_logs
+
+    now = datetime.now(UTC)
+    page = await list_logs(
+        start_time=now - timedelta(days=1),
+        end_time=now,
+        limit=50,
+        operation_name=operation_name,
+    )
+    return JSONResponse([entry.model_dump(mode="json") for entry in page.items])
 
 
 @app.get("/control/human-review-requests")
@@ -769,19 +801,24 @@ async def slack_action(request: Request) -> JSONResponse:
     return JSONResponse(response.json(), status_code=response.status_code)
 
 
+async def _signed_in(login: str, email: str) -> User:
+    """The ``users`` row a real sign-in would give ``login``, created like the OAuth callback does."""
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", login)
+    if user is not None:
+        return user
+    github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
+    return await User.sign_in("github", github_id, login=login, email=email)
+
+
 @app.post("/control/login")
 async def control_login(request: Request) -> JSONResponse:
     """Simulate a signed-in dashboard user by minting the real session cookie."""
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = JSONResponse({"ok": True, "login": login, "email": email})
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -814,13 +851,8 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     if not email:
         match = next((u for u in TEST_USERS if u["login"] == login), None)
         email = match["email"] if match else f"{login}@example.com"
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -868,13 +900,8 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -1260,6 +1287,13 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
     if "vnd.github.diff" in request.headers.get("Accept", ""):
         return Response(fakes.pull_diff(pr), media_type="text/plain")
     return JSONResponse(_gh_pr_json(pr))
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/commits")
+async def gh_list_pull_commits(owner: str, repo: str, number: int) -> JSONResponse:
+    if fakes.find_pull(number, owner, repo) is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse([])
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")

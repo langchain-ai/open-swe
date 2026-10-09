@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Button } from "@langchain/macaw-components/Button"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import type {
   ManagedToolsConnectCard,
@@ -88,15 +88,16 @@ export function MissingRow({
 }) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
-      <span className="text-sm">{credential.display_name}</span>
+      <span className="text-sm text-primary">{credential.display_name}</span>
       {credential.kind === "secret" ? (
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-secondary">
           Set its API key in LangSmith
         </span>
       ) : (
         <Button
-          size="sm"
-          variant="outline"
+          size="xs"
+          color="secondary"
+          variant="outlined"
           disabled={connecting}
           onClick={() => onConnect(gatewayId, credential.slug)}
         >
@@ -120,30 +121,32 @@ function GatewayStatus({
   return (
     <section
       aria-label={`${status.gateway.name} managed tools`}
-      className="rounded-md border"
+      className="rounded-md border border-default"
     >
       <div className="flex flex-wrap items-center justify-between gap-3 p-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium">{status.gateway.name}</p>
-          <p className="text-xs text-muted-foreground">Used in {workspaces}</p>
+          <p className="text-sm font-medium text-primary">
+            {status.gateway.name}
+          </p>
+          <p className="text-xs text-secondary">Used in {workspaces}</p>
         </div>
         {status.ready ? (
-          <Badge variant="outline">
-            Ready · {status.tool_count ?? status.gateway.tool_count} tools
+          <Badge color="success" size="xs">
+            {`Ready · ${status.tool_count ?? status.gateway.tool_count} tools`}
           </Badge>
         ) : (
-          <Badge variant="outline">
-            Connect {status.missing.length} to use
+          <Badge color="warning" size="xs">
+            {`Connect ${status.missing.length} to use`}
           </Badge>
         )}
       </div>
       {status.ready ? null : (
         <>
-          <p className="px-3 pb-2 text-xs text-muted-foreground">
+          <p className="px-3 pb-2 text-xs text-secondary">
             LangSmith offers this gateway&apos;s tools only after every service
             in it is connected to your account.
           </p>
-          <ul className="divide-y divide-border border-t">
+          <ul className="divide-y divide-default border-t border-default">
             {status.missing.map((credential) => (
               <MissingRow
                 key={credential.slug}
@@ -177,9 +180,9 @@ export function ManagedToolsSection() {
       description="Tools your workspace admins picked from LangSmith Managed Tools. They load in your private threads and run with your own connections; provider tokens stay in LangSmith."
     >
       {view.isLoading ? (
-        <p className="p-4 text-xs text-muted-foreground">Loading…</p>
+        <p className="p-4 text-xs text-secondary">Loading…</p>
       ) : view.isError ? (
-        <p role="alert" className="p-4 text-xs text-destructive">
+        <p role="alert" className="p-4 text-xs text-error-secondary">
           {view.error.message}
         </p>
       ) : !view.data?.langsmith_connected ? (
@@ -189,7 +192,7 @@ export function ManagedToolsSection() {
           control={<ConnectLangSmithButton />}
         />
       ) : view.data.gateways.length === 0 ? (
-        <p className="p-4 text-xs text-muted-foreground">
+        <p className="p-4 text-xs text-secondary">
           No workspace has picked a managed tools gateway yet.
         </p>
       ) : (

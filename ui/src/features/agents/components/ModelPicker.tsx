@@ -1,4 +1,10 @@
 import {
+  CaretDownIcon,
+  CaretRightIcon,
+  CheckIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
+import {
   useCallback,
   useEffect,
   useEffectEvent,
@@ -7,7 +13,12 @@ import {
   useRef,
   useState,
 } from "react"
-import { Check, ChevronDown, ChevronRight } from "lucide-react"
+import { Input } from "@langchain/macaw-components/Input"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/macaw-components/Popover"
 
 import type { ModelOption } from "@/lib/api"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -17,7 +28,6 @@ import {
   routedModelLabel,
 } from "@/features/agents/lib/provider/useModelOptions"
 import { formatTokenCount } from "@/features/agents/lib/contextUsage"
-import { Z } from "@/features/agents/components/z-index"
 import { cn } from "@/lib/utils"
 
 export interface ModelPickerProps {
@@ -40,6 +50,9 @@ type Pane = "main" | "models"
 
 const AUTO_ID = "__auto__"
 
+const PANE =
+  "rounded-lg border border-default bg-elevated p-0 text-primary shadow-md outline-none"
+
 function effortForModel(
   model: ModelOption,
   selection: ModelSelection | null
@@ -52,7 +65,7 @@ function effortForModel(
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-3 pt-2 pb-1 text-[11px] text-muted-foreground/60">
+    <div className="px-space-3 pt-space-2 pb-space-1 text-xxs text-tertiary">
       {children}
     </div>
   )
@@ -84,18 +97,22 @@ function OptionRow({
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] whitespace-nowrap transition-colors",
-        selected ? "text-foreground" : "text-muted-foreground",
-        focused && "bg-accent",
+        "flex w-full items-center gap-space-2 px-space-3 py-1.5 text-left text-xs whitespace-nowrap transition-colors",
+        selected ? "text-primary" : "text-secondary",
+        focused && "bg-elevated-hover",
         disabled
           ? "cursor-default opacity-40"
-          : "cursor-pointer hover:bg-accent"
+          : "cursor-pointer hover:bg-elevated-hover"
       )}
     >
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {trailing ??
         (selected && (
-          <Check className="size-3.5 shrink-0 text-muted-foreground/60" />
+          <CheckIcon
+            size={14}
+            weight="regular"
+            className="shrink-0 text-icon-tertiary"
+          />
         ))}
     </button>
   )
@@ -120,8 +137,8 @@ export function ModelPicker({
 }: ModelPickerProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
   const open = controlledOpen ?? uncontrolledOpen
-  // Read through a ref so `setOpen` stays referentially stable for the
-  // click-outside listener while still resolving updater functions correctly.
+  // Read through a ref so `setOpen` stays referentially stable while still
+  // resolving updater functions correctly.
   const openRef = useRef(open)
   useEffect(() => {
     openRef.current = open
@@ -139,7 +156,6 @@ export function ModelPicker({
   const [pane, setPane] = useState<Pane>("main")
   const [mainIndex, setMainIndex] = useState(0)
   const [modelPaneTop, setModelPaneTop] = useState(0)
-  const containerRef = useRef<HTMLDivElement>(null)
   const mainPaneRef = useRef<HTMLDivElement>(null)
   const modelRowRef = useRef<HTMLDivElement>(null)
   const modelPaneRef = useRef<HTMLDivElement>(null)
@@ -215,19 +231,6 @@ export function ModelPicker({
     )
     setModelPaneTop((top) => top + clamped - paneRect.top)
   }, [pane])
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [setOpen])
 
   const close = useCallback(() => {
     setOpen(false)
@@ -355,112 +358,128 @@ export function ModelPicker({
     !selection && routedLabel ? `Routed model: ${routedLabel}` : undefined
 
   return (
-    <div
-      ref={containerRef}
-      className={cn("relative min-w-0 shrink", className)}
-    >
-      <button
-        type="button"
-        disabled={pickerDisabled}
-        onClick={() => setOpen((value) => !value)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        title={triggerTitle}
-        className={cn(
-          "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
-          triggerClassName
-        )}
-      >
-        <span className="truncate">{triggerLabel}</span>
-        {!pickerDisabled && (
-          <ChevronDown className="size-3.5 shrink-0 opacity-60" />
-        )}
-      </button>
-      {open && !pickerDisabled && (
-        <div
-          data-testid="model-picker-panel"
-          onKeyDown={handleKeyDown}
-          style={{ zIndex: Z.DROPDOWN }}
-          className="absolute bottom-full left-0 mb-1"
-        >
-          <div
-            ref={mainPaneRef}
-            tabIndex={-1}
-            className="dropdown-glass flex w-56 flex-col overflow-hidden rounded-xl py-1 outline-none"
-          >
-            {selectedModel ? (
-              <>
-                {contextWindow != null && (
-                  <>
-                    <SectionHeading>Context</SectionHeading>
-                    <div
-                      className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-foreground"
-                      title="Context window reported for this model"
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        {formatTokenCount(contextWindow)}
-                      </span>
-                    </div>
-                  </>
-                )}
-                <SectionHeading>Reasoning</SectionHeading>
-                <div
-                  role="listbox"
-                  aria-label="Reasoning effort"
-                  className="max-h-60 overflow-y-auto"
-                >
-                  {efforts.map((effort, index) => (
-                    <OptionRow
-                      key={effort}
-                      label={formatEffort(effort)}
-                      selected={currentEffort === effort}
-                      focused={pane === "main" && mainIndex === index}
-                      onMouseEnter={() => {
-                        setPane("main")
-                        setMainIndex(index)
-                      }}
-                      onClick={() => applyEffort(effort)}
-                    />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
-                Model and reasoning are chosen when the thread starts.
-              </p>
+    <div className={cn("relative min-w-0 shrink", className)}>
+      <Popover open={open && !pickerDisabled} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={pickerDisabled}
+            aria-haspopup="listbox"
+            title={triggerTitle}
+            className={cn(
+              "flex max-w-[220px] cursor-pointer items-center gap-0.5 text-xs text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+              triggerClassName
             )}
-            <div ref={modelRowRef} className="mt-1 border-t border-border pt-1">
-              <SectionHeading>Model</SectionHeading>
-              <OptionRow
-                label={selectedModel?.label ?? "Auto"}
-                selected={false}
-                focused={pane === "models" || mainIndex === modelRowIndex}
-                trailing={
-                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
-                }
-                onMouseEnter={openModelPane}
-                onClick={openModelPane}
+          >
+            <span className="truncate">{triggerLabel}</span>
+            {!pickerDisabled && (
+              <CaretDownIcon
+                size={14}
+                weight="regular"
+                className="shrink-0 opacity-60"
               />
-            </div>
+            )}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          ref={mainPaneRef}
+          data-testid="model-picker-panel"
+          side="top"
+          align="start"
+          sideOffset={4}
+          onKeyDown={handleKeyDown}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => {
+            // Escape steps back out of the model pane before it closes.
+            if (pane === "models") event.preventDefault()
+          }}
+          className={cn(PANE, "relative w-56 py-space-1 [filter:none]")}
+        >
+          {selectedModel ? (
+            <>
+              {contextWindow != null && (
+                <>
+                  <SectionHeading>Context</SectionHeading>
+                  <div
+                    className="flex items-center gap-space-2 px-space-3 py-1.5 text-xs text-primary"
+                    title="Context window reported for this model"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {formatTokenCount(contextWindow)}
+                    </span>
+                  </div>
+                </>
+              )}
+              <SectionHeading>Reasoning</SectionHeading>
+              <div
+                role="listbox"
+                aria-label="Reasoning effort"
+                className="max-h-60 overflow-y-auto"
+              >
+                {efforts.map((effort, index) => (
+                  <OptionRow
+                    key={effort}
+                    label={formatEffort(effort)}
+                    selected={currentEffort === effort}
+                    focused={pane === "main" && mainIndex === index}
+                    onMouseEnter={() => {
+                      setPane("main")
+                      setMainIndex(index)
+                    }}
+                    onClick={() => applyEffort(effort)}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="px-space-3 py-1.5 text-xs text-tertiary">
+              Model and reasoning are chosen when the thread starts.
+            </p>
+          )}
+          <div
+            ref={modelRowRef}
+            className="mt-space-1 border-t border-default pt-space-1"
+          >
+            <SectionHeading>Model</SectionHeading>
+            <OptionRow
+              label={selectedModel?.label ?? "Auto"}
+              selected={false}
+              focused={pane === "models" || mainIndex === modelRowIndex}
+              trailing={
+                <CaretRightIcon
+                  size={14}
+                  weight="regular"
+                  className="shrink-0 text-icon-tertiary"
+                />
+              }
+              onMouseEnter={openModelPane}
+              onClick={openModelPane}
+            />
           </div>
           {pane === "models" && (
             <div
               ref={modelPaneRef}
               style={{ top: modelPaneTop }}
-              className="dropdown-glass absolute left-full ml-1 flex w-60 flex-col overflow-hidden rounded-xl"
+              className={cn(
+                PANE,
+                "absolute left-full ml-space-1 flex w-60 flex-col overflow-hidden"
+              )}
             >
-              <input
+              <Input
                 autoFocus
+                variant="plain"
+                size="md"
+                leftIcon={MagnifyingGlassRegularIcon}
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={setQuery}
                 placeholder="Search models"
                 aria-label="Search models"
-                className="w-full border-b border-border bg-transparent px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60"
+                inputContainerClassName="border-b border-default"
               />
               <div
                 role="listbox"
                 aria-label="Models"
-                className="max-h-72 overflow-y-auto py-1"
+                className="max-h-72 overflow-y-auto py-space-1"
               >
                 {showAuto && (
                   <OptionRow
@@ -472,7 +491,7 @@ export function ModelPicker({
                   />
                 )}
                 {filteredModels.length === 0 ? (
-                  <p className="px-3 py-1.5 text-[13px] text-muted-foreground/60">
+                  <p className="px-space-3 py-1.5 text-xs text-tertiary">
                     No matches
                   </p>
                 ) : (
@@ -487,7 +506,7 @@ export function ModelPicker({
                       label={
                         <>
                           {model.label}{" "}
-                          <span className="text-muted-foreground/60">
+                          <span className="text-tertiary">
                             {formatEffort(effortForModel(model, selection))}
                           </span>
                         </>
@@ -498,8 +517,8 @@ export function ModelPicker({
               </div>
             </div>
           )}
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }

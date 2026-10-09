@@ -1,50 +1,47 @@
-import { useCallback, useEffect, useState } from "react"
 import {
-  Bot,
-  Check,
-  ChevronDown,
-  CircleAlert,
-  Eye,
-  Globe,
-  Hammer,
-  MessageCircle,
-  SquarePen,
-  Terminal,
-  Wrench,
-  X,
-  Zap,
-} from "lucide-react"
+  CaretDownIcon,
+  CheckIcon,
+  GlobeRegularIcon,
+  WrenchRegularIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
+import { useCallback, useEffect, useState } from "react"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
+import { HammerIcon } from "@phosphor-icons/react/dist/ssr/Hammer"
+import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
+import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
+import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { ToolResultBody } from "./ToolResultBody"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { KeyboardEvent, ReactNode } from "react"
 
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
 
-const ICONS: Record<WorkEntryIconName, typeof Bot> = {
-  bot: Bot,
-  check: Check,
-  "circle-alert": CircleAlert,
-  eye: Eye,
-  globe: Globe,
-  hammer: Hammer,
-  "message-circle": MessageCircle,
-  "square-pen": SquarePen,
-  terminal: Terminal,
-  wrench: Wrench,
-  zap: Zap,
+const ICONS: Record<WorkEntryIconName, IconComponent> = {
+  bot: RobotIcon,
+  check: CheckIcon,
+  "circle-alert": WarningCircleIcon,
+  eye: EyeIcon,
+  globe: GlobeRegularIcon,
+  hammer: HammerIcon,
+  "message-circle": ChatCircleIcon,
+  "square-pen": PencilSimpleIcon,
+  terminal: TerminalIcon,
+  wrench: WrenchRegularIcon,
+  zap: LightningIcon,
 }
 
-function WorkEntryIcon({
-  name,
-  className,
-}: {
-  name: WorkEntryIconName
-  className: string
-}) {
-  const Icon = ICONS[name]
-  return <Icon className={className} aria-hidden />
+function WorkEntryIcon({ name }: { name: WorkEntryIconName }) {
+  const Glyph = ICONS[name]
+  return (
+    <Glyph size={14} weight="regular" className="block shrink-0" aria-hidden />
+  )
 }
 
 const stopRowToggle = (event: { stopPropagation: () => void }) =>
@@ -53,45 +50,42 @@ const stopRowToggle = (event: { stopPropagation: () => void }) =>
 function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
   if (status === "error") {
     return (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              className="flex size-4 items-center justify-center"
-              aria-label="Tool call failed"
-            />
-          }
+      <Tooltip title="Failed">
+        <span
+          className="flex size-4 items-center justify-center"
+          aria-label="Tool call failed"
         >
-          <X className="block size-3 shrink-0 text-destructive" aria-hidden />
-        </TooltipTrigger>
-        <TooltipPopup>Failed</TooltipPopup>
+          <XIcon
+            size={12}
+            weight="bold"
+            className="block shrink-0 text-icon-error"
+            aria-hidden
+          />
+        </span>
       </Tooltip>
     )
   }
 
   if (status === "completed") {
     return (
-      <Tooltip>
-        <TooltipTrigger
-          render={<span className="flex size-4 items-center justify-center" />}
-        >
-          <Check className="block size-3 shrink-0 stroke-current" aria-hidden />
-        </TooltipTrigger>
-        <TooltipPopup>Completed</TooltipPopup>
+      <Tooltip title="Completed">
+        <span className="flex size-4 items-center justify-center">
+          <CheckIcon
+            size={12}
+            weight="bold"
+            className="block shrink-0"
+            aria-hidden
+          />
+        </span>
       </Tooltip>
     )
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={<span className="flex size-4 items-center justify-center" />}
-      >
+    <Tooltip title={status === "pending" ? "Waiting" : "Running"}>
+      <span className="flex size-4 items-center justify-center">
         <span className="block size-1.5 shrink-0 animate-status-pulse rounded-full bg-current" />
-      </TooltipTrigger>
-      <TooltipPopup>
-        {status === "pending" ? "Waiting" : "Running"}
-      </TooltipPopup>
+      </span>
     </Tooltip>
   )
 }
@@ -196,9 +190,9 @@ export function WorkEntryRow({
   return (
     <div
       className={cn(
-        "group/entry flex flex-col rounded-md px-0.5 py-0.5 transition-colors",
+        "group/entry flex flex-col rounded-md px-0.5 py-0.5 transition-colors duration-normal",
         activate &&
-          "cursor-pointer hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:outline-none focus-visible:ring-inset"
+          "cursor-pointer hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       )}
       {...rowToggleProps}
     >
@@ -207,60 +201,53 @@ export function WorkEntryRow({
           className={cn(
             "flex size-5 shrink-0 items-center justify-center",
             isError
-              ? "text-destructive"
+              ? "text-icon-error"
               : entry.tone === "thinking"
-                ? "text-foreground/92"
-                : "text-muted-foreground/65"
+                ? "text-icon-primary"
+                : "text-icon-tertiary"
           )}
         >
-          <WorkEntryIcon
-            name={entry.icon}
-            className="block size-3.5 shrink-0 stroke-[1.8] opacity-80"
-          />
+          <WorkEntryIcon name={entry.icon} />
         </span>
 
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-[13px] leading-5">
+            <p className="flex w-full min-w-0 items-baseline gap-1.5 text-xs leading-5">
               <span
                 className={cn(
                   "shrink-0 truncate font-medium",
                   isError
-                    ? "text-destructive"
+                    ? "text-error-secondary"
                     : entry.status === "pending" ||
                         entry.status === "in_progress"
                       ? "shimmer-text"
-                      : "text-foreground/82"
+                      : "text-primary"
                 )}
               >
                 {entry.heading}
               </span>
               {entry.preview &&
                 (entry.previewTooltip ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground" />
-                      }
-                    >
+                  <Tooltip
+                    title={entry.previewTooltip}
+                    tooltipClassName="max-w-md break-all text-primary"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-secondary">
                       {entry.preview}
-                    </TooltipTrigger>
-                    <TooltipPopup className="max-w-md break-all">
-                      {entry.previewTooltip}
-                    </TooltipPopup>
+                    </span>
                   </Tooltip>
                 ) : (
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate text-secondary">
                     {entry.preview}
                   </span>
                 ))}
               {entry.diffStats && (
-                <span className="flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground tabular-nums">
-                  <span className="transition-colors group-focus-within/entry:text-success-foreground group-hover/entry:text-success-foreground">
+                <span className="flex shrink-0 items-center gap-1 font-mono text-xxs text-secondary tabular-nums">
+                  <span className="transition-colors group-focus-within/entry:text-success-secondary group-hover/entry:text-success-secondary">
                     +{entry.diffStats.additions}
                   </span>
                   <span aria-hidden>/</span>
-                  <span className="transition-colors group-focus-within/entry:text-destructive group-hover/entry:text-destructive">
+                  <span className="transition-colors group-focus-within/entry:text-error-secondary group-hover/entry:text-error-secondary">
                     -{entry.diffStats.deletions}
                   </span>
                 </span>
@@ -268,10 +255,10 @@ export function WorkEntryRow({
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 text-muted-foreground">
+          <div className="flex shrink-0 items-center gap-1 text-secondary">
             {trailing}
             {hoverTimestamp && (
-              <time className="text-[10px] tabular-nums opacity-0 transition-opacity group-hover/entry:opacity-100">
+              <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-hover/entry:opacity-100">
                 {hoverTimestamp}
               </time>
             )}
@@ -280,9 +267,11 @@ export function WorkEntryRow({
               aria-hidden={!canExpand}
             >
               {canExpand ? (
-                <ChevronDown
+                <CaretDownIcon
+                  size={12}
+                  weight="bold"
                   className={cn(
-                    "size-3 shrink-0 opacity-70 transition-transform duration-200",
+                    "shrink-0 text-icon-tertiary transition-transform duration-normal",
                     expanded && "rotate-180"
                   )}
                   aria-hidden
@@ -298,7 +287,7 @@ export function WorkEntryRow({
 
       {expanded && canExpand && (
         <div
-          className="ms-7 mt-1 cursor-default border-s border-border/45 ps-3 pt-0.5"
+          className="ms-7 mt-1 cursor-default border-s border-subtle ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
@@ -308,7 +297,7 @@ export function WorkEntryRow({
               (detailText != null ? (
                 <ToolResultBody value={detailText} />
               ) : (
-                <p className="text-[12px] text-muted-foreground">
+                <p className="text-xxs text-secondary">
                   {loadError ?? "Loading output…"}
                 </p>
               )))}

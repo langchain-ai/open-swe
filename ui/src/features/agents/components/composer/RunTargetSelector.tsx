@@ -1,15 +1,26 @@
+import { CheckIcon, LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
-  Check,
-  Cloud,
-  Folder,
-  FolderGit2,
-  FolderOpen,
-  FolderPlus,
-  GitBranch,
-  Laptop,
-  Trash2,
-} from "lucide-react"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
+import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
+import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
+import { FolderPlusIcon } from "@phosphor-icons/react/dist/ssr/FolderPlus"
+import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
+import { GitForkIcon } from "@phosphor-icons/react/dist/ssr/GitFork"
+import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
+import type { ReactNode } from "react"
 
 import { ComposerControlChevron } from "./ComposerControl"
 import type {
@@ -17,51 +28,129 @@ import type {
   DesktopProjectRef,
   DesktopWorkspaceMode,
 } from "@/desktop"
-import {
-  Menu,
-  MenuGroup,
-  MenuGroupLabel,
-  MenuItem,
-  MenuPopup,
-  MenuSeparator,
-  MenuSub,
-  MenuSubPopup,
-  MenuSubTrigger,
-  MenuTrigger,
-} from "@/components/ui/menu"
 import { cn } from "@/lib/utils"
 
 export type RunTarget = "cloud" | "local"
 
+const TRIGGER_CLASS_NAME =
+  "flex items-center gap-1 text-secondary transition-opacity outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-focus"
+
+function TriggerIcon({ icon: Icon }: { icon: IconComponent }) {
+  return <Icon className="size-3.5 shrink-0" weight="regular" />
+}
+
+function MenuLabel({ children }: { children: ReactNode }) {
+  return (
+    <DropdownMenuLabel className="px-space-2 py-space-1 text-xxs text-tertiary">
+      {children}
+    </DropdownMenuLabel>
+  )
+}
+
+/** A menu row: leading icon, label, and a check when it is the current choice. */
+function MenuOption({
+  icon: Icon,
+  selected = false,
+  destructive = false,
+  disabled,
+  title,
+  onSelect,
+  children,
+}: {
+  icon?: IconComponent
+  selected?: boolean
+  destructive?: boolean
+  disabled?: boolean
+  title?: string
+  onSelect?: () => void
+  children: ReactNode
+}) {
+  return (
+    <DropdownMenuItem
+      className={cn(
+        "gap-space-2 text-xs",
+        destructive && "text-error-secondary focus:bg-error-subtle"
+      )}
+      disabled={disabled}
+      onSelect={onSelect}
+      size="sm"
+      title={title}
+    >
+      {Icon ? (
+        <Icon
+          className={cn(
+            "size-3.5 shrink-0",
+            destructive ? "text-icon-error" : "text-icon-secondary"
+          )}
+          weight="regular"
+        />
+      ) : null}
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {selected ? (
+        <CheckIcon
+          className="size-3.5 shrink-0 text-icon-secondary"
+          weight="regular"
+        />
+      ) : null}
+    </DropdownMenuItem>
+  )
+}
+
 export function RunTargetSelector({
   value,
   onChange,
+  pending = false,
 }: {
   value: RunTarget
-  onChange: (value: RunTarget) => void
+  /** Omitted while the target can't change. */
+  onChange?: (value: RunTarget) => void
+  pending?: boolean
 }) {
-  const Icon = value === "local" ? Laptop : Cloud
+  const current = (
+    <>
+      <TriggerIcon icon={value === "local" ? LaptopRegularIcon : CloudIcon} />
+      <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+      {pending && <span className="text-tertiary">· next message</span>}
+    </>
+  )
+  const title = pending ? "Moves with your next message" : undefined
+  if (!onChange)
+    return (
+      <span className="flex items-center gap-1 text-secondary" title={title}>
+        {current}
+      </span>
+    )
   return (
-    <Menu>
-      <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
-        <Icon className="size-3.5 shrink-0" />
-        <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+    <DropdownMenu>
+      <DropdownMenuTrigger className={TRIGGER_CLASS_NAME} title={title}>
+        {current}
         <ComposerControlChevron />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-44" side="top" sideOffset={7}>
-        <MenuGroup>
-          <MenuGroupLabel>Work in</MenuGroupLabel>
-          <MenuItem onClick={() => onChange("local")}>
-            <Laptop />
-            This Mac{value === "local" && <Check className="ml-auto" />}
-          </MenuItem>
-          <MenuItem onClick={() => onChange("cloud")}>
-            <Cloud />
-            Cloud{value === "cloud" && <Check className="ml-auto" />}
-          </MenuItem>
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-44"
+        side="top"
+        sideOffset={7}
+      >
+        <DropdownMenuGroup>
+          <MenuLabel>Work in</MenuLabel>
+          <MenuOption
+            icon={LaptopRegularIcon}
+            onSelect={() => onChange("local")}
+            selected={value === "local"}
+          >
+            This Mac
+          </MenuOption>
+          <MenuOption
+            icon={CloudIcon}
+            onSelect={() => onChange("cloud")}
+            selected={value === "cloud"}
+          >
+            Cloud
+          </MenuOption>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -86,68 +175,72 @@ export function LocalRepoSelector({
 }) {
   const selectedRepo = repos.find((repo) => repo.cwd === selectedRepoPath)
   return (
-    <Menu>
-      <MenuTrigger
-        className={cn(
-          "flex max-w-[260px] items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80",
-          triggerClassName
-        )}
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={cn(TRIGGER_CLASS_NAME, "max-w-[260px]", triggerClassName)}
         title={selectedRepo?.cwd}
       >
-        <FolderOpen className="size-3.5 shrink-0" />
+        <TriggerIcon icon={FolderOpenIcon} />
         <span className="truncate">{selectedRepo?.name ?? placeholder}</span>
         <ComposerControlChevron />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-64" side={side} sideOffset={7}>
-        <MenuGroup>
-          <MenuGroupLabel>Repositories</MenuGroupLabel>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-64"
+        side={side}
+        sideOffset={7}
+      >
+        <DropdownMenuGroup>
+          <MenuLabel>Repositories</MenuLabel>
           {repos.length === 0 && (
-            <MenuItem disabled>No repositories added</MenuItem>
+            <MenuOption disabled>No repositories added</MenuOption>
           )}
           {repos.map((repo) => (
-            <MenuItem
+            <MenuOption
+              icon={FolderOpenIcon}
               key={repo.cwd}
-              onClick={() => onSelectRepo(repo.cwd)}
+              onSelect={() => onSelectRepo(repo.cwd)}
+              selected={selectedRepoPath === repo.cwd}
               title={repo.cwd}
             >
-              <FolderOpen />
-              <span className="min-w-0 flex-1 truncate">{repo.name}</span>
-              {selectedRepoPath === repo.cwd && <Check className="ml-auto" />}
-            </MenuItem>
+              {repo.name}
+            </MenuOption>
           ))}
-        </MenuGroup>
-        <MenuSeparator />
-        <MenuGroup>
-          <MenuItem onClick={onAddRepo}>
-            <FolderPlus />
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <MenuOption icon={FolderPlusIcon} onSelect={onAddRepo}>
             Add repository…
-          </MenuItem>
+          </MenuOption>
           {repos.length > 0 && (
-            <MenuSub>
-              <MenuSubTrigger>
-                <Trash2 />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="gap-space-2 text-xs" size="sm">
+                <TrashIcon
+                  className="size-3.5 shrink-0 text-icon-secondary"
+                  weight="regular"
+                />
                 Remove repository…
-              </MenuSubTrigger>
-              <MenuSubPopup className="w-64">
-                <MenuGroup>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-64">
+                <DropdownMenuGroup>
                   {repos.map((repo) => (
-                    <MenuItem
+                    <MenuOption
+                      destructive
+                      icon={FolderOpenIcon}
                       key={repo.cwd}
-                      onClick={() => onRemoveRepo(repo.cwd)}
+                      onSelect={() => onRemoveRepo(repo.cwd)}
                       title={repo.cwd}
-                      variant="destructive"
                     >
-                      <FolderOpen />
-                      <span className="truncate">{repo.name}</span>
-                    </MenuItem>
+                      {repo.name}
+                    </MenuOption>
                   ))}
-                </MenuGroup>
-              </MenuSubPopup>
-            </MenuSub>
+                </DropdownMenuGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
           )}
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -162,38 +255,47 @@ export function LocalWorkspaceSelector({
   /** What the label calls a worktree the thread is already working in. */
   worktreeLabel?: string
 }) {
-  const Icon = value === "worktree" ? FolderGit2 : Folder
+  const icon = value === "worktree" ? GitForkIcon : FolderIcon
   const label = value === "worktree" ? worktreeLabel : "Current checkout"
   if (!onChange)
     return (
-      <span className="flex items-center gap-1 text-muted-foreground">
-        <Icon className="size-3.5 shrink-0" />
+      <span className="flex items-center gap-1 text-secondary">
+        <TriggerIcon icon={icon} />
         {label}
       </span>
     )
   return (
-    <Menu>
-      <MenuTrigger className="flex items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80">
-        <Icon className="size-3.5 shrink-0" />
+    <DropdownMenu>
+      <DropdownMenuTrigger className={TRIGGER_CLASS_NAME}>
+        <TriggerIcon icon={icon} />
         <span>{label}</span>
         <ComposerControlChevron />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-52" side="top" sideOffset={7}>
-        <MenuGroup>
-          <MenuGroupLabel>Workspace</MenuGroupLabel>
-          <MenuItem onClick={() => onChange("local")}>
-            <Folder />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-52"
+        side="top"
+        sideOffset={7}
+      >
+        <DropdownMenuGroup>
+          <MenuLabel>Workspace</MenuLabel>
+          <MenuOption
+            icon={FolderIcon}
+            onSelect={() => onChange("local")}
+            selected={value === "local"}
+          >
             Current checkout
-            {value === "local" && <Check className="ml-auto" />}
-          </MenuItem>
-          <MenuItem onClick={() => onChange("worktree")}>
-            <FolderGit2 />
+          </MenuOption>
+          <MenuOption
+            icon={GitForkIcon}
+            onSelect={() => onChange("worktree")}
+            selected={value === "worktree"}
+          >
             New worktree
-            {value === "worktree" && <Check className="ml-auto" />}
-          </MenuItem>
-        </MenuGroup>
-      </MenuPopup>
-    </Menu>
+          </MenuOption>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -249,28 +351,26 @@ export function LocalBranchSelector({
           if (!open) onRefresh()
           setOpen((value) => !value)
         }}
-        className="flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
+        className="flex max-w-[260px] cursor-pointer items-center gap-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-50"
       >
-        <GitBranch className="size-3.5 shrink-0" />
+        <TriggerIcon icon={GitBranchIcon} />
         <span className="truncate">{selectedBranch ?? "No branch"}</span>
         <ComposerControlChevron />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded-lg bg-popover text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10">
-          <div className="border-b border-border">
+        <div className="absolute bottom-full left-0 z-50 mb-1 flex max-h-72 w-72 flex-col overflow-hidden rounded-lg border border-subtle bg-elevated text-xs text-primary shadow-md">
+          <div className="border-b border-default">
             <input
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search refs..."
-              className="w-full bg-transparent px-3 py-2 text-foreground outline-none placeholder:text-muted-foreground"
+              className="w-full bg-transparent px-3 py-2 text-primary outline-none placeholder:text-placeholder"
             />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-1">
             {filtered.length === 0 ? (
-              <div className="px-2 py-1.5 text-muted-foreground">
-                No refs found.
-              </div>
+              <div className="px-2 py-1.5 text-secondary">No refs found.</div>
             ) : (
               filtered.map((ref) => (
                 <button
@@ -278,15 +378,15 @@ export function LocalBranchSelector({
                   type="button"
                   onClick={() => select(ref.name)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+                    "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-elevated-hover hover:text-primary",
                     ref.name === selectedBranch
-                      ? "text-foreground"
-                      : "text-muted-foreground"
+                      ? "text-primary"
+                      : "text-secondary"
                   )}
                 >
                   <span className="min-w-0 flex-1 truncate">{ref.name}</span>
                   {badge(ref) && (
-                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                    <span className="shrink-0 text-xxs text-tertiary">
                       {badge(ref)}
                     </span>
                   )}

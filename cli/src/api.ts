@@ -6,23 +6,18 @@ import {
   type JsonObject,
 } from "./json.ts"
 import type { Credential } from "./credentials.ts"
-import {
-  identitySchema,
-  threadsPageSchema,
-  type Identity,
-  type ThreadsPage,
-} from "./threads.ts"
-import {
-  humanReviewDismissSchema,
-  humanReviewRequestSchema,
-  pullRequestApiPath,
-  type HumanReviewDismissResult,
-  type HumanReviewRequestResult,
-} from "./review.ts"
-import { uploadedThreadSchema } from "./upload.ts"
-import { cliToolSchema, type CliTool } from "./mcp-catalog.ts"
 import { BridgeHttpApi } from "open-swe-bridge-client"
 import * as z from "zod"
+
+const identitySchema = z.object({
+  login: z.string(),
+  email: z.string().nullish(),
+  is_admin: z.boolean().nullish(),
+})
+
+export type Identity = z.infer<typeof identitySchema>
+
+const uploadedThreadSchema = z.object({ id: z.string() })
 
 export class ApiError extends Error {
   constructor(
@@ -160,83 +155,6 @@ export class ApiClient {
     await this.send("GET", "/threads?limit=1")
   }
 
-  async listThreadsPage(query: URLSearchParams): Promise<ThreadsPage> {
-    const parsed = threadsPageSchema.safeParse(
-      await this.json("GET", `/threads/page?${query}`)
-    )
-    if (!parsed.success)
-      throw new ProtocolError("/threads/page response is malformed")
-    return parsed.data
-  }
-
-  async mcpTools(): Promise<CliTool[]> {
-    const result = z
-      .array(cliToolSchema)
-      .safeParse(await this.json("GET", "/cli/mcp/tools"))
-    if (!result.success)
-      throw new ProtocolError("/cli/mcp/tools response is malformed")
-    return result.data
-  }
-
-  async mcpInvoke(
-    name: string,
-    args: Record<string, unknown>
-  ): Promise<unknown> {
-    return this.json("POST", `/cli/mcp/tools/${encodeURIComponent(name)}`, {
-      body: args,
-    })
-  }
-
-  /** Create a thread from a gzipped JSONL session upload; returns its id. */
-  async uploadSession(gzippedJsonl: Uint8Array): Promise<string> {
-    const parsed = uploadedThreadSchema.safeParse(
-      await this.json("POST", "/threads/uploads", {
-        raw: {
-          data: gzippedJsonl,
-          headers: {
-            "Content-Type": "application/x-ndjson",
-            "Content-Encoding": "gzip",
-          },
-        },
-      })
-    )
-    if (!parsed.success)
-      throw new ProtocolError("/threads/uploads response is malformed")
-    return parsed.data.id
-  }
-
-  /** Post a Slack review card for a pull request, or return (and re-summarize) the open one. */
-  async requestHumanReview(
-    prUrl: string,
-    body: { inline_summary: string; channel?: string }
-  ): Promise<HumanReviewRequestResult> {
-    const parsed = humanReviewRequestSchema.safeParse(
-      await this.json("POST", `${pullRequestApiPath(prUrl)}/human-review`, {
-        body,
-      })
-    )
-    if (!parsed.success)
-      throw new ProtocolError("human review response is malformed")
-    return parsed.data
-  }
-
-  /** Dismiss a pull request's open review request, as its card's Dismiss button does. */
-  async dismissHumanReviewRequest(
-    prUrl: string,
-    body: { reason?: string }
-  ): Promise<HumanReviewDismissResult> {
-    const parsed = humanReviewDismissSchema.safeParse(
-      await this.json(
-        "POST",
-        `${pullRequestApiPath(prUrl)}/human-review/dismiss`,
-        { body }
-      )
-    )
-    if (!parsed.success)
-      throw new ProtocolError("human review dismissal response is malformed")
-    return parsed.data
-  }
-
   /** The bridge routes, for `Bridge` to serve this machine through. */
   bridges(): BridgeHttpApi {
     return new BridgeHttpApi((method, path, options) =>
@@ -321,4 +239,30 @@ export async function exchangeDesktopHandoff(
   if (!session)
     throw new ProtocolError("exchange response is missing a session")
   return session
+}
+
+/** Fill the thread an upload code reserved with a gzipped JSONL transcript; returns its id. */
+export async function uploadSession(
+  backend: string,
+  code: string,
+  gzippedJsonl: Uint8Array
+): Promise<string> {
+  const response = await fetch(`${backend}/dashboard/api/threads/uploads`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${code}`,
+      "Content-Type": "application/x-ndjson",
+      "Content-Encoding": "gzip",
+      Accept: "application/json",
+    },
+    body: gzippedJsonl,
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    throw new ApiError(response.status, detailFrom(response.statusText, text))
+  }
+  const parsed = uploadedThreadSchema.safeParse(parseJson(text))
+  if (!parsed.success)
+    throw new ProtocolError("/threads/uploads response is malformed")
+  return parsed.data.id
 }

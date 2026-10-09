@@ -31,6 +31,7 @@ _TOOL_MODULES = {
     "link_pull_request": ".open_pull_request",
     "list_threads": ".threads",
     "manage_baby_sit": ".manage_baby_sit",
+    "switch_to_performance_model": ".switch_to_performance_model",
     "manage_code_channel": "openswe.slack.tools.manage_code_channel",
     "manage_incident": "openswe.incidents.tools",
     "manage_thread": ".threads",
@@ -38,6 +39,8 @@ _TOOL_MODULES = {
     "open_pull_request": ".open_pull_request",
     "output_iframe": ".output_iframe",
     "publish_review": ".publish_review",
+    "write_store_item": ".repair_data",
+    "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
     "read_store_item": ".read_store_item",
     "read_repo_file": "openswe.github.tools.read_repo_file",
@@ -49,6 +52,7 @@ _TOOL_MODULES = {
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
+    "request_rollout_check": ".request_rollout_check",
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
@@ -112,6 +116,7 @@ __all__ = [
     "link_pull_request",
     "list_threads",
     "manage_baby_sit",
+    "switch_to_performance_model",
     "manage_code_channel",
     "manage_incident",
     "manage_thread",
@@ -119,6 +124,8 @@ __all__ = [
     "open_pull_request",
     "output_iframe",
     "publish_review",
+    "write_store_item",
+    "write_database_rows",
     "read_only_sql",
     "read_store_item",
     "read_repo_file",
@@ -130,6 +137,7 @@ __all__ = [
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
+    "request_rollout_check",
     "reply_to_finding_thread",
     "resolve_finding_thread",
     "publish_workspace",
@@ -216,6 +224,7 @@ if TYPE_CHECKING:
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
+    from openswe.tools.repair_data import write_database_rows, write_store_item
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
     from openswe.tools.request_human_review import (
@@ -225,6 +234,7 @@ if TYPE_CHECKING:
         get_human_review_status,
         request_human_review,
     )
+    from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
     from openswe.tools.save_plan import save_plan
     from openswe.tools.save_user_instructions import save_user_instructions
@@ -233,6 +243,7 @@ if TYPE_CHECKING:
     from openswe.tools.search_pull_requests import search_pull_requests
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
+    from openswe.tools.switch_to_performance_model import switch_to_performance_model
     from openswe.tools.threads import get_thread, list_threads, manage_thread, start_thread
     from openswe.tools.update_finding import update_finding
     from openswe.tools.user_skills import delete_user_skill, save_user_skill

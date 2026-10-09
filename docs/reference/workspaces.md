@@ -100,7 +100,9 @@ order, and the first match wins:
 
 1. An existing thread's recorded workspace. Follow-ups on issues, PRs, Linear issues, and Slack
    threads land here; none of them recompute the workspace from the repository.
-2. A `workspace:<slug>` tag on the message that opens the thread (`env:` keeps working as an alias).
+2. A `/workspace:<slug>` command on the message that opens the thread, e.g.
+   `@Open SWE /workspace:infra fix the flaky test`. The older `workspace:<slug>` and `env:<slug>`
+   tags still work anywhere in the message.
 3. The Slack channel's bound workspace. A message in a workspace's channel runs there even when it
    names a repository another workspace prefers, since every workspace can use every repository.
 4. The repository's preferred workspace. This is how GitHub events, Linear issues, automations, and

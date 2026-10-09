@@ -10,20 +10,12 @@ from openswe.slack.stop import process_slack_stop_reaction
 class FakeStore:
     def __init__(self) -> None:
         self.items: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
-        self.deleted: list[tuple[tuple[str, ...], str]] = []
-        self.fail_delete = False
 
     async def get_item(self, namespace: tuple[str, ...], key: str) -> dict[str, Any] | None:
         return self.items.get((namespace, key))
 
     async def put_item(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None:
         self.items[(namespace, key)] = {"value": value}
-
-    async def delete_item(self, namespace: tuple[str, ...], key: str) -> None:
-        if self.fail_delete:
-            raise RuntimeError("store unavailable")
-        self.deleted.append((namespace, key))
-        self.items.pop((namespace, key), None)
 
 
 class FakeThreads:
@@ -68,6 +60,7 @@ class FakeClient:
         self.threads = FakeThreads()
         self.runs = FakeRuns()
         self.cleared_queues: list[str] = []
+        self.fail_clear = False
 
 
 def _event(message_ts: str, *, user_id: str = "UOTHER") -> dict[str, Any]:
@@ -146,6 +139,8 @@ def _patch_handler(
     class FakeQueuedMessage:
         @staticmethod
         async def clear(thread_id: str) -> None:
+            if client.fail_clear:
+                raise RuntimeError("database unavailable")
             client.cleared_queues.append(thread_id)
 
     monkeypatch.setattr(slack_stop, "get_client", lambda url: client)
@@ -163,7 +158,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     _map_reply(client, "2.000")
     client.runs.by_status["pending"] = [{"run_id": "run-pending"}]
     client.runs.by_status["running"] = [{"run_id": "run-running"}]
-    client.store.items[(("autofix", thread_id), "pending_event")] = {"value": {"reason": "ci"}}
     dispatched, claimed = _patch_handler(monkeypatch, client)
 
     await process_slack_stop_reaction(_event("2.000"), event_id="EvStop")
@@ -177,7 +171,6 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
         }
     ]
     assert client.cleared_queues == [thread_id]
-    assert (("autofix", thread_id), "pending_event") in client.store.deleted
     assert client.threads.updates[0][1]["latest_run_status"] == "interrupted"
     assert len(dispatched) == 1
     assert dispatched[0]["thread_id"] == thread_id
@@ -224,7 +217,7 @@ async def test_duplicate_stop_reaction_has_no_side_effects(
 
     assert dispatched == []
     assert client.runs.cancelled == []
-    assert client.store.deleted == []
+    assert client.cleared_queues == []
 
 
 async def test_failed_cancellation_does_not_dispatch_success_summary(
@@ -240,7 +233,7 @@ async def test_failed_cancellation_does_not_dispatch_success_summary(
     await process_slack_stop_reaction(_event("2.000"), event_id="EvFailure")
 
     assert dispatched == []
-    assert client.store.deleted == []
+    assert client.cleared_queues == []
     assert client.threads.updates == []
 
 
@@ -250,7 +243,7 @@ async def test_failed_queue_cleanup_does_not_dispatch_summary(
     client = FakeClient()
     _add_thread(client)
     _map_reply(client, "2.000")
-    client.store.fail_delete = True
+    client.fail_clear = True
     dispatched, _ = _patch_handler(monkeypatch, client)
 
     await process_slack_stop_reaction(_event("2.000"), event_id="EvStoreFailure")

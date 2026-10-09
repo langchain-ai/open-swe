@@ -26,6 +26,7 @@ const pr: OpenPullRequest = {
   repo: "acme/app",
   number: 7,
   title: "Change",
+  state: "open",
   draft: false,
   additions: 1,
   deletions: 1,
@@ -34,6 +35,7 @@ const pr: OpenPullRequest = {
   headSha: "a".repeat(40),
   headRef: "feature",
   reviewDecision: "none",
+  reviewers: [],
   reviewRequired: false,
   statusAvailable: true,
   createdAt: null,
@@ -58,8 +60,12 @@ it("blocks the sibling action as soon as one is queued", async () => {
   })
   render(
     <QueryClientProvider client={client}>
-      <PullRequestThreadAction pr={pr} login="me" action="fix-checks" />
-      <PullRequestThreadAction pr={pr} login="me" action="address-comments" />
+      <PullRequestThreadAction pr={pr} login="me" actions={["fix-checks"]} />
+      <PullRequestThreadAction
+        pr={pr}
+        login="me"
+        actions={["address-comments"]}
+      />
     </QueryClientProvider>
   )
 

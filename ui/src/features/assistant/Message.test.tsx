@@ -18,6 +18,7 @@ import {
   useExternalStoreRuntime,
 } from "@assistant-ui/react"
 import { convertLangChainBaseMessage } from "@assistant-ui/react-langchain"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { AssistantMessage, toolkit } from "./Message"
 
 vi.mock("@/features/agents/components/chat/Markdown", () => ({
@@ -52,15 +53,17 @@ function Transcript({ messages }: { messages: BaseMessage[] }) {
   })
   const config = AuiConfig({ tools: Tools({ toolkit }) })
   return (
-    <AssistantRuntimeProvider runtime={runtime} config={config}>
-      <ThreadPrimitive.Root>
-        <ThreadPrimitive.Viewport>
-          <ThreadPrimitive.Messages>
-            {() => <AssistantMessage />}
-          </ThreadPrimitive.Messages>
-        </ThreadPrimitive.Viewport>
-      </ThreadPrimitive.Root>
-    </AssistantRuntimeProvider>
+    <TooltipProvider>
+      <AssistantRuntimeProvider runtime={runtime} config={config}>
+        <ThreadPrimitive.Root>
+          <ThreadPrimitive.Viewport>
+            <ThreadPrimitive.Messages>
+              {() => <AssistantMessage />}
+            </ThreadPrimitive.Messages>
+          </ThreadPrimitive.Viewport>
+        </ThreadPrimitive.Root>
+      </AssistantRuntimeProvider>
+    </TooltipProvider>
   )
 }
 

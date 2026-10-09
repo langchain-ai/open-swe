@@ -1,14 +1,17 @@
+import { CheckIcon } from "@langchain/macaw-components/icons"
+import { Button } from "@langchain/macaw-components/Button"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { ThumbsDownIcon } from "@phosphor-icons/react/dist/ssr/ThumbsDown"
+import { ThumbsUpIcon } from "@phosphor-icons/react/dist/ssr/ThumbsUp"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { CheckIcon, ThumbsDownIcon, ThumbsUpIcon } from "@phosphor-icons/react"
+
 import type {
   PublishedReviewAssessment,
   ReviewAssessmentFeedbackInput,
 } from "@/lib/api"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 
 interface Props {
   assessment: PublishedReviewAssessment
@@ -84,12 +87,12 @@ function AssessmentCard({
     <section
       id="assessment-feedback"
       aria-label="Review assessment"
-      className="mt-4 rounded-lg border border-border bg-card p-4 text-sm"
+      className="mt-4 rounded-lg border border-default bg-surface-level-1 p-4 text-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">Risk {assessment.risk_score}/5</span>
-          <span className="text-muted-foreground">·</span>
+          <span className="text-secondary">·</span>
           <span>
             {assessment.approved
               ? "Approved"
@@ -97,7 +100,16 @@ function AssessmentCard({
                 ? "Would approve"
                 : "Needs human review"}
           </span>
-          <span className="text-xs text-muted-foreground">
+          <span
+            className="text-xs text-secondary"
+            title={
+              assessment.approved
+                ? "Open SWE approved this pull request on GitHub."
+                : assessment.dry_run
+                  ? "Auto-approval is in dry run for this repository: Open SWE scores the risk but never approves on GitHub."
+                  : "Open SWE only advises here; it doesn't approve on GitHub."
+            }
+          >
             {assessment.approved
               ? "Automatic approval"
               : assessment.dry_run
@@ -110,14 +122,16 @@ function AssessmentCard({
             {feedback.data && (
               <span
                 role="status"
-                className="flex items-center gap-1 text-xs text-muted-foreground"
+                className="flex items-center gap-1 text-xs text-secondary"
               >
-                <CheckIcon /> Feedback saved
+                <CheckIcon weight="regular" className="size-3.5" /> Feedback
+                saved
               </span>
             )}
             <Button
-              size="sm"
-              variant="ghost"
+              size="xs"
+              color="secondary"
+              variant="plain"
               onClick={() => {
                 save.reset()
                 setEditing(true)
@@ -128,9 +142,9 @@ function AssessmentCard({
           </div>
         )}
       </div>
-      <details className="mt-2 text-xs text-muted-foreground">
+      <details className="mt-2 text-xs text-secondary">
         <summary className="cursor-pointer">Why this assessment?</summary>
-        <p className="mt-2 text-sm whitespace-pre-wrap text-foreground">
+        <p className="mt-2 text-sm whitespace-pre-wrap text-primary">
           {assessment.explanation}
         </p>
         <p className="mt-2">
@@ -139,12 +153,12 @@ function AssessmentCard({
         </p>
       </details>
       {headSha !== assessment.head_sha && (
-        <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+        <p className="mt-2 text-xs text-warning-secondary">
           This assessment is for an earlier commit.
         </p>
       )}
       {feedback.isError && (
-        <p role="alert" className="mt-3 text-xs text-destructive">
+        <p role="alert" className="mt-3 text-xs text-error-secondary">
           Could not load your feedback.{" "}
           <button
             type="button"
@@ -157,7 +171,7 @@ function AssessmentCard({
       )}
       {editing && login && feedback.isSuccess && (
         <form
-          className="mt-3 space-y-3 border-t border-border pt-3"
+          className="mt-3 space-y-3 border-t border-default pt-3"
           onSubmit={(event) => {
             event.preventDefault()
             if (value?.rating && !save.isPending)
@@ -168,49 +182,46 @@ function AssessmentCard({
             <legend className="mb-2 text-xs font-medium">
               Was this assessment helpful?
             </legend>
-            <div className="flex gap-2">
+            <div className="flex gap-space-2">
               {(["helpful", "unhelpful"] as const).map((rating) => (
                 <Button
                   key={rating}
-                  type="button"
-                  size="sm"
-                  variant={value?.rating === rating ? "secondary" : "outline"}
+                  size="xs"
+                  color="secondary"
+                  variant={value?.rating === rating ? "normal" : "outlined"}
                   aria-pressed={value?.rating === rating}
+                  leftDecorator={
+                    rating === "helpful" ? ThumbsUpIcon : ThumbsDownIcon
+                  }
                   onClick={() =>
                     setDraft({ rating, comment: value?.comment ?? "" })
                   }
                 >
-                  {rating === "helpful" ? <ThumbsUpIcon /> : <ThumbsDownIcon />}
                   {rating === "helpful" ? "Helpful" : "Not helpful"}
                 </Button>
               ))}
             </div>
-            <label className="block space-y-1.5 text-xs text-muted-foreground">
-              <span>Comment (optional)</span>
-              <Textarea
-                maxLength={3000}
-                value={value?.comment ?? ""}
-                onChange={(event) =>
-                  setDraft({
-                    rating: value?.rating,
-                    comment: event.target.value,
-                  })
-                }
-                placeholder="What was right, or what did we miss?"
-                className="min-h-20 text-sm"
-              />
-            </label>
-            <p className="text-xs text-muted-foreground">
+            <Textarea
+              size="md"
+              label="Comment (optional)"
+              maxLength={3000}
+              value={value?.comment ?? ""}
+              onChange={(comment) =>
+                setDraft({ rating: value?.rating, comment })
+              }
+              placeholder="What was right, or what did we miss?"
+            />
+            <p className="text-xs text-secondary">
               Saved in Open SWE. Your comment is not posted to GitHub.
             </p>
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={!value?.rating}>
+            <div className="flex gap-space-2">
+              <Button type="submit" size="xs" disabled={!value?.rating}>
                 {save.isPending ? "Saving…" : "Save feedback"}
               </Button>
               <Button
-                type="button"
-                size="sm"
-                variant="ghost"
+                size="xs"
+                color="secondary"
+                variant="plain"
                 onClick={() => {
                   setEditing(false)
                   setDraft(null)

@@ -1,18 +1,8 @@
-import { clsx } from "clsx"
-import { twMerge } from "tailwind-merge"
-import type { ClassValue } from "clsx"
-
 /**
- * Merge class names into a single string.
- * @param inputs - The class names to merge.
- * @returns The merged class name string.
- * @example
- * cn("text-red-500", "bg-blue-500") // "text-red-500 bg-blue-500"
- * cn("text-red-500", "bg-blue-500", "text-2xl") // "text-red-500 bg-blue-500 text-2xl"
+ * Macaw's token-aware merge: stock tailwind-merge treats `text-secondary` and
+ * `text-xs` as the same group and drops one.
  */
-export function cn(...inputs: Array<ClassValue>) {
-  return twMerge(clsx(inputs))
-}
+export { cn } from "@langchain/macaw-components/utils/cn"
 
 /**
  * Format an elapsed duration in milliseconds as a compact string (e.g. "5s", "3m 20s").

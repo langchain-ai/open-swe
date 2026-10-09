@@ -1,11 +1,8 @@
-import { ChevronRight } from "lucide-react"
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
+import { useId, useState } from "react"
 import type { ReactNode } from "react"
 
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+import { cn } from "@/lib/utils"
 
 export function ExpandableMessageChip({
   label,
@@ -20,20 +17,35 @@ export function ExpandableMessageChip({
   testId?: string
   accessibleLabel?: string
 }) {
+  const [open, setOpen] = useState(false)
+  const contentId = useId()
+
   return (
-    <Collapsible>
-      <div className="flex max-w-full items-center gap-1.5">
-        <CollapsibleTrigger
+    <div>
+      <div className="flex max-w-full items-center gap-space-1">
+        <button
+          type="button"
           data-testid={testId}
           aria-label={accessibleLabel}
-          className="group/chip flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/30"
+          aria-expanded={open}
+          aria-controls={open ? contentId : undefined}
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-w-0 items-center gap-1.5 rounded-full border border-default bg-surface-level-2 px-2.5 py-1 text-xxs text-secondary transition-colors duration-normal hover:bg-surface-level-2-hover hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
         >
-          <ChevronRight className="size-3 shrink-0 group-data-panel-open/chip:rotate-90" />
+          <CaretRightIcon
+            size={12}
+            weight="bold"
+            aria-hidden
+            className={cn(
+              "shrink-0 transition-transform duration-fast",
+              open && "rotate-90"
+            )}
+          />
           {label}
-        </CollapsibleTrigger>
+        </button>
         {actions}
       </div>
-      <CollapsibleContent>{children}</CollapsibleContent>
-    </Collapsible>
+      {open && <div id={contentId}>{children}</div>}
+    </div>
   )
 }

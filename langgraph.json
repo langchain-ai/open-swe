@@ -23,6 +23,12 @@
       "default_ttl": 43200
     }
   },
+  "store": {
+    "ttl": {
+      "refresh_on_read": false,
+      "sweep_interval_minutes": 60
+    }
+  },
   "env": ".env",
   "dockerfile_lines": [
     "# Bundle the dashboard so the deployment serves it at / (docs/INSTALLATION.md).",

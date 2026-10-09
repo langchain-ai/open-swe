@@ -14,7 +14,7 @@ from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
 from openswe.review_guide.advance import advance
-from openswe.review_guide.buttons import LOOKS_GOOD
+from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.slack import webhook as service
@@ -35,6 +35,7 @@ from openswe.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
+from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
 from openswe.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
@@ -59,6 +60,7 @@ from openswe.slack.responses import (
 )
 from openswe.slack.run_feedback import FEEDBACK_ACTION, process_feedback
 from openswe.slack.solo_threads import allow_solo_thread_followup
+from openswe.slack.summon import SUMMON_REACTION, process_slack_summon_reaction
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -425,6 +427,16 @@ async def slack_webhook(
         if event.reaction in common.FEEDBACK_REACTIONS:
             background_tasks.add_task(common.process_slack_reaction_added, raw_event, event_id)
             return accepted("Reaction feedback queued")
+        if event.reaction == SUMMON_REACTION and channel_context is not None:
+            background_tasks.add_task(
+                process_slack_summon_reaction,
+                event,
+                event_id,
+                channel_context=channel_context,
+                bot_user_id=envelope.bot_user_id(common.SLACK_BOT_USER_ID),
+                team_id=team_id,
+            )
+            return accepted("Summon reaction queued")
         return ignored("Reaction not tracked for feedback")
 
     if event.type == "reaction_removed":
@@ -561,9 +573,12 @@ async def slack_webhook(
     ):
         return ignored("Message addressed to another user")
 
+    message = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
     by_the_way = (
-        SlackAskRequest.by_the_way_question(text, bot_user_id)
-        if explicit_mention and not (in_code_channel or in_dm_channel or allowed_bot)
+        message.argument
+        if message.action is SlackAction.BY_THE_WAY
+        and explicit_mention
+        and not (in_code_channel or in_dm_channel or allowed_bot)
         else None
     )
     solo_followup = False
@@ -705,21 +720,23 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
-            web = (
-                None
-                if in_dm_channel or allowed_bot is not None
-                else BreakoutCommand.parse(text, bot_user_id, command="web")
-            )
-            if web is not None:
-                background_tasks.add_task(process_slack_web, request, web, repo)
+            if (
+                message.action is SlackAction.BREAKOUT_WEB
+                and not in_dm_channel
+                and allowed_bot is None
+            ):
+                background_tasks.add_task(
+                    process_slack_web, request, BreakoutCommand.from_message(message), repo
+                )
                 return accepted("Slack web question queued")
-            breakout = (
-                None
-                if in_code_channel or in_dm_channel or allowed_bot is not None
-                else BreakoutCommand.parse(text, bot_user_id)
-            )
-            if breakout is not None:
-                background_tasks.add_task(process_slack_breakout, request, breakout, repo)
+            if (
+                message.action is SlackAction.BREAKOUT
+                and not (in_code_channel or in_dm_channel)
+                and allowed_bot is None
+            ):
+                background_tasks.add_task(
+                    process_slack_breakout, request, BreakoutCommand.from_message(message), repo
+                )
                 return accepted("Slack breakout queued")
             background_tasks.add_task(service.process_slack_mention, request, repo)
             return accepted("Slack mention queued")
@@ -1063,11 +1080,11 @@ async def slack_interactivity(
         )
         if not thread_id:
             return ignored("Slack thread is not associated")
-        # A review guide's "Looks good" is recorded by the server, never by the model, and
+        # A review guide's "Next" is recorded by the server, never by the model, and
         # only for the person being walked through: approval marks their lines as reviewed.
         guide = (
             await ReviewGuideSession.for_channel(channel_id)
-            if in_code_channel and response == LOOKS_GOOD
+            if in_code_channel and response in NEXT_LABELS
             else None
         )
         if guide is not None:

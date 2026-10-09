@@ -1,45 +1,46 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
+from openswe.skill_store.backend import skills_backend
 from openswe.skill_store.store import (
     SkillCreate,
     create_skill,
+    get_skill,
 )
 from openswe.tools.organization_skills import save_organization_skill
+from openswe.users import User
 
 
-async def test_skill_validation_and_persistence() -> None:
-    put_item = AsyncMock()
-    client = AsyncMock()
-    client.store.put_item = put_item
+async def test_skill_validation_and_persistence(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
+    await User.sign_in("github", "1", login="octocat")
 
     with pytest.raises(ValidationError):
         SkillCreate(name="Invalid Name", description="Useful")
 
-    client.store.get_item.return_value = None
-
-    with patch("openswe.store.store_client", return_value=client):
-        record = await create_skill(
-            "octocat",
-            SkillCreate(
-                name="review-feedback",
-                description="Address PR review feedback",
-                instructions="Check every open comment.",
-            ),
-        )
+    record = await create_skill(
+        "octocat",
+        SkillCreate(
+            name="review-feedback",
+            description="Address PR review feedback",
+            instructions="Check every open comment.",
+        ),
+    )
 
     assert record["content"] == (
         '---\nname: "review-feedback"\n'
         'description: "Address PR review feedback"\n---\n\n'
         "Check every open comment.\n"
     )
-    put_item.assert_awaited_once_with(
-        ["user_skills", "octocat"],
-        "/review-feedback/SKILL.md",
-        record,
-    )
+    assert await get_skill("Octocat", "review-feedback") == record
+    assert await get_skill("octocat", "other") is None
+    (file,) = await skills_backend("octocat").adownload_files(["/review-feedback/SKILL.md"])
+    assert file.content == record["content"].encode()
 
 
 async def test_save_organization_skill_requires_admin(monkeypatch: pytest.MonkeyPatch) -> None:

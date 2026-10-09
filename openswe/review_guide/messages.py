@@ -2,7 +2,7 @@
 
 - The progress message is the channel's summary message, which Slack shows in
   the thread the channel came from.
-- A chunk's "Looks good" button is taken away once the chunk is settled, so only
+- A chunk's "Next" button is taken away once the chunk is settled, so only
   what is on screen ever offers it.
 - A pull request update pauses the walkthrough with a note, until the reader
   says to go on.
@@ -12,9 +12,8 @@ import logging
 from typing import Literal
 
 from openswe.review_guide.buttons import CONTINUE
-from openswe.review_guide.diff import ChangedLine
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.review_guide.walk import Walk, summary
+from openswe.review_guide.walk import Reader
 from openswe.slack.blocks import block_payload, context, option_actions
 from openswe.slack.client import post_slack_top_level_message_with_ts, update_slack_message
 from openswe.slack.code_channels import set_summary_message
@@ -43,21 +42,16 @@ def _text_blocks(
 
 
 async def refresh_progress(
-    session: ReviewGuideSession,
-    walk: Walk | None = None,
-    unseen: list[ChangedLine] | None = None,
-    *,
-    stage: Stage = "walking",
+    session: ReviewGuideSession, reader: Reader | None = None, *, stage: Stage = "walking"
 ) -> None:
     """Edit the progress message, posting it and making it the channel's summary the first time."""
     pr = session.pull_request
     lines = [f"*{_HEADINGS[stage]}* · <{pr.url}|{pr.repo}#{pr.number}>"]
-    if walk is not None:
-        lines.append(walk.coverage())
-        left = walk.left(unseen or [])
-        if left and stage in ("walking", "paused"):
-            lines.append(f"{summary(left)}.")
-    text = "\n".join(lines)
+    if reader is not None:
+        lines.append(reader.walk.coverage())
+        if (left := reader.progress_line()) and stage in ("walking", "paused"):
+            lines.append(left)
+    text = "\n".join(line for line in lines if line)
     channel_id = session.slack_channel_id
     if session.summary_message_ts:
         try:
@@ -87,14 +81,14 @@ async def refresh_progress(
 
 
 async def post_with_buttons(session: ReviewGuideSession, text: str, buttons: list[str]) -> str:
-    """Post a message the guide prepared earlier; its timestamp, or ``""`` when Slack refused."""
+    """Post a planned chunk without a model turn; its timestamp, or ``""`` when Slack refused."""
     try:
         return await post_slack_top_level_message_with_ts(
             session.slack_channel_id, text, blocks=_text_blocks(text, buttons=buttons)
         )
     except SlackRequestError as exc:
         logger.warning(
-            "Could not post a prepared review guide chunk",
+            "Could not post a planned review guide chunk",
             extra={"agent_thread_id": session.thread_id, "slack_error": str(exc)},
         )
         return ""
