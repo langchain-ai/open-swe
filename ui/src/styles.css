@@ -33,6 +33,15 @@ body:has(.version-mismatch-banner) {
     /* Duty-cycled indicator animation: long holds with stepped ramps, so the
        compositor updates discrete frames instead of every vsync. */
     --animate-status-pulse: status-pulse 2s infinite;
+    --animate-attention-flash: attention-flash 1.4s ease-out;
+    @keyframes attention-flash {
+        0% {
+            background-color: var(--bg-brand-subtle);
+        }
+        100% {
+            background-color: transparent;
+        }
+    }
     @keyframes status-pulse {
         0%,
         40% {

@@ -26,8 +26,10 @@ import {
   withSubmittedReview,
 } from "@/features/reviews/lib/reviewers"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
 import { usePullRequestStatus } from "@/features/reviews/lib/usePullRequestStatus"
-import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
+import { useRefreshPullRequest } from "@/features/reviews/page/queries"
+import { plural } from "@/features/reviews/page/text"
 
 const VERDICTS: ReadonlyArray<{
   event: PullRequestReviewEvent
@@ -56,26 +58,39 @@ export function SubmitReviewPopover({
   owner,
   repo,
   number,
+  open,
+  onOpenChange: setOpen,
+  defaultVerdict,
 }: {
   owner: string
   repo: string
   number: number
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** The verdict the form opens on, e.g. from an "approve" shortcut. */
+  defaultVerdict: PullRequestReviewEvent
 }) {
   const queryClient = useQueryClient()
   const session = useSession()
   const login = session.data?.login
+  const refresh = useRefreshPullRequest({ owner, repo, number })
   const pending = usePendingReview(owner, repo, number)
   const pendingCount = pending.comments.length
   const status = usePullRequestStatus(`${owner}/${repo}`, number)
   const approved = standingReview(status.data, login) === "approved"
-  const [open, setOpen] = useState(false)
-  const [event, setEvent] = useState<PullRequestReviewEvent>("COMMENT")
+  // GitHub refuses an author's approval or change request on their own PR.
+  const isAuthor = useIsPullRequestAuthor(owner, repo, number)
+  const [chosen, setEvent] = useState<PullRequestReviewEvent>(defaultVerdict)
+  const event: PullRequestReviewEvent = isAuthor ? "COMMENT" : chosen
+  const [openedOn, setOpenedOn] = useState<PullRequestReviewEvent | null>(null)
+  if (open && openedOn !== defaultVerdict) {
+    setOpenedOn(defaultVerdict)
+    setEvent(defaultVerdict)
+  } else if (!open && openedOn !== null) {
+    setOpenedOn(null)
+  }
   const [body, setBody] = useState("")
   const needsBody = event !== "APPROVE" && pendingCount === 0
-  const statusKey = pullRequestStatusQuery(login ?? "", {
-    repo: `${owner}/${repo}`,
-    number,
-  }).queryKey
   const submit = useMutation({
     mutationFn: () =>
       api.submitPullRequestReview(owner, repo, number, {
@@ -87,7 +102,8 @@ export function SubmitReviewPopover({
       if (!login) return {}
       const undo = await optimisticUpdate<OpenPullRequest | null>(
         queryClient,
-        statusKey,
+        pullRequestStatusQuery(login, { repo: `${owner}/${repo}`, number })
+          .queryKey,
         (current) =>
           withSubmittedReview(
             current,
@@ -98,8 +114,6 @@ export function SubmitReviewPopover({
       return { undo }
     },
     onError: (_error, _variables, context) => context?.undo?.(),
-    onSettled: () =>
-      void queryClient.invalidateQueries({ queryKey: statusKey, exact: true }),
     onSuccess: (result) => {
       setOpen(false)
       setBody("")
@@ -111,13 +125,8 @@ export function SubmitReviewPopover({
             window.open(result.html_url, "_blank", "noopener,noreferrer"),
         },
       })
-      void queryClient.invalidateQueries({
-        queryKey: ["review", owner, repo, number],
-      })
+      refresh.reviewed()
       void pending.invalidate()
-      void queryClient.invalidateQueries({
-        queryKey: reviewConversationQueryKey(owner, repo, number),
-      })
     },
   })
   const canSubmit = !submit.isPending && (!needsBody || body.trim().length > 0)
@@ -131,16 +140,16 @@ export function SubmitReviewPopover({
     >
       <PopoverTrigger asChild>
         <Button
-          size="xs"
+          size="sm"
           rightDecorator={CaretDownIcon}
           tagText={pendingCount > 0 ? String(pendingCount) : undefined}
           aria-label={
             pendingCount > 0
-              ? `Review changes, ${pendingCount} pending comments`
+              ? `Review changes, ${plural(pendingCount, "pending comment")}`
               : "Review changes"
           }
         >
-          Review changes
+          Review<span className="max-sm:hidden"> changes</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -155,12 +164,12 @@ export function SubmitReviewPopover({
           }}
         >
           <Text as="h2" variant="sm" weight="semibold">
-            Finish your review
+            {isAuthor ? "Comment on your pull request" : "Finish your review"}
           </Text>
           {pendingCount > 0 && (
-            <p className="mt-1 text-xs text-secondary">
-              {pendingCount} pending comment{pendingCount === 1 ? "" : "s"} will
-              be submitted with this review.
+            <p className="mt-space-1 text-xs text-secondary">
+              {plural(pendingCount, "pending comment")} will be submitted with
+              this review.
             </p>
           )}
           <Textarea
@@ -180,55 +189,63 @@ export function SubmitReviewPopover({
             disabled={submit.isPending}
             autoFocus
           />
-          <RadioGroup
-            aria-label="Review verdict"
-            className="mt-space-3 gap-space-2"
-            value={event}
-            disabled={submit.isPending}
-            onValueChange={(value) => {
-              const verdict = VERDICTS.find((item) => item.event === value)
-              if (verdict) setEvent(verdict.event)
-            }}
-          >
-            {VERDICTS.map((verdict) => {
-              const alreadyGiven = approved && verdict.event === "APPROVE"
-              return (
-                <label
-                  key={verdict.event}
-                  className={cn(
-                    "flex items-start gap-space-2 text-xs",
-                    alreadyGiven
-                      ? "cursor-not-allowed opacity-60"
-                      : "cursor-pointer"
-                  )}
-                >
-                  <RadioGroupItem
-                    value={verdict.event}
-                    disabled={alreadyGiven}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="font-medium text-primary">
-                      {verdict.label}
+          {isAuthor ? (
+            <p className="mt-space-2 text-xs text-secondary">
+              GitHub doesn&apos;t let you approve or request changes on your own
+              pull request.
+            </p>
+          ) : (
+            <RadioGroup
+              aria-label="Review verdict"
+              className="mt-space-3 gap-space-2"
+              value={event}
+              disabled={submit.isPending}
+              onValueChange={(value) => {
+                const verdict = VERDICTS.find((item) => item.event === value)
+                if (verdict) setEvent(verdict.event)
+              }}
+            >
+              {VERDICTS.map((verdict) => {
+                const alreadyGiven = approved && verdict.event === "APPROVE"
+                return (
+                  <label
+                    key={verdict.event}
+                    className={cn(
+                      "flex items-start gap-space-2 text-xs",
+                      alreadyGiven
+                        ? "cursor-not-allowed opacity-60"
+                        : "cursor-pointer"
+                    )}
+                  >
+                    <RadioGroupItem
+                      value={verdict.event}
+                      disabled={alreadyGiven}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="font-medium text-primary">
+                        {verdict.label}
+                      </span>
+                      <span className="block text-secondary">
+                        {alreadyGiven
+                          ? "You approved these changes."
+                          : verdict.description}
+                      </span>
                     </span>
-                    <span className="block text-secondary">
-                      {alreadyGiven
-                        ? "You approved these changes."
-                        : verdict.description}
-                    </span>
-                  </span>
-                </label>
-              )
-            })}
-          </RadioGroup>
+                  </label>
+                )
+              })}
+            </RadioGroup>
+          )}
           {submit.error && (
-            <p className="mt-2 text-xs break-words text-error-secondary">
+            <p className="mt-space-2 text-xs break-words text-error-secondary">
               {submit.error.message}
             </p>
           )}
-          <div className="mt-3 flex items-center justify-end gap-2">
+          <div className="mt-space-3 flex items-center justify-end gap-space-2">
             {pending.review && (
               <Button
+                type="button"
                 size="xs"
                 color="error"
                 variant="plain"
@@ -240,6 +257,7 @@ export function SubmitReviewPopover({
               </Button>
             )}
             <Button
+              type="button"
               size="xs"
               color="secondary"
               variant="outlined"
@@ -249,7 +267,11 @@ export function SubmitReviewPopover({
               Cancel
             </Button>
             <Button type="submit" size="xs" disabled={!canSubmit}>
-              {submit.isPending ? "Submitting…" : "Submit review"}
+              {submit.isPending
+                ? "Submitting…"
+                : isAuthor
+                  ? "Comment"
+                  : "Submit review"}
             </Button>
           </div>
         </form>

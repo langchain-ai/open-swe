@@ -994,30 +994,6 @@ export interface SubmittedReview {
   state: string
 }
 
-export interface ReviewCommentResult {
-  id: number
-  html_url: string
-}
-
-export interface PrReviewComment {
-  id: number
-  author: string
-  author_avatar_url: string
-  path: string
-  line: number | null
-  side: "LEFT" | "RIGHT"
-  body: string
-  html_url: string
-  created_at: string
-  is_open_swe: boolean
-  // Outdated: the line no longer appears in the current diff, so it can't render inline.
-  is_outdated: boolean
-}
-
-export interface ReviewCommentsPayload {
-  comments: Array<PrReviewComment>
-}
-
 export interface ReviewCounts {
   open: number
   resolved: number
@@ -2095,21 +2071,6 @@ export const api = {
     request<PostedReviewComment>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
       { method: "POST", body: JSON.stringify(comment) }
-    ),
-  listReviewComments: (owner: string, repo: string, number: number) =>
-    request<ReviewCommentsPayload>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
-    ),
-  updateReviewComment: (
-    owner: string,
-    repo: string,
-    number: number,
-    commentId: number,
-    body: string
-  ) =>
-    request<ReviewCommentResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments/${commentId}`,
-      { method: "PATCH", body: JSON.stringify({ body }) }
     ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   startReviewerEval: (body: ReviewerEvalStartRequest) =>

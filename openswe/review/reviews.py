@@ -41,7 +41,7 @@ from openswe.review.findings import (
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
 from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from openswe.thread_ids import reviewer_thread_id
-from openswe.utils.json_types import ThreadLike, as_json_object, thread_metadata
+from openswe.utils.json_types import ThreadLike, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, thread_run_error
 from openswe.walkthrough.record import WalkthroughView
 from openswe.workspaces.store import WORKSPACES
@@ -584,11 +584,6 @@ class _ReviewThread(BaseModel):
 _REVIEW_THREADS = TypeAdapter(list[_ReviewThread])
 
 
-class _CommentOwner(BaseModel):
-    user: _ReviewAuthor | None = None
-    pull_request_url: str = ""
-
-
 class PostedReviewComment(BaseModel):
     id: int
     html_url: str
@@ -604,78 +599,12 @@ class PostedReviewComment(BaseModel):
             )
         )
 
-    @classmethod
-    async def edit(
-        cls, pull: PullRequestClient, comment_id: int, *, viewer_login: str, body: str
-    ) -> Self:
-        """Edit an inline comment on this PR, which only its author may do."""
-        owner = _CommentOwner.model_validate(await pull.repo.review_comment(comment_id))
-        if (
-            owner.user is None
-            or owner.user.login.lower() != viewer_login.lower()
-            or not owner.pull_request_url.lower().endswith(
-                f"/repos/{pull.repo.full_name}/pulls/{pull.number}".lower()
-            )
-        ):
-            raise HTTPException(403, "comment is not editable by this user")
-        return cls.model_validate(await pull.repo.edit_review_comment(comment_id, body))
-
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-# Inline comments the reviewer posts carry this hidden marker (see reviewer_publish).
-_OPEN_SWE_COMMENT_RE = re.compile(r"<!--\s*open-swe-review-comment\b")
-_REVIEW_COMMENTS_PER_PAGE = 100
-# Bound the fetch so a pathological PR can't trigger unbounded paging (~2000 comments).
-_MAX_REVIEW_COMMENT_PAGES = 20
 
 
 def _clean_comment_body(body: str) -> str:
     return _HTML_COMMENT_RE.sub("", body).strip()
-
-
-def _normalize_review_comment(item: dict[str, Any]) -> dict[str, Any]:
-    raw_body = item.get("body")
-    body = raw_body if isinstance(raw_body, str) else ""
-    user = as_json_object(item.get("user"))
-    line = item.get("line")
-    if not isinstance(line, int):
-        original = item.get("original_line")
-        line = original if isinstance(original, int) else None
-    return {
-        "id": item.get("id"),
-        "author": user.get("login") if isinstance(user.get("login"), str) else "",
-        "author_avatar_url": (
-            user.get("avatar_url") if isinstance(user.get("avatar_url"), str) else ""
-        ),
-        "path": item.get("path") if isinstance(item.get("path"), str) else "",
-        "line": line,
-        "side": item.get("side") if item.get("side") in ("LEFT", "RIGHT") else "RIGHT",
-        "body": _clean_comment_body(body),
-        "html_url": item.get("html_url") if isinstance(item.get("html_url"), str) else "",
-        "created_at": item.get("created_at") if isinstance(item.get("created_at"), str) else "",
-        "is_open_swe": bool(_OPEN_SWE_COMMENT_RE.search(body)),
-        # GitHub nulls `position` when the line no longer appears in the current
-        # diff — i.e. the comment is outdated and can't be rendered inline.
-        "is_outdated": not isinstance(item.get("position"), int),
-    }
-
-
-async def list_review_comments(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    """List inline review comments on a PR (newest first), normalized for the UI.
-
-    Surfaces every inline comment on the PR — including humans' — not just the
-    reviewer's findings. ``is_open_swe`` flags the reviewer's own (marker-bearing)
-    comments so the UI can separate them from other people's. Pages through the
-    full list (bounded by ``_MAX_REVIEW_COMMENT_PAGES``) so older comments aren't
-    silently dropped.
-    """
-    async with GitHubClient.as_app() as github:
-        raw = (
-            await github.repo(owner, repo)
-            .pull_request(pr_number)
-            .review_comments(newest_first=True, max_pages=_MAX_REVIEW_COMMENT_PAGES)
-        )
-    return {"comments": [_normalize_review_comment(item) for item in raw]}
 
 
 async def _reviewer_thread_for(owner: str, repo: str, pr_number: int) -> ThreadLike | None:

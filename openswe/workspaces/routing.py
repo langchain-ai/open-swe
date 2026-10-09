@@ -1,7 +1,7 @@
 """Which workspace an inbound event belongs to.
 
 Resolution order, first match wins: the thread's recorded workspace, a
-``workspace:<slug>`` tag on the opening message, the Slack channel's owner, the
+``/workspace:<slug>`` command on the opening message, the Slack channel's owner, the
 repository's preferred workspace, the user's default, then ``default``. The
 channel outranks the repository because every workspace can use every
 repository: a message in a workspace's channel stays there. This is the

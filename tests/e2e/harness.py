@@ -1272,6 +1272,13 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
     return JSONResponse(_gh_pr_json(pr))
 
 
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/commits")
+async def gh_list_pull_commits(owner: str, repo: str, number: int) -> JSONResponse:
+    if fakes.find_pull(number, owner, repo) is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse([])
+
+
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
 async def gh_list_pull_comments(
     owner: str, repo: str, number: int, request: Request, page: int = 1

@@ -1,4 +1,8 @@
-import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
+import {
+  ReviewChatActionsContext,
+  ReviewExcerptChips,
+} from "@/features/reviews/components/ReviewChatActions"
+import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
 import {
   Profiler,
   useCallback,
@@ -60,6 +64,7 @@ import {
   useAgentSkills,
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
+  useAgentThreadQueuedMessages,
 } from "@/features/agents/lib/queries"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -240,9 +245,10 @@ export function AgentThreadView({
       sandboxBridgeClient: "desktop",
     }
   }, [handoff, thread.id, thread.repoFullName])
+  // The review page shows its PR's status itself; don't poll it a second time here.
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
-    (thread.pullRequests?.length ?? 0) > 0
+    !reviewChat && (thread.pullRequests?.length ?? 0) > 0
   )
   const pullRequestHealth = pullRequestStatus.isError
     ? undefined
@@ -346,6 +352,24 @@ export function AgentThreadView({
     ]
   )
 
+  // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
+  const submitWithExcerpts = useCallback(
+    async (
+      content: string,
+      images: Array<ImageChunk>,
+      options?: SubmitOptions
+    ) => {
+      const excerpts = reviewChat?.excerpts ?? []
+      await submitMessage(
+        excerpts.length ? serializeExcerpts(content, excerpts) : content,
+        images,
+        options
+      )
+      if (excerpts.length) reviewChat?.clearExcerpts?.()
+    },
+    [reviewChat, submitMessage]
+  )
+
   const commentOnDiff = useCallback(
     (content: string) => submitMessage(content, []),
     [submitMessage]
@@ -371,9 +395,27 @@ export function AgentThreadView({
         key: (previous?.key ?? 0) + 1,
         text: composerDraft.text,
         images: [],
+        replacesSuggestion: true,
       }))
     }
   }
+
+  const question = reviewChat?.question
+  const clearQuestion = reviewChat?.clearQuestion
+  useEffect(() => {
+    if (!question || !canPost) return
+    clearQuestion?.()
+    // oxlint-disable-next-line react/set-state-in-effect
+    submitWithExcerpts(question, []).catch((error: unknown) => {
+      console.error("Could not send the review question", error)
+      setRestoreDraft((previous) => ({
+        key: (previous?.key ?? 0) + 1,
+        text: question,
+        images: [],
+      }))
+    })
+  }, [question, canPost, clearQuestion, submitWithExcerpts])
+
   const [droppedFiles, setDroppedFiles] = useState<{
     key: number
     files: Array<File>
@@ -611,8 +653,14 @@ export function AgentThreadView({
     )
   }, [baseMessages, queryClient, queued, thread.id, thread.pendingMessages])
 
+  const agentQueue = useAgentThreadQueuedMessages(thread.id).data
   const queuedRows = useMemo(() => {
     const known = new Set(queued.map((entry) => entry.message.id))
+    // A steered follow-up is already on the transcript under the same id.
+    const shown = new Set([
+      ...known,
+      ...baseMessages.map((message) => message.id),
+    ])
     return [
       ...queued.map((entry) => ({
         id: entry.message.id,
@@ -631,8 +679,17 @@ export function AgentThreadView({
           createdAt: message.createdAt,
           pending: true,
         })),
+      ...(agentQueue ?? [])
+        .filter((message) => !shown.has(message.id))
+        .map((message) => ({
+          id: message.id,
+          content: message.text,
+          createdAt: message.queued_at ? Date.parse(message.queued_at) : 0,
+          waitsForAgent: true,
+          sender: message.sender,
+        })),
     ]
-  }, [isOwnQueued, queued, thread.pendingMessages])
+  }, [agentQueue, baseMessages, isOwnQueued, queued, thread.pendingMessages])
 
   const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedRows.length > 0
@@ -698,32 +755,37 @@ export function AgentThreadView({
         className="flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
-        <AgentThreadHeader
-          key={thread.id}
-          title={thread.title}
-          onRename={(title) =>
-            renameThread.mutateAsync({ threadId: thread.id, title })
-          }
-          target={
-            localThread || thread.sandboxBridgeClient === "desktop"
-              ? "This Mac"
-              : thread.sandboxBridgeClient === "cli"
-                ? "Local CLI"
-                : "Cloud"
-          }
-          targetMenu={
-            canMove ? (
-              <ThreadTargetMenu
-                value={handoff ?? runsHere}
-                pending={handoff !== null}
-                disabled={isStreaming}
-                onChange={(next) => setHandoff(next === runsHere ? null : next)}
-              />
-            ) : undefined
-          }
-          panelCollapsed={panelCollapsed}
-          thread={thread}
-        />
+        {/* The review page's rail is the header for its chat. */}
+        {!reviewChat && (
+          <AgentThreadHeader
+            key={thread.id}
+            title={thread.title}
+            onRename={(title) =>
+              renameThread.mutateAsync({ threadId: thread.id, title })
+            }
+            target={
+              localThread || thread.sandboxBridgeClient === "desktop"
+                ? "This Mac"
+                : thread.sandboxBridgeClient === "cli"
+                  ? "Local CLI"
+                  : "Cloud"
+            }
+            targetMenu={
+              canMove ? (
+                <ThreadTargetMenu
+                  value={handoff ?? runsHere}
+                  pending={handoff !== null}
+                  disabled={isStreaming}
+                  onChange={(next) =>
+                    setHandoff(next === runsHere ? null : next)
+                  }
+                />
+              ) : undefined
+            }
+            panelCollapsed={panelCollapsed}
+            thread={thread}
+          />
+        )}
         {(macOffline || bridgeError) && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-3">
             <Banner
@@ -873,9 +935,11 @@ export function AgentThreadView({
                           Reload to try again.
                         </Banner>
                       ) : (
-                        <p className="text-xs text-tertiary">
-                          This thread has no messages yet.
-                        </p>
+                        (reviewChat?.emptyState ?? (
+                          <p className="text-xs text-tertiary">
+                            This thread has no messages yet.
+                          </p>
+                        ))
                       )}
                     </div>
                   }
@@ -932,6 +996,7 @@ export function AgentThreadView({
                   fixDisabled={!canPost || sendMessage.isPending}
                 />
               )}
+              {reviewChat && <ReviewExcerptChips />}
               <AgentPromptBar
                 placeholder={
                   macOffline
@@ -950,7 +1015,7 @@ export function AgentThreadView({
                 busy={isStreaming}
                 activeRun={activeRun}
                 onStop={stopRun}
-                onSubmit={submitMessage}
+                onSubmit={submitWithExcerpts}
                 onEmptySubmit={steerNextQueuedMessage}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
@@ -988,14 +1053,17 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      <AgentGitPanel
-        thread={thread}
-        onComment={canPost ? commentOnDiff : undefined}
-        revealFilePath={revealFilePath}
-        revealChangesKey={revealChangesKey}
-        collapsed={panelCollapsed}
-        onCollapsedChange={handlePanelCollapsedChange}
-      />
+      {/* The review page is already the diff; a second panel only squeezes the chat. */}
+      {!reviewChat && (
+        <AgentGitPanel
+          thread={thread}
+          onComment={canPost ? commentOnDiff : undefined}
+          revealFilePath={revealFilePath}
+          revealChangesKey={revealChangesKey}
+          collapsed={panelCollapsed}
+          onCollapsedChange={handlePanelCollapsedChange}
+        />
+      )}
     </div>
   )
 }

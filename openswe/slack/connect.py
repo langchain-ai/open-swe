@@ -156,24 +156,15 @@ async def _verified_slack_identity(code: str) -> SlackIdentity:
 async def _link_slack_identity(
     session: dict[str, Any], *, slack_user_id: str, email: str, team_id: str
 ) -> None:
-    """Attach the Slack account to the person the session belongs to.
-
-    Sessions minted before the ``user_id`` claim existed fall back to the
-    GitHub login; one without a users row is left unlinked.
-    """
+    """Attach the Slack account to the person the session belongs to."""
     github_login = session["sub"]
-    user_id = session_user_id(session)
-    user = (
-        await User.get(user_id)
-        if user_id is not None
-        else await User.for_login("github", github_login)
-    )
+    user = await User.for_session(session_user_id(session), github_login)
     if user is None:
-        logger.info(
+        logger.warning(
             "Slack identity not linked: no user for this GitHub login",
             extra={"github_login": github_login},
         )
-        return
+        raise HTTPException(409, "no Open SWE account for your GitHub login — sign in again")
     await user.link("slack", slack_user_id, email=email, team_id=team_id)
 
 
