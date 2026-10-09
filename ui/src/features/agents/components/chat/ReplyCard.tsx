@@ -51,7 +51,7 @@ function blocksFromOptions(
   )
   if (cleanOptions.length === 0) return null
   return [
-    { type: "section", text: { type: "markdown", text: message } },
+    { type: "section", text: { type: "mrkdwn", text: message } },
     {
       type: "actions",
       elements: cleanOptions.slice(0, 5).map((option) => ({
@@ -75,9 +75,7 @@ function renderSlackBlocks(blocks: Array<SlackBlock>): ReactNode {
               key={index}
               className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap"
             >
-              {block.text.type === "markdown" ? (
-                <Markdown content={block.text.text ?? ""} />
-              ) : block.text.type === "mrkdwn" ? (
+              {block.text.type === "mrkdwn" ? (
                 <SlackMrkdwn text={block.text.text ?? ""} />
               ) : (
                 block.text.text
@@ -145,7 +143,9 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
             ) : blocks ? (
               renderSlackBlocks(blocks)
             ) : (
-              <Markdown content={body} />
+              <div className="[overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+                <SlackMrkdwn text={body} />
+              </div>
             )}
           </div>
         </div>
