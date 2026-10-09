@@ -1,7 +1,8 @@
 """Mention-free follow-ups in Slack threads Open SWE was tagged in.
 
-Solo threads route every follow-up; shared threads ask Jev whether
-the newest message is addressed to Open SWE.
+Solo threads route every follow-up; shared threads where a participant turned on
+``experimental_addressed_followups`` ask Jev whether the newest message is
+addressed to Open SWE.
 """
 
 import asyncio
@@ -16,6 +17,7 @@ from openswe.slack.client import slack_thread_mutation_lock
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SlackClient
 from openswe.slack.payloads import SlackMessage
+from openswe.users import User
 from openswe.utils.jev import select_jev_choice
 from openswe.utils.json_types import JsonObject
 
@@ -82,6 +84,14 @@ def _transcript(messages: list[SlackMessage], bot_user_id: str) -> str:
             for m in messages[-_DECISION_CONTEXT_MESSAGES:]
             if not m.is_noise
         ]
+    )
+
+
+async def _participant_opted_in(messages: list[SlackMessage]) -> bool:
+    members = {m.user for m in messages if m.user and not m.is_from_bot}
+    users = await asyncio.gather(*(User.for_identity("slack", member) for member in members))
+    return any(
+        u is not None and u.typed_preferences.experimental_addressed_followups for u in users
     )
 
 
@@ -182,6 +192,8 @@ async def allow_solo_thread_followup(
             return False
         if participation == "solo":
             return True
+        if not await _participant_opted_in(messages):
+            return False
         return await _addressed_to_open_swe(channel_id, messages, message_ts, bot_user_id)
     except Exception:
         logger.warning(

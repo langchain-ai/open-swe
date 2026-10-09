@@ -60,6 +60,11 @@ function ExperimentsPage() {
               : "In Slack threads with more than one person, Open SWE DMs you for approval before opening a PR under your name."
           }
         />
+        <ProfileSwitchRow
+          field="experimental_addressed_followups"
+          label="Answer untagged replies in shared Slack threads (experimental)"
+          description="In Slack threads you are part of, Open SWE answers messages meant for it even when nobody tags it. Applies to everyone in those threads."
+        />
       </SettingsSection>
     </SettingsPage>
   )

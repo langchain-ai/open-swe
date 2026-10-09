@@ -73,6 +73,7 @@ class ProfileUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_act_as_approval: bool | None = None
+    experimental_addressed_followups: bool | None = None
     slack_onboarding_dismissed: bool = False
 
     @model_validator(mode="after")
@@ -449,6 +450,7 @@ async def put_my_profile(
             prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
             experimental_task_coordination=update.experimental_task_coordination,
             experimental_act_as_approval=update.experimental_act_as_approval,
+            experimental_addressed_followups=update.experimental_addressed_followups,
             # Switching approval either way starts over from asking every time.
             act_as_always_allowed=(
                 False if update.experimental_act_as_approval is not None else None
@@ -463,6 +465,7 @@ async def put_my_profile(
         or update.prefer_tools_in_sandbox
         or update.experimental_task_coordination
         or update.experimental_act_as_approval
+        or update.experimental_addressed_followups
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)

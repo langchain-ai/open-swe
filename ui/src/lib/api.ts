@@ -318,6 +318,7 @@ export interface Profile {
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
+  experimental_addressed_followups?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -344,6 +345,7 @@ export interface ProfileUpdate {
   pr_failure_reactions?: boolean
   prefer_tools_in_sandbox?: boolean
   experimental_act_as_approval?: boolean
+  experimental_addressed_followups?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

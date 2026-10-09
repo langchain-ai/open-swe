@@ -164,7 +164,9 @@ async def test_shared_thread_routes_messages_addressed_to_open_swe(
     await harness.send("<@BOT> help")
     assert (await harness.send("I have thoughts", user="U2"))["status"] == "ignored"
     monkeypatch.setattr(solo_threads, "_addressed_to_open_swe", AsyncMock(return_value=True))
-    assert (await harness.send("can you also fix the tests?", user="U2"))["status"] == "accepted"
+    assert (await harness.send("can you also fix the tests?", user="U2"))["status"] == "ignored"
+    monkeypatch.setattr(solo_threads, "_participant_opted_in", AsyncMock(return_value=True))
+    assert (await harness.send("please fix the tests", user="U2"))["status"] == "accepted"
     assert harness.requests[-1].treat_all_messages_as_mentions is True
 
 
