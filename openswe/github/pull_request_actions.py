@@ -30,9 +30,16 @@ mutation MarkPullRequestReady($pullRequestId: ID!) {
 
 
 class PullRequestActionResult(BaseModel):
+    """GitHub-confirmed action outcome; queued auto-merge does not mean the PR merged."""
+
     action: PullRequestActionName
+    """The requested GitHub operation."""
+
     done: bool
+    """Whether GitHub confirmed the operation, including enabling auto-merge."""
+
     auto_merge: bool = False
+    """Whether GitHub queued auto-merge rather than merging immediately."""
 
 
 def _graphql_error_message(payload: dict[str, object]) -> str | None:
