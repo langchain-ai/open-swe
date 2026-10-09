@@ -438,8 +438,14 @@ are read or a run is dispatched.
 ### Forwarding Claude Code hook events
 
 Claude Code can forward its [hook events](https://code.claude.com/docs/en/hooks) to Open SWE
-through the `record_hook_event` tool on the `oswe` MCP server, using that server's existing
-OAuth login. Add an `mcp_tool` handler under each event in `~/.claude/settings.json`:
+through the `record_hook_event` tool on Open SWE's remote MCP server, using that server's
+existing OAuth login. Connect the server as `oswe`:
+
+```bash
+claude mcp add --transport http oswe https://<host>/oswe/mcp
+```
+
+Then add an `mcp_tool` handler under each event in `~/.claude/settings.json`:
 
 ```json
 {
