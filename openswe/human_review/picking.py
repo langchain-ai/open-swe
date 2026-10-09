@@ -273,6 +273,8 @@ class Coverage:
 REVIEWER_INSTRUCTIONS_PATH = ".open-swe/REVIEWERS.md"
 _REVIEWER_INSTRUCTIONS_MAX_CHARS = 10_000
 _INCLUDED_FILE_MAX_CHARS = 100_000
+_INCLUDED_TOTAL_MAX_CHARS = 200_000
+_MAX_INCLUDES = 10
 _INCLUDE = re.compile(r"^@(\S+)[ \t]*$", re.MULTILINE)
 
 
@@ -312,11 +314,13 @@ class ReviewerInstructions:
         """Replace each ``@path`` line of the file at ``path`` with the file it names at ``ref``.
 
         ``@/a/b`` is from the repository root and ``@a/b`` from ``path``'s directory. A line
-        naming no file, such as a team mention, or a path outside the repository stays as written.
+        naming no file, such as a team mention, a path outside the repository, or one past the
+        include limits stays as written.
         """
         parts: list[str] = []
         end = 0
-        for line in _INCLUDE.finditer(text):
+        budget = _INCLUDED_TOTAL_MAX_CHARS
+        for line in list(_INCLUDE.finditer(text))[:_MAX_INCLUDES]:
             named = line.group(1)
             resolved = posixpath.normpath(
                 named.lstrip("/")
@@ -325,9 +329,12 @@ class ReviewerInstructions:
             )
             if resolved in {".", ".."} or resolved.startswith("../"):
                 continue
-            content = await repo.read_file(resolved, ref, max_chars=_INCLUDED_FILE_MAX_CHARS)
+            content = await repo.read_file(
+                resolved, ref, max_chars=min(_INCLUDED_FILE_MAX_CHARS, budget)
+            )
             if content is None:
                 continue
+            budget -= len(content)
             parts += [
                 text[end : line.start()],
                 f'<included_file name="{escape(resolved)}">\n{content}\n</included_file>',
