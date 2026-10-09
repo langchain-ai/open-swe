@@ -144,6 +144,9 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     ("event_type", "text", "expected_status"),
     [
         ("message", "please ask @openswe about this", "ignored"),
+        ("message", "/model:perf do it", "ignored"),
+        ("message", "/btw why?", "ignored"),
+        ("message", "/breakout fix it", "ignored"),
         ("message", "<@BOT> help", "accepted"),
         ("app_mention", "help", "accepted"),
     ],
@@ -211,7 +214,13 @@ async def test_kitchen_messages_preserve_explicit_mentions(
 
 @pytest.mark.parametrize("kitchen", [False, True])
 @pytest.mark.parametrize(
-    "text", ["<@OTHER> shots fired", "  <@OTHER> shots fired", "<@OTHER> ask <@BOT> later"]
+    "text",
+    [
+        "<@OTHER> shots fired",
+        "  <@OTHER> shots fired",
+        "<@OTHER> ask <@BOT> later",
+        "<@OTHER> /model:perf do it",
+    ],
 )
 async def test_leading_other_user_mention_does_not_trigger(
     monkeypatch: pytest.MonkeyPatch, kitchen: bool, text: str

@@ -139,9 +139,9 @@ async def cancel_active_runs(thread_id: str, *, keep_run_id: str = "") -> None:
 async def queued_context_count(thread_id: str) -> int:
     """Count of messages waiting to reach this thread's agent.
 
-    Combines the legacy in-run injection queue (``queue_context`` /
-    ``queue_message_for_thread``, still used by Slack context and the
-    ``send_dashboard_message`` agent tool) with genuine pending runs
+    Combines the in-run injection queue (``queue_context`` /
+    ``queue_message_for_thread``, used by Slack context and steered
+    follow-ups) with genuine pending runs
     (a composer follow-up enqueued via the server-backed queue adapter is a
     real LangGraph run, not a KV-store entry, and would otherwise be
     invisible here).

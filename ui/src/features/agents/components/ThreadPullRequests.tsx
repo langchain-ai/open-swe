@@ -1,11 +1,6 @@
 import { Avatar } from "@langchain/macaw-components/Avatar"
 import { Button } from "@langchain/macaw-components/Button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@langchain/macaw-components/DropdownMenu"
+import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import {
   HoverCard,
   HoverCardContent,
@@ -27,6 +22,7 @@ import type {
   AgentPullRequestHealth,
   ThreadFixScope,
 } from "@/features/agents/lib/types"
+import { SplitButton } from "@/components/SplitButton"
 import { cn } from "@/lib/utils"
 
 /** Surface for {@link PullRequestHoverCard}; the card sets its own width. */
@@ -491,46 +487,51 @@ function FixMenu({
   disabled: boolean
 }) {
   const [fixing, setFixing] = useState(false)
-  const [failed, setFailed] = useState(false)
+  const [failed, setFailed] = useState<ThreadFixScope | null>(null)
   const handleFix = async (scope: ThreadFixScope) => {
-    setFailed(false)
+    setFailed(null)
     setFixing(true)
     try {
       await onFix(pullRequest, scope)
     } catch (error) {
       console.error("Could not start a pull request fix", { scope, error })
-      setFailed(true)
+      setFailed(scope)
     } finally {
       setFixing(false)
     }
   }
+  // The first problem is the one to fix first; the caret offers the others.
+  const primary = failed ?? scopes[0]!
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          color="secondary"
-          variant="plain"
-          disabled={disabled || fixing}
-          aria-label={`Fix PR #${pullRequest.number}`}
-          leftDecorator={WrenchIcon}
-          rightDecorator={CaretDownIcon}
-          className="text-primary"
-        >
-          {fixing ? "Starting…" : failed ? "Retry fix" : "Fix"}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" sideOffset={6}>
-        {scopes.map((scope) => (
-          <DropdownMenuItem
-            key={scope}
-            aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
-            onSelect={() => void handleFix(scope)}
-          >
-            {FIX_LABELS[scope]}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SplitButton
+      size="md"
+      variant="plain"
+      icon={WrenchIcon}
+      disabled={disabled || fixing}
+      onClick={() => void handleFix(primary)}
+      menuLabel={`Fix PR #${pullRequest.number}`}
+      menuSide="top"
+      menu={
+        scopes.length > 1 &&
+        scopes
+          .filter((scope) => scope !== primary)
+          .map((scope) => (
+            <DropdownMenuItem
+              key={scope}
+              aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
+              onSelect={() => void handleFix(scope)}
+            >
+              {FIX_LABELS[scope]}
+            </DropdownMenuItem>
+          ))
+      }
+    >
+      {fixing
+        ? "Starting…"
+        : failed
+          ? `Retry: ${FIX_LABELS[failed]}`
+          : FIX_LABELS[primary]}
+    </SplitButton>
   )
 }
 

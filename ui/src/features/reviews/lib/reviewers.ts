@@ -3,6 +3,7 @@ import type {
   PullRequestReviewer,
   PullRequestReviewEvent,
 } from "@/lib/api"
+import { sameLogin } from "@/features/reviews/lib/logins"
 
 const SUBMITTED: Record<PullRequestReviewEvent, PullRequestReviewer["state"]> =
   {
@@ -10,8 +11,6 @@ const SUBMITTED: Record<PullRequestReviewEvent, PullRequestReviewer["state"]> =
     REQUEST_CHANGES: "changes_requested",
     COMMENT: "commented",
   }
-
-const sameLogin = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 export function standingReview(
   status: OpenPullRequest | null | undefined,

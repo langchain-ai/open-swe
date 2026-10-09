@@ -77,7 +77,6 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
-from openswe.review.walkthrough import WalkthroughView
 from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
@@ -114,6 +113,7 @@ from openswe.utils.model import (
     make_model,
     provider_model_kwargs,
 )
+from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 

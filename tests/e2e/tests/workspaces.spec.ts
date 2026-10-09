@@ -352,7 +352,7 @@ test.describe("Workspaces", () => {
     await resetDefaultWorkspace(page);
   });
 
-  test("an env: tag on the opening Slack message selects the workspace", async ({
+  test("a /workspace: command on the opening Slack message selects the workspace", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
@@ -365,7 +365,7 @@ test.describe("Workspaces", () => {
     await page
       .locator("#text")
       .fill(
-        `<@U0BOT> env:${ALT_SLUG} please add a greet() helper and open a PR`,
+        `<@U0BOT> /workspace:${ALT_SLUG} please add a greet() helper and open a PR`,
       );
     await page.locator("#send").click();
 
@@ -375,8 +375,8 @@ test.describe("Workspaces", () => {
 
     const systemPrompt = await lastSystemPrompt(page);
     expect(systemPrompt).toContain(ALT_WORKSPACE_PROMPT);
-    // The tag itself is consumed, so the agent never sees it in the request.
-    expect(systemPrompt).not.toContain(`env:${ALT_SLUG}`);
+    // The command itself is consumed, so the agent never sees it in the request.
+    expect(systemPrompt).not.toContain(`/workspace:${ALT_SLUG}`);
 
     await deleteWorkspace(page, ALT_SLUG);
   });
