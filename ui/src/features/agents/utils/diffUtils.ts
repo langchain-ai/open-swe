@@ -1,14 +1,48 @@
 import { useMemo, useSyncExternalStore } from "react"
-import { preloadHighlighter } from "@pierre/diffs"
+import { preloadHighlighter, registerCustomTheme } from "@pierre/diffs"
 import type {
   VirtualFileMetrics,
   WorkerInitializationRenderOptions,
   WorkerPoolOptions,
 } from "@pierre/diffs/react"
+import { createCssVariablesTheme } from "shiki"
 import { useResolvedTheme } from "@/lib/theme"
 
 export type DiffStyle = "unified" | "split"
 export type DiffOverflow = "scroll" | "wrap"
+
+// Colors resolve from Macaw's --syntax-* tokens, which already switch with .dark.
+const macawSyntaxTheme = createCssVariablesTheme({
+  name: "macaw",
+  variablePrefix: "--diffs-",
+  fontStyle: false,
+  variableDefaults: {
+    foreground: "var(--syntax-plain)",
+    "token-keyword": "var(--syntax-keyword)",
+    "token-string": "var(--syntax-string)",
+    "token-string-expression": "var(--syntax-string)",
+    "token-comment": "var(--syntax-comment)",
+    "token-constant": "var(--syntax-constant)",
+    "token-function": "var(--syntax-function)",
+    "token-parameter": "var(--syntax-property)",
+    "token-punctuation": "var(--syntax-operator)",
+    "token-link": "var(--syntax-tag)",
+    "ansi-green": "var(--icon-success)",
+    "ansi-red": "var(--icon-error)",
+  },
+})
+
+const DIFF_THEME = { light: "macaw-light", dark: "macaw-dark" } as const
+
+registerCustomTheme(DIFF_THEME.light, async () => ({
+  ...macawSyntaxTheme,
+  name: DIFF_THEME.light,
+  type: "light",
+}))
+registerCustomTheme(DIFF_THEME.dark, async () => ({
+  ...macawSyntaxTheme,
+  name: DIFF_THEME.dark,
+}))
 
 const DIFF_OVERFLOW_STORAGE_KEY = "open-swe.diff.overflow"
 const diffOverflowListeners = new Set<() => void>()
@@ -138,7 +172,7 @@ export const DIFF_FIXED_LINE_HEIGHT_CSS = `
 `
 
 export const diffOptions = {
-  theme: { light: "pierre-light", dark: "pierre-dark" } as const,
+  theme: DIFF_THEME,
   themeType: "system" as const,
   diffStyle: "unified" as const,
   overflow: "scroll" as const,
@@ -210,7 +244,7 @@ export const DIFF_WORKER_POOL_OPTIONS = {
 } satisfies WorkerPoolOptions
 
 export const DIFF_WORKER_HIGHLIGHTER_OPTIONS = {
-  theme: { light: "pierre-light", dark: "pierre-dark" },
+  theme: DIFF_THEME,
   lineDiffType: "word-alt",
   maxLineDiffLength: 800,
   tokenizeMaxLineLength: 1200,
