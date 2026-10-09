@@ -13,12 +13,12 @@ export function ThinkingSpinner({
 
   return (
     <div
-      className="my-2 flex items-center gap-space-1"
+      className="my-2 flex items-center gap-space-2"
       role="status"
       aria-live="polite"
       aria-atomic="true"
     >
-      <LoadingIndicator className="size-3" />
+      <LoadingIndicator className="size-3" speed="slow" />
       <span className="shimmer-text text-xs">
         {settingUpSandbox
           ? "Agent is setting up the environment…"
