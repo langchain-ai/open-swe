@@ -45,6 +45,7 @@ from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackEvent, SlackEventEnvelope
+from openswe.source_context import SlackThreadRef
 from openswe.threads.access import agent_version_metadata, resolve_run_email
 from openswe.threads.creation import create_thread
 from openswe.users import User
@@ -1005,6 +1006,7 @@ async def _launch_agent_schedule_record(
     test_run: bool = False,
     prompt: str | None = None,
     token_repositories: list[str] | None = None,
+    slack_trigger: SlackThreadRef | None = None,
 ) -> dict[str, Any]:
     schedule_id = record["id"]
     if not test_run and not record.get("enabled"):
@@ -1043,6 +1045,8 @@ async def _launch_agent_schedule_record(
     run_config = await _agent_run_config(
         record, thread_id, repo_config, test_run=test_run, admin_thread=admin_thread
     )
+    if slack_trigger is not None:
+        run_config["configurable"]["slack_trigger"] = slack_trigger.dump()
     metadata = _agent_run_metadata(
         record, thread_id, repo_config, test_run=test_run, admin_thread=admin_thread
     )
@@ -1350,6 +1354,7 @@ def _slack_event_prompt(
         channel_id=channel.id,
         author=author,
         ts=event.ts,
+        thread_ts=event.thread_ts or event.ts,
         message=_SLACK_FENCE_RE.sub(r"&lt;\1", message),
     )
 
@@ -1454,7 +1459,12 @@ async def launch_slack_automations(
             continue
         try:
             result = await _launch_agent_schedule_record(
-                record, repo=None, prompt=_slack_event_prompt(record, channel, event, text)
+                record,
+                repo=None,
+                prompt=_slack_event_prompt(record, channel, event, text),
+                slack_trigger=SlackThreadRef(
+                    channel_id=channel.id, thread_ts=event.thread_ts or event.ts
+                ),
             )
         except Exception:
             logger.exception(

@@ -4,6 +4,7 @@ This automation was triggered by a Slack event in {{ channel }} (`{{ channel_id 
 
 From: {{ author }}
 Message ts: {{ ts }}
+Trigger thread ts: {{ thread_ts }}. To report in this thread, use `slack_post_message` with channel_id `{{ channel_id }}` and `reply_in_trigger_thread=true`.
 
 <untrusted_slack_message>
 {{ message }}

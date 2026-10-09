@@ -12,6 +12,7 @@ from langgraph_sdk.errors import ConflictError
 from pydantic import ValidationError
 from sqlalchemy import text
 
+from openswe import tools
 from openswe.dashboard import repo_access
 from openswe.dashboard.options import fable_disabled_fallback
 from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
@@ -19,6 +20,7 @@ from openswe.database.postgres import transaction
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.jobs import queue
 from openswe.jobs.queue import Job
+from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
 from openswe.schedules.store import (
     GitHubTrigger,
@@ -30,7 +32,9 @@ from openswe.schedules.store import (
     TriggerConfig,
 )
 from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
+from openswe.slack.tools import channels
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.support.slack_api import SlackAPI
 
 SCHED_1 = "11111111-1111-4111-8111-111111111111"
 SCHED_2 = "22222222-2222-4222-8222-222222222222"
@@ -703,8 +707,13 @@ def _slack_post(ts: str, text: str, **event: object) -> SlackEventEnvelope:
     return envelope
 
 
+@pytest.mark.parametrize("thread_ts", [None, "6.0"])
 async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit(
-    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
+    fake_client: _FakeClient,
+    auth: None,
+    monkeypatch: pytest.MonkeyPatch,
+    slack_api: SlackAPI,
+    thread_ts: str | None,
 ) -> None:
     monkeypatch.setattr(schedules, "_require_watchable_slack_channel", AsyncMock())
     created = await schedules.create_agent_schedule(
@@ -740,7 +749,13 @@ async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit
     assert await launch(_slack_post("5.0", "FIRING", user="UOPENSWE", bot_id="BOPENSWE")) == []
 
     # The alert text can sit in an attachment; a redelivery doesn't run twice.
-    alert = _slack_post("6.0", "", attachments=[{"title": "[FIRING] api latency"}], **bot)
+    alert = _slack_post(
+        "6.0",
+        "",
+        **({"thread_ts": thread_ts} if thread_ts else {}),
+        attachments=[{"title": "[FIRING] api latency"}],
+        **bot,
+    )
     assert await launch(alert) == [created["id"]]
     assert await launch(alert) == []
     assert await launch(_slack_post("7.0", "FIRING: db", **bot)) == [created["id"]]
@@ -750,6 +765,20 @@ async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit
     assert len(fake_client.runs.created) == 2
     prompt = fake_client.runs.created[0]["input"]["messages"][-1]["content"]
     assert "#alerts" in prompt and "[FIRING] api latency" in prompt
+    cfg = RunConfig.from_config(fake_client.runs.created[0]["config"])
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: cfg)
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    monkeypatch.setattr(channels, "run_slack_location", AsyncMock(return_value=("", "")))
+    slack_api.respond(
+        {"ok": True, "channels": [{"id": _ALERTS, "name": "alerts", "is_private": False}]}
+    )
+    slack_api.respond({"ok": True, "ts": "9.0"})
+    result = await tools.slack_post_message(_ALERTS, "Alert report", reply_in_trigger_thread=True)
+    assert result["success"] is True
+    method, payload = slack_api.calls[-1]
+    assert method == "chat.postMessage"
+    assert payload["channel"] == _ALERTS
+    assert payload["thread_ts"] == "6.0"
 
 
 async def test_a_slack_trigger_needs_a_channel_open_swe_reads(
