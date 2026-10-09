@@ -7,11 +7,9 @@ import {
   useRouterState,
 } from "@tanstack/react-router"
 
-import { useQuery } from "@tanstack/react-query"
-
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
-import { reviewChatQuery } from "@/features/agents/lib/queries"
-import { Skeleton } from "@/components/ui/skeleton"
+import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
@@ -25,22 +23,7 @@ export const Route = createFileRoute("/agents")({
   head: () => ({ meta: [{ title: pageTitle("Agents") }] }),
 })
 
-/**
- * The `.agents-ui` class themes the layout subtree, but popovers, tooltips and
- * menus portal to `<body>`. Marking the document root while these routes are
- * mounted is what keeps those in the same palette.
- */
-function useAgentsTheme() {
-  useEffect(() => {
-    document.documentElement.dataset["agentsTheme"] = "true"
-    return () => {
-      delete document.documentElement.dataset["agentsTheme"]
-    }
-  }, [])
-}
-
 function AgentsLayout() {
-  useAgentsTheme()
   const session = useSession()
   const profile = useProfile()
   const experimentalAssistantUi = useExperimentalAssistantUi()
@@ -59,15 +42,16 @@ function AgentsLayout() {
   const activeThreadId = threadMatch?.params.threadId
   const activeLocalSessionId = localMatch?.params.sessionId
   const reviewNumber = Number(reviewMatch?.params.number)
+  const reviewRef = {
+    owner: reviewMatch?.params.owner ?? "",
+    repo: reviewMatch?.params.repo ?? "",
+    number: reviewNumber,
+  }
   // A review page's sidebar row is the user's review chat thread.
-  const reviewChat = useQuery({
-    ...reviewChatQuery({
-      owner: reviewMatch?.params.owner ?? "",
-      repo: reviewMatch?.params.repo ?? "",
-      number: reviewNumber,
-    }),
-    enabled: Boolean(session.data) && Boolean(reviewMatch) && reviewNumber > 0,
-  })
+  const reviewChat = useReviewChat(
+    reviewRef,
+    Boolean(session.data) && Boolean(reviewMatch) && reviewNumber > 0
+  )
   const activeReviewThreadId = reviewMatch
     ? reviewChat.data?.thread_id
     : undefined
@@ -107,7 +91,7 @@ function AgentsLayout() {
 
   if (session.isLoading) {
     return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-background p-6">
+      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1 p-6">
         <Skeleton className="h-40 w-full max-w-md" />
       </main>
     )

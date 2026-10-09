@@ -7,7 +7,7 @@ middleware stack. All per-thread state lives in the sandbox + thread metadata;
 the agent itself is stateless.
 """
 
-# ruff: noqa: E402
+# ruff: noqa: E402, PLC2701
 import hashlib
 import logging
 import warnings
@@ -47,6 +47,9 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddl
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
+from langchain_quickjs import CodeInterpreterMiddleware
+from langchain_quickjs._ptc import is_valid_ptc_tool_name
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -84,7 +87,6 @@ from openswe.dashboard.options import (
     model_supports_effort,
     model_supports_images,
 )
-from openswe.dashboard.user_credentials import get_notion_status
 from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.desktop import (
@@ -102,13 +104,13 @@ from openswe.input_messages import (
 )
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.instance import instance_mcp_source
+from openswe.mcp.managed import managed_mcp_source
 from openswe.mcp.user import user_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
-    IntegrationGroup,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
@@ -155,6 +157,8 @@ from openswe.model_request import (
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt
+from openswe.review_guide.middleware import ReviewGuideMiddleware
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -180,20 +184,21 @@ from openswe.sandboxes.state import (
 )
 from openswe.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
 from openswe.sandboxes.tool_runtime import ToolSurface, save_tool_context
-from openswe.skill_store.store import ORGANIZATION_SKILLS_NAMESPACE, SKILLS_NAMESPACE
+from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
-from openswe.threads.blobs import blob_namespace
+from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
-from openswe.tool_loaders.notion_mcp import load_notion_tools
 from openswe.tools import (
     assign_human_reviewer,
     auto_assign_human_reviewer,
     background_execute,
     background_task,
+    code_channel_set_view,
     configure_repository,
+    connect_managed_tools,
     create_automation,
     create_sandbox_file_download_url,
     delete_automation,
@@ -204,6 +209,7 @@ from openswe.tools import (
     expedite_pr_approval,
     expose_port,
     fetch_url,
+    get_human_review_status,
     get_thread,
     http_request,
     link_pull_request,
@@ -228,7 +234,7 @@ from openswe.tools import (
     report_platform_issue,
     request_human_review,
     request_pr_review,
-    request_service_connection,
+    request_rollout_check,
     save_organization_skill,
     save_plan,
     save_user_instructions,
@@ -247,12 +253,16 @@ from openswe.tools import (
     slack_read_channel_messages,
     slack_read_thread_messages,
     slack_reply,
+    slack_start_review_channel,
     start_thread,
     submit_thread_feedback,
     suggest_task,
+    switch_to_performance_model,
     trigger_automation,
     update_automation,
     web_search,
+    write_database_rows,
+    write_store_item,
 )
 from openswe.tools.access import permitted, resolve_access
 from openswe.tools.admin_gate import (
@@ -261,8 +271,10 @@ from openswe.tools.admin_gate import (
 )
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
+from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
+from openswe.tools.review_walkthrough import walkthrough_tools
 from openswe.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
@@ -307,7 +319,6 @@ from openswe.workspaces.store import (
 
 client = get_client()
 
-DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS = 5.0
 USER_SKILLS_ROUTE = "/skills/"
 ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
@@ -328,15 +339,26 @@ DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
+# Each posts to the reader and ends the walkthrough's turn as surely as a final reply.
+GUIDE_REPLY_TOOLS = frozenset(
+    {
+        "walkthrough_show_chunk",
+        "walkthrough_show_lines",
+        "walkthrough_show_other",
+        "walkthrough_end",
+    }
+)
 # A `/oswe` request has a channel but no Slack thread, so only the tools that act
 # on one are out of reach. Everything else, writes included, stays available.
 SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {
+        "code_channel_set_view",
         "manage_code_channel",
         "manage_incident",
         "slack_add_reaction",
         "slack_attach_html",
         "slack_move_thread",
+        "slack_start_review_channel",
     }
 )
 SLACK_BY_THE_WAY_EXCLUDED_TOOLS = SLACK_ASK_EXCLUDED_TOOLS | frozenset({"slack_breakout_thread"})
@@ -358,21 +380,6 @@ def _registered_tool_name(value: Any) -> str:
     if not isinstance(name, str) or not name:
         raise TypeError(f"tool has no registered name: {value!r}")
     return name
-
-
-def _tool_loader_timeout_seconds() -> float:
-    raw_timeout = ENV.TOOL_LOADER_TIMEOUT_SECONDS.optional()
-    if not raw_timeout:
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    try:
-        timeout = float(raw_timeout)
-    except ValueError:
-        logger.warning("Invalid TOOL_LOADER_TIMEOUT_SECONDS=%r; using default", raw_timeout)
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    if timeout <= 0:
-        logger.warning("TOOL_LOADER_TIMEOUT_SECONDS must be positive; using default")
-        return DEFAULT_TOOL_LOADER_TIMEOUT_SECONDS
-    return timeout
 
 
 async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
@@ -528,6 +535,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
 
 INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
+        "code_channel_set_view",
         "manage_code_channel",
         "manage_incident",
         "slack_add_reaction",
@@ -544,8 +552,10 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "assign_human_reviewer",
         "auto_assign_human_reviewer",
         "dismiss_human_review_request",
+        "get_human_review_status",
         "manage_baby_sit",
         "listen_events",
+        "request_rollout_check",
         "manage_thread",
         "link_pull_request",
         "open_pull_request",
@@ -556,6 +566,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "slack_move_thread",
         "slack_post_message",
         "slack_breakout_thread",
+        "slack_start_review_channel",
         "publish_workspace",
         "refresh_workspace_start",
         "configure_repository",
@@ -619,15 +630,17 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
         "get_thread",
+        "code_channel_set_view",
         "manage_code_channel",
         "manage_incident",
         "list_threads",
         "listen_events",
+        "request_rollout_check",
         "manage_thread",
         "read_incident",
         "read_only_sql",
         "read_user_settings",
-        "request_service_connection",
+        "connect_managed_tools",
         "save_user_settings",
         "record_incident_report",
         "search_incidents",
@@ -735,46 +748,65 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
-async def _cached_tool_loader(key: str, ttl_seconds: float, loader: Any) -> list[Any]:
-    async def load_with_timeout() -> list[Any]:
-        return await asyncio.wait_for(loader(), timeout=_tool_loader_timeout_seconds())
-
-    try:
-        return await ttl_cache.cached_stale_while_revalidate(key, ttl_seconds, load_with_timeout)
-    except TimeoutError:
-        logger.warning("Timed out loading cached tools for %s", key, exc_info=True)
-        return []
-    except Exception:
-        logger.warning("Failed to load cached tools for %s", key, exc_info=True)
-        return []
-
-
-async def _notion_tools_for(profile_login: str | None) -> list[Any]:
-    if not profile_login:
-        return []
-    try:
-        status = (await get_notion_status(profile_login))["notion"]
-    except Exception:
-        logger.warning("Could not read Notion connection status", exc_info=True)
-        return []
-    if not status.get("connected"):
-        return []
-    return await _cached_tool_loader(
-        f"tools:notion:{profile_login}:{status.get('updated_at')}",
-        300,
-        lambda: load_notion_tools(profile_login),
-    )
-
-
-async def _mcp_tools_for(credential_login: str | None, workspace: str) -> list[Any]:
+async def _mcp_tools_for(
+    credential_login: str | None, workspace: str, managed_gateway: str | None
+) -> list[Any]:
     """Load the run's MCPs by tier: instance, then workspace, then the user's own.
 
-    A later tier's connection replaces a same-named one from the tier before.
+    A later tier's connection replaces a same-named one from the tier before. The
+    workspace's LangSmith Managed Tools gateway comes last, used as the private owner.
     """
     sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
     if credential_login:
         sources.append(user_mcp_source(credential_login))
+        if managed_gateway:
+            sources.append(managed_mcp_source(credential_login, managed_gateway))
     return await load_mcp_tools(*sources)
+
+
+async def _mcp_code_mode(
+    thread_id: str,
+    tools: Sequence[BaseTool],
+    *,
+    local_run: bool,
+    additional_tools: Sequence[str | BaseTool] = (),
+) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
+    if local_run or not (tools or additional_tools):
+        return None, tools
+    import langgraph_sdk
+
+    thread = await langgraph_sdk.get_client().threads.get(thread_id)
+    launcher_login = thread_metadata(thread).get("owner_login")
+    profile = await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
+    if not profile or profile.get("experimental_mcp_ptc") is not True:
+        return None, tools
+    ptc_tools: list[str | BaseTool] = [tool for tool in tools if is_valid_ptc_tool_name(tool.name)]
+    ptc_tools.extend(
+        tool
+        for tool in additional_tools
+        if (tool if isinstance(tool, str) else tool.name)
+        not in (DEEP_AGENT_TOOL_NAMES - {"read_file", "write_file"})
+        | {"background_execute", "slack_reply", "slack_no_reply_needed", "cli_result"}
+        and is_valid_ptc_tool_name(tool if isinstance(tool, str) else tool.name)
+    )
+    if not ptc_tools:
+        return None, tools
+    ordinary_tools = [tool for tool in tools if not is_valid_ptc_tool_name(tool.name)]
+    return CodeInterpreterMiddleware(ptc=ptc_tools, subagents=False, mode="turn"), ordinary_tools
+
+
+def _integration_middleware(
+    mcp_tools: Sequence[BaseTool],
+    reserved_names: set[str],
+    *,
+    model_visible: bool = True,
+) -> DynamicToolMiddleware | None:
+    candidate = DynamicToolMiddleware(
+        {"MCPs": mcp_tools},
+        reserved_names=reserved_names,
+        model_visible=model_visible,
+    )
+    return candidate if candidate.has_groups else None
 
 
 async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
@@ -1404,6 +1436,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         incident_session = await load_incident_session(config)
         cfg.slack_thread = incident_session.slack_thread
         configurable["slack_thread"] = cfg.slack_thread.dump()
+    guide = await ReviewGuideSession.get(thread_id)
+    if guide is not None and guide.closed:
+        guide = None
     profile_login = await resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
@@ -1704,25 +1739,19 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     cli_result_required = not stop_summary_mode and bridge_client == "cli"
     sandbox_file_downloads = _sandbox_file_downloads_enabled(cfg, bridged=bridge_client is not None)
     mcp_tools: list[Any] = []
-    notion_tools: list[Any] = []
+    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+    managed_gateway = (
+        (await cached_workspace_settings(workspace)).managed_tools_gateway_id
+        if credential_login and not stop_summary_mode and not local_run
+        else None
+    )
     if not stop_summary_mode and not local_run and credential_scope_known:
-        mcp_tools, notion_tools = await asyncio.gather(
-            _phase_result(
-                thread_id,
-                "factory.mcp_tools",
-                lambda: _mcp_tools_for(
-                    credential_login, workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
-                ),
-            ),
-            _phase_result(
-                thread_id,
-                "factory.notion_tools",
-                lambda: _notion_tools_for(credential_login),
-            ),
-        )
+        async with aphase(thread_id, "factory.mcp_tools"):
+            mcp_tools = await _mcp_tools_for(credential_login, workspace, managed_gateway)
 
     slack_tools = [
         manage_code_channel,
+        code_channel_set_view,
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
@@ -1734,6 +1763,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_read_thread_messages,
         slack_reply,
         slack_breakout_thread,
+        slack_start_review_channel,
     ]
     static_tools = [
         http_request,
@@ -1758,12 +1788,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *([task_status, message_task_thread, control_worker] if task_coordination else []),
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
+        switch_to_performance_model,
         expedite_pr_approval,
         merge_expedited_pr,
         request_human_review,
         assign_human_reviewer,
         auto_assign_human_reviewer,
         dismiss_human_review_request,
+        get_human_review_status,
         open_pull_request,
         link_pull_request,
         *(
@@ -1773,13 +1805,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ),
         read_user_settings,
         request_pr_review,
-        request_service_connection,
+        *((connect_managed_tools,) if managed_gateway else ()),
         recreate_sandbox,
         report_platform_issue,
         schedule_thread_wakeup,
+        request_rollout_check,
         listen_events,
         list_event_types,
         manage_code_channel,
+        code_channel_set_view,
         manage_incident,
         slack_add_reaction,
         slack_attach_html,
@@ -1792,6 +1826,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         slack_read_thread_messages,
         slack_reply,
         slack_breakout_thread,
+        slack_start_review_channel,
         submit_thread_feedback,
         suggest_task,
         submit_review_assessment_feedback,
@@ -1802,8 +1837,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
         read_only_sql,
         read_store_item,
+        *(
+            (write_store_item, write_database_rows)
+            if ENV.OPENSWE_ENV.optional() in {"preview", "staging"}
+            else ()
+        ),
         manage_feature_flags,
         manage_review_approval_mode,
+        manage_review_repos,
     ]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
@@ -1825,6 +1866,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 assign_human_reviewer,
                 auto_assign_human_reviewer,
                 dismiss_human_review_request,
+                get_human_review_status,
             )
         ]
     if (
@@ -1844,6 +1886,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             for tool in static_tools
             if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         ]
+    if guide is not None:
+        static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
     static_tools = apply_tool_descriptions(
         static_tools,
         {
@@ -1889,19 +1933,38 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
-    dynamic_tool_middleware: DynamicToolMiddleware | None = None
-    integration_tool_groups: dict[str, IntegrationGroup | Sequence[Any]] = {
-        "MCPs": mcp_tools,
-        "Notion": notion_tools,
-    }
-    if integration_tool_groups:
-        candidate = DynamicToolMiddleware(
-            integration_tool_groups,
-            reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
+    mcp_ptc, ordinary_mcp_tools = await _mcp_code_mode(
+        thread_id,
+        [tool for tool in mcp_tools if tool.name not in excluded_tools],
+        local_run=local_run,
+        additional_tools=[
+            *[
+                _registered_tool_name(tool)
+                for tool in main_tools
+                if _registered_tool_name(tool) not in excluded_tools
+            ],
+            *[
+                name
+                for name in ("read_file", "write_file")
+                if name not in excluded_tools and name not in client_tool_names
+            ],
+        ],
+    )
+    integration_reserved_names = {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names}
+    full_dynamic_tools = _integration_middleware(
+        mcp_tools,
+        integration_reserved_names,
+        model_visible=not prefer_tools_in_sandbox,
+    )
+    dynamic_tool_middleware = (
+        _integration_middleware(
+            ordinary_mcp_tools,
+            integration_reserved_names,
             model_visible=not prefer_tools_in_sandbox,
         )
-        if candidate.has_groups:
-            dynamic_tool_middleware = candidate
+        if mcp_ptc is not None
+        else full_dynamic_tools
+    )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
@@ -1917,20 +1980,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         # their repository. Keep the agent's scratch files out of it.
         skill_routes.update(await desktop_artifact_routes(thread_id))
     else:
-        skill_routes[ORGANIZATION_SKILLS_ROUTE] = ReadOnlyBackend(
-            StoreBackend(namespace=lambda _runtime: (ORGANIZATION_SKILLS_NAMESPACE,))
-        )
+        skill_routes[ORGANIZATION_SKILLS_ROUTE] = skills_backend(None)
         skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
         if credential_login:
-            skill_routes[USER_SKILLS_ROUTE] = ReadOnlyBackend(
-                StoreBackend(
-                    namespace=lambda _runtime, login=credential_login: (SKILLS_NAMESPACE, login)
-                )
-            )
+            skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
             skill_sources.insert(0, USER_SKILLS_ROUTE)
-        # Offloaded images live in the store so they can be read without the sandbox.
+        # Offloaded images live in PostgreSQL so they can be read without the sandbox.
         skill_routes[BLOBS_ROUTE] = StoreBackend(
-            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id)
+            store=ThreadBlobs(thread_id),
+            namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
         )
     agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
@@ -2017,7 +2075,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             "default": model_id,
         },
         routing_mode=model_routing_mode,
-        requested_model_factory=requested_model_factory if requested_models else None,
+        requested_model_factory=requested_model_factory,
     )
     subagent_model = _make_model_or_defer(
         subagent_model_id,
@@ -2049,7 +2107,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         and _registered_tool_name(tool) not in sandbox_only_tools
                     ],
                     workspace_skills=workspace_skills,
-                    dynamic_tools=dynamic_tool_middleware,
+                    dynamic_tools=full_dynamic_tools,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                     incident_middleware=IncidentMiddleware(incident_session)
                     if incident_session is not None
@@ -2059,6 +2117,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         check_message_queue_before_model.name,
                         deliver_event_matches_before_model.name,
                         model_selection.name,
+                        *([mcp_ptc.name] if mcp_ptc is not None else []),
                     ),
                 ),
             ],
@@ -2099,6 +2158,15 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         saved_requested_model=thread_settings.get("requested_model"),
                         bridge_client=bridge_client,
                         prefer_tools_in_sandbox=prefer_tools_in_sandbox,
+                    ),
+                    *(
+                        [
+                            ReviewGuideMiddleware(
+                                thread_id=thread_id, approve_ts=cfg.review_guide_approve_ts
+                            )
+                        ]
+                        if guide is not None
+                        else []
                     ),
                     TranscriptMiddleware(),
                     *([client_tools] if client_tools else []),
@@ -2145,6 +2213,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         initial_surface=(
                             _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
                         ),
+                        replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
                     ),
                     *(
                         [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
@@ -2157,6 +2226,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     fallback_middleware,
                     *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+                    *([mcp_ptc] if mcp_ptc is not None else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
                     SanitizeThinkingBlocksMiddleware(),
@@ -2170,7 +2240,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ).with_config(bindable_config(config))
     if tool_surface is not None:
         tool_surface.graph = graph
-        tool_surface.dynamic = dynamic_tool_middleware
+        tool_surface.dynamic = full_dynamic_tools
         tool_surface.excluded = (
             STOP_SUMMARY_EXCLUDED_TOOLS
             if stop_summary_mode

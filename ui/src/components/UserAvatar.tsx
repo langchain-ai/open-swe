@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Avatar } from "@langchain/macaw-components/Avatar"
 import { api } from "@/lib/api"
 
 export function UserAvatar({
@@ -22,11 +22,11 @@ export function UserAvatar({
   })
   const label = name || login || "?"
   return (
-    <Avatar size={size} className={className}>
-      {profile.data?.avatar_url && (
-        <AvatarImage src={profile.data.avatar_url} alt="" />
-      )}
-      <AvatarFallback>{label.slice(0, 2).toUpperCase()}</AvatarFallback>
-    </Avatar>
+    <Avatar
+      size={size === "default" ? "md" : size}
+      className={className}
+      label={label}
+      imageUrl={profile.data?.avatar_url || undefined}
+    />
   )
 }

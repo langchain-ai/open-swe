@@ -1,8 +1,18 @@
-import { ContextMenu } from "@base-ui/react/context-menu"
-import { Menu } from "@base-ui/react/menu"
-import { DotsThreeIcon } from "@phosphor-icons/react"
-import { Folder } from "lucide-react"
 import { type ReactNode, useRef, useState } from "react"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@langchain/macaw-components/ContextMenu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
+import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 
 import { useNavigate } from "@tanstack/react-router"
 import type { DesktopLegacyLocalThread } from "@/desktop"
@@ -12,9 +22,11 @@ import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
-import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
+import {
+  ThreadMenuItems,
+  type ThreadMenuKind,
+} from "@/features/agents/components/ThreadMenuItems"
 import { ThreadParticipants } from "@/features/agents/components/ThreadParticipants"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
 import { ShareThreadDialog } from "@/features/agents/components/ShareThreadDialog"
@@ -58,20 +70,22 @@ function ThreadRepoIndicator({
   if (!repoName) return null
 
   return (
-    <Tooltip open={open} onOpenChange={setOpen}>
-      <TooltipTrigger
-        render={<button type="button" />}
-        closeOnClick={false}
-        onClick={() => setOpen(true)}
+    <Tooltip title={repoName} side="bottom" open={open} onOpenChange={setOpen}>
+      <button
+        type="button"
+        // Default-prevented so the trigger's own click handler keeps it open.
+        onClick={(event) => {
+          event.preventDefault()
+          setOpen(true)
+        }}
         onPointerLeave={() => setOpen(false)}
         onBlur={() => setOpen(false)}
         aria-label={`Repository: ${repoName}`}
         data-no-drag=""
-        className="flex size-7 shrink-0 items-center justify-center text-muted-foreground"
+        className="flex size-7 shrink-0 items-center justify-center text-icon-secondary"
       >
-        <Folder className="size-4" />
-      </TooltipTrigger>
-      <TooltipPopup>{repoName}</TooltipPopup>
+        <FolderIcon size={16} weight="regular" />
+      </button>
     </Tooltip>
   )
 }
@@ -181,6 +195,10 @@ export function AgentThreadHeader({
     editingRef.current = true
     setDraft(title)
   }
+  // A rename started from the menu owns focus; don't hand it back to the trigger.
+  const keepRenameFocus = (event: Event) => {
+    if (editingRef.current) event.preventDefault()
+  }
   const continueThreadPrivately = () => {
     if (!thread || localThread || continuePrivately.isPending) return
     continuePrivately.mutate(thread.id)
@@ -208,8 +226,9 @@ export function AgentThreadHeader({
       }
     />
   ) : null
-  const menuItems = (
+  const menuItems = (menu: ThreadMenuKind) => (
     <ThreadMenuItems
+      menu={menu}
       thread={thread ?? null}
       localThread={localThread}
       pinned={pinned}
@@ -240,7 +259,7 @@ export function AgentThreadHeader({
   const header = (
     <header
       data-desktop-drag-region=""
-      className="relative z-10 h-11 shrink-0 border-b border-border/60 bg-background/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-background/60 after:to-transparent"
+      className="relative z-10 h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
     >
       <div
         className={cn(
@@ -260,7 +279,7 @@ export function AgentThreadHeader({
                 onFocus={(event) => event.currentTarget.select()}
                 aria-label="Thread title"
                 data-no-drag=""
-                className="min-w-0 rounded-md bg-muted px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="min-w-0 rounded-md bg-surface-level-2 px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 style={{ width: editorWidth }}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -286,7 +305,7 @@ export function AgentThreadHeader({
                 disabled={savingTitle !== null}
                 title={savingTitle ?? title}
                 data-no-drag=""
-                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="min-w-0 truncate rounded-md px-2 py-1 text-left transition-colors hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                 onClick={startRename}
               >
                 {savingTitle ?? title}
@@ -297,31 +316,27 @@ export function AgentThreadHeader({
               </span>
             )}
             {(thread || localThread) && (
-              <Menu.Root>
-                <Menu.Trigger
-                  aria-label="Thread actions"
-                  data-no-drag=""
-                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    icon={DotsThreeIcon}
+                    iconWeight="bold"
+                    label="Thread actions"
+                    size="sm"
+                    color="secondary"
+                    variant="plain"
+                    data-no-drag=""
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  sideOffset={4}
+                  onCloseAutoFocus={keepRenameFocus}
+                  className="min-w-[10rem]"
                 >
-                  <DotsThreeIcon className="size-5" weight="bold" />
-                </Menu.Trigger>
-                <Menu.Portal>
-                  <Menu.Positioner
-                    align="start"
-                    sideOffset={4}
-                    className="z-50 outline-none"
-                  >
-                    <Menu.Popup
-                      finalFocus={() =>
-                        editingRef.current ? false : undefined
-                      }
-                      className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
-                    >
-                      {menuItems}
-                    </Menu.Popup>
-                  </Menu.Positioner>
-                </Menu.Portal>
-              </Menu.Root>
+                  {menuItems("dropdown")}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         )}
@@ -330,7 +345,7 @@ export function AgentThreadHeader({
             <ThreadParticipants threadId={thread.id} />
           )}
           {targetMenu ?? (
-            <span className="text-xs text-muted-foreground">{target}</span>
+            <span className="text-xs text-secondary">{target}</span>
           )}
           {!localThread && visibilityMenu}
         </div>
@@ -342,19 +357,15 @@ export function AgentThreadHeader({
 
   return (
     <>
-      <ContextMenu.Root>
-        <ContextMenu.Trigger render={header} />
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="z-50 outline-none">
-            <ContextMenu.Popup
-              finalFocus={() => (editingRef.current ? false : undefined)}
-              className="min-w-[10rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
-            >
-              {menuItems}
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
+        <ContextMenuContent
+          onCloseAutoFocus={keepRenameFocus}
+          className="min-w-[10rem]"
+        >
+          {menuItems("context")}
+        </ContextMenuContent>
+      </ContextMenu>
       {thread && (
         <ShareThreadDialog
           open={shareOpen}

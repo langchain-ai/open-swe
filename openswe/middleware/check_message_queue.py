@@ -1,6 +1,6 @@
 """Before-model middleware that injects queued messages into state.
 
-Checks the LangGraph store for pending messages (e.g. follow-up Linear
+Checks the thread's queued follow-ups for pending messages (e.g. follow-up Linear
 comments that arrived while the agent was busy) and injects them as new
 human messages before the next model call.
 """
@@ -10,9 +10,8 @@ from typing import Any, cast
 
 import httpx2
 from langchain.agents.middleware import before_model
-from langgraph.config import get_config, get_store
+from langgraph.config import get_config
 from langgraph.runtime import Runtime
-from langgraph.store.base import BaseStore
 from langgraph_sdk import get_client
 
 from openswe.dashboard.options import model_supports_images
@@ -22,6 +21,7 @@ from openswe.input_messages import (
     build_input_messages,
     visible_dynamic_context_hashes,
 )
+from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
@@ -30,7 +30,6 @@ from openswe.middleware.require_user_reply import (
     current_reply_surface,
 )
 from openswe.middleware.trace import scrub_middleware_inputs
-from openswe.prompts import prompt
 from openswe.users import User
 from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -156,51 +155,6 @@ def _message_update(
     return {"messages": queued, **surface_update}
 
 
-async def _consume_queued_messages(
-    store: BaseStore, namespace: tuple[str, ...], consumed: list[dict[str, Any]]
-) -> None:
-    """Remove ``consumed`` from the queue, keeping follow-ups appended since.
-
-    Building the injected messages awaits (model lookup, image fetches), and a
-    follow-up queued during that time is not in the snapshot; deleting the
-    whole entry would drop it without ever delivering it.
-    """
-    current_item = await store.aget(namespace, "pending_messages")
-    current = current_item.value.get("messages", []) if current_item is not None else []
-    remaining = [message for message in current if message not in consumed]
-    if remaining:
-        await store.aput(namespace, "pending_messages", {"messages": remaining})
-    else:
-        await store.adelete(namespace, "pending_messages")
-
-
-async def _consume_pending_autofix_event(store: BaseStore, thread_id: str) -> str | None:
-    """Pull and clear a batched PR-babysitting event from the store (no thread fetch)."""
-    namespace = ("autofix", thread_id)
-    try:
-        item = await store.aget(namespace, "pending_event")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not read pending auto-fix event for thread %s", thread_id, exc_info=True
-        )
-        return None
-    if item is None or not item.value.get("reason"):
-        return None
-    try:
-        await store.adelete(namespace, "pending_event")
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "Could not clear pending auto-fix event for thread %s", thread_id, exc_info=True
-        )
-    message = prompt("runs/autofix-event")
-    details = item.value.get("details")
-    if isinstance(details, list):
-        joined = "\n\n".join(d for d in details if isinstance(d, str) and d)
-        if joined:
-            message += "\n\nNewly arrived feedback to address:\n" + joined
-    return message
-
-
 @scrub_middleware_inputs
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(  # noqa: PLR0911
@@ -224,54 +178,32 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         if not thread_id:
             return None
 
-        try:
-            store = get_store()
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Could not get store from context: %s", e)
-            return None
-
-        if store is None:
-            return None
-
         queued_updates: list[dict[str, Any]] = []
         content_blocks: list[dict[str, Any]] = []
         injected = visible_dynamic_context_hashes(state)
-        pending_autofix = await _consume_pending_autofix_event(store, thread_id)
-        if pending_autofix:
-            content_blocks.append({"type": "text", "text": pending_autofix})
-
-        namespace = ("queue", thread_id)
 
         try:
-            queued_item = await store.aget(namespace, "pending_messages")
+            # A snapshot: what this call consumes, whatever is queued meanwhile.
+            queued_messages = await QueuedMessage.for_thread(thread_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get queued item: %s", e)
             _flush_blocks(queued_updates, content_blocks, injected)
             return _message_update(queued_updates, thread_id)
+        contents = [message.content for message in queued_messages]
 
-        if queued_item is None:
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
-
-        queued_value = queued_item.value
-        # A snapshot: what this call consumes, whatever is appended meanwhile.
-        queued_messages = list(queued_value.get("messages", []))
-
-        if not queued_messages:
-            await store.adelete(namespace, "pending_messages")
+        if not contents:
             _flush_blocks(queued_updates, content_blocks, injected)
             return _message_update(queued_updates, thread_id)
 
         logger.info(
             "Found %d queued message(s) for thread %s, injecting into state",
-            len(queued_messages),
+            len(contents),
             thread_id,
         )
 
         has_images = any(
-            isinstance(msg.get("content"), dict)
-            and (msg["content"].get("image_urls") or msg["content"].get("images"))
-            for msg in queued_messages
+            isinstance(content, dict) and (content.get("image_urls") or content.get("images"))
+            for content in contents
         )
         resolved_model_id: str | None = None
         if has_images and not configurable.get("image_model_fallback_enabled"):
@@ -288,8 +220,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
 
         surface = current_reply_surface(state)
         moved_surface: ReplySurface | None = None
-        for msg in queued_messages:
-            content = msg.get("content")
+        for content in contents:
             if _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on
@@ -355,7 +286,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         _flush_blocks(queued_updates, content_blocks, injected)
         # Cleared only once every message is built: a failure above leaves
         # them for the next model call instead of losing them.
-        await _consume_queued_messages(store, namespace, queued_messages)
+        await QueuedMessage.remove(queued_messages)
         return _message_update(queued_updates, thread_id, moved_surface)  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")

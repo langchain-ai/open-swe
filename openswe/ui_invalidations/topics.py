@@ -7,23 +7,28 @@ changed; each topic still answers who may subscribe, because a key can name
 something private.
 """
 
+import asyncio
+import logging
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from openswe.dashboard.admin import is_admin
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.ui_invalidations import outbox
 
 if TYPE_CHECKING:
     from openswe.incidents.models import IncidentId
     from openswe.review.styles import RepoFullName
 
+logger = logging.getLogger(__name__)
+
 type Session = dict[str, Any]
 type Connection = AsyncConnection | AsyncSession
-type KeyAuthorizer = Callable[[Session, str], Awaitable[bool]]
+type KeysAuthorizer = Callable[[Session, set[str]], Awaitable[set[str]]]
 
 _WELL_FORMED = re.compile(r"^[a-z][a-z-]*(?:/[A-Za-z0-9._:@-]+)*$")
 _MAX_LENGTH = 200
@@ -47,15 +52,25 @@ class BaseTopic(ABC):
         return len(topic) <= _MAX_LENGTH and _WELL_FORMED.fullmatch(topic) is not None
 
     @classmethod
-    async def may_hear(cls, session: Session, topic: str) -> bool:
-        name, _, key = topic.partition("/")
-        if name not in cls._by_name:
-            return False
-        return await cls._by_name[name].authorize(session, key)
+    async def audible(cls, session: Session, topics: Iterable[str]) -> set[str]:
+        """The ``topics`` ``session`` may hear, each kind authorizing all its keys at once."""
+        keys_by_kind: dict[BaseTopic, set[str]] = {}
+        for topic in topics:
+            name, _, key = topic.partition("/")
+            if name in cls._by_name:
+                keys_by_kind.setdefault(cls._by_name[name], set()).add(key)
+        allowed = await asyncio.gather(
+            *(kind.authorize(session, keys) for kind, keys in keys_by_kind.items())
+        )
+        return {
+            f"{kind}/{key}" if key else kind.name
+            for kind, keys in zip(keys_by_kind, allowed, strict=True)
+            for key in keys
+        }
 
     @abstractmethod
-    async def authorize(self, session: Session, key: str) -> bool:
-        """Whether ``session`` may hear this topic, or with ``key`` that record's."""
+    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+        """Which of ``keys`` ``session`` may hear; the empty key is this topic itself."""
 
     @staticmethod
     async def _publish(conn: Connection | None, *topics: str) -> None:
@@ -81,6 +96,13 @@ class Topic(BaseTopic):
     INCIDENT_SETTINGS: ClassVar[Topic]
     """The incident policy, which decides which incidents anyone can see."""
 
+    PULL_REQUESTS: ClassVar[KeyedTopic[PullRequestKey]]
+    """Keyed: one pull request's live state and review page, from its GitHub
+    reviews, checks and comments to the reviewer's findings and the walkthrough."""
+
+    THREAD_QUEUES: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: the messages waiting in that thread's queue for its agent."""
+
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
 
@@ -90,16 +112,16 @@ class Topic(BaseTopic):
         """
         await self._publish(conn, self.name)
 
-    async def authorize(self, session: Session, key: str) -> bool:
-        return not key
+    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+        return keys & {""}
 
 
 class KeyedTopic[K: str](BaseTopic):
     """A topic whose records each have one of their own, ``<topic>/<key>``."""
 
-    def __init__(self, name: str, *, authorize_key: KeyAuthorizer | None = None) -> None:
+    def __init__(self, name: str, *, authorize_keys: KeysAuthorizer | None = None) -> None:
         super().__init__(name)
-        self._authorize_key = authorize_key
+        self._authorize_keys = authorize_keys
 
     async def invalidate(self, conn: Connection | None = None, *, key: K | None = None) -> None:
         """Mark this topic stale, and with ``key`` that one record's topic too.
@@ -114,22 +136,72 @@ class KeyedTopic[K: str](BaseTopic):
     def keyed(self, key: K) -> str:
         return f"{self.name}/{key}"
 
-    async def authorize(self, session: Session, key: str) -> bool:
-        if not key or self._authorize_key is None:
-            return True
-        return await self._authorize_key(session, key)
+    async def authorize(self, session: Session, keys: set[str]) -> set[str]:
+        records = keys - {""}
+        if self._authorize_keys is None or not records:
+            return keys
+        return (keys & {""}) | await self._authorize_keys(session, records)
 
 
-async def _may_read_incident(session: Session, incident_id: str) -> bool:
+async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[str]:
     # The incident service invalidates through this module.
     from openswe.incidents import service
     from openswe.incidents.models import IncidentId
 
     admin = is_admin(session.get("email"), login=session.get("sub"))
-    return await service.visible(IncidentId(incident_id), include_setup=admin)
+    ordered = sorted(incident_ids)
+    visible = await asyncio.gather(
+        *(service.visible(IncidentId(key), include_setup=admin) for key in ordered)
+    )
+    return {key for key, ok in zip(ordered, visible, strict=True) if ok}
+
+
+async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
+    # The repository listing reaches the Store, which imports this module.
+    from openswe.github.repos import accessible_repo_full_names
+
+    try:
+        accessible = await accessible_repo_full_names(session["sub"])
+    except Exception:
+        logger.warning("Could not list repositories for pull request invalidations", exc_info=True)
+        return set()
+    return {
+        key
+        for key in keys
+        if (parsed := PullRequestKey.parse(key)) is not None
+        and parsed == key
+        and parsed.repo_full_name in accessible
+    }
+
+
+async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
+    # Thread summaries reach the Store, which imports this module.
+    from openswe.threads.summary import thread_is_readable
+    from openswe.utils.json_types import thread_metadata
+    from openswe.utils.thread_ops import langgraph_client
+
+    client = langgraph_client()
+    ordered = sorted(thread_ids)
+    threads = await asyncio.gather(
+        *(client.threads.get(thread_id) for thread_id in ordered), return_exceptions=True
+    )
+    readable: set[str] = set()
+    for thread_id, thread in zip(ordered, threads, strict=True):
+        if isinstance(thread, BaseException):
+            logger.warning(
+                "Could not read thread for queue invalidations",
+                exc_info=thread,
+                extra={"agent_thread_id": thread_id},
+            )
+            continue
+        if thread_is_readable(thread_metadata(thread), session.get("sub"), session.get("email")):
+            readable.add(thread_id)
+    return readable
 
 
 Topic.WORKSPACES = Topic("workspaces")
 Topic.REVIEW_STYLES = KeyedTopic("review-styles")
-Topic.INCIDENTS = KeyedTopic("incidents", authorize_key=_may_read_incident)
+Topic.INCIDENTS = KeyedTopic("incidents", authorize_keys=_readable_incidents)
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
+Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
+Topic.THREAD_QUEUES = KeyedTopic("thread-queues", authorize_keys=_readable_threads)

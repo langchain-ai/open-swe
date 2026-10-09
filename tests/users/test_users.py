@@ -164,6 +164,27 @@ async def test_linking_a_claimed_identity_moves_it_to_the_new_owner() -> None:
     assert [i.provider for i in reloaded_first.identities] == ["github"]
 
 
+async def test_a_session_follows_its_github_login_after_the_identity_moves() -> None:
+    minted_for = await User.sign_in("github", "1001", login="OctoCat")
+    new_owner = await User.sign_in("github", "2002", login="ada")
+    await new_owner.link("github", "1001", login="OctoCat")
+
+    resolved = await User.for_session(minted_for.id, "octocat")
+
+    assert resolved is not None and resolved.id == new_owner.id
+    assert await User.get(minted_for.id) is not None
+
+
+async def test_a_session_keeps_its_user_after_a_rename_frees_the_login() -> None:
+    renamed = await User.sign_in("github", "1001", login="ada")
+    await User.sign_in("github", "1001", login="renamed")
+    await User.sign_in("github", "2002", login="ada")
+
+    resolved = await User.for_session(renamed.id, "ada")
+
+    assert resolved is not None and resolved.id == renamed.id
+
+
 async def test_an_unauthorized_github_login_gets_no_user_row() -> None:
     with pytest.raises(UnauthorizedUser):
         await User.sign_in("github", "666", login="outsider")
