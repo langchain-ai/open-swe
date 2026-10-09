@@ -1,3 +1,4 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -9,7 +10,6 @@ import {
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 

@@ -1,3 +1,7 @@
+import {
+  CaretRightIcon,
+  CheckCircleFillIcon,
+} from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
@@ -6,9 +10,7 @@ import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCircleText"
-import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { CircleDashedIcon } from "@phosphor-icons/react/dist/ssr/CircleDashed"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
@@ -318,9 +320,7 @@ function Row({
   )
 }
 
-const passIcon = (
-  <CheckCircleIcon size={16} weight="fill" className="text-icon-success" />
-)
+const passIcon = <CheckCircleFillIcon size={16} className="text-icon-success" />
 const failIcon = (
   <XCircleIcon size={16} weight="fill" className="text-icon-error" />
 )
@@ -436,9 +436,8 @@ function ChecksRow({
                   className="text-icon-warning"
                 />
               ) : (
-                <CheckCircleIcon
+                <CheckCircleFillIcon
                   size={14}
-                  weight="fill"
                   className={
                     state === "skip"
                       ? "text-icon-tertiary"

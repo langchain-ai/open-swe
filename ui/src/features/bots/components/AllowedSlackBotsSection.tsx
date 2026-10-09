@@ -1,3 +1,8 @@
+import {
+  CaretRightIcon,
+  MagnifyingGlassRegularIcon,
+  PlusIcon,
+} from "@langchain/macaw-components/icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Avatar } from "@langchain/macaw-components/Avatar"
 import { Banner } from "@langchain/macaw-components/Banner"
@@ -10,9 +15,6 @@ import {
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
 import { Text } from "@langchain/macaw-components/Text"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { useState } from "react"
 
@@ -163,7 +165,7 @@ export function AllowedSlackBotsSection({
                 <Input
                   size="md"
                   aria-label="Search Slack bots"
-                  leftIcon={MagnifyingGlassIcon}
+                  leftIcon={MagnifyingGlassRegularIcon}
                   placeholder="Search Slack bots…"
                   value={search}
                   onChange={setSearch}

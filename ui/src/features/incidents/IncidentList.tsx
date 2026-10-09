@@ -1,3 +1,8 @@
+import {
+  ArrowRightIcon,
+  ClockCounterClockwiseRegularIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Link } from "@tanstack/react-router"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
@@ -5,9 +10,6 @@ import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Input } from "@langchain/macaw-components/Input"
-import { ArrowRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowRight"
-import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ClockCounterClockwise"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { SirenIcon } from "@phosphor-icons/react/dist/ssr/Siren"
 
 import { invalidationTopic } from "@/lib/invalidations/topics"
@@ -72,7 +74,7 @@ export function IncidentList({
         <Button
           color="secondary"
           variant="plain"
-          leftDecorator={ClockCounterClockwiseIcon}
+          leftDecorator={ClockCounterClockwiseRegularIcon}
           onClick={() => onViewChange(view === "history" ? "all" : "history")}
         >
           {view === "history" ? "Current incidents" : "Incident history"}
@@ -99,7 +101,7 @@ export function IncidentList({
           size="md"
           role="searchbox"
           aria-label="Search incidents"
-          leftIcon={MagnifyingGlassIcon}
+          leftIcon={MagnifyingGlassRegularIcon}
           placeholder={
             view === "history"
               ? "Search incident history…"

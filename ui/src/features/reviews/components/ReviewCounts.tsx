@@ -1,5 +1,5 @@
+import { FlagRegularIcon } from "@langchain/macaw-components/icons"
 import { BugBeetleIcon } from "@phosphor-icons/react/dist/ssr/BugBeetle"
-import { FlagIcon } from "@phosphor-icons/react/dist/ssr/Flag"
 
 import type { ReviewCounts as Counts } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -28,7 +28,7 @@ export function ReviewCounts({
         {withLabels && " bugs"}
       </span>
       <span className="inline-flex items-center gap-1 text-secondary">
-        <FlagIcon aria-hidden="true" weight="regular" className="size-3.5" />
+        <FlagRegularIcon aria-hidden="true" className="size-3.5" />
         {counts.flags}
         {withLabels && " flags"}
       </span>

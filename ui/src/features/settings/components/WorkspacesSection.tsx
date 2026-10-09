@@ -1,11 +1,10 @@
+import { CheckIcon, XIcon } from "@langchain/macaw-components/icons"
 import { useState, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
 import { SettingsSection } from "@/components/AppShell"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"

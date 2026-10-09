@@ -1,3 +1,9 @@
+import {
+  CaretDownIcon,
+  CaretUpIcon,
+  WarningRegularIcon,
+  WrenchRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Avatar } from "@langchain/macaw-components/Avatar"
 import { Button } from "@langchain/macaw-components/Button"
 import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
@@ -7,13 +13,9 @@ import {
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretUpIcon } from "@phosphor-icons/react/dist/ssr/CaretUp"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
-import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
-import { WrenchIcon } from "@phosphor-icons/react/dist/ssr/Wrench"
 import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 import { useState } from "react"
 
@@ -167,7 +169,7 @@ function HealthSummary({
       )}
       {health.mergeConflictState === "conflicting" && (
         <HealthItem
-          icon={WarningIcon}
+          icon={WarningRegularIcon}
           iconClassName="text-icon-error"
           label="Conflict"
         />
@@ -209,7 +211,7 @@ function HealthDetails({
     <div className="space-y-3 border-t border-subtle pt-3">
       {health.mergeConflictState === "conflicting" && (
         <div className="flex items-start gap-2 text-sm text-error-secondary">
-          <WarningIcon size={16} weight="regular" className="mt-0.5 shrink-0" />
+          <WarningRegularIcon size={16} className="mt-0.5 shrink-0" />
           <span>This branch has merge conflicts.</span>
         </div>
       )}
@@ -222,9 +224,8 @@ function HealthDetails({
             const label = check.name || "Unnamed check"
             const content = (
               <>
-                <WarningIcon
+                <WarningRegularIcon
                   size={14}
-                  weight="regular"
                   className="shrink-0 text-icon-error"
                 />
                 <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -506,7 +507,7 @@ function FixMenu({
     <SplitButton
       size="md"
       variant="plain"
-      icon={WrenchIcon}
+      icon={WrenchRegularIcon}
       disabled={disabled || fixing}
       onClick={() => void handleFix(primary)}
       menuLabel={`Fix PR #${pullRequest.number}`}

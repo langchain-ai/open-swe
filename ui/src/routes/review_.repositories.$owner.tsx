@@ -1,8 +1,8 @@
+import { MagnifyingGlassRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Switch } from "@langchain/macaw-components/Switch"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
@@ -141,7 +141,7 @@ function RepositoriesOwnerPage() {
         </div>
         <Input
           size="md"
-          leftIcon={MagnifyingGlassIcon}
+          leftIcon={MagnifyingGlassRegularIcon}
           value={search}
           onChange={(next) => setSearchPosition({ owner, search: next })}
           placeholder="Search repositories…"

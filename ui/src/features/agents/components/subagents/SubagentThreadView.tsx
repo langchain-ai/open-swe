@@ -1,6 +1,6 @@
+import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
-import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Badge } from "@langchain/macaw-components/Badge"

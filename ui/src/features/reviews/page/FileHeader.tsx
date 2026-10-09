@@ -1,9 +1,8 @@
+import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import { cn } from "@/lib/utils"

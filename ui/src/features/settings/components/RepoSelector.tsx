@@ -1,3 +1,4 @@
+import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
@@ -9,8 +10,6 @@ import {
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 
 import { useRefreshRepos } from "@/lib/profile"

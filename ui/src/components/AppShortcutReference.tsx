@@ -1,3 +1,4 @@
+import { XIcon } from "@langchain/macaw-components/icons"
 import {
   Dialog,
   DialogClose,
@@ -7,7 +8,6 @@ import {
 } from "@langchain/macaw-components/Dialog"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Kbd } from "@langchain/macaw-components/Kbd"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
 import type { AppCommand } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"

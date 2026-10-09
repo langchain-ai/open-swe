@@ -1,6 +1,6 @@
+import { CheckIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { ThumbsDownIcon } from "@phosphor-icons/react/dist/ssr/ThumbsDown"
 import { ThumbsUpIcon } from "@phosphor-icons/react/dist/ssr/ThumbsUp"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"

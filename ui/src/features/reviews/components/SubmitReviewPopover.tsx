@@ -1,3 +1,4 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   Popover,
@@ -8,7 +9,6 @@ import { RadioButton } from "@langchain/macaw-components/RadioButton"
 import { RadioGroup } from "@langchain/macaw-components/RadioGroup"
 import { Text } from "@langchain/macaw-components/Text"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"

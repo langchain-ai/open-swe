@@ -1,3 +1,4 @@
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import type { ReactNode } from "react"
 import {
   DropdownMenu,
@@ -8,7 +9,6 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"

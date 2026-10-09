@@ -1,3 +1,4 @@
+import { XIcon } from "@langchain/macaw-components/icons"
 import {
   useCallback,
   useEffect,
@@ -10,7 +11,6 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useSubmissionQueue } from "@langchain/react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { Link } from "@tanstack/react-router"
 
 import type {

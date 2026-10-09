@@ -1,3 +1,4 @@
+import { XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
@@ -9,7 +10,6 @@ import {
   TabPanels,
 } from "@langchain/macaw-components/Tabs"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"

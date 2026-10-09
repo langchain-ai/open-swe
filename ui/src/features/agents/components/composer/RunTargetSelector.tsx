@@ -1,3 +1,4 @@
+import { CheckIcon, LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   DropdownMenu,
@@ -12,14 +13,12 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
 import { FolderPlusIcon } from "@phosphor-icons/react/dist/ssr/FolderPlus"
 import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
 import { GitForkIcon } from "@phosphor-icons/react/dist/ssr/GitFork"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import type { ReactNode } from "react"
 
@@ -100,15 +99,31 @@ function MenuOption({
 export function RunTargetSelector({
   value,
   onChange,
+  pending = false,
 }: {
   value: RunTarget
-  onChange: (value: RunTarget) => void
+  /** Omitted while the target can't change. */
+  onChange?: (value: RunTarget) => void
+  pending?: boolean
 }) {
+  const current = (
+    <>
+      <TriggerIcon icon={value === "local" ? LaptopRegularIcon : CloudIcon} />
+      <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+      {pending && <span className="text-tertiary">· next message</span>}
+    </>
+  )
+  const title = pending ? "Moves with your next message" : undefined
+  if (!onChange)
+    return (
+      <span className="flex items-center gap-1 text-secondary" title={title}>
+        {current}
+      </span>
+    )
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={TRIGGER_CLASS_NAME}>
-        <TriggerIcon icon={value === "local" ? LaptopIcon : CloudIcon} />
-        <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+      <DropdownMenuTrigger className={TRIGGER_CLASS_NAME} title={title}>
+        {current}
         <ComposerControlChevron />
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -120,7 +135,7 @@ export function RunTargetSelector({
         <DropdownMenuGroup>
           <MenuLabel>Work in</MenuLabel>
           <MenuOption
-            icon={LaptopIcon}
+            icon={LaptopRegularIcon}
             onSelect={() => onChange("local")}
             selected={value === "local"}
           >

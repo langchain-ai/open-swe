@@ -1,3 +1,8 @@
+import {
+  GlobeRegularIcon,
+  PlusIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ContextMenu,
@@ -17,11 +22,8 @@ import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
 import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
 import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
-import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
@@ -382,7 +384,7 @@ export function surfaceTitle(
 }
 
 const SURFACE_ICONS = {
-  preview: GlobeIcon,
+  preview: GlobeRegularIcon,
   diff: GitDiffIcon,
   files: FilesIcon,
   file: FileIcon,

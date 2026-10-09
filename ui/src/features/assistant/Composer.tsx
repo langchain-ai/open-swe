@@ -1,3 +1,4 @@
+import { ArrowUpIcon, PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { useCallback, useEffect } from "react"
 import {
   AttachmentPrimitive,
@@ -7,10 +8,7 @@ import {
 } from "@assistant-ui/react"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Select } from "@langchain/macaw-components/Select"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 import { StopIcon } from "@phosphor-icons/react/dist/ssr/Stop"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { modelConfigurable } from "@/features/agents/lib/stream/promptMessage"

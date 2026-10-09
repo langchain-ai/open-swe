@@ -1,6 +1,6 @@
+import { ArrowUpIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useRef, useState } from "react"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
 import { StopIcon } from "@phosphor-icons/react/dist/ssr/Stop"
 
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
