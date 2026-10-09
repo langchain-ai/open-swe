@@ -12,7 +12,7 @@ from openswe.human_review import card
 from openswe.human_review.clicks import answer_click
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
-from openswe.human_review.pick_messages import PickMessage
+from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import SNOOZE_DURATIONS, claim, decline, snooze
 from openswe.prompts import prompt

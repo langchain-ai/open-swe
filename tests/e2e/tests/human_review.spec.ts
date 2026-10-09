@@ -991,8 +991,8 @@ test.describe("Human review in Slack", () => {
     );
     expect(modal.blocks[0].element.initial_option).toBeUndefined();
 
-    // 5. Submitting a reason withdraws the pick on Slack and GitHub. No new DM is
-    //    sent: the pick's own message trades its buttons for the outcome.
+    // 5. Submitting a reason withdraws the pick on Slack and GitHub. The pick's own
+    //    message trades its buttons for the outcome, and no new DM notifies them.
     await control(request, "/mock/slack/view-submit", {
       view_id: modal.id,
       user: declining.slack,
@@ -1002,18 +1002,26 @@ test.describe("Human review in Slack", () => {
         },
       },
     });
-    const pickMessage = async () =>
-      (await channelMessages(request, dmChannel)).find(
-        (m) => m.ts === picked.ts,
-      );
     await expect
-      .poll(async () => cardText((await pickMessage())!), { timeout: 30_000 })
-      .toContain("Review declined");
-    const settled = await pickMessage();
-    expect(buttons(settled!)).toEqual([]);
+      .poll(
+        async () => {
+          const settled = (await channelMessages(request, dmChannel)).find(
+            (m) => m.ts === picked.ts,
+          );
+          return (
+            settled !== undefined &&
+            buttons(settled).length === 0 &&
+            cardText(settled).includes("Review declined")
+          );
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
     expect(
-      (await channelMessages(request, dmChannel)).filter((m) => m.is_bot),
-    ).toHaveLength(1);
+      (await channelMessages(request, dmChannel)).some((m) =>
+        m.text.includes("You declined the review"),
+      ),
+    ).toBe(false);
     await expect
       .poll(async () =>
         (await pull(request, seeded.number)).requested_reviewers.includes(

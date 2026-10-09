@@ -825,42 +825,43 @@ class ReviewPicks:
             )
 
     async def _tell_withdrawn(self, participant: HumanReviewParticipant, text: str) -> None:
-        """Replace the buttons on their pick DMs with ``text``; DM it only when no pick DM is known."""
+        """Say on a pending pick's DM why it ended, which does not notify; otherwise DM ``text``."""
         request = self.request
         slack_user_id = participant.user.slack_user_id
         if not slack_user_id:
             return
         origin = request.notice_origin("reviewer_released")
-        messages = participant.pick_messages
-        if not messages:
-            await send_dm(
+        # Someone who accepted may be partway through the review, so they get a notification.
+        message = participant.pick_message if participant.decision != "review" else None
+        if message is not None and await message.show(text):
+            if origin is not None:
+                await origin.save_for(message.channel_id, message.ts, f"{message.text}\n{text}")
+                await note_for_thread_owner(
+                    *origin.location,
+                    prompt(
+                        "slack/review-pick-withdrawn",
+                        recipient=f"<@{slack_user_id}>",
+                        pr_url=request.pull_request.url,
+                        text=text,
+                    ),
+                )
+            await note_for_concierge(
                 slack_user_id,
-                text,
-                blocks=block_payload(
-                    [
-                        section(text),
-                        *await origin_footer(
-                            request.thread_id, origin.location if origin else None
-                        ),
-                    ]
-                ),
-                origin=origin,
+                message.channel_id,
+                prompt("slack/concierge-dm-edited", text=message.text, status=text),
             )
             return
-        status = f":no_entry_sign: {text}"
-        for message in messages:
-            await message.show(status)
-            if origin is not None:
-                await origin.save_for(message.channel_id, message.ts, f"{message.text}\n{status}")
-        note = prompt(
-            "slack/review-pick-withdrawn",
-            recipient=f"<@{slack_user_id}>",
-            pr_url=request.pull_request.url,
-            text=text,
+        await send_dm(
+            slack_user_id,
+            text,
+            blocks=block_payload(
+                [
+                    section(text),
+                    *await origin_footer(request.thread_id, origin.location if origin else None),
+                ]
+            ),
+            origin=origin,
         )
-        if origin is not None:
-            await note_for_thread_owner(*origin.location, note)
-        await note_for_concierge(slack_user_id, messages[-1].channel_id, note)
 
     async def release(
         self,
@@ -918,7 +919,7 @@ class ReviewPicks:
         current = self.request = await HumanReviewRequest.get(request.id) or request
         label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
         if current.state != "open":
-            for pick in (p for p in current.picks if p.pick_messages):
+            for pick in (p for p in current.picks if p.pick_message):
                 await self._tell_withdrawn(
                     pick, f"The review request for {label} closed: {reason}."
                 )
@@ -948,15 +949,16 @@ class ReviewPicks:
     async def drop(
         self,
         user_ids: set[UUID],
-        message: str,
+        message: str | None,
         *,
         cause: ReviewDecisionCause,
         expired: bool = False,
         reason: str = "",
     ) -> list[HumanReviewParticipant]:
-        """Withdraw pending picks of ``user_ids`` from the card and GitHub, showing each ``message``.
+        """Withdraw pending picks of ``user_ids`` from the card and GitHub, and tell each ``message``.
 
-        An ``expired`` pick stays on the request so it is never picked for it again.
+        An ``expired`` pick stays on the request so it is never picked for it again. Without a
+        ``message`` nobody is told, for a pick the person ended themselves.
         """
         request = self.request
         async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -989,7 +991,8 @@ class ReviewPicks:
                     "expired": expired,
                 },
             )
-            await self._tell_withdrawn(pick, message)
+            if message is not None:
+                await self._tell_withdrawn(pick, message)
         await request.log_decision(
             "reviewers_released",
             cause=cause,

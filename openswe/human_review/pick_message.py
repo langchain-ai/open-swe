@@ -1,4 +1,4 @@
-"""The DM a reviewer pick's buttons sit on."""
+"""The DM a reviewer pick's buttons sit on, edited in place as the pick moves on."""
 
 import logging
 from collections.abc import Sequence
@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 class PickMessage(BaseModel):
-    """A pick's message, which shows a click's progress or why the pick ended in place of its buttons."""
+    """The message a pick's buttons sit on; an edit to it does not notify the reviewer."""
 
     channel_id: str
     ts: str
     text: str
 
-    async def show(self, status: str, buttons: Sequence[ButtonElement] = ()) -> None:
+    async def show(self, status: str, buttons: Sequence[ButtonElement] = ()) -> bool:
         blocks: list[Block] = [section(self.text), context(status)]
         if buttons:
             blocks.append(actions(*buttons))
@@ -32,3 +32,5 @@ class PickMessage(BaseModel):
                 "Could not update a reviewer pick message",
                 extra={"slack_channel": self.channel_id, "slack_error": exc.code},
             )
+            return False
+        return True

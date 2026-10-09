@@ -50,7 +50,7 @@ from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.notices import NoticeKind
 from openswe.human_review.people import Outcome, Participant, resolve_writer
-from openswe.human_review.pick_messages import PickMessage
+from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, WorkHours, choose_reviewer
 from openswe.human_review.requests import (
     HumanReviewParticipant,
@@ -626,11 +626,7 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
     if request.state != "open":
         return Outcome("This review request is no longer open.")
     dropped = await ReviewPicks(request).drop(
-        {user.id},
-        f"You declined the review of {request.pull_request.url}: {reason}.",
-        cause="declined",
-        expired=True,
-        reason=reason,
+        {user.id}, None, cause="declined", expired=True, reason=reason
     )
     if not dropped:
         return Outcome("This reviewer pick is no longer pending for you.")
@@ -828,13 +824,11 @@ async def _send_pick_dm(
         ),
         origin=origin,
     )
-    if location is None:
-        return
-    channel_id, ts = location
-    async with HumanReviewRequest.locked(request.id) as (_, row):
-        participant = row.participant(user.id) if row is not None else None
-        if participant is not None:
-            participant.add_pick_message(PickMessage(channel_id=channel_id, ts=ts, text=text))
+    if location is not None:
+        channel_id, ts = location
+        await request.record_pick_message(
+            user.id, PickMessage(channel_id=channel_id, ts=ts, text=text)
+        )
 
 
 class PendingPick(BaseModel):

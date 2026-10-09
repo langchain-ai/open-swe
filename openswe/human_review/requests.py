@@ -33,7 +33,7 @@ from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.events import ReviewDecision, ReviewDecisionCause, ReviewDecisionKind
 from openswe.human_review.notices import NoticeKind, ReviewNotice
-from openswe.human_review.pick_messages import PickMessage
+from openswe.human_review.pick_message import PickMessage
 from openswe.run_config import RunConfig
 from openswe.slack.client import lookup_slack_thread_id
 from openswe.slack.dm import DmOrigin
@@ -77,18 +77,17 @@ class HumanReviewParticipant(Base):
     github_review_sha: Mapped[str] = mapped_column(server_default="", default="")
     assigned_by_agent: Mapped[bool] = mapped_column(server_default="false", default=False)
     joined_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
-    # DMs carrying this pick's buttons, edited in place when the pick ends.
-    slack_pick_messages: Mapped[list[JsonObject]] = mapped_column(
-        JSONB, server_default="[]", default_factory=list
-    )
+    dm_channel_id: Mapped[str] = mapped_column(server_default="", default="")
+    dm_ts: Mapped[str] = mapped_column(server_default="", default="")
+    dm_text: Mapped[str] = mapped_column(server_default="", default="")
     user: Mapped[User] = relationship(init=False)
 
     @property
-    def pick_messages(self) -> list[PickMessage]:
-        return [PickMessage.model_validate(message) for message in self.slack_pick_messages]
-
-    def add_pick_message(self, message: PickMessage) -> None:
-        self.slack_pick_messages = [*self.slack_pick_messages, message.model_dump()]
+    def pick_message(self) -> PickMessage | None:
+        """The DM that asked them to take the pick; ``None`` when it was never recorded."""
+        if not self.dm_channel_id or not self.dm_ts:
+            return None
+        return PickMessage(channel_id=self.dm_channel_id, ts=self.dm_ts, text=self.dm_text)
 
     @property
     def github_login(self) -> str:
@@ -522,3 +521,13 @@ class HumanReviewRequest(Base):
             for name, value in changes.items():
                 setattr(row, name, value)
             return row
+
+    async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
+        """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""
+        async with self.locked(self.id) as (_, row):
+            participant = row.participant(user_id) if row is not None else None
+            if participant is None:
+                return
+            participant.dm_channel_id = message.channel_id
+            participant.dm_ts = message.ts
+            participant.dm_text = message.text
