@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -20,7 +21,7 @@ afterEach(() => {
 
 describe("OutputIframe", () => {
   it("renders the signed preview URL in a sandboxed iframe", () => {
-    render(<OutputIframe display={display} />)
+    render(<OutputIframe display={display} />, { wrapper: TooltipProvider })
 
     const iframe = screen.getByTitle(display.title)
     expect(iframe.getAttribute("src")).toBe(display.previewUrl)
@@ -57,7 +58,7 @@ describe("OutputIframe", () => {
         clickedRel = this.rel
       }
     )
-    render(<OutputIframe display={display} />)
+    render(<OutputIframe display={display} />, { wrapper: TooltipProvider })
 
     fireEvent.click(screen.getByRole("button", { name: "Download HTML" }))
 

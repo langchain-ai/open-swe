@@ -58,8 +58,7 @@ def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         return user
 
     monkeypatch.setattr(user, "link", fake_link)
-    monkeypatch.setattr(connect.User, "get", AsyncMock(return_value=user))
-    monkeypatch.setattr(connect.User, "for_login", AsyncMock(return_value=user))
+    monkeypatch.setattr(connect.User, "for_session", AsyncMock(return_value=user))
     monkeypatch.setattr(connect, "slack_oauth_configured", lambda: True)
     monkeypatch.setattr(
         connect,
@@ -122,7 +121,7 @@ def test_desktop_slack_connect_links_under_the_session_the_app_holds(
         assert wrong_verifier.status_code == 400
 
         wrong_provider = client.post(
-            "/dashboard/api/notion/desktop/exchange",
+            "/dashboard/api/langsmith/desktop/exchange",
             json={"code": handoff, "verifier": _VERIFIER},
             headers=_APP_ORIGIN,
         )
