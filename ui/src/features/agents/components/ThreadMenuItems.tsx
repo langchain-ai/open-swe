@@ -4,6 +4,7 @@ import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
@@ -45,8 +46,37 @@ export function ThreadMenuItems({
 }) {
   const Item = MENU_ITEM[menu]
   const threadId = thread?.id ?? localThread?.id
+  const repositories = [
+    ...new Set(
+      [
+        thread?.repoFullName,
+        ...(thread?.pullRequests?.map((pr) => pr.repoFullName) ?? []),
+      ]
+        .map((repo) => repo?.trim())
+        .filter((repo): repo is string => Boolean(repo))
+    ),
+  ]
   return (
     <>
+      {repositories.length > 0 && (
+        <div role="group" aria-label="Repositories">
+          <div className="py-space-1.5 px-space-2 text-xs text-text-tertiary">
+            Repositories
+          </div>
+          {repositories.map((repo) => (
+            <Item key={repo} asChild className="gap-space-2">
+              <a
+                href={`https://github.com/${repo}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <FolderIcon size={ICON_SIZE} weight="regular" />
+                {repo}
+              </a>
+            </Item>
+          ))}
+        </div>
+      )}
       {thread?.traceUrl && (
         <Item asChild className="gap-space-2">
           <a href={thread.traceUrl} target="_blank" rel="noreferrer">
