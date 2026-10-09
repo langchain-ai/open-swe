@@ -12,11 +12,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from openswe.claude_code.transcript import ClaudeTranscript, TranscriptError
-from openswe.dashboard.oauth import (
-    UPLOAD_TICKET_TTL_SECONDS,
-    decode_upload_ticket,
-    issue_upload_ticket,
-)
+from openswe.dashboard.oauth import UPLOAD_TICKET_TTL_SECONDS, UploadTicket, issue_upload_ticket
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, GitHubError
@@ -31,8 +27,15 @@ from openswe.threads.runs import (
     _resolve_agent_model_choice,
     _resolve_requested_workspace,
 )
-from openswe.threads.summary import DASHBOARD_SOURCE, _now_ms, _parse_repo, _thread_summary
+from openswe.threads.summary import (
+    DASHBOARD_SOURCE,
+    SESSION_UPLOAD_PENDING_KEY,
+    _now_ms,
+    _parse_repo,
+    _thread_summary,
+)
 from openswe.transcript.mirror import mirror_thread_metadata
+from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -42,7 +45,6 @@ logger = logging.getLogger(__name__)
 
 _INFLATE_CHUNK_BYTES = 1024 * 1024
 _PR_LINK_SOURCE = "session_upload"
-_PENDING_KEY = "session_upload_pending"
 _UPLOAD_SENDER: SystemIdentity = {
     "id": "system:session-upload",
     "display_name": "Session upload",
@@ -303,7 +305,7 @@ async def reserve_session_upload(
         "resolved_model": resolved_model,
         "resolved_effort": resolved_effort,
         "uploaded_session_type": header.type,
-        _PENDING_KEY: True,
+        SESSION_UPLOAD_PENDING_KEY: True,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
         # update_state refuses a thread with no graph, and LangGraph only
@@ -319,9 +321,10 @@ async def reserve_session_upload(
     await create_thread(
         langgraph_client(), thread_id, title=title, metadata=metadata, if_exists="raise"
     )
-    if target.pr_number is not None:
-        await _link_pull_request(target, target.pr_number, thread_id)
-    code = issue_upload_ticket(login=login, email=email, thread_id=thread_id)
+    user = await User.for_login("github", login)
+    code = issue_upload_ticket(
+        login=login, email=email, user_id=str(user.id) if user else None, thread_id=thread_id
+    )
     backend = dashboard_api_base_url()
     return SessionReservation(
         thread_id=thread_id,
@@ -354,9 +357,8 @@ class _ReservedThread(BaseModel):
         )
 
 
-async def upload_session(stream: UploadStream, code: str) -> dict[str, Any]:
+async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str, Any]:
     """Seed a reserved thread with the session's history; no run starts until the person sends one."""
-    ticket = decode_upload_ticket(code)
     client = langgraph_client()
     try:
         thread = await client.threads.get(ticket.thread_id)
@@ -391,11 +393,14 @@ async def upload_session(stream: UploadStream, code: str) -> dict[str, Any]:
             exc_info=True,
         )
         raise HTTPException(502, "failed to store the session transcript") from exc
-    update: dict[str, Any] = {_PENDING_KEY: False, "updated_at_ms": _now_ms()}
+    update: dict[str, Any] = {SESSION_UPLOAD_PENDING_KEY: False, "updated_at_ms": _now_ms()}
     if session.title:
         update["title"] = session.title
     await client.threads.update(thread_id=thread_id, metadata=update)
     await mirror_thread_metadata(thread_id, update)
+    # Linked only once the thread holds the session, so an abandoned reservation stays off the PR.
+    if reserved.pr_number is not None:
+        await _link_pull_request(reserved.target, reserved.pr_number, thread_id)
     return await _thread_summary(await client.threads.get(thread_id))
 
 

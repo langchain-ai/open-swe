@@ -7,8 +7,9 @@ from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.types import Message
 
-from openswe.dashboard.oauth import issue_upload_ticket
+from openswe.dashboard.oauth import decode_upload_ticket, issue_upload_ticket
 from openswe.threads import session_upload
+from openswe.threads.summary import assert_thread_postable
 
 _TRANSCRIPT = (
     json.dumps({"type": "user", "uuid": "u1", "parentUuid": None, "message": {"content": "hi"}})
@@ -29,6 +30,7 @@ def _request() -> Request:
 def reserved(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-secret")
     metadata: dict[str, object] = {
+        "source": "dashboard",
         "owner_login": "alice",
         "repo_owner": "acme",
         "repo_name": "app",
@@ -52,28 +54,33 @@ def reserved(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     return metadata
 
 
-async def test_an_upload_code_fills_its_own_thread_once(reserved: dict[str, object]) -> None:
-    code = issue_upload_ticket(login="alice", email=None, thread_id="t1")
+async def _upload(code: str) -> dict[str, object]:
+    ticket = decode_upload_ticket(code)
+    return await session_upload.upload_session(session_upload.UploadStream(_request()), ticket)
 
-    summary = await session_upload.upload_session(session_upload.UploadStream(_request()), code)
-    assert summary["id"] == "t1"
+
+def _code(login: str) -> str:
+    return issue_upload_ticket(login=login, email=None, user_id=None, thread_id="t1")
+
+
+async def test_an_upload_code_fills_its_own_thread_once(reserved: dict[str, object]) -> None:
+    with pytest.raises(HTTPException) as early:
+        assert_thread_postable(reserved, "alice")
+    assert early.value.status_code == 409
+
+    assert (await _upload(_code("alice")))["id"] == "t1"
     assert reserved["session_upload_pending"] is False
+    assert_thread_postable(reserved, "alice")
     with pytest.raises(HTTPException) as reused:
-        await session_upload.upload_session(session_upload.UploadStream(_request()), code)
+        await _upload(_code("alice"))
     assert reused.value.status_code == 409
 
 
-@pytest.mark.parametrize(
-    ("login", "forged", "status"),
-    [("bob", False, 409), ("alice", True, 401)],
-)
+@pytest.mark.parametrize(("login", "suffix", "status"), [("bob", "", 409), ("alice", "x", 401)])
 async def test_another_persons_or_a_forged_code_is_refused(
-    reserved: dict[str, object], login: str, forged: bool, status: int
+    reserved: dict[str, object], login: str, suffix: str, status: int
 ) -> None:
-    code = issue_upload_ticket(login=login, email=None, thread_id="t1")
     with pytest.raises(HTTPException) as refused:
-        await session_upload.upload_session(
-            session_upload.UploadStream(_request()), code + "x" if forged else code
-        )
+        await _upload(_code(login) + suffix)
     assert refused.value.status_code == status
     assert reserved["session_upload_pending"] is True

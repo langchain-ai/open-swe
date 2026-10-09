@@ -88,15 +88,19 @@ class UploadTicket(BaseModel):
 
     sub: str = Field(min_length=1)
     email: str | None = None
+    user_id: str | None = None
     thread_id: str = Field(min_length=1)
 
 
-def issue_upload_ticket(*, login: str, email: str | None, thread_id: str) -> str:
+def issue_upload_ticket(
+    *, login: str, email: str | None, user_id: str | None, thread_id: str
+) -> str:
     now = int(time.time())
     payload = {
         "aud": UPLOAD_TICKET_AUDIENCE,
         "sub": login,
         "email": email,
+        "user_id": user_id,
         "thread_id": thread_id,
         "iat": now,
         "exp": now + UPLOAD_TICKET_TTL_SECONDS,
