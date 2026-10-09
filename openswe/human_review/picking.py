@@ -10,10 +10,13 @@ away from it for not accepting, is skipped.
 
 import asyncio
 import logging
+import re
 from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
+from html import escape
+from pathlib import PurePosixPath
 from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -269,6 +272,8 @@ class Coverage:
 
 REVIEWER_INSTRUCTIONS_PATH = ".open-swe/REVIEWERS.md"
 _REVIEWER_INSTRUCTIONS_MAX_CHARS = 10_000
+_INCLUDED_FILE_MAX_CHARS = 100_000
+_INCLUDE = re.compile(r"^@(\S+)[ \t]*$", re.MULTILINE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,7 +281,7 @@ class ReviewerInstructions:
     """A repository's ``.open-swe/REVIEWERS.md``: how its maintainers want reviewers picked.
 
     Read from the pull request's base branch, so a pull request cannot rewrite how its own
-    reviewers are chosen.
+    reviewers are chosen. A line that is only ``@path`` includes that repository file.
     """
 
     text: str
@@ -285,13 +290,15 @@ class ReviewerInstructions:
     async def load(cls, request: HumanReviewRequest) -> Self | None:
         """``None`` when the file is absent, empty, too large, or unreadable."""
         pr = request.pull_request
+        ref = pr.base_ref or None
         try:
             async with GitHubClient.as_app(pr.owner, pr.repo) as github:
-                text = await github.repo(pr.owner, pr.repo).read_file(
-                    REVIEWER_INSTRUCTIONS_PATH,
-                    pr.base_ref or None,
-                    max_chars=_REVIEWER_INSTRUCTIONS_MAX_CHARS,
+                repo = github.repo(pr.owner, pr.repo)
+                text = await repo.read_file(
+                    REVIEWER_INSTRUCTIONS_PATH, ref, max_chars=_REVIEWER_INSTRUCTIONS_MAX_CHARS
                 )
+                if text:
+                    text = await cls._include(repo, ref, text)
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to read reviewer instructions",
@@ -299,6 +306,26 @@ class ReviewerInstructions:
             )
             return None
         return cls(text) if text else None
+
+    @staticmethod
+    async def _include(repo: RepoClient, ref: str | None, text: str) -> str:
+        """Replace each ``@path`` line with that file at ``ref``; a line naming no file, such as
+        a team mention, stays as written."""
+        parts: list[str] = []
+        end = 0
+        for line in _INCLUDE.finditer(text):
+            path = line.group(1).lstrip("/")
+            if ".." in PurePosixPath(path).parts:
+                continue
+            content = await repo.read_file(path, ref, max_chars=_INCLUDED_FILE_MAX_CHARS)
+            if content is None:
+                continue
+            parts += [
+                text[end : line.start()],
+                f'<included_file name="{escape(path)}">\n{content}\n</included_file>',
+            ]
+            end = line.end()
+        return "".join([*parts, text[end:]])
 
 
 async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) -> Counter[str]:

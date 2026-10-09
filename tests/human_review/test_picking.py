@@ -6,7 +6,9 @@ import httpx2
 import pytest
 
 from openswe.github.codeowners import CodeOwners
-from openswe.human_review.picking import WorkHours
+from openswe.github.pull_requests import PullRequest
+from openswe.human_review.picking import ReviewerInstructions, WorkHours
+from openswe.human_review.requests import HumanReviewRequest
 
 _CODEOWNERS = CodeOwners.parse(
     """
@@ -85,6 +87,45 @@ async def test_strict_codeowners_fetch_distinguishes_missing_from_unreadable(
     else:
         owners = await CodeOwners.fetch(repo, "main", strict=True)
         assert (owners is None) == (status == 404)
+
+
+async def test_reviewer_instructions_include_only_repository_files(
+    monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
+) -> None:
+    from openswe.github import http as github_http
+
+    files = {
+        ".open-swe/REVIEWERS.md": (
+            "Ask the owners below.\n@.github/CODEOWNERS\n@langchain-ai/security\n@../secrets\n"
+            "Mentions like @.github/CODEOWNERS inside a sentence stay."
+        ),
+        ".github/CODEOWNERS": "/api/ @bob",
+    }
+    fetched: list[str] = []
+
+    async def respond(_client: object, method: str, url: str, **_: object) -> httpx2.Response:
+        path = url.split("/contents/", 1)[1]
+        fetched.append(path)
+        request = httpx2.Request(method, url)
+        if path in files:
+            return httpx2.Response(200, text=files[path], request=request)
+        return httpx2.Response(404, json={"message": "Not Found"}, request=request)
+
+    monkeypatch.setattr(github_http, "github_request", respond)
+    pr = PullRequest(owner="lc", repo="repo", number=7, base_ref="main")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+
+    instructions = await ReviewerInstructions.load(request)
+
+    assert instructions is not None
+    assert instructions.text == (
+        "Ask the owners below.\n"
+        '<included_file name=".github/CODEOWNERS">\n/api/ @bob\n</included_file>\n'
+        "@langchain-ai/security\n@../secrets\n"
+        "Mentions like @.github/CODEOWNERS inside a sentence stay."
+    )
+    assert "../secrets" not in fetched
 
 
 def test_off_shift_on_friday_evening_waits_for_monday_morning() -> None:

@@ -98,7 +98,9 @@ This affects reviewer assignment, not the two-hour auto-merge deadline.
 - `.open-swe/REVIEWERS.md`, read from the base branch, tells the picking agent how this
   repository wants reviewers chosen, for example which areas need their own approval.
   When it exists, the agent makes every pick, and after an approval it adds reviewers
-  for the areas left only if the file asks for that.
+  for the areas left only if the file asks for that. A line that is only `@path`, such
+  as `@.github/CODEOWNERS`, includes that repository file; a line naming no file stays
+  as written.
 
 ## Merging
 
