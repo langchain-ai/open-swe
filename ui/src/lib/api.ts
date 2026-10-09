@@ -299,6 +299,7 @@ export interface Profile {
   experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
+  experimental_mcp_ptc?: boolean | null
   login?: string
   email?: string
   default_model?: string
@@ -328,6 +329,7 @@ export interface ProfileUpdate {
   experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
+  experimental_mcp_ptc?: boolean | null
   default_model: string
   reasoning_effort: string
   default_subagent_model?: string | null

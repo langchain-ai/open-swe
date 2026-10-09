@@ -47,6 +47,11 @@ function ExperimentsPage() {
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
         />
         <ProfileSwitchRow
+          field="experimental_mcp_ptc"
+          label="Programmatic tool calling (experimental)"
+          description="Let the agent call integrations and file read/write tools from JavaScript. Applies to runs in threads you originally started."
+        />
+        <ProfileSwitchRow
           field="prefer_tools_in_sandbox"
           label="Prefer tools through the sandbox"
           description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint so it can filter their output. Applies to threads you start afterwards."

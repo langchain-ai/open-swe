@@ -206,6 +206,7 @@ export function buildProfileUpdate(
     experimental_assistant_ui: current?.experimental_assistant_ui ?? null,
     experimental_background_callbacks:
       current?.experimental_background_callbacks ?? null,
+    experimental_mcp_ptc: current?.experimental_mcp_ptc ?? null,
     ...patch,
   }
 }
