@@ -1,3 +1,4 @@
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,7 +9,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"

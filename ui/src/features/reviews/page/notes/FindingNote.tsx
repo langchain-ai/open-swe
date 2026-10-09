@@ -1,4 +1,4 @@
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import type { ReviewFinding } from "@/lib/api"

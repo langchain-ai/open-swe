@@ -1,7 +1,9 @@
+import {
+  CaretDownIcon,
+  CheckIcon,
+  StackRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { useEffect, useRef, useState } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
-import { StackIcon } from "@phosphor-icons/react/dist/ssr/Stack"
 
 import type { WorkspaceOption } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -63,7 +65,7 @@ export function WorkspaceSelector({
         onClick={() => setOpen((value) => !value)}
         className="flex max-w-[220px] cursor-pointer items-center gap-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
       >
-        <StackIcon className="size-3.5 shrink-0" weight="regular" />
+        <StackRegularIcon className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
           {selected?.name ?? placeholder}
         </span>

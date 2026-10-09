@@ -1,7 +1,7 @@
+import { XIcon } from "@langchain/macaw-components/icons"
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { FileCodeIcon } from "@phosphor-icons/react/dist/ssr/FileCode"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import type { Message } from "@/features/agents/lib/types"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
 import { chatDiffAction } from "@/features/reviews/lib/chatDiffActions"

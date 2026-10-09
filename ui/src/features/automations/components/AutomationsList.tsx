@@ -1,3 +1,4 @@
+import { PlusIcon, StackRegularIcon } from "@langchain/macaw-components/icons"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -11,8 +12,6 @@ import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PauseIcon } from "@phosphor-icons/react/dist/ssr/Pause"
 import { PlayIcon } from "@phosphor-icons/react/dist/ssr/Play"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
-import { StackIcon } from "@phosphor-icons/react/dist/ssr/Stack"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 
 import type { AgentSchedule } from "@/features/agents/lib/types"
@@ -263,7 +262,7 @@ function AutomationRow({
             </span>
             {workspaces.length > 1 && (
               <span className="flex items-center gap-1">
-                <StackIcon size={14} weight="regular" />
+                <StackRegularIcon size={14} />
                 {workspaceName}
               </span>
             )}

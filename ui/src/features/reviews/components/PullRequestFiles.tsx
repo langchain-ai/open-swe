@@ -1,9 +1,8 @@
+import { CaretRightIcon, XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { PatchDiff } from "@pierre/diffs/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {

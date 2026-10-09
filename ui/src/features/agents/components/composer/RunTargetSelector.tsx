@@ -1,3 +1,4 @@
+import { CheckIcon, LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   DropdownMenu,
@@ -12,14 +13,12 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
 import { FolderPlusIcon } from "@phosphor-icons/react/dist/ssr/FolderPlus"
 import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
 import { GitForkIcon } from "@phosphor-icons/react/dist/ssr/GitFork"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import type { ReactNode } from "react"
 
@@ -107,7 +106,7 @@ export function RunTargetSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className={TRIGGER_CLASS_NAME}>
-        <TriggerIcon icon={value === "local" ? LaptopIcon : CloudIcon} />
+        <TriggerIcon icon={value === "local" ? LaptopRegularIcon : CloudIcon} />
         <span>{value === "local" ? "This Mac" : "Cloud"}</span>
         <ComposerControlChevron />
       </DropdownMenuTrigger>
@@ -120,7 +119,7 @@ export function RunTargetSelector({
         <DropdownMenuGroup>
           <MenuLabel>Work in</MenuLabel>
           <MenuOption
-            icon={LaptopIcon}
+            icon={LaptopRegularIcon}
             onSelect={() => onChange("local")}
             selected={value === "local"}
           >

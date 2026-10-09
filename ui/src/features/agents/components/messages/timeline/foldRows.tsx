@@ -1,6 +1,7 @@
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
-
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
 import { cn } from "@/lib/utils"
 
 /**

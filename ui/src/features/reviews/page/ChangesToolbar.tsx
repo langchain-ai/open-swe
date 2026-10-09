@@ -1,8 +1,8 @@
+import { XIcon } from "@langchain/macaw-components/icons"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ColumnsIcon } from "@phosphor-icons/react/dist/ssr/Columns"
 import { RowsIcon } from "@phosphor-icons/react/dist/ssr/Rows"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useQuery } from "@tanstack/react-query"
 
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"

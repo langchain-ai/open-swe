@@ -1,22 +1,24 @@
+import {
+  CaretDownIcon,
+  LaptopRegularIcon,
+} from "@langchain/macaw-components/icons"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
 
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
 
 export type ThreadTarget = "cloud" | "local"
 
-const OPTIONS: Record<ThreadTarget, { label: string; Icon: typeof CloudIcon }> =
-  {
-    cloud: { label: "Cloud", Icon: CloudIcon },
-    local: { label: "This Mac", Icon: LaptopIcon },
-  }
+const OPTIONS: Record<ThreadTarget, { label: string; Icon: IconComponent }> = {
+  cloud: { label: "Cloud", Icon: CloudIcon },
+  local: { label: "This Mac", Icon: LaptopRegularIcon },
+}
 const ORDER: ThreadTarget[] = ["cloud", "local"]
 
 /** Where the thread runs; a change takes effect with the next message. */
