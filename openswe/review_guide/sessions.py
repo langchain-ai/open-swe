@@ -19,9 +19,10 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
-from openswe.review_guide.walk import Walk
+from openswe.review_guide.walk import Reader, Walk
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
+from openswe.walkthrough.record import Walkthrough
 
 # A reviewer ends by approving; the author, who cannot approve their own PR, ends by readying it.
 GuideMode = Literal["reviewer", "author"]
@@ -119,6 +120,14 @@ class ReviewGuideSession(Base):
     @property
     def walk(self) -> Walk | None:
         return Walk.model_validate(self.walk_json) if self.walk_json else None
+
+    async def reader(self) -> Reader | None:
+        """The reader's walk over the stored plan, or ``None`` until both are at the same head."""
+        walk = self.walk
+        stored = await Walkthrough.get(self.pull_request_id)
+        if walk is None or stored is None or stored.head_sha != walk.head_sha:
+            return None
+        return Reader.of(walk, stored.plan, await self.seen_lines())
 
     async def save_walk(self, walk: Walk | None) -> None:
         self.walk_json = walk.model_dump(mode="json") if walk else None

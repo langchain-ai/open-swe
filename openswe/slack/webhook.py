@@ -35,7 +35,6 @@ from openswe.input_messages import (
     visible_dynamic_context_hashes,
 )
 from openswe.prompts import prompt
-from openswe.review_guide.advance import cancel_prefetch
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
@@ -1245,8 +1244,7 @@ async def _process_slack_mention_impl(
         "slack_kickoff_eligible": False,
     }
     if review_guide:
-        # The thread keeps the last run's configurable, which may be a prepare run's.
-        configurable["review_guide_prefetch"] = False
+        # The thread keeps the last run's configurable, which may be a click's.
         configurable["review_guide_approve_ts"] = ""
     if mapped_login:
         configurable["github_login"] = mapped_login
@@ -1329,9 +1327,6 @@ async def _process_slack_mention_impl(
     # A person writing in a closed guide wants it back.
     if guide is not None and guide.closed:
         await guide.set_closed(False)
-    # The reader spoke: stop preparing ahead so the guide hears them now, not after.
-    if guide is not None:
-        await cancel_prefetch(langgraph_client, thread_id)
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
     # queue while the thread is idle; an edit made after the agent finished waits

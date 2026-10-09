@@ -8,8 +8,6 @@ again after a rebase or force-push.
 
 import hashlib
 import re
-from collections import Counter
-from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -101,32 +99,3 @@ def parse(diff: str) -> list[FileChange]:
             new += 1
     finish()
     return files
-
-
-def unseen(
-    files: list[FileChange],
-    seen: Counter[str],
-    approved: Collection[tuple[str, Sign, int]] = (),
-) -> list[ChangedLine]:
-    """The changed lines not yet approved, each approval consuming one matching line.
-
-    ``approved`` names the exact (path, sign, lineno) occurrences approved at this
-    head; they settle first, so of two identical lines the one the reader approved
-    is the one that counts as seen.
-    """
-    remaining = Counter(seen)
-    lines = [line for file in files for line in file.lines]
-    settled: set[int] = set()
-    for index, line in enumerate(lines):
-        if (line.path, line.sign, line.lineno) in approved and remaining[line.key] > 0:
-            remaining[line.key] -= 1
-            settled.add(index)
-    out: list[ChangedLine] = []
-    for index, line in enumerate(lines):
-        if index in settled:
-            continue
-        if remaining[line.key] > 0:
-            remaining[line.key] -= 1
-        else:
-            out.append(line)
-    return out

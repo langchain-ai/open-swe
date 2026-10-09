@@ -38,7 +38,6 @@ from openswe.review.findings import (
     ReviewerSlackThread,
     reviewer_thread_title,
 )
-from openswe.review.walkthrough import Walkthrough
 from openswe.run_config import Repo
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
@@ -50,6 +49,7 @@ from openswe.thread_ids import (
 )
 from openswe.threads.creation import create_thread
 from openswe.users import User
+from openswe.walkthrough.record import Walkthrough
 from openswe.webhooks import common
 
 
