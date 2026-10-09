@@ -192,6 +192,7 @@ class OpenPullRequest(BaseModel):
     updated_at: str | None = None
     draft: bool | None = None
     details_loading: bool = False
+    review_request_url: str | None = None
     additions: int | None = None
     deletions: int | None = None
     mergeable: bool | None = None

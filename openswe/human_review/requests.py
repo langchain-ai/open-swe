@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, or_, select
+from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -262,6 +262,32 @@ class HumanReviewRequest(Base):
                     cls.state == "open",
                 )
             )
+
+    @classmethod
+    async def active_slack_urls(cls, pulls: list[tuple[str, int]]) -> dict[tuple[str, int], str]:
+        if not pulls or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(
+                    Repository.key, PullRequest.number, cls.slack_channel_id, cls.slack_message_ts
+                )
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    tuple_(Repository.key, PullRequest.number).in_(
+                        [(repo.lower(), number) for repo, number in pulls]
+                    ),
+                    cls.state == "open",
+                    cls.slack_channel_id != "",
+                    cls.slack_message_ts != "",
+                    cls.awaiting_ready.is_(False),
+                )
+            )
+            return {
+                (repo, number): f"https://slack.com/archives/{channel}/p{ts.replace('.', '')}"
+                for repo, number, channel, ts in rows
+            }
 
     @classmethod
     async def assigned_to(cls, user_id: UUID) -> list[Self]:

@@ -48,12 +48,34 @@ export function PullRequestCard({
   onSettled: (outcome: PullRequestOutcome | undefined) => void
   onReady: () => void
 }) {
+  const reviewRequest = !outcome && pr.reviewRequestUrl && (
+    <a
+      href={pr.reviewRequestUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(event) => event.stopPropagation()}
+      className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs text-blue-700 hover:underline dark:text-blue-300"
+    >
+      Review requested
+    </a>
+  )
+
   if (compact) {
     return (
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
+        onKeyDown={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            (event.key === "Enter" || event.key === " ")
+          ) {
+            event.preventDefault()
+            onSelect()
+          }
+        }}
         className={cn(
           "flex w-full gap-2.5 rounded-md py-2 pr-2.5 pl-2 text-left transition-colors",
           selected ? "bg-selected" : "hover:bg-surface-level-1-hover",
@@ -82,6 +104,7 @@ export function PullRequestCard({
           ) : (
             <>
               <span className="mt-1 flex flex-wrap gap-1">
+                {reviewRequest}
                 {statusLabels(pr).map((status) => (
                   <StatusPill key={status} status={status} />
                 ))}
@@ -94,7 +117,7 @@ export function PullRequestCard({
             </>
           )}
         </span>
-      </button>
+      </div>
     )
   }
 
@@ -126,6 +149,7 @@ export function PullRequestCard({
               {pr.repo}{" "}
               <span className="font-mono tabular-nums">#{pr.number}</span>
             </span>
+            {reviewRequest}
             {statusLabels(pr).map((status) => (
               <StatusPill key={status} status={status} />
             ))}

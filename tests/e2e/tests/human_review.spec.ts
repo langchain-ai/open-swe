@@ -672,6 +672,13 @@ test.describe("Human review in Slack", () => {
     const posted = await latestRequest(request);
     expect(posted.slack_channel_id).toBe(REVIEW_CHANNEL);
     expect(posted.thread_id).toBe("");
+    await page.reload();
+    await expect(
+      row.getByRole("link", { name: "Review requested" }),
+    ).toHaveAttribute(
+      "href",
+      `https://slack.com/archives/${posted.slack_channel_id}/p${posted.slack_message_ts.replace(".", "")}`,
+    );
     // With no summary from an agent, the card shows the description's start, cut with an ellipsis.
     expect(posted.tldr).toMatch(
       /^Uses the name in the greeting\. It also trims.*…$/,
