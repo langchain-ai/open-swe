@@ -17,7 +17,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
-from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
+from openswe.input_messages import ContextBlock, input_message_text, message_sender_id
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
@@ -473,7 +473,7 @@ def _latest_state_github_login(state: Mapping[str, Any] | None) -> str | None:
         if _message_kind(message) not in {"human", "user"}:
             continue
         content = _message_content(message)
-        if dynamic_context_hash(content) is not None or message_sender_id(content, kind="system"):
+        if ContextBlock.parse(content) is not None or message_sender_id(content, kind="system"):
             continue
         sender_id = message_sender_id(content)
         if isinstance(sender_id, str) and sender_id.startswith("github:"):

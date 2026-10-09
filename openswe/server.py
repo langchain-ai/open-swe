@@ -94,10 +94,10 @@ from openswe.desktop import (
 )
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
-    dynamic_context_hash,
+    RunMessage,
+    VisibleContext,
     message_sender_id,
     person_introduction,
-    visible_dynamic_context_hashes,
 )
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.instance import instance_mcp_source
@@ -108,6 +108,7 @@ from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
+    LatestContextMiddleware,
     ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
@@ -278,6 +279,7 @@ from openswe.tools.task_threads import (
     task_status,
 )
 from openswe.users import User
+from openswe.users.briefing import Briefing
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -571,6 +573,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 # conversation where the reply itself is that signal, so reacting there is only
 # clutter on every message the person sends.
 DM_EXCLUDED_TOOLS: frozenset[str] = frozenset({"slack_add_reaction"})
+_BRIEFING_TIMEOUT_SECONDS = 8
 
 
 def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
@@ -943,15 +946,31 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     @staticmethod
     def _participants_messages(
         state: PrepareRunState, participants: Sequence[ThreadParticipant]
-    ) -> list[Any]:
+    ) -> list[RunMessage]:
         """One person block per participant, sent when theirs is not already visible."""
-        visible = visible_dynamic_context_hashes(state)
         ordered = sorted(
             participants,
             key=lambda candidate: (candidate.identity.display_name.lower(), candidate.person_id),
         )
-        blocks = [person_introduction(p.as_person()) for p in ordered]
-        return [block for block in blocks if dynamic_context_hash(block["content"]) not in visible]
+        return VisibleContext.of_state(state).admit_all(
+            [person_introduction(p.as_person()) for p in ordered]
+        )
+
+    async def _briefing_messages(self, state: PrepareRunState, person_id: str) -> list[RunMessage]:
+        """The sender's briefing, when it changed since the model last saw it."""
+        if not self._profile_login:
+            return []
+        try:
+            async with asyncio.timeout(_BRIEFING_TIMEOUT_SECONDS):
+                briefing = await Briefing.load(person_id, self._profile_login)
+        except Exception:
+            logger.warning(
+                "Could not load the concierge briefing; the model keeps the last one",
+                extra={"agent_thread_id": self._thread_id, "github_login": self._profile_login},
+                exc_info=True,
+            )
+            return []
+        return VisibleContext.of_state(state).admit_all([briefing.introduction()])
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, object]:
         decision = ModelSelectionDecision(requested_model=self._saved_requested_model)
@@ -1236,7 +1255,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             subject_id = self._sender_subject_id(
                 state, f"system:slack-bot-{bot_id}" if bot_id else None
             )
-            sender_messages: list[Any] = []
+            sender_messages: list[RunMessage] = []
+            briefing_task = (
+                asyncio.create_task(self._briefing_messages(state, subject_id))
+                if subject_id is not None and _slack_concierge_run(cfg)
+                else None
+            )
             if subject_id is not None:
                 participants = await _thread_participants(
                     self._thread_id,
@@ -1254,6 +1278,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
+            if briefing_task is not None:
+                sender_messages.extend(await briefing_task)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
         try:
             async with aphase(self._thread_id, "prepare.record_run"):
@@ -2145,6 +2171,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     fallback_middleware,
                     *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+                    LatestContextMiddleware(),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
                     SanitizeThinkingBlocksMiddleware(),

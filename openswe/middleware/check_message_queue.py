@@ -18,8 +18,8 @@ from openswe.dashboard.options import model_supports_images
 from openswe.input_messages import (
     PersonIdentity,
     SystemIdentity,
+    VisibleContext,
     build_input_messages,
-    visible_dynamic_context_hashes,
 )
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import (
@@ -121,7 +121,7 @@ def _merge_text_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _flush_blocks(
-    messages: list[dict[str, Any]], blocks: list[dict[str, Any]], injected: set[str]
+    messages: list[dict[str, Any]], blocks: list[dict[str, Any]], visible: VisibleContext
 ) -> None:
     if not blocks:
         return
@@ -132,7 +132,7 @@ def _flush_blocks(
                 _merge_text_blocks(blocks),
                 {"sender_id": _QUEUE_SYSTEM["id"], "surface": "automation", "kind": "system"},
                 systems=[_QUEUE_SYSTEM],
-                injected_dynamic_context_hashes=injected,
+                visible=visible,
             ),
         )
     )
@@ -180,19 +180,19 @@ async def check_message_queue_before_model(  # noqa: PLR0911
 
         queued_updates: list[dict[str, Any]] = []
         content_blocks: list[dict[str, Any]] = []
-        injected = visible_dynamic_context_hashes(state)
+        visible = VisibleContext.of_state(state)
 
         try:
             # A snapshot: what this call consumes, whatever is queued meanwhile.
             queued_messages = await QueuedMessage.for_thread(thread_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to get queued item: %s", e)
-            _flush_blocks(queued_updates, content_blocks, injected)
+            _flush_blocks(queued_updates, content_blocks, visible)
             return _message_update(queued_updates, thread_id)
         contents = [message.content for message in queued_messages]
 
         if not contents:
-            _flush_blocks(queued_updates, content_blocks, injected)
+            _flush_blocks(queued_updates, content_blocks, visible)
             return _message_update(queued_updates, thread_id)
 
         logger.info(
@@ -222,7 +222,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         moved_surface: ReplySurface | None = None
         for content in contents:
             if _is_dashboard_queued_message(content):
-                _flush_blocks(queued_updates, content_blocks, injected)
+                _flush_blocks(queued_updates, content_blocks, visible)
                 # Only the move itself is worth announcing. Re-announcing it on
                 # every later web follow-up stacks identical handoff notices in
                 # the dashboard stream.
@@ -244,7 +244,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                                         "platform": "open-swe",
                                     }
                                 ],
-                                injected_dynamic_context_hashes=injected,
+                                visible=visible,
                             ),
                         )
                     )
@@ -265,9 +265,9 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                     structured = build_input_messages(
                         blocks,
                         {"sender_id": person["id"], "surface": "web", "kind": "human"},
-                        injected_dynamic_context_hashes=injected,
+                        visible=visible,
                     )
-                    _flush_blocks(queued_updates, content_blocks, injected)
+                    _flush_blocks(queued_updates, content_blocks, visible)
                     queue_id = content.get("queue_id")
                     if isinstance(queue_id, str) and structured:
                         structured[-1]["id"] = queue_id
@@ -283,7 +283,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                 logger.debug("Queued message contains text content")
                 content_blocks.append({"type": "text", "text": content})
 
-        _flush_blocks(queued_updates, content_blocks, injected)
+        _flush_blocks(queued_updates, content_blocks, visible)
         # Cleared only once every message is built: a failure above leaves
         # them for the next model call instead of losing them.
         await QueuedMessage.remove(queued_messages)

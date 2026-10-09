@@ -41,12 +41,12 @@ from openswe.dispatch import (
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.input_messages import (
+    DYNAMIC_CONTEXT_VERSIONS_KEY,
     PersonIdentity,
     RunMessage,
     SystemIdentity,
+    VisibleContext,
     build_input_messages,
-    dynamic_context_hashes_from_messages,
-    injected_dynamic_context_hashes_from_metadata,
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
@@ -735,16 +735,16 @@ async def _attributed_run_messages(
     client: Any,
     sandbox_handoff: Mapping[str, Any] | None = None,
     review_chat_pr_url: str | None = None,
-) -> tuple[list[RunMessage], set[str], set[str]]:
+) -> tuple[list[RunMessage], VisibleContext, set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
-    Returns the structured messages, the dynamic-context hashes already in the
+    Returns the structured messages, the context blocks already in the
     conversation, and the ids of the messages the graph already holds.
     """
     if content is None:
         content = ""
     sender_id = f"github:{login}"
-    injected = injected_dynamic_context_hashes_from_metadata(metadata)
+    visible = VisibleContext.of_metadata(metadata)
     persisted_message_ids: set[str] = set()
     history_read = False
     if not creating:
@@ -754,8 +754,8 @@ async def _attributed_run_messages(
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
             if isinstance(values, dict):
                 messages = values.get("messages")
-                injected.update(dynamic_context_hashes_from_messages(messages))
                 if isinstance(messages, list):
+                    visible.update(VisibleContext.of_messages(messages))
                     persisted_message_ids = {
                         message_id
                         for message in messages
@@ -796,18 +796,16 @@ async def _attributed_run_messages(
         content,
         {"sender_id": sender_id, "surface": "web", "kind": "human"},
         systems=[system for system, _ in notices] or None,
-        injected_dynamic_context_hashes=injected,
+        visible=visible,
     )
     for system, body in notices:
         structured.insert(
             -1,
             build_input_messages(
-                body,
-                {"sender_id": system["id"], "surface": "automation", "kind": "system"},
-                injected_dynamic_context_hashes={system["id"]},
+                body, {"sender_id": system["id"], "surface": "automation", "kind": "system"}
             )[0],
         )
-    return structured, injected, persisted_message_ids
+    return structured, visible, persisted_message_ids
 
 
 async def _enrich_run_start_command(
@@ -921,7 +919,7 @@ async def _enrich_run_start_command(
             run_model, run_effort = _with_vision_fallback(run_model, run_effort, has_images=True)
         _validate_command_images(content, model_id=run_model)
 
-    structured, injected, persisted_message_ids = await _attributed_run_messages(
+    structured, visible, persisted_message_ids = await _attributed_run_messages(
         thread_id,
         login,
         metadata=metadata,
@@ -954,7 +952,7 @@ async def _enrich_run_start_command(
         "unlisted": False,
         "model_selection": model_selection,
         **await participant_metadata(metadata, login=login, email=email),
-        "injected_dynamic_context_hashes": sorted(injected),
+        DYNAMIC_CONTEXT_VERSIONS_KEY: visible.as_metadata(),
         **(sandbox_handoff or {}),
     }
     if command_images and run_model and run_effort:

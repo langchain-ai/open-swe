@@ -25,6 +25,7 @@ from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import (
     RunMessage,
     SystemIdentity,
+    VisibleContext,
     build_input_messages,
     delivered_event_match_ids,
 )
@@ -118,7 +119,7 @@ class EventMatch(Base):
 
     @classmethod
     def messages(cls, matches: Sequence[Self]) -> list[RunMessage]:
-        introduced: set[str] = set()
+        visible = VisibleContext()
         messages: list[RunMessage] = []
         for match in matches:
             data: dict[str, object] = {"event_match": str(match.id)}
@@ -131,7 +132,7 @@ class EventMatch(Base):
                     "data": data,
                 },
                 systems=[_SYSTEM],
-                injected_dynamic_context_hashes=introduced,
+                visible=visible,
             )
             built[-1]["id"] = f"event-match:{match.id}"
             messages.extend(built)

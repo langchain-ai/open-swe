@@ -25,14 +25,13 @@ from openswe.input_messages import (
     RunInput,
     RunMessage,
     SystemIdentity,
+    VisibleContext,
     channel_introduction,
-    dynamic_context_hash,
     human_input,
     input_message_timestamps,
     person_introduction,
     system_input,
     system_introduction,
-    visible_dynamic_context_hashes,
 )
 from openswe.prompts import prompt
 from openswe.review_guide.advance import cancel_prefetch
@@ -174,8 +173,8 @@ async def _slack_channel_identity(
     return channel
 
 
-async def _dispatched_slack_context(client: Any, thread_id: str) -> tuple[set[str], set[str]]:
-    """What the thread already holds: visible context hashes and replayed Slack ts.
+async def _dispatched_slack_context(client: Any, thread_id: str) -> tuple[VisibleContext, set[str]]:
+    """What the thread already holds: visible context blocks and replayed Slack ts.
 
     Both keep dispatch from re-sending what the model has. A thread whose state
     cannot be read is treated as empty, which repeats context rather than losing
@@ -189,18 +188,18 @@ async def _dispatched_slack_context(client: Any, thread_id: str) -> tuple[set[st
             extra={"agent_thread_id": thread_id},
             exc_info=True,
         )
-        return set(), set()
+        return VisibleContext(), set()
     values = state.get("values")
     if not isinstance(values, dict):
-        return set(), set()
+        return VisibleContext(), set()
     messages = values.get("messages")
     if not isinstance(messages, list):
-        return set(), set()
+        return VisibleContext(), set()
     timestamps: set[str] = set()
     for message in messages:
         if isinstance(message, dict):
             timestamps |= input_message_timestamps(message.get("content"))
-    return visible_dynamic_context_hashes(values), timestamps
+    return VisibleContext.of_state(values), timestamps
 
 
 _SLACK_CONTEXT_SENDER_ID = "system:slack-context"
@@ -456,7 +455,7 @@ def _slack_context_input(
     constant_context: str = "",
     dispatched_timestamps: set[str] | None = None,
     run_described_person_ids: set[str] | None = None,
-    visible_context_hashes: set[str] | None = None,
+    visible: VisibleContext | None = None,
     trigger_bot: AllowedSlackBot | None = None,
     explicit_mention: bool = False,
     web_only: bool = False,
@@ -464,17 +463,12 @@ def _slack_context_input(
     channel_entity_id = channel["id"]
     channel_names = channel_names_by_id or {}
     already_dispatched = dispatched_timestamps or set()
-    visible = set(visible_context_hashes or ())
+    shown = visible if visible is not None else VisibleContext()
     run_messages: list[RunMessage] = []
 
     def add_context(message: RunMessage) -> None:
-        """Append a context block unless the model can already see that content."""
-        context_hash = dynamic_context_hash(message["content"])
-        if context_hash is not None:
-            if context_hash in visible:
-                return
-            visible.add(context_hash)
-        run_messages.append(message)
+        if shown.admit(message):
+            run_messages.append(message)
 
     add_context(channel_introduction(channel))
     # An edit's `event_ts` matches no message, and the approve-button path passes
@@ -1368,9 +1362,7 @@ async def _process_slack_mention_impl(
             explicit_request=request.explicit_request or performance_command is not None,
         )
     )
-    visible_context_hashes, dispatched_timestamps = await _dispatched_slack_context(
-        langgraph_client, thread_id
-    )
+    visible, dispatched_timestamps = await _dispatched_slack_context(langgraph_client, thread_id)
     # The run describes the sender and, on a follow-up, every linked person in
     # the Slack thread — the same set persisted as this thread's participants.
     described_slack_ids = {user_id} if is_first_mention else set(logins_by_user_id)
@@ -1397,7 +1389,7 @@ async def _process_slack_mention_impl(
             for slack_id in described_slack_ids
             if (person_id := person_ids_by_user_id.get(slack_id))
         },
-        visible_context_hashes=visible_context_hashes,
+        visible=visible,
         trigger_bot=allowed_bot,
         explicit_mention=request.explicit_mention or _mentions_open_swe(text, bot_user_id),
     )

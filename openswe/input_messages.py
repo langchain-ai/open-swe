@@ -1,20 +1,21 @@
 """Typed construction and serialization for application-owned model inputs."""
 
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from html import escape
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, Self, TypedDict
 from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
 
-INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
+DYNAMIC_CONTEXT_VERSIONS_KEY = "dynamic_context_versions"
 # Written by the deepagents summarization middleware; the prompt it builds is the
 # summary message followed by messages[cutoff_index:].
 SUMMARIZATION_EVENT_KEY = "_summarization_event"
 
 Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval", "deployment"]
-EntityKind = Literal["person", "channel", "system"]
+EntityKind = Literal["person", "channel", "system", "briefing"]
 MessageKind = Literal["human", "system"]
 
 
@@ -68,7 +69,15 @@ class SystemIdentity(TypedDict):
     content: NotRequired[str]
 
 
-Identity = PersonIdentity | ChannelIdentity | SystemIdentity
+class BriefingIdentity(TypedDict):
+    """What one person has in flight, keyed by their person id."""
+
+    id: str
+    open_prs: NotRequired[str]
+    review_requests: NotRequired[str]
+
+
+Identity = PersonIdentity | ChannelIdentity | SystemIdentity | BriefingIdentity
 
 
 class InputMessageContext(TypedDict):
@@ -116,6 +125,7 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
         "trace_url",
     ),
     "system": ("display_name", "platform", "sender_type", "content"),
+    "briefing": ("open_prs", "review_requests"),
 }
 
 
@@ -141,15 +151,6 @@ def _validate_entity_id(entity_id: str) -> str:
     if any(char.isspace() or char in "<>\"'" for char in entity_id):
         raise ValueError("entity id contains invalid characters")
     return entity_id
-
-
-def injected_dynamic_context_hashes_from_metadata(metadata: object) -> set[str]:
-    if not isinstance(metadata, dict):
-        return set()
-    values = metadata.get(INJECTED_DYNAMIC_CONTEXT_HASHES_KEY)
-    if not isinstance(values, list):
-        return set()
-    return {value for value in values if isinstance(value, str) and value}
 
 
 def _content_texts(content: object) -> list[str]:
@@ -214,26 +215,6 @@ def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     }
 
 
-def dynamic_context_hash(content: object) -> str | None:
-    values = content if isinstance(content, list) else [content]
-    for value in values:
-        text = value.get("text") if isinstance(value, dict) else value
-        if not isinstance(text, str) or "<dynamic-context" not in text:
-            continue
-        try:
-            root = ElementTree.fromstring(text)
-        except ElementTree.ParseError:
-            continue
-        if root.tag != "dynamic-context":
-            continue
-        claimed_hash = root.attrib.pop("hash", None)
-        canonical = ElementTree.tostring(root, encoding="unicode")
-        context_hash = hashlib.sha256(canonical.encode()).hexdigest()
-        if claimed_hash is None or claimed_hash == context_hash:
-            return context_hash
-    return None
-
-
 def _message_content(message: object) -> object:
     """The content of a message, whether it is a model object or its JSON form."""
     if isinstance(message, BaseMessage):
@@ -243,33 +224,122 @@ def _message_content(message: object) -> object:
     return None
 
 
-def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
-    if not isinstance(messages, (list, tuple)):
-        return set()
-    hashes: set[str] = set()
-    for message in messages:
-        context_hash = dynamic_context_hash(_message_content(message))
-        if context_hash is not None:
-            hashes.add(context_hash)
-    return hashes
+@dataclass(frozen=True)
+class ContextBlock:
+    """One ``<dynamic-context>`` block: the entity it describes and a digest of what it says."""
+
+    kind: str
+    entity_id: str
+    digest: str
+
+    @property
+    def entity(self) -> str:
+        return f"{self.kind}/{self.entity_id}"
+
+    @classmethod
+    def parse(cls, content: object) -> Self | None:
+        for text in _content_texts(content):
+            if "<dynamic-context" not in text:
+                continue
+            try:
+                root = ElementTree.fromstring(text)
+            except ElementTree.ParseError:
+                continue
+            if root.tag != "dynamic-context":
+                continue
+            claimed = root.attrib.pop("hash", None)
+            canonical = ElementTree.tostring(root, encoding="unicode")
+            digest = hashlib.sha256(canonical.encode()).hexdigest()
+            if claimed is None or claimed == digest:
+                return cls(root.get("kind", ""), root.get("id", ""), digest)
+        return None
+
+    @classmethod
+    def of(cls, message: object) -> Self | None:
+        """The block a message carries, whether it is a model object or its JSON form."""
+        return cls.parse(_message_content(message))
 
 
-def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:
-    """Context hashes the model can still see, so the rest is reintroduced.
+class VisibleContext:
+    """The latest version of each entity's context block the model can see.
 
-    Summarization replaces everything before ``cutoff_index`` with a summary, so a
-    context block behind the cutoff is gone from the prompt while still sitting in
-    state. Treating it as introduced is what leaves the model unable to resolve a
-    sender it is still being shown messages from.
+    A newer block for an entity replaces the older one in the prompt, so only the
+    latest version counts as shown: content that reverts to an earlier version is
+    sent again.
     """
-    messages = state.get("messages")
-    if not isinstance(messages, (list, tuple)):
-        return set()
-    event = state.get(SUMMARIZATION_EVENT_KEY)
-    cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
-    if isinstance(cutoff, int) and cutoff >= 0:
-        messages = messages[cutoff:]
-    return dynamic_context_hashes_from_messages(messages)
+
+    def __init__(self, versions: Mapping[str, str] | None = None) -> None:
+        self._versions = dict(versions or {})
+
+    @classmethod
+    def of_messages(cls, messages: Iterable[object]) -> Self:
+        visible = cls()
+        for message in messages:
+            if (block := ContextBlock.of(message)) is not None:
+                visible._versions[block.entity] = block.digest
+        return visible
+
+    @classmethod
+    def of_state(cls, state: Mapping[str, object]) -> Self:
+        """The blocks still in the prompt, so the rest is reintroduced.
+
+        Summarization replaces everything before ``cutoff_index`` with a summary, so a
+        block behind the cutoff is gone from the prompt while still sitting in state.
+        """
+        messages = state.get("messages")
+        if not isinstance(messages, (list, tuple)):
+            return cls()
+        event = state.get(SUMMARIZATION_EVENT_KEY)
+        cutoff = event.get("cutoff_index") if isinstance(event, Mapping) else None
+        if isinstance(cutoff, int) and cutoff >= 0:
+            messages = messages[cutoff:]
+        return cls.of_messages(messages)
+
+    @classmethod
+    def of_metadata(cls, metadata: Mapping[str, object]) -> Self:
+        versions = metadata.get(DYNAMIC_CONTEXT_VERSIONS_KEY)
+        if not isinstance(versions, Mapping):
+            return cls()
+        return cls(
+            {
+                entity: digest
+                for entity, digest in versions.items()
+                if isinstance(entity, str) and isinstance(digest, str)
+            }
+        )
+
+    def update(self, other: VisibleContext) -> None:
+        self._versions.update(other._versions)
+
+    def as_metadata(self) -> dict[str, str]:
+        return dict(sorted(self._versions.items()))
+
+    def admit(self, message: RunMessage) -> bool:
+        """Record ``message`` as shown; ``False`` when the model already sees this version."""
+        block = ContextBlock.of(message)
+        if block is None:
+            return True
+        if self._versions.get(block.entity) == block.digest:
+            return False
+        self._versions[block.entity] = block.digest
+        return True
+
+    def admit_all(self, messages: Iterable[RunMessage]) -> list[RunMessage]:
+        return [message for message in messages if self.admit(message)]
+
+
+def latest_context_only[M](messages: Sequence[M]) -> list[M]:
+    """``messages`` without context blocks a later block for the same entity replaces."""
+    blocks = [
+        ContextBlock.parse(content) if isinstance(content := _message_content(m), str) else None
+        for m in messages
+    ]
+    latest = {block.entity: index for index, block in enumerate(blocks) if block is not None}
+    return [
+        message
+        for index, (message, block) in enumerate(zip(messages, blocks, strict=True))
+        if block is None or latest[block.entity] == index
+    ]
 
 
 def _entity_field_line(field: str, value: object) -> str:
@@ -306,6 +376,10 @@ def channel_introduction(channel: ChannelIdentity) -> RunMessage:
 
 def system_introduction(system: SystemIdentity) -> RunMessage:
     return _entity_message(system, "system")
+
+
+def briefing_introduction(briefing: BriefingIdentity) -> RunMessage:
+    return _entity_message(briefing, "briefing")
 
 
 def _data_element(name: str, value: object) -> str:
@@ -377,22 +451,14 @@ def build_input_messages(
     *,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
-    injected_dynamic_context_hashes: set[str] | None = None,
+    visible: VisibleContext | None = None,
 ) -> list[RunMessage]:
-    injected = (
-        injected_dynamic_context_hashes if injected_dynamic_context_hashes is not None else set()
+    messages = (visible if visible is not None else VisibleContext()).admit_all(
+        [
+            *(channel_introduction(channel) for channel in channels or []),
+            *(system_introduction(system) for system in systems or []),
+        ]
     )
-    messages: list[RunMessage] = []
-    introductions = [
-        *(channel_introduction(channel) for channel in channels or []),
-        *(system_introduction(system) for system in systems or []),
-    ]
-    for message in introductions:
-        context_hash = dynamic_context_hash(message["content"])
-        if context_hash is None or context_hash in injected:
-            continue
-        messages.append(message)
-        injected.add(context_hash)
     if context["kind"] == "human":
         messages.append(human_input(content, context))
     else:
@@ -406,16 +472,12 @@ def build_run_input(
     *,
     channels: list[ChannelIdentity] | None = None,
     systems: list[SystemIdentity] | None = None,
-    injected_dynamic_context_hashes: set[str] | None = None,
+    visible: VisibleContext | None = None,
     files: dict[str, Any] | None = None,
 ) -> RunInput:
     result: RunInput = {
         "messages": build_input_messages(
-            content,
-            context,
-            channels=channels,
-            systems=systems,
-            injected_dynamic_context_hashes=injected_dynamic_context_hashes,
+            content, context, channels=channels, systems=systems, visible=visible
         )
     }
     if files is not None:

@@ -19,7 +19,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from openswe.input_messages import dynamic_context_hash, input_message_text
+from openswe.input_messages import ContextBlock, input_message_text
 from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def build_branch_name(raw: str) -> str | None:
 
 def _request_text(messages: Sequence[BaseMessage]) -> str | None:
     for message in messages:
-        if message.type != "human" or dynamic_context_hash(message.content) is not None:
+        if message.type != "human" or ContextBlock.parse(message.content) is not None:
             continue
         text = (input_message_text(message.content) or message.text).strip()
         if text:

@@ -202,6 +202,32 @@ class OpenPullRequest(BaseModel):
     pending_checks: list[str] = Field(default_factory=list)
     missing_checks: list[str] = Field(default_factory=list)
 
+    def standing(self) -> str:
+        """One coarse status line, so it changes only when where the PR stands does."""
+        facts = ["draft"] if self.draft else []
+        if not self.status_available:
+            facts.append("status unavailable")
+        else:
+            match self.ci:
+                case "failing":
+                    checks = f" ({', '.join(self.failing_checks)})" if self.failing_checks else ""
+                    facts.append(f"CI failing{checks}")
+                case "pending":
+                    facts.append("CI running")
+                case "passing":
+                    facts.append("CI passing")
+            if self.merge_state == "dirty":
+                facts.append("merge conflict")
+            if self.review_decision == "approved":
+                facts.append("approved")
+            elif self.review_decision == "changes_requested":
+                facts.append("changes requested")
+            elif self.review_required:
+                facts.append("awaiting review")
+            if self.unresolved_threads:
+                facts.append(f"{self.unresolved_threads} unresolved review threads")
+        return f"{self.repo}#{self.number} {self.title} — {', '.join(facts) or 'open'}"
+
 
 class OpenPullRequests(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
@@ -210,6 +236,16 @@ class OpenPullRequests(BaseModel):
     next_page: int | None
     incomplete: bool
     updated_at: str
+    total: int | None = None
+
+    def standings(self) -> str:
+        """One line per PR, most recently updated first, noting any it leaves out."""
+        if self.incomplete:
+            return "GitHub search timed out; unknown"
+        lines = [pull.standing() for pull in self.pull_requests]
+        if self.total is not None and self.total > len(lines):
+            lines.append(f"…and {self.total - len(lines)} more")
+        return "\n".join(lines) or "none"
 
 
 def _as_str(value: object, default: str) -> str:
@@ -868,6 +904,7 @@ async def list_open_pull_requests(
     sort: str = "updated",
     direction: str = "desc",
     page: int = 1,
+    per_page: int = _SEARCH_PAGE_SIZE,
     scope: Literal["mine", "review-requested"] = "mine",
 ) -> OpenPullRequests:
     """Read the open PRs ``login`` authored or is asked to review, with current-head checks."""
@@ -892,7 +929,7 @@ async def list_open_pull_requests(
             "search/issues",
             {
                 "q": query,
-                "per_page": str(_SEARCH_PAGE_SIZE),
+                "per_page": str(per_page),
                 "page": str(page),
                 "sort": sort,
                 "order": direction,
@@ -920,14 +957,13 @@ async def list_open_pull_requests(
         async with semaphore:
             return await client.load(details=not lightweight, listed=item, wanted={"open"})
 
-    items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
+    items = await asyncio.gather(*(load(item) for item in payload["items"][:per_page]))
     total = payload.get("total_count")
-    has_more = (
-        isinstance(total, int) and page * _SEARCH_PAGE_SIZE < total and page < _SEARCH_MAX_PAGES
-    )
+    has_more = isinstance(total, int) and page * per_page < total and page < _SEARCH_MAX_PAGES
     return OpenPullRequests(
         pull_requests=[item for item in items if item is not None],
         next_page=page + 1 if has_more else None,
         incomplete=payload.get("incomplete_results") is True,
         updated_at=datetime.now(UTC).isoformat(),
+        total=total if isinstance(total, int) else None,
     )

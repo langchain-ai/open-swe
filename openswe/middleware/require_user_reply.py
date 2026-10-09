@@ -17,11 +17,11 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langgraph.runtime import Runtime
 
 from openswe.input_messages import (
+    ContextBlock,
     SystemIdentity,
+    VisibleContext,
     build_input_messages,
-    dynamic_context_hash,
     message_sender_id,
-    visible_dynamic_context_hashes,
 )
 from openswe.middleware.message_content import content_to_text
 from openswe.middleware.trace import OpenSWEMiddleware
@@ -61,7 +61,7 @@ def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:
 def _starts_turn(message: BaseMessage) -> bool:
     if not isinstance(message, HumanMessage):
         return False
-    if dynamic_context_hash(message.content) is not None:
+    if ContextBlock.parse(message.content) is not None:
         return False
     return message_sender_id(message.content, kind="system") != REPLY_GUARD["id"]
 
@@ -180,7 +180,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             instruction,
             {"sender_id": REPLY_GUARD["id"], "surface": "automation", "kind": "system"},
             systems=[REPLY_GUARD],
-            injected_dynamic_context_hashes=visible_dynamic_context_hashes(state),
+            visible=VisibleContext.of_state(state),
         )
         return [
             HumanMessage(content=content_to_text(m["content"]), id=str(uuid.uuid7())) for m in built

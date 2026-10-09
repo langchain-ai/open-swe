@@ -3,9 +3,10 @@ from xml.etree import ElementTree
 from langchain_core.messages import AIMessage, HumanMessage
 
 from openswe.input_messages import (
+    VisibleContext,
     human_input,
+    latest_context_only,
     person_introduction,
-    visible_dynamic_context_hashes,
 )
 
 
@@ -47,20 +48,33 @@ def test_multimodal_input_preserves_non_text_blocks_and_order() -> None:
     assert (_parse(message["content"][1]["text"]).text or "").strip() == "describe <this>"
 
 
-def _person_intro_message(entity_id: str) -> HumanMessage:
-    content = person_introduction({"id": entity_id, "display_name": "Ramon"})["content"]
+def _person_intro_message(entity_id: str, name: str = "Ramon") -> HumanMessage:
+    content = person_introduction({"id": entity_id, "display_name": name})["content"]
     assert isinstance(content, str)
     return HumanMessage(content=content)
 
 
-def test_visible_dynamic_context_hashes_ignores_summarized_prefix() -> None:
+def test_visible_context_ignores_summarized_prefix() -> None:
+    intro = person_introduction({"id": "slack:U1", "display_name": "Ramon"})
     messages = [
         _person_intro_message("slack:U1"),
         AIMessage(content="working"),
         HumanMessage(content="follow up"),
     ]
 
-    assert visible_dynamic_context_hashes({"messages": messages})
+    assert not VisibleContext.of_state({"messages": messages}).admit(intro)
 
     summarized = {"messages": messages, "_summarization_event": {"cutoff_index": 1}}
-    assert visible_dynamic_context_hashes(summarized) == set()
+    assert VisibleContext.of_state(summarized).admit(intro)
+
+
+def test_reverted_context_is_sent_again_and_only_the_latest_reaches_the_model() -> None:
+    first = _person_intro_message("slack:U1", "Ramon")
+    renamed = _person_intro_message("slack:U1", "Ray")
+    other = _person_intro_message("slack:U2", "Ada")
+    messages = [first, other, HumanMessage(content="hi"), renamed]
+
+    assert VisibleContext.of_messages(messages).admit(
+        person_introduction({"id": "slack:U1", "display_name": "Ramon"})
+    )
+    assert latest_context_only(messages) == [other, messages[2], renamed]

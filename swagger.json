@@ -3337,6 +3337,17 @@
             "title": "Pullrequests",
             "type": "array"
           },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
           "updatedAt": {
             "title": "Updatedat",
             "type": "string"

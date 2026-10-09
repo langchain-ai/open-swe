@@ -8,7 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from openswe.input_messages import dynamic_context_hash, human_input, input_message_text
+from openswe.input_messages import ContextBlock, human_input, input_message_text
 from openswe.prompts import prompt
 from openswe.slack.client import update_slack_message
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
@@ -44,7 +44,7 @@ def _thread_metadata(thread: Any) -> dict[str, Any]:
 def _title_input(messages: Sequence[BaseMessage]) -> str | None:
     texts: list[str] = []
     for message in messages:
-        if dynamic_context_hash(message.content) is not None:
+        if ContextBlock.parse(message.content) is not None:
             continue
         text = (input_message_text(message.content) or message.text).strip()
         if text:

@@ -11,8 +11,8 @@ from langgraph.runtime import Runtime
 
 from openswe.input_messages import (
     SystemIdentity,
+    VisibleContext,
     build_input_messages,
-    visible_dynamic_context_hashes,
 )
 from openswe.middleware.message_content import content_to_text
 from openswe.middleware.require_user_reply import reported_failure, turn_tail
@@ -71,7 +71,7 @@ class RequireCliResultMiddleware(OpenSWEMiddleware):
             instruction,
             {"sender_id": CLI_RESULT_GUARD["id"], "surface": "automation", "kind": "system"},
             systems=[CLI_RESULT_GUARD],
-            injected_dynamic_context_hashes=visible_dynamic_context_hashes(state),
+            visible=VisibleContext.of_state(state),
         )
         return [
             HumanMessage(content=content_to_text(m["content"]), id=str(uuid.uuid7())) for m in built

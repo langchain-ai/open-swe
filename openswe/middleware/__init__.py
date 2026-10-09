@@ -8,6 +8,7 @@ _MIDDLEWARE_MODULES = {
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
+    "LatestContextMiddleware": ".latest_context",
     "ModelCallTimeoutMiddleware": ".model_call_timeout",
     "ModelErrorMiddleware": ".model_errors",
     "ModelFallbackMiddleware": ".model_fallback",
@@ -38,6 +39,7 @@ __all__ = [
     "DynamicToolMiddleware",
     "ExcludeToolsMiddleware",
     "IntegrationGroup",
+    "LatestContextMiddleware",
     "ModelCallTimeoutMiddleware",
     "ModelErrorMiddleware",
     "ModelFallbackMiddleware",
@@ -71,6 +73,7 @@ if TYPE_CHECKING:
     from openswe.middleware.deliver_event_matches import deliver_event_matches_before_model
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
+    from openswe.middleware.latest_context import LatestContextMiddleware
     from openswe.middleware.model_call_timeout import ModelCallTimeoutMiddleware
     from openswe.middleware.model_errors import ModelErrorMiddleware
     from openswe.middleware.model_fallback import ModelFallbackMiddleware
