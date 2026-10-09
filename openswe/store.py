@@ -98,8 +98,11 @@ async def get_value(namespace: Namespace, key: str) -> dict[str, Any] | None:
     return _unwrap(item)
 
 
-async def put_value(namespace: Namespace, key: str, value: Mapping[str, Any]) -> None:
-    await store_client().store.put_item(list(namespace), key, value)
+async def put_value(
+    namespace: Namespace, key: str, value: Mapping[str, Any], *, ttl_minutes: int | None = None
+) -> None:
+    """Store an item; with ``ttl_minutes`` the Store sweeps it once that time has passed."""
+    await store_client().store.put_item(list(namespace), key, value, ttl=ttl_minutes)
 
 
 async def delete_value(namespace: Namespace, key: str) -> None:

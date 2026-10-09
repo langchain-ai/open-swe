@@ -126,7 +126,10 @@ class _CatalogProvider(Provider):
 
 
 def build_server() -> FastMCP:
-    return FastMCP(_SERVER_NAME, providers=[_CatalogProvider()])
+    server = FastMCP(_SERVER_NAME, providers=[_CatalogProvider()])
+    # A run with no catalog must fail the listing, not list as an empty catalog.
+    server.provider_error_strategy = "raise"
+    return server
 
 
 async def _hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:

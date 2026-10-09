@@ -4,9 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, JsonValue, RootModel
 
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.mcp.caller import ToolCaller, UnknownTool
+from openswe.mcp.caller import Access, ToolCaller, UnknownTool
 from openswe.sandboxes.tool_models import ToolResult
-from openswe.tools.mcp_exposure import Access
 
 router = APIRouter(tags=["cli-mcp-tools"])
 

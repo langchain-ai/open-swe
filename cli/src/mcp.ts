@@ -178,27 +178,35 @@ export async function createMcpServer(
       )
       continue
     }
-    server.registerTool(
-      tool.name,
-      {
-        description: tool.description,
-        inputSchema,
-        annotations: { openWorldHint: true },
-      },
-      async (args) => {
-        const current = await client()
-        if (!isRecord(args))
-          throw new Error(`Invalid arguments for ${tool.name}`)
-        const result = await current
-          .mcpInvoke(tool.name, args)
-          .catch(rejectedSession(current))
-        return {
-          content: [
-            { type: "text" as const, text: JSON.stringify(result, null, 2) },
-          ],
+    // A backend tool named like one registered above (`list_threads`) is
+    // served by the CLI's own version, which links back to the dashboard.
+    try {
+      server.registerTool(
+        tool.name,
+        {
+          description: tool.description,
+          inputSchema,
+          annotations: { openWorldHint: true },
+        },
+        async (args) => {
+          const current = await client()
+          if (!isRecord(args))
+            throw new Error(`Invalid arguments for ${tool.name}`)
+          const result = await current
+            .mcpInvoke(tool.name, args)
+            .catch(rejectedSession(current))
+          return {
+            content: [
+              { type: "text" as const, text: JSON.stringify(result, null, 2) },
+            ],
+          }
         }
-      }
-    )
+      )
+    } catch (cause) {
+      process.stderr.write(
+        `oswe mcp: skipping ${tool.name}: ${String(cause)}\n`
+      )
+    }
   }
   return server
 }

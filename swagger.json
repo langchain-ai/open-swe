@@ -1,6 +1,13 @@
 {
   "components": {
     "schemas": {
+      "Access": {
+        "enum": [
+          "session",
+          "admin"
+        ],
+        "type": "string"
+      },
       "AddressCommentIntent": {
         "properties": {
           "comment_url": {
@@ -844,36 +851,10 @@
         "title": "CLIArguments",
         "type": "object"
       },
-      "CLIResult": {
-        "properties": {
-          "content": {
-            "$ref": "#/components/schemas/JsonValue"
-          },
-          "status": {
-            "enum": [
-              "success",
-              "error"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "content"
-        ],
-        "title": "CLIResult",
-        "type": "object"
-      },
       "CLITool": {
         "properties": {
           "access": {
-            "enum": [
-              "session",
-              "admin"
-            ],
-            "title": "Access",
-            "type": "string"
+            "$ref": "#/components/schemas/Access"
           },
           "description": {
             "title": "Description",
@@ -9674,7 +9655,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CLIResult"
+                  "$ref": "#/components/schemas/ToolResult"
                 }
               }
             },

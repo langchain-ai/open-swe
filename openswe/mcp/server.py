@@ -111,5 +111,8 @@ def build_mount() -> Mount | None:
     if auth is None:
         return None
     server = FastMCP(_SERVER_NAME, providers=[_CallerProvider()], auth=auth)
+    # The only provider is the caller's catalog: a refusal must reach the client,
+    # not list as an empty catalog.
+    server.provider_error_strategy = "raise"
     app = server.http_app(path=_MCP_PATH, json_response=True, stateless_http=True)
     return Mount(app=app, well_known=list(auth.get_well_known_routes(mcp_path=_MCP_PATH)))

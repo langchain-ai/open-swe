@@ -9,13 +9,14 @@ thread the caller owns, so injected state and access policies resolve the same w
 from dataclasses import dataclass
 from functools import cache
 from importlib import import_module
-from typing import TYPE_CHECKING, Final, Self
+from typing import TYPE_CHECKING, Final, Literal, Self
 
 from pydantic import JsonValue
 
 from openswe.dashboard.admin import is_admin
 from openswe.sandboxes.tool_models import ToolResult
-from openswe.tools.mcp_exposure import Access
+
+type Access = Literal["session", "admin"]
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -81,13 +82,16 @@ class ToolCaller:
     @classmethod
     async def for_github_account(cls, external_id: str) -> Self:
         """The Open SWE user who owns this GitHub account, if they may still sign in."""
-        from openswe.dashboard.oauth import enforce_github_login_gate
         from openswe.users import User
+        from openswe.users.authorization import is_authorized_github_login
 
         user = await User.for_identity("github", external_id)
         if user is None or not user.github_login:
             raise PermissionError("Sign in to the Open SWE dashboard before connecting over MCP")
-        await enforce_github_login_gate(user.github_login)
+        if not await is_authorized_github_login(user.github_login):
+            raise PermissionError(
+                "Your GitHub account is not authorized for this Open SWE instance"
+            )
         return cls(login=user.github_login, email=user.email or None)
 
     @property

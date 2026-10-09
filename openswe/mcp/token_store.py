@@ -4,6 +4,7 @@ Every replica answers any OAuth step, so the state lives in the LangGraph Store,
 sealed with ``TOKEN_ENCRYPTION_KEY`` because it holds upstream GitHub tokens.
 """
 
+import math
 from typing import Final, override
 
 from key_value.aio.stores.base import BaseStore, ManagedEntry
@@ -37,7 +38,13 @@ class SealedStore(BaseStore):
         self, *, collection: str, key: str, managed_entry: ManagedEntry
     ) -> None:
         sealed = encrypt_token(self._serialization_adapter.dump_json(managed_entry))
-        await put_value(self._namespace(collection), key, {"sealed": sealed})
+        ttl = managed_entry.ttl
+        await put_value(
+            self._namespace(collection),
+            key,
+            {"sealed": sealed},
+            ttl_minutes=math.ceil(ttl / 60) if ttl is not None else None,
+        )
 
     @override
     async def _delete_managed_entry(self, *, key: str, collection: str) -> bool:
