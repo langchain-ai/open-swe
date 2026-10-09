@@ -102,6 +102,7 @@ export function AgentTurn({
   isMarkdownLive,
   repoPath,
   activityLabel,
+  costUsd,
   ...callbacks
 }: {
   message: Message
@@ -109,6 +110,7 @@ export function AgentTurn({
   isMarkdownLive?: boolean
   repoPath?: string
   activityLabel?: string
+  costUsd?: number
 } & ApprovalCallbacks) {
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
@@ -348,6 +350,7 @@ export function AgentTurn({
           <MessageTimestamp
             timestamp={message.timestamp}
             startedAt={message.startedAt}
+            costUsd={costUsd}
           />
         )}
       </div>

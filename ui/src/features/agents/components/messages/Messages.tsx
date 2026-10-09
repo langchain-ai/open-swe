@@ -13,6 +13,7 @@ import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
+import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
@@ -107,6 +108,7 @@ export const Messages = memo(function MessagesComponent({
   threadId,
   scrollKey,
   showPlanArtifact = false,
+  runCosts,
   emptyState,
   footer,
   pollWorkflowApprovalsWhileActive = false,
@@ -143,6 +145,10 @@ export const Messages = memo(function MessagesComponent({
   const visibleMessages = useMemo(
     () => messages.filter((message) => !message.hidden),
     [messages]
+  )
+  const costsByTurn = useMemo(
+    () => turnCosts(visibleMessages, runCosts),
+    [visibleMessages, runCosts]
   )
   const liveMarkdownMessageId = useLiveMarkdownMessageId(
     visibleMessages,
@@ -223,6 +229,7 @@ export const Messages = memo(function MessagesComponent({
                   isMarkdownLive={messageIsMarkdownLive}
                   repoPath={repoPath}
                   activityLabel={messageIsStreaming ? activityLabel : undefined}
+                  costUsd={costsByTurn.get(message.id)}
                   onApprove={onApprove}
                   onReject={onReject}
                   onAutoApprove={onAutoApprove}

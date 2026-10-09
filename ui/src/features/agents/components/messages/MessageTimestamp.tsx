@@ -1,8 +1,12 @@
 import { toast } from "sonner"
 
+import { formatCost } from "@/features/agents/lib/contextUsage"
+
 type MessageTimestampProps = {
   timestamp: string
   startedAt?: string
+  /** Cost of the run that produced this turn, shown after the time. */
+  costUsd?: number
   align?: "left" | "right"
   className?: string
 }
@@ -49,6 +53,7 @@ function shortTimestamp(date: Date): string {
 export function MessageTimestamp({
   timestamp,
   startedAt,
+  costUsd,
   align = "left",
   className = "",
 }: MessageTimestampProps) {
@@ -82,6 +87,7 @@ export function MessageTimestamp({
         className="cursor-pointer rounded-xs text-xxs leading-4 text-tertiary tabular-nums opacity-0 transition-opacity duration-normal select-none group-hover/turn:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
         <time dateTime={date.toISOString()}>{shortTimestamp(date)}</time>
+        {costUsd != null && ` · ${formatCost(costUsd)}`}
       </button>
     </div>
   )

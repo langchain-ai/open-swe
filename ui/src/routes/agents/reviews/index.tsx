@@ -1,5 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { createFileRoute } from "@tanstack/react-router"
+import { useEffect } from "react"
 
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
@@ -20,6 +21,26 @@ export const Route = createFileRoute("/agents/reviews/")({
   component: ReviewsPage,
 })
 
+const REPO_STORAGE_KEY = "open-swe.reviews.repo"
+
+function readStoredRepos(): string[] | undefined {
+  try {
+    return validateReviewsSearch({
+      repo: JSON.parse(window.localStorage.getItem(REPO_STORAGE_KEY) ?? "[]"),
+    }).repo
+  } catch (error) {
+    console.warn("Discarding invalid stored repository filter", error)
+    window.localStorage.removeItem(REPO_STORAGE_KEY)
+    return undefined
+  }
+}
+
+function storeRepos(repos: string[] | undefined) {
+  if (repos?.length)
+    window.localStorage.setItem(REPO_STORAGE_KEY, JSON.stringify(repos))
+  else window.localStorage.removeItem(REPO_STORAGE_KEY)
+}
+
 const tabs = [
   ["mine", "Mine"],
   ["to-review", "To Review"],
@@ -32,6 +53,7 @@ function ReviewsPage() {
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
+    if ("repo" in changes) storeRepos(changes.repo)
     void navigate({
       search: (previous) => ({
         ...previous,
@@ -46,6 +68,11 @@ function ReviewsPage() {
       replace,
     })
   }
+  useEffect(() => {
+    const stored = readStoredRepos()
+    if (!filters.repo && stored) changeFilters({ repo: stored }, true)
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const selection = tab !== "all" ? parsePullRequestSelection(filters.pr) : null
 
   return (

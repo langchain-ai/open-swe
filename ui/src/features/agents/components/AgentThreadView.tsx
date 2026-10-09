@@ -545,7 +545,7 @@ export function AgentThreadView({
     },
     [submitMessage, thread.id]
   )
-  const usedTokens = source.contextTokens
+  const contextUsage = source.contextUsage
 
   // Own the git panel's collapsed state so file links can reveal the panel.
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
@@ -864,6 +864,7 @@ export function AgentThreadView({
                   threadId={thread.id}
                   scrollKey={thread.id}
                   showPlanArtifact={Boolean(thread.planStatus)}
+                  runCosts={thread.runCosts}
                   emptyState={
                     <div className="flex min-h-60 items-center justify-center">
                       {hydrationFailed ? (
@@ -977,8 +978,10 @@ export function AgentThreadView({
                     }
                   : {})}
                 contextUsage={{
-                  usedTokens,
+                  usedTokens: contextUsage?.tokens,
                   contextWindow: activeModel?.context_window ?? null,
+                  model: contextUsage?.model,
+                  costUsd: thread.costUsd,
                 }}
               />
             </AgentComposerDock>

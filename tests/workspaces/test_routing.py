@@ -10,8 +10,7 @@ from openswe.workspaces import routing
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
 from tests.conftest import FakeUserRecords
 
-# Workspaces are rows; user preferences are still Store records, so the tests
-# that read a preference keep the store double as well.
+# Workspaces are rows; tests that read a preference use the in-memory user_records double.
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
