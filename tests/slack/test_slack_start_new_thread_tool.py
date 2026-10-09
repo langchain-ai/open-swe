@@ -281,6 +281,10 @@ async def test_slack_breakout_thread_success(
         "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1> "
         f"<https://dashboard.example/agents/{expected_thread_id}|Open in Web>"
     )
+    assert (
+        captured["top_level_post"]["blocks"][0]["text"]["text"]
+        == captured["top_level_post"]["text"]
+    )
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
     react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", target, new_ts)
     assert captured["top_level_post"]["unfurl_links"] is False

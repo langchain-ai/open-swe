@@ -335,15 +335,16 @@ async def slack_breakout_thread(
         source_line,
         f"<@{requester}>" if requester else "",
     )
+    root_text = append_slack_web_link_footer(
+        " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
+    )
     try:
         message_ts = await post_slack_top_level_message_with_ts(
             clean_channel_id,
-            append_slack_web_link_footer(
-                " · ".join(part for part in root_parts if part), dashboard_thread_url(thread_id)
-            ),
+            root_text,
             blocks=block_payload(
                 [
-                    section(" · ".join(part for part in root_parts if part)),
+                    section(root_text),
                     *await origin_footer(cfg.thread_id),
                 ]
             ),
