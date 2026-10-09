@@ -1,1 +1,1 @@
-"""Workspaces: their store, snapshot refresh jobs, routing, and dashboard API."""
+"""Workspaces: their store, snapshot refresh jobs, routing, and web API."""

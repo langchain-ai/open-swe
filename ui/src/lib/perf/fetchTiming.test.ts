@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest"
 
-import { classifyDashboardRequest, parseServerTiming } from "./fetchTiming"
+import { classifyWebRequest, parseServerTiming } from "./fetchTiming"
 
 const THREAD = "0d5a5a4e-1b2c-4d3e-8f90-123456789abc"
 
@@ -22,32 +22,27 @@ describe("parseServerTiming", () => {
   })
 })
 
-describe("classifyDashboardRequest", () => {
+describe("classifyWebRequest", () => {
   it("recognises the thread requests that gate a thread view", () => {
+    expect(classifyWebRequest(`/api/threads/${THREAD}`)).toEqual({
+      kind: "thread_detail",
+      threadId: THREAD,
+    })
     expect(
-      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}`)
-    ).toEqual({ kind: "thread_detail", threadId: THREAD })
-    expect(
-      classifyDashboardRequest(
-        `https://example.com/dashboard/api/threads/${THREAD.toUpperCase()}?mark_viewed=false`
+      classifyWebRequest(
+        `https://example.com/api/threads/${THREAD.toUpperCase()}?mark_viewed=false`
       )
     ).toEqual({ kind: "thread_detail", threadId: THREAD })
+    expect(classifyWebRequest(`/api/threads/${THREAD}/state`)?.kind).toBe(
+      "thread_state"
+    )
     expect(
-      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/state`)?.kind
-    ).toBe("thread_state")
-    expect(
-      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/stream/events`)
-        ?.kind
+      classifyWebRequest(`/api/threads/${THREAD}/stream/events`)?.kind
     ).toBe("stream_events")
-    expect(
-      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/commands/`)
-        ?.kind
-    ).toBe("command")
-    expect(
-      classifyDashboardRequest("/dashboard/api/threads/page?limit=10")
-    ).toBe(null)
-    expect(
-      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/branch-diff`)
-    ).toBe(null)
+    expect(classifyWebRequest(`/api/threads/${THREAD}/commands/`)?.kind).toBe(
+      "command"
+    )
+    expect(classifyWebRequest("/api/threads/page?limit=10")).toBe(null)
+    expect(classifyWebRequest(`/api/threads/${THREAD}/branch-diff`)).toBe(null)
   })
 })

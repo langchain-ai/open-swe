@@ -44,9 +44,8 @@ function setup(overrides?: (path: string) => Response | undefined) {
     const path = new URL(input, "http://localhost").pathname
     const response = overrides?.(path)
     if (response) return response
-    if (path === "/dashboard/api/incidents/records/local-1")
-      return Response.json(record)
-    if (path === "/dashboard/api/incidents/documents/local-1")
+    if (path === "/api/incidents/records/local-1") return Response.json(record)
+    if (path === "/api/incidents/documents/local-1")
       return Response.json({ incident_id: "local-1", postmortem: { markdown } })
     return Response.json({ detail: "Unexpected request" }, { status: 404 })
   })

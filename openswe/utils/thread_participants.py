@@ -273,7 +273,7 @@ async def resolve_thread_participant_logins(
         unresolved_count += source_unresolved
     elif source == "dashboard":
         if not metadata.get(PARTICIPANT_LOGINS_KEY):
-            raise ValueError("Dashboard participant metadata is unavailable")
+            raise ValueError("Web participant metadata is unavailable")
     elif source == "schedule":
         if not metadata.get(PARTICIPANT_LOGINS_KEY):
             raise ValueError("Schedule participant metadata is unavailable")

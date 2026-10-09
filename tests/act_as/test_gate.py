@@ -72,9 +72,7 @@ async def _answer(approved: bool) -> None:
 @pytest.mark.parametrize("slack_url", [None, "https://example.slack.com/archives/C123/p123456"])
 async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monkeypatch, slack_url):
     _alice(monkeypatch, "U-ALICE")
-    monkeypatch.setattr(
-        gate, "dashboard_thread_url", lambda _: "https://example.com/agents/thread-1"
-    )
+    monkeypatch.setattr(gate, "web_thread_url", lambda _: "https://example.com/agents/thread-1")
     if slack_url:
         monkeypatch.setattr(
             gate, "get_active_slack_thread", AsyncMock(return_value={"permalink": slack_url})

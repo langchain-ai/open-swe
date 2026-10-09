@@ -143,7 +143,7 @@ async def find_expired_wakeup_cron_ids(client: Any, *, now: datetime) -> list[st
     """Return the ids of ``thread_wakeup`` crons whose ``end_time`` has passed.
 
     Conservative: matches solely on ``metadata.kind == "thread_wakeup"`` AND a
-    past ``end_time``, so analyzer/dashboard crons are never selected. Paginates
+    past ``end_time``, so analyzer/web crons are never selected. Paginates
     fully before returning so the result is stable to delete afterwards.
     """
     expired_ids: list[str] = []

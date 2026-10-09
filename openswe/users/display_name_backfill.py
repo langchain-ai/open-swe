@@ -1,10 +1,10 @@
 """Fill in the display names the legacy import never had.
 
 The legacy ``user_mappings`` import created users with only a GitHub login and
-a Slack identity, so most rows pre-dating dashboard sign in carry an empty
+a Slack identity, so most rows pre-dating web sign in carry an empty
 ``display_name``. Every Slack request already resolves the sender's profile
 name for the prompt context; this persists it, once, when the table does not
-have a name yet. A name from the dashboard GitHub sign in is the person's own
+have a name yet. A name from the web app GitHub sign in is the person's own
 claim on their account and is never overwritten.
 """
 
@@ -22,7 +22,7 @@ async def persist_display_name(slack_user_id: str, name: str) -> None:
     """Give the person behind ``slack_user_id`` their Slack name, if they are nameless.
 
     The rename is conditional on the stored name still being empty inside the
-    same UPDATE, so a dashboard sign in that lands between the Slack lookup and
+    same UPDATE, so a web sign in that lands between the Slack lookup and
     this write can never lose the GitHub name it claimed — and the first
     backfill wins for each person. An empty or ``unknown`` Slack name writes
     nothing.

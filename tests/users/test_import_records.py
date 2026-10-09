@@ -1,11 +1,11 @@
 import pytest
 from sqlalchemy import text
 
-from openswe.dashboard.profiles import PROFILES
 from openswe.database.postgres import transaction
 from openswe.database.store_imports import StoreImport, run_store_import
 from openswe.users.import_records import import_user_records
 from openswe.users.models import User
+from openswe.web.profiles import PROFILES
 from tests.conftest import FakeStore
 
 pytestmark = pytest.mark.usefixtures("registry_db")

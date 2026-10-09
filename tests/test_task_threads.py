@@ -9,7 +9,6 @@ from fastapi import HTTPException
 from pydantic import JsonValue
 from sqlalchemy import func, select
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.database import postgres
 from openswe.tasks import flags, presentation, service, store
 from openswe.tasks import messages as task_messages
@@ -19,6 +18,7 @@ from openswe.tasks.schemas import ThreadMetadata
 from openswe.threads import access, creation, handlers
 from openswe.users import User
 from openswe.users.models import UserIdentity
+from openswe.web.workspace_settings import WorkspaceSettings
 from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
 from openswe.webhooks.event_subscriptions import EventSubscription

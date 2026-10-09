@@ -35,7 +35,7 @@ Args:
     base: The branch you want to merge into (e.g. "main").
     title: PR title.
     body: PR description (Markdown).
-    draft: Requested draft status. The authenticated user's dashboard preference
+    draft: Requested draft status. The authenticated user's web preference
       overrides this value for newly created PRs; existing PRs are returned unchanged.
     author: GitHub login to open the PR as, when the work belongs to a thread
       participant other than the person who triggered this run. Leave empty to

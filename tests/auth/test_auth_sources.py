@@ -19,15 +19,15 @@ def _slack_config(github_login: str | None = "mason-gh") -> dict:
     return {"configurable": configurable}
 
 
-def _stub_dashboard_store(
+def _stub_web_store(
     monkeypatch: pytest.MonkeyPatch,
     *,
     token: str | None,
     expires_at: str | None = "2099-01-01T00:00:00Z",
     cached: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    from openswe.dashboard import profiles
     from openswe.github.thread_token import cache_github_token_for_thread
+    from openswe.web import profiles
 
     if cached[0]:
         cache_github_token_for_thread("t1", cached[0], cached[1], principal="login:mason-gh")
@@ -53,10 +53,10 @@ def _stub_dashboard_store(
     monkeypatch.setattr(profiles, "get_oauth_token_record", fake_get_record)
 
 
-def test_resolve_github_token_slack_uses_dashboard_store(
+def test_resolve_github_token_slack_uses_web_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub_dashboard_store(monkeypatch, token="user-tok")
+    _stub_web_store(monkeypatch, token="user-tok")
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
     token, expires_at = asyncio.run(auth.resolve_github_token(_slack_config(), "t1"))
@@ -69,7 +69,7 @@ def test_resolve_github_token_slack_ignores_stale_thread_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A private run must refresh its owner token instead of trusting an older cache entry.
-    _stub_dashboard_store(
+    _stub_web_store(
         monkeypatch,
         token="bob-token",
         cached=("alice-token", "2099-01-01T00:00:00Z"),
@@ -84,7 +84,7 @@ def test_resolve_github_token_slack_ignores_stale_thread_cache(
 def test_resolve_github_token_slack_no_token_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub_dashboard_store(monkeypatch, token=None)
+    _stub_web_store(monkeypatch, token=None)
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
     with pytest.raises(auth.GitHubUserAuthRequired):
@@ -94,7 +94,7 @@ def test_resolve_github_token_slack_no_token_raises(
 def test_resolve_github_token_per_user_wins_over_bot_only_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub_dashboard_store(monkeypatch, token="user-tok")
+    _stub_web_store(monkeypatch, token="user-tok")
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
 
     async def fail_bot(thread_id: str):
@@ -109,7 +109,7 @@ def test_resolve_github_token_per_user_wins_over_bot_only_mode(
 def test_private_slack_no_token_requires_auth_in_bot_only_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub_dashboard_store(monkeypatch, token=None)
+    _stub_web_store(monkeypatch, token=None)
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
 
     async def fake_bot(thread_id: str):
@@ -132,10 +132,10 @@ def _linear_config(github_login: str | None = "mason-gh") -> dict:
     return {"configurable": configurable}
 
 
-def test_resolve_github_token_linear_uses_dashboard_store(
+def test_resolve_github_token_linear_uses_web_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub_dashboard_store(monkeypatch, token="user-tok")
+    _stub_web_store(monkeypatch, token="user-tok")
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
     token, expires_at = asyncio.run(auth.resolve_github_token(_linear_config(), "t1"))
@@ -147,7 +147,7 @@ def test_resolve_github_token_linear_uses_dashboard_store(
 def test_resolve_github_token_linear_no_token_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub_dashboard_store(monkeypatch, token=None)
+    _stub_web_store(monkeypatch, token=None)
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: False)
 
     with pytest.raises(auth.GitHubUserAuthRequired):
@@ -157,7 +157,7 @@ def test_resolve_github_token_linear_no_token_raises(
 def test_private_linear_no_token_requires_auth_in_bot_only_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub_dashboard_store(monkeypatch, token=None)
+    _stub_web_store(monkeypatch, token=None)
     monkeypatch.setattr(auth, "is_bot_token_only_mode", lambda: True)
 
     async def fake_bot(thread_id: str):

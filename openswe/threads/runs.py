@@ -1,4 +1,4 @@
-"""Turning a dashboard request into a LangGraph run: bodies, models, images, commands."""
+"""Turning a web request into a LangGraph run: bodies, models, images, commands."""
 
 import base64
 import binascii
@@ -14,24 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
-from openswe.dashboard.admin import is_admin
-from openswe.dashboard.agent_overrides import normalize_profile_overrides
-from openswe.dashboard.options import (
-    DEPRECATED_MODEL_IDS,
-    default_vision_model_pair,
-    gate_fable_model,
-    model_supports_images,
-    normalize_model_choice,
-)
-from openswe.dashboard.profiles import get_profile
-from openswe.dashboard.repo_access import (
-    require_repo_access_for_user,
-    require_repo_access_for_workspace,
-)
-from openswe.dashboard.user_preferences import get_user_preferences
-from openswe.dashboard.workspace_settings import (
-    get_workspace_settings,
-)
 from openswe.database import postgres
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
@@ -58,15 +40,15 @@ from openswe.slack.client import (
 )
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
-    _ensure_dashboard_github_token,
+    _ensure_web_github_token,
     agent_version_metadata,
     resolve_run_email,
 )
 from openswe.threads.creation import create_thread
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.summary import (
-    DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
+    WEB_APP_SOURCE,
     _is_thread_resolved,
     _now_ms,
     _parse_repo,
@@ -87,12 +69,30 @@ from openswe.transcript.events import (
 )
 from openswe.transcript.turns import OpenTurn, recorded_turn_id
 from openswe.users import User
-from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.utils.thread_settings import thread_model_choice
+from openswe.utils.web_handoff import WEB_HANDOFF_BODY
+from openswe.web.admin import is_admin
+from openswe.web.agent_overrides import normalize_profile_overrides
+from openswe.web.options import (
+    DEPRECATED_MODEL_IDS,
+    default_vision_model_pair,
+    gate_fable_model,
+    model_supports_images,
+    normalize_model_choice,
+)
+from openswe.web.profiles import get_profile
+from openswe.web.repo_access import (
+    require_repo_access_for_user,
+    require_repo_access_for_workspace,
+)
+from openswe.web.user_preferences import get_user_preferences
+from openswe.web.workspace_settings import (
+    get_workspace_settings,
+)
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ logger = logging.getLogger(__name__)
 _ASSISTANT_ID = "agent"
 API_SOURCE = "api"
 # Modes required for the v3 event-stream protocol (`POST …/stream/events`).
-DASHBOARD_STREAM_MODES: tuple[str, ...] = (
+WEB_STREAM_MODES: tuple[str, ...] = (
     "values",
     "updates",
     "messages",
@@ -110,11 +110,11 @@ DASHBOARD_STREAM_MODES: tuple[str, ...] = (
     "events",
 )
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-_MAX_DASHBOARD_IMAGES = 5
-_MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
-_DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
+_MAX_WEB_IMAGES = 5
+_MAX_WEB_IMAGE_BYTES = 10 * 1024 * 1024
+_WEB_HANDOFF_SYSTEM: SystemIdentity = {
     "id": "system:dashboard-handoff",
-    "display_name": "Dashboard handoff",
+    "display_name": "Web handoff",
     "platform": "open-swe",
 }
 _SANDBOX_HANDOFF_SYSTEM: SystemIdentity = {
@@ -133,7 +133,7 @@ class _LinkedPullRequest(BaseModel):
     pr_url: str | None = None
 
 
-class DashboardImageBody(BaseModel):
+class WebImageBody(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     kind: str | None = None
@@ -182,7 +182,7 @@ def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tu
         return model_id, effort
     fallback_model_id, fallback_effort = default_vision_model_pair()
     logger.info(
-        "Using vision fallback model %s for dashboard image input; configured model %s "
+        "Using vision fallback model %s for web image input; configured model %s "
         "does not support images",
         fallback_model_id,
         model_id,
@@ -190,29 +190,27 @@ def _with_vision_fallback(model_id: str, effort: str, *, has_images: bool) -> tu
     return fallback_model_id, fallback_effort
 
 
-def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
+def _decode_web_image(image: WebImageBody) -> bytes:
     if image.mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
         raise HTTPException(422, f"unsupported image type: {image.mime_type}")
     try:
         data = base64.b64decode(image.base64, validate=True)
     except binascii.Error as exc:
         raise HTTPException(422, "invalid image data") from exc
-    if len(data) > _MAX_DASHBOARD_IMAGE_BYTES:
+    if len(data) > _MAX_WEB_IMAGE_BYTES:
         raise HTTPException(422, "image exceeds 10MB limit")
     return data
 
 
-def _image_blocks(
-    images: list[DashboardImageBody], *, model_id: str | None
-) -> list[ImageContentBlock]:
-    if len(images) > _MAX_DASHBOARD_IMAGES:
-        raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
+def _image_blocks(images: list[WebImageBody], *, model_id: str | None) -> list[ImageContentBlock]:
+    if len(images) > _MAX_WEB_IMAGES:
+        raise HTTPException(422, f"at most {_MAX_WEB_IMAGES} images are supported")
     if images and (not model_id or not model_supports_images(model_id)):
         model_label = model_id or "the current model"
         raise HTTPException(422, f"model {model_label} does not support image input")
     return [
         create_image_block(
-            base64=base64.b64encode(_decode_dashboard_image(image)).decode("ascii"),
+            base64=base64.b64encode(_decode_web_image(image)).decode("ascii"),
             mime_type=image.mime_type,
         )
         for image in images
@@ -220,7 +218,7 @@ def _image_blocks(
 
 
 def _user_message_content(
-    prompt: str, images: list[DashboardImageBody], *, model_id: str | None = None
+    prompt: str, images: list[WebImageBody], *, model_id: str | None = None
 ) -> str | list[ImageContentBlock | dict[str, str]]:
     text = prompt.strip()
     if not text and not images:
@@ -236,7 +234,7 @@ def _user_message_content(
 async def _resolve_requested_workspace(
     requested: object, repo_config: dict[str, str] | None, *, login: str | None
 ) -> str:
-    """The workspace a new dashboard thread lands in.
+    """The workspace a new web thread lands in.
 
     An explicit pick from the composer wins when it names a real workspace;
     otherwise the repository's owner, then the signed-in user's default,
@@ -251,7 +249,7 @@ async def _resolve_requested_workspace(
     return (await resolve_workspace(tag=tag, repo=repo, login=login)).slug
 
 
-async def create_dashboard_thread_record(
+async def create_web_thread_record(
     thread_id: str,
     *,
     login: str,
@@ -259,7 +257,7 @@ async def create_dashboard_thread_record(
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
     prompt: str,
-    images: list[DashboardImageBody] | None = None,
+    images: list[WebImageBody] | None = None,
     title: str | None = None,
     model_id: str | None = None,
     effort: str | None = None,
@@ -268,7 +266,7 @@ async def create_dashboard_thread_record(
     workspace: str | None = None,
     extra_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a dashboard thread with immutable ownership and visibility."""
+    """Create a web thread with immutable ownership and visibility."""
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
     prompt = prompt.strip()
@@ -290,8 +288,8 @@ async def create_dashboard_thread_record(
     has_repo = bool(repo_config.get("owner") and repo_config.get("name"))
     initial_title = title or prompt[:80] or "New agent"
     metadata: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
-        "origin": DASHBOARD_SOURCE,
+        "source": WEB_APP_SOURCE,
+        "origin": WEB_APP_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
         "visibility": visibility,
@@ -347,7 +345,7 @@ async def create_dashboard_thread_record(
                 command_id=f"thread:{thread_id}:created",
                 event=ThreadCreated(
                     title=initial_title,
-                    source=DASHBOARD_SOURCE,
+                    source=WEB_APP_SOURCE,
                     owner_login=login.strip(),
                     visibility=visibility,
                     repo_owner=repo_config["owner"] if has_repo else None,
@@ -365,7 +363,7 @@ async def create_dashboard_thread_record(
     return as_thread_dict(thread)
 
 
-async def _build_dashboard_configurable(
+async def _build_web_configurable(
     thread_id: str,
     login: str,
     metadata: Mapping[str, Any],
@@ -420,10 +418,10 @@ class SessionCreateBody(BaseModel):
     start: bool = True
 
 
-async def create_dashboard_session(
+async def create_web_session(
     body: SessionCreateBody, login: str, *, email: str | None = None
 ) -> str:
-    """Create a fresh owned thread using the person's dashboard defaults."""
+    """Create a fresh owned thread using the person's web defaults."""
     profile = await get_profile(login) or {}
     repo = body.repo if body.repo is not None else profile.get("default_repo")
     repo_config = _parse_repo(repo) or {}
@@ -431,8 +429,8 @@ async def create_dashboard_session(
         if not repo_config:
             raise HTTPException(422, "repo must be owner/name")
         await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
-    await _ensure_dashboard_github_token(login)
-    thread = await create_dashboard_thread_record(
+    await _ensure_web_github_token(login)
+    thread = await create_web_thread_record(
         str(uuid.uuid4()),
         login=login,
         email=email,
@@ -444,7 +442,7 @@ async def create_dashboard_session(
     return str(thread["thread_id"])
 
 
-async def start_dashboard_thread(
+async def start_web_thread(
     login: str,
     email: str | None,
     *,
@@ -453,7 +451,7 @@ async def start_dashboard_thread(
     repos: Sequence[str],
     visibility: Literal["public", "private"],
 ) -> str:
-    """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
+    """Start a person's web thread; the first repo is the one its sandbox opens in."""
     repo_configs: list[dict[str, str]] = []
     for repo in repos:
         repo_config = _parse_repo(repo)
@@ -461,9 +459,9 @@ async def start_dashboard_thread(
             raise HTTPException(422, "repos must be owner/name")
         await require_repo_access_for_user(login, f"{repo_config['owner']}/{repo_config['name']}")
         repo_configs.append(repo_config)
-    await _ensure_dashboard_github_token(login)
+    await _ensure_web_github_token(login)
     primary = repo_configs[0] if repo_configs else {}
-    thread = await create_dashboard_thread_record(
+    thread = await create_web_thread_record(
         str(uuid.uuid4()),
         login=login,
         email=email,
@@ -478,8 +476,8 @@ async def start_dashboard_thread(
     await dispatch_agent_run(
         thread_id,
         prompt,
-        await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
-        source=DASHBOARD_SOURCE,
+        await _build_web_configurable(thread_id, login, thread_metadata(thread)),
+        source=WEB_APP_SOURCE,
         thread_title=None,
         client=client,
     )
@@ -495,12 +493,10 @@ async def start_sandbox_guest_run(
     overrides: dict[str, Any],
 ) -> str:
     """Start a run on a thread a sandbox program talks to, with the tool results it ran for it."""
-    await _ensure_dashboard_github_token(login)
+    await _ensure_web_github_token(login)
     client = langgraph_client()
     metadata = thread_metadata(await client.threads.get(thread_id))
-    configurable = await _build_dashboard_configurable(
-        thread_id, login, metadata, overrides=overrides
-    )
+    configurable = await _build_web_configurable(thread_id, login, metadata, overrides=overrides)
     if tool_results:
         user = [{"role": "user", "content": prompt}] if prompt else []
         run = await create_durable_run(
@@ -508,7 +504,7 @@ async def start_sandbox_guest_run(
             _ASSISTANT_ID,
             input={"messages": [*tool_results, *user]},
             config={"configurable": configurable},
-            source=DASHBOARD_SOURCE,
+            source=WEB_APP_SOURCE,
             thread_title=None,
             client=client,
             multitask_strategy="enqueue",
@@ -518,7 +514,7 @@ async def start_sandbox_guest_run(
             thread_id,
             prompt,
             configurable,
-            source=DASHBOARD_SOURCE,
+            source=WEB_APP_SOURCE,
             thread_title=None,
             client=client,
             multitask_strategy="enqueue",
@@ -580,11 +576,11 @@ def _command_prompt_text(content: Any) -> str:
     return ""
 
 
-def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
+def _web_images_from_content(content: Any) -> list[WebImageBody]:
     """Read inline image blocks for size, format, and model validation."""
     if not isinstance(content, list):
         return []
-    images: list[DashboardImageBody] = []
+    images: list[WebImageBody] = []
     for block in content:
         if isinstance(block, dict) and block.get("type") == "image_url":
             image_url = block.get("image_url")
@@ -598,7 +594,7 @@ def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
                 or not header.endswith(";base64")
             ):
                 raise HTTPException(422, "images must be embedded as base64 data URLs")
-            images.append(DashboardImageBody(base64=data, mimeType=header[5:-7]))
+            images.append(WebImageBody(base64=data, mimeType=header[5:-7]))
             continue
         if not isinstance(block, dict) or block.get("type") != "image":
             continue
@@ -608,7 +604,7 @@ def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
             raise HTTPException(422, "invalid image data")
         file_name = block.get("file_name") or block.get("fileName")
         images.append(
-            DashboardImageBody(
+            WebImageBody(
                 base64=data,
                 mimeType=mime,
                 fileName=file_name if isinstance(file_name, str) else None,
@@ -618,11 +614,11 @@ def _dashboard_images_from_content(content: Any) -> list[DashboardImageBody]:
 
 
 def _transcript_attachments(
-    images: list[DashboardImageBody], message_id: str
+    images: list[WebImageBody], message_id: str
 ) -> tuple[list[MessageAttachment], tuple[PendingAttachment, ...]]:
     """Attachment rows for a command's images, and the metadata the event carries.
 
-    ``_decode_dashboard_image`` re-applies the type allowlist and the 10MB cap
+    ``_decode_web_image`` re-applies the type allowlist and the 10MB cap
     the run already validated, so nothing reaches the database unchecked.
     """
     metadata: list[MessageAttachment] = []
@@ -636,7 +632,7 @@ def _transcript_attachments(
                 position=position,
                 mime_type=image.mime_type,
                 file_name=image.file_name,
-                data=_decode_dashboard_image(image),
+                data=_decode_web_image(image),
             )
         )
         metadata.append(
@@ -651,7 +647,7 @@ def _transcript_attachments(
 
 def _validate_command_images(content: Any, *, model_id: str | None) -> None:
     """Reject images for text-only models / oversize attachments (raises 422)."""
-    images = _dashboard_images_from_content(content)
+    images = _web_images_from_content(content)
     if images:
         _image_blocks(images, model_id=model_id)
 
@@ -737,7 +733,7 @@ async def _requested_visibility(
     requested = requested_thread_type(configurable)
     if requested == "system":
         # The principal check upstream allows this only for an admin, and an admin's
-        # system thread is not created through the dashboard record at all.
+        # system thread is not created through the web app record at all.
         raise HTTPException(500, "system threads are not created as a person's thread")
     if requested is not None:
         return "private" if requested == "private" else "public"
@@ -761,7 +757,7 @@ async def _attributed_run_messages(
     sandbox_handoff: Mapping[str, Any] | None = None,
     review_chat_pr_url: str | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
-    """The human message a dashboard command carries, attributed to its sender.
+    """The human message a web command carries, attributed to its sender.
 
     Returns the structured messages, the dynamic-context hashes already in the
     conversation, and the ids of the messages the graph already holds.
@@ -788,14 +784,14 @@ async def _attributed_run_messages(
                         and isinstance(message_id := message.get("id"), str)
                     }
         except Exception:
-            logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
+            logger.debug("Could not read web thread history for %s", thread_id, exc_info=True)
     person: PersonIdentity = {"id": sender_id, "github_login": login}
     if email:
         person["email"] = email
     sender_id = (await User.canonical_person(person))["id"]
     notices: list[tuple[SystemIdentity, str]] = []
     if metadata.get("source") == "slack":
-        notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
+        notices.append((_WEB_HANDOFF_SYSTEM, WEB_HANDOFF_BODY))
     if sandbox_handoff is not None:
         to_cloud = sandbox_handoff.get("sandbox_id") is None
         carried = sandbox_handoff.get(HANDOFF_FROM_KEY) is not None
@@ -853,7 +849,7 @@ async def _enrich_run_start_command(
         params = {}
         command["params"] = params
 
-    await _ensure_dashboard_github_token(login)
+    await _ensure_web_github_token(login)
 
     client_config = params.get("config")
     if not isinstance(client_config, dict):
@@ -891,7 +887,7 @@ async def _enrich_run_start_command(
     content = _command_message_content(params)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
-    command_images = _dashboard_images_from_content(content)
+    command_images = _web_images_from_content(content)
     invocation_id = new_invocation_id()
     invocation_started_at = datetime.now(UTC).isoformat()
     overrides = with_invocation_id(None, invocation_id)
@@ -901,14 +897,14 @@ async def _enrich_run_start_command(
 
     if creating:
         # First ``run.start`` for a client-minted thread id: stamp the full
-        # dashboard thread record (owner, title, repo, model) and validate any
+        # web thread record (owner, title, repo, model) and validate any
         # attached images against the resolved model before the run is
         # forwarded to LangGraph. The repo hint rides in the client
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
         visibility = await _requested_visibility(client_configurable, login=login)
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
-        thread = await create_dashboard_thread_record(
+        thread = await create_web_thread_record(
             thread_id,
             login=login,
             email=email,
@@ -974,7 +970,7 @@ async def _enrich_run_start_command(
     if isinstance(run_input, dict):
         run_input["messages"] = structured
     metadata_update: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
+        "source": WEB_APP_SOURCE,
         # Continuing on the web promotes a `/oswe` question thread for good.
         "unlisted": False,
         "model_selection": model_selection,
@@ -1043,7 +1039,7 @@ async def _enrich_run_start_command(
                             # carries the sender and surface a reader attributes
                             # the message by.
                             text=_command_prompt_text(structured[-1].get("content")),
-                            sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                            sender=MessageSender(login=login, kind=WEB_APP_SOURCE),
                             attachments=attachments,
                             model_id=run_model,
                             effort=run_effort,
@@ -1062,7 +1058,7 @@ async def _enrich_run_start_command(
     overrides["model_selection_changed"] = (
         client_configurable.get("model_selection_changed") is True
     )
-    merged_configurable = await _build_dashboard_configurable(
+    merged_configurable = await _build_web_configurable(
         thread_id,
         login,
         metadata,
@@ -1102,9 +1098,9 @@ async def _enrich_run_start_command(
         params["input"] = {}
 
     params["assistant_id"] = _ASSISTANT_ID
-    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_mode", list(WEB_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    user_id = await _run_user_id({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
+    user_id = await _run_user_id({"configurable": merged_configurable}, source=WEB_APP_SOURCE)
     if user_id:
         run_metadata["user_id"] = user_id
     config_metadata = client_config.get("metadata")
@@ -1124,7 +1120,7 @@ async def _enrich_run_start_command(
 
 
 QUEUED_BY_KEY = "queued_by"
-# The model a dashboard run was started with; thread metadata moves on as soon
+# The model a web run was started with; thread metadata moves on as soon
 # as a follow-up is queued with another one.
 RUN_MODEL_KEY = "agent_model_id"
 
@@ -1159,7 +1155,7 @@ async def steer_running_thread(
     if not isinstance(params, dict):
         params = {}
     content = _command_message_content(params)
-    command_images = _dashboard_images_from_content(content)
+    command_images = _web_images_from_content(content)
     if not _command_prompt_text(content) and not command_images:
         raise HTTPException(422, "a follow-up needs a message")
 
@@ -1207,7 +1203,7 @@ async def steer_running_thread(
                         message_id=message_id,
                         role="human",
                         text=_command_prompt_text(structured[-1].get("content")),
-                        sender=MessageSender(login=login, kind=DASHBOARD_SOURCE),
+                        sender=MessageSender(login=login, kind=WEB_APP_SOURCE),
                         attachments=attachments or None,
                         created_at=datetime.now(UTC),
                     ),
@@ -1232,7 +1228,7 @@ async def steer_running_thread(
         "created_at_ms": _now_ms(),
     }
     if metadata.get("source") == "slack":
-        payload["source"] = DASHBOARD_SOURCE
+        payload["source"] = WEB_APP_SOURCE
     if not await queue_message_for_thread(thread_id, payload):
         raise HTTPException(502, "failed to deliver the follow-up to the running agent")
     # The run may have ended between the busy check and the store write, past
@@ -1264,7 +1260,7 @@ async def steer_running_thread(
     try:
         await _notify_slack_web_handoff(thread_id, metadata, client)
     except Exception:
-        logger.exception("Failed to update Slack message for dashboard handoff on %s", thread_id)
+        logger.exception("Failed to update Slack message for web handoff on %s", thread_id)
     return {
         "id": command.get("id"),
         "type": "success",
@@ -1335,9 +1331,9 @@ async def queue_follow_up_run(
             _ASSISTANT_ID,
             input=run_input if isinstance(run_input, dict) else {},
             config={"configurable": configurable},
-            # Only its sender may withdraw it (``proxy_dashboard_thread_run_cancel``).
+            # Only its sender may withdraw it (``proxy_web_thread_run_cancel``).
             metadata={**enriched_params["metadata"], QUEUED_BY_KEY: login},
-            source=DASHBOARD_SOURCE,
+            source=WEB_APP_SOURCE,
             thread_title=None,
             client=langgraph_client(),
             multitask_strategy="enqueue",
@@ -1418,12 +1414,12 @@ async def dispatch_pending_follow_ups(
     """
     if not await QueuedMessage.for_thread(thread_id):
         return None
-    configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+    configurable = await _build_web_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(
         thread_id,
         None,
         configurable,
-        source=DASHBOARD_SOURCE,
+        source=WEB_APP_SOURCE,
         thread_title=None,
         input={"messages": []},
         metadata={"kind": FOLLOW_UP_PICKUP_KIND},
@@ -1465,7 +1461,7 @@ async def _notify_slack_web_handoff(
         message_ts, error = await post_slack_thread_reply_with_ts(
             channel_id,
             thread_ts,
-            "This conversation has moved to Web; subsequent replies will appear in the dashboard.",
+            "This conversation has moved to Web; subsequent replies will appear in the web app.",
             agent_thread_id=thread_id,
             unfurl_links=False,
             unfurl_media=False,
@@ -1502,7 +1498,7 @@ async def _create_system_thread_record(
 ) -> dict[str, Any]:
     """Stamp a thread that belongs to a workspace rather than to a person.
 
-    Deliberately not built from :func:`create_dashboard_thread_record`: there is
+    Deliberately not built from :func:`create_web_thread_record`: there is
     no profile to read defaults from, no owner to record, and no participant to
     merge, and inheriting those would give the thread a person it does not have.
     """
@@ -1595,7 +1591,7 @@ async def _enrich_system_run_start_command(
     prompt = _command_prompt_text(content)
     if not prompt.strip():
         raise HTTPException(422, "a run needs a prompt")
-    if _dashboard_images_from_content(content):
+    if _web_images_from_content(content):
         raise HTTPException(422, "machine principals cannot attach images")
 
     if not creating and client_configurable.get("sandbox_bridge_id") is not None:
@@ -1657,7 +1653,7 @@ async def _enrich_system_run_start_command(
         configurable["repo"] = repo_config
 
     params["assistant_id"] = _ASSISTANT_ID
-    params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
+    params.setdefault("stream_mode", list(WEB_STREAM_MODES))
     params.setdefault("stream_resumable", True)
     params["config"] = {**client_config, "configurable": configurable}
     params["metadata"] = with_invocation_id({**agent_version_metadata()}, invocation_id)

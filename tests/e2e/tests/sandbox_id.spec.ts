@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Exercises the sidebar's "Copy sandbox ID" action against the REAL dashboard
+// Exercises the sidebar's "Copy sandbox ID" action against the REAL web
 // UI and a REAL (local-provider) sandbox: the Slack flow runs the agent, which
 // creates a sandbox and stamps its id into the thread metadata, and the UI
 // copies that same id. Only the LLM/GitHub/Slack boundaries are faked.
@@ -40,7 +40,7 @@ const copyItem = (page: Page) =>
 
 async function getSandboxId(page: Page, threadId: string): Promise<string> {
   const response = await page.request.get(
-    `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+    `/api/threads/${threadId}?mark_viewed=false`,
   );
   expect(response.ok()).toBeTruthy();
   const thread: { sandboxId?: string | null } = await response.json();
@@ -50,7 +50,7 @@ async function getSandboxId(page: Page, threadId: string): Promise<string> {
   return thread.sandboxId;
 }
 
-test.describe("thread sandbox id (real dashboard UI)", () => {
+test.describe("thread sandbox id (real web UI)", () => {
   test("desktop: context menu copies the real sandbox id", async ({
     page,
     baseURL,

@@ -5,12 +5,12 @@ describe("backendProxy", () => {
   const originalFetch = globalThis.fetch
 
   beforeEach(() => {
-    process.env.DASHBOARD_API_URL = "https://backend.example.com"
+    process.env.WEB_API_URL = "https://backend.example.com"
   })
 
   afterEach(() => {
     globalThis.fetch = originalFetch
-    delete process.env.DASHBOARD_API_URL
+    delete process.env.WEB_API_URL
   })
 
   it("drops request framing headers undici refuses to send", async () => {
@@ -19,7 +19,7 @@ describe("backendProxy", () => {
 
     await backendProxy({
       req: new Request(
-        "https://dashboard.example.com/dashboard/api/threads/pull-request-checks",
+        "https://web.example.com/api/threads/pull-request-checks",
         {
           method: "POST",
           headers: {
@@ -59,7 +59,7 @@ describe("backendProxy", () => {
     ) as typeof fetch
     const response = await backendProxy({
       req: new Request(
-        "https://dashboard.example.com/dashboard/api/threads/thread-a/stream/events",
+        "https://web.example.com/api/threads/thread-a/stream/events",
         { method: "POST" }
       ),
     })

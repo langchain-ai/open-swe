@@ -138,7 +138,7 @@ class ReviewCounts(BaseModel):
 
 
 class ReviewSummary(BaseModel):
-    """A reviewer thread's durable state, as the dashboard reads it."""
+    """A reviewer thread's durable state, as the web app reads it."""
 
     thread_id: str
     owner: str

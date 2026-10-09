@@ -10,8 +10,8 @@ from openswe.tasks import presentation, store
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata, TaskEventStatus
 from openswe.tasks.schemas import RunPayload, StateSnapshot
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_thread_url
 from openswe.webhooks.event_subscriptions import EventSubscription
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ async def worker_finished(
             "tasks/finished",
             task_id=str(context.task.id),
             worker_id=thread_id,
-            worker_url=dashboard_thread_url(thread_id),
+            worker_url=web_thread_url(thread_id),
             run_id=run_id,
             status=status,
             result=result,

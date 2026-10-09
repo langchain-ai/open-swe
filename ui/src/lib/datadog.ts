@@ -1,6 +1,6 @@
 import type { RumInitConfiguration } from "@datadog/browser-rum"
 
-import { dashboardApiBase } from "./api-base"
+import { webApiBase } from "./api-base"
 
 type PublicEnv = Record<string, string | boolean | undefined>
 type RumClient = {
@@ -73,7 +73,7 @@ export function subscribeToDatadogInitialization(
   return () => initializationListeners.delete(listener)
 }
 
-function templateDashboardPath(pathname: string): string {
+function templateWebPath(pathname: string): string {
   if (/^\/agents\/reviews\/[^/]+\/[^/]+\/[^/]+\/?$/.test(pathname))
     return "/agents/reviews/:owner/:repo/:number"
   if (/^\/agents\/local\/[^/]+\/?$/.test(pathname))
@@ -96,25 +96,22 @@ function templateDashboardPath(pathname: string): string {
   return pathname
 }
 
-function stripUrlDetails(url: string, dashboardOrigin?: string): string {
+function stripUrlDetails(url: string, webOrigin?: string): string {
   const withoutDetails = url.split(/[?#]/, 1)[0] ?? ""
   if (withoutDetails.startsWith("/"))
     return withoutDetails.startsWith("//")
-      ? stripAbsoluteUrlDetails(withoutDetails, dashboardOrigin)
-      : templateDashboardPath(withoutDetails)
+      ? stripAbsoluteUrlDetails(withoutDetails, webOrigin)
+      : templateWebPath(withoutDetails)
   if (!/^https?:\/\//i.test(withoutDetails)) return withoutDetails
-  return stripAbsoluteUrlDetails(withoutDetails, dashboardOrigin)
+  return stripAbsoluteUrlDetails(withoutDetails, webOrigin)
 }
 
-function stripAbsoluteUrlDetails(
-  url: string,
-  dashboardOrigin?: string
-): string {
+function stripAbsoluteUrlDetails(url: string, webOrigin?: string): string {
   try {
-    const parsed = new URL(url, dashboardOrigin)
+    const parsed = new URL(url, webOrigin)
     const pathname =
-      parsed.origin === dashboardOrigin
-        ? templateDashboardPath(parsed.pathname)
+      parsed.origin === webOrigin
+        ? templateWebPath(parsed.pathname)
         : parsed.pathname
     const prefix = url.startsWith("//") ? `//${parsed.host}` : parsed.origin
     return `${prefix}${pathname}`
@@ -125,7 +122,7 @@ function stripAbsoluteUrlDetails(
 
 function stripEventUrlDetails(
   value: unknown,
-  dashboardOrigin?: string,
+  webOrigin?: string,
   seen = new WeakSet<object>()
 ): void {
   if (!value || typeof value !== "object" || seen.has(value)) return
@@ -140,9 +137,9 @@ function stripEventUrlDetails(
         key === "resource_url" ||
         key === "source_url")
     ) {
-      record[key] = stripUrlDetails(child, dashboardOrigin)
+      record[key] = stripUrlDetails(child, webOrigin)
     } else {
-      stripEventUrlDetails(child, dashboardOrigin, seen)
+      stripEventUrlDetails(child, webOrigin, seen)
     }
   }
 }
@@ -150,13 +147,13 @@ function stripEventUrlDetails(
 function sanitizeEventUrls(
   event: Parameters<NonNullable<RumInitConfiguration["beforeSend"]>>[0]
 ): boolean {
-  let dashboardOrigin: string | undefined
+  let webOrigin: string | undefined
   const viewUrl = (event as { view?: { url?: unknown } }).view?.url
   if (typeof viewUrl === "string" && URL.canParse(viewUrl))
-    dashboardOrigin = new URL(viewUrl).origin
-  dashboardOrigin ??=
+    webOrigin = new URL(viewUrl).origin
+  webOrigin ??=
     typeof window === "undefined" ? undefined : window.location.origin
-  stripEventUrlDetails(event, dashboardOrigin)
+  stripEventUrlDetails(event, webOrigin)
   return true
 }
 
@@ -172,10 +169,10 @@ export async function initializeDatadogRum(
   const version = envString(env, "VITE_DATADOG_VERSION")
   let environment: string
   try {
-    const response = await fetch(
-      `${dashboardApiBase()}/dashboard/api/analytics/config`,
-      { cache: "no-store", signal: AbortSignal.timeout(5000) }
-    )
+    const response = await fetch(`${webApiBase()}/api/analytics/config`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    })
     if (!response.ok) {
       throw new Error(`Telemetry configuration: ${response.status}`)
     }

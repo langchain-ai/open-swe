@@ -1,7 +1,7 @@
 """Per-thread snapshot of the profile settings a conversation runs under.
 
 Threads are multi-party and long-lived: anyone can reply, and any participant can
-edit their dashboard profile at any time. Thread-level model and repository
+edit their web profile at any time. Thread-level model and repository
 settings are therefore resolved once on the first run and stored on the thread.
 Sender identity, personal instructions, and PR preferences remain per-message
 context.
@@ -16,8 +16,8 @@ from typing import Any, TypedDict
 
 from pydantic import TypeAdapter, ValidationError
 
-from openswe.dashboard.options import SUPPORTED_MODEL_IDS, normalize_model_choice
 from openswe.utils import ttl_cache
+from openswe.web.options import SUPPORTED_MODEL_IDS, normalize_model_choice
 
 logger = logging.getLogger(__name__)
 

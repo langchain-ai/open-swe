@@ -248,7 +248,7 @@ class GitHubClient:
         including when GitHub still rejects the refreshed token.
         """
         # profiles imports this module.
-        from openswe.dashboard.profiles import get_valid_access_token
+        from openswe.web.profiles import get_valid_access_token
 
         token = await get_valid_access_token(login)
         if not token:
@@ -259,7 +259,7 @@ class GitHubClient:
     async def _refreshed_token(self, login: str) -> str:
         """One refresh per client, shared by every request that GitHub rejected."""
         # profiles imports this module.
-        from openswe.dashboard.profiles import get_valid_access_token
+        from openswe.web.profiles import get_valid_access_token
 
         async def refresh() -> str:
             if token := await get_valid_access_token(login, force_refresh=True):

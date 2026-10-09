@@ -162,7 +162,7 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
         metadata={"visibility": "public", "owner_type": "user", "owner_login": "Alice"},
     )
     monkeypatch.setattr(
-        "openswe.dashboard.profiles.get_valid_access_token",
+        "openswe.web.profiles.get_valid_access_token",
         AsyncMock(side_effect={"Alice": "alice-token", "bob": "bob-token"}.get),
     )
     monkeypatch.setattr(
@@ -235,7 +235,7 @@ def test_profile_draft_preference_overrides_tool_argument(monkeypatch: pytest.Mo
 def test_private_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})
 
-    from openswe.dashboard import profiles
+    from openswe.web import profiles
 
     async def no_user_token(login: str, **_kw: Any) -> str | None:
         return None
@@ -261,7 +261,7 @@ def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch, fake_store)
         metadata={"visibility": "public", "owner_type": "user", "owner_login": "alice"},
     )
 
-    from openswe.dashboard import profiles
+    from openswe.web import profiles
 
     monkeypatch.setattr(
         profiles,
@@ -409,7 +409,7 @@ def _stub_plan(monkeypatch: pytest.MonkeyPatch, plan: dict[str, Any] | None) -> 
 def test_plan_reference_survives_source_reference_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("WEB_BASE_URL", "https://web.example")
     _set_config(
         monkeypatch,
         {
@@ -437,14 +437,14 @@ def test_plan_reference_survives_source_reference_failure(
     _open_with_body("body")
 
     sent_body = client.post_calls[0]["json"]["body"]
-    assert "- [Plan](https://dashboard.example/agents/thread-1/plan)" in sent_body
+    assert "- [Plan](https://web.example/agents/thread-1/plan)" in sent_body
     assert client.post_calls
 
 
 def test_public_repo_appends_plan_and_slack_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("WEB_BASE_URL", "https://web.example")
     _set_config(
         monkeypatch,
         {
@@ -474,7 +474,7 @@ def test_public_repo_appends_plan_and_slack_reference(
     _open_with_body("body")
 
     sent_body = client.post_calls[0]["json"]["body"]
-    assert "- [Plan](https://dashboard.example/agents/thread-1/plan)" in sent_body
+    assert "- [Plan](https://web.example/agents/thread-1/plan)" in sent_body
     assert "- [Slack thread](https://slack.example/p1)" in sent_body
 
 
@@ -668,7 +668,7 @@ def test_updating_pr_preserves_original_feedback_run() -> None:
 def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, user_records) -> None:
     from cryptography.fernet import Fernet
 
-    from openswe.dashboard import profiles
+    from openswe.web import profiles
 
     monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
     _set_config(monkeypatch, {"source": "slack", "github_login": "johannes117"})

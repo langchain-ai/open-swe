@@ -6,10 +6,7 @@ import {
   type Page,
 } from "@playwright/test";
 
-import {
-  dismissOnboardingIfShown,
-  waitForThreadIdle,
-} from "./helpers/dashboard";
+import { dismissOnboardingIfShown, waitForThreadIdle } from "./helpers/web";
 
 const USER = {
   login: "threads-workspace-e2e",
@@ -50,7 +47,7 @@ const TITLES = {
   pinnedRepo: "E2E Workspace Pinned repository chat",
 } as const;
 
-// Filled in by seedSchedules: the dashboard API assigns automation ids.
+// Filled in by seedSchedules: the web app API assigns automation ids.
 const SCHEDULE_IDS = { daily: "", weekly: "" };
 
 interface ThreadSeed {
@@ -318,7 +315,7 @@ async function seedSchedules(request: APIRequestContext) {
   ];
 
   for (const schedule of schedules) {
-    const response = await request.post("/dashboard/api/schedules", {
+    const response = await request.post("/api/schedules", {
       data: schedule.body,
       headers: SAME_ORIGIN_HEADERS,
     });
@@ -327,7 +324,7 @@ async function seedSchedules(request: APIRequestContext) {
     SCHEDULE_IDS[schedule.key] = id;
     createdScheduleIds.add(id);
     if (!schedule.enabled) {
-      const paused = await request.patch(`/dashboard/api/schedules/${id}`, {
+      const paused = await request.patch(`/api/schedules/${id}`, {
         data: { enabled: false },
         headers: SAME_ORIGIN_HEADERS,
       });
@@ -350,10 +347,9 @@ async function cleanupFixtures(request: APIRequestContext) {
     expect(login.ok(), await login.text()).toBeTruthy();
   }
   for (const scheduleId of createdScheduleIds) {
-    const response = await request.delete(
-      `/dashboard/api/schedules/${scheduleId}`,
-      { headers: SAME_ORIGIN_HEADERS },
-    );
+    const response = await request.delete(`/api/schedules/${scheduleId}`, {
+      headers: SAME_ORIGIN_HEADERS,
+    });
     expect([200, 204, 404]).toContain(response.status());
   }
   createdThreadIds.clear();
@@ -365,7 +361,7 @@ function waitForThreadsPage(page: Page, expected: Record<string, string>) {
     const url = new URL(response.url());
     return (
       response.request().method() === "GET" &&
-      url.pathname === "/dashboard/api/threads/page" &&
+      url.pathname === "/api/threads/page" &&
       Object.entries(expected).every(
         ([key, value]) => url.searchParams.get(key) === value,
       )
@@ -437,7 +433,7 @@ test.describe("threads workspace", () => {
       },
     ]);
     await loginAs(page);
-    await page.route("**/dashboard/api/me", async (route) => {
+    await page.route("**/api/me", async (route) => {
       const response = await route.fetch();
       const session = (await response.json()) as Record<string, unknown>;
       await route.fulfill({
@@ -452,7 +448,7 @@ test.describe("threads workspace", () => {
     const profileGate = deferred();
     const profileStarted = deferred();
     const profileFinished = deferred();
-    await page.route("**/dashboard/api/profile", async (route) => {
+    await page.route("**/api/profile", async (route) => {
       profileStarted.resolve();
       await profileGate.promise;
       await route.fulfill({ json: {} });
@@ -709,7 +705,7 @@ test.describe("automation run history", () => {
     expect(loginResponse.ok()).toBeTruthy();
 
     const triggerResponse = await page.request.post(
-      `/dashboard/api/schedules/${SCHEDULE_IDS.daily}/trigger`,
+      `/api/schedules/${SCHEDULE_IDS.daily}/trigger`,
       { headers: SAME_ORIGIN_HEADERS },
     );
     expect(triggerResponse.ok(), await triggerResponse.text()).toBeTruthy();
@@ -723,7 +719,7 @@ test.describe("automation run history", () => {
     await waitForThreadIdle(page, triggered.thread_id);
 
     const producedHistoryResponse = await page.request.get(
-      `/dashboard/api/threads/page?scope=automation&automation_id=${SCHEDULE_IDS.daily}&limit=100&offset=0`,
+      `/api/threads/page?scope=automation&automation_id=${SCHEDULE_IDS.daily}&limit=100&offset=0`,
     );
     expect(
       producedHistoryResponse.ok(),
@@ -747,7 +743,7 @@ test.describe("automation run history", () => {
     );
 
     let failAutomationRuns = true;
-    await page.route("**/dashboard/api/threads/page?*", async (route) => {
+    await page.route("**/api/threads/page?*", async (route) => {
       const url = new URL(route.request().url());
       if (
         failAutomationRuns &&

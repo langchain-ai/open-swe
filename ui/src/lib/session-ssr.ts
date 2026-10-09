@@ -2,12 +2,12 @@ import { redirect } from "@tanstack/react-router"
 import { createIsomorphicFn } from "@tanstack/react-start"
 import { getRequestUrl } from "@tanstack/react-start/server"
 
-import { isCrossOriginApiBase } from "./api-base"
+import { configuredWebApiBase, isCrossOriginApiBase } from "./api-base"
 import { sanitizeAuthRedirect } from "./auth-redirect-core"
 import { sessionQueryOptions } from "./session"
 import type { QueryClient } from "@tanstack/react-query"
 
-const PUBLIC_PATH_RE = /^\/(?:login|dashboard\/api|_serverFn)(?:[/?#]|$)/
+const PUBLIC_PATH_RE = /^\/(?:login|(?:dashboard\/)?api|_serverFn)(?:[/?#]|$)/
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_RE.test(pathname)
@@ -32,12 +32,7 @@ export const resolveSessionOnServer = createIsomorphicFn()
     // this request cannot carry it and `/me` would 401 for a signed-in user —
     // redirecting them to a login page that bounces them straight back. Auth
     // resolution stays client-side there.
-    if (
-      isCrossOriginApiBase(
-        import.meta.env.VITE_DASHBOARD_API_BASE_URL,
-        getRequestUrl().origin
-      )
-    ) {
+    if (isCrossOriginApiBase(configuredWebApiBase(), getRequestUrl().origin)) {
       return
     }
 

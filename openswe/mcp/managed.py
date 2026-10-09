@@ -24,15 +24,15 @@ from mcp import ClientSession
 from mcp.types import PaginatedRequestParams
 from openswe.config import ENV
 from openswe.credential_scope import private_credential_login
-from openswe.dashboard.langsmith_oauth import (
+from openswe.mcp.models import MCPConnection
+from openswe.mcp.runtime import MCPSource
+from openswe.mcp.transport import mcp_http_client
+from openswe.web.langsmith_oauth import (
     LangSmithOAuthError,
     langsmith_access_token,
     langsmith_issuer,
     langsmith_oauth_configured,
 )
-from openswe.mcp.models import MCPConnection
-from openswe.mcp.runtime import MCPSource
-from openswe.mcp.transport import mcp_http_client
 
 logger = logging.getLogger(__name__)
 

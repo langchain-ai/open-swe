@@ -26,8 +26,6 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
-from openswe.dashboard.options import gate_fable_model
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.thread_token import cache_github_token_for_thread
@@ -68,6 +66,8 @@ from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_mode
 from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
+from openswe.web.options import gate_fable_model
+from openswe.web.workspace_settings_cache import cached_workspace_settings
 
 logger = logging.getLogger(__name__)
 

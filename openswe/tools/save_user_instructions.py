@@ -6,10 +6,10 @@ from typing import Any
 from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.agent_overrides import resolve_github_login
-from openswe.dashboard.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
 from openswe.tools.access import Policy, access, unchanged
 from openswe.utils.json_types import as_json_object
+from openswe.web.agent_overrides import resolve_github_login
+from openswe.web.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ async def save_user_instructions(instructions: str) -> dict[str, Any]:
             "error": (
                 "Could not resolve the triggering user's GitHub login, so there is no "
                 "profile to save instructions to. Ask the user to set them in the "
-                "dashboard Profile tab."
+                "web Profile tab."
             ),
         }
 

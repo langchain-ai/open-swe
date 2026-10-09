@@ -12,8 +12,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from openswe.dashboard.options import SUPPORTED_MODEL_IDS
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.openai_responses.conversations import SandboxCaller
 from openswe.openai_responses.ids import OpenSweId
@@ -33,6 +31,8 @@ from openswe.sandboxes.tool_access import OPENAI_PATH
 from openswe.transcript.snapshot import load_head, load_run_start
 from openswe.utils.json_types import run_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.web.options import SUPPORTED_MODEL_IDS
+from openswe.web.workspace_settings import get_workspace_settings
 
 router = APIRouter(prefix=OPENAI_PATH, tags=["sandbox-openai"])
 

@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, patch
 import langgraph_sdk
 import pytest
 
-from openswe.dashboard.personal_settings import SettingValue, patch_personal_settings
-from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.tools.read_user_settings import read_user_settings
 from openswe.tools.save_user_settings import save_user_settings
+from openswe.web.personal_settings import SettingValue, patch_personal_settings
+from openswe.web.user_preferences import USER_PREFERENCES
 from tests.conftest import FakeUserRecords
 
 
@@ -191,7 +191,7 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     before = deepcopy(user_records.items)
     result = await save_user_settings(settings)
     assert result["ok"] is False
-    assert "dashboard" in str(result["error"])
+    assert "web app" in str(result["error"])
     assert user_records.items == before
 
 

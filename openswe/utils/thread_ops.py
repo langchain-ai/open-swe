@@ -1,9 +1,9 @@
-"""Shared LangGraph thread helpers for the dashboard.
+"""Shared LangGraph thread helpers for the web app.
 
 The webhook triggers (Slack / Linear / GitHub) dispatch through
 ``openswe.dispatch.dispatch_agent_run`` with ``multitask_strategy="interrupt"``,
 so they no longer need a busy-check or an in-process lock. The follow-up queue
-(``openswe.message_queue``) is retained for the dashboard's deliberate "inject a
+(``openswe.message_queue``) is retained for the web app's deliberate "inject a
 follow-up into a run that's already in flight" path.
 """
 
@@ -51,7 +51,7 @@ async def thread_run_error(thread_id: str, client: LangGraphClient | None = None
 async def queue_message_for_thread(thread_id: str, message_content: QueuedContent) -> bool:
     """Queue a follow-up message for a busy thread's next model call.
 
-    Used by the dashboard to inject a follow-up into a run that's already in
+    Used by the web app to inject a follow-up into a run that's already in
     flight; webhook triggers use ``multitask_strategy="interrupt"`` instead.
     """
     queue_id = message_content.get("queue_id") if isinstance(message_content, dict) else None

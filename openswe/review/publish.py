@@ -41,7 +41,7 @@ from openswe.review.findings import (
     normalize_finding_title,
     set_reviewer_thread_metadata,
 )
-from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +376,7 @@ def render_status_comment(
     """
     parts = ["## 🔍 Open SWE Review: in progress\n\nOpen SWE is reviewing this PR…"]
     links = []
-    ui_url = dashboard_thread_url(thread_id) if thread_id else None
+    ui_url = web_thread_url(thread_id) if thread_id else None
     if ui_url:
         links.append(f"[Open in Web]({ui_url})")
     if trace_url:

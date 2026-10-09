@@ -1418,7 +1418,7 @@ def _is_move_followup(text: str) -> bool:
 
 
 def _is_pull_request_fix(text: str) -> bool:
-    """A dashboard PR-fix dispatch, whose prompt names an existing PR to repair.
+    """A web PR-fix dispatch, whose prompt names an existing PR to repair.
 
     Without this it lands on the catch-all implement script and opens a *new* PR,
     which renumbers the fake store under whichever spec runs next."""

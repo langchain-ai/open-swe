@@ -32,7 +32,7 @@ from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.sandboxes.lifecycle import get_cached_sandbox_backend
 from openswe.slack.code_channels import repo_context_bar_items, set_context_bar, set_view
 from openswe.slack.http import SlackRequestError
-from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.web_links import web_thread_url
 from openswe.walkthrough.checkout import PinnedCheckout
 from openswe.walkthrough.plan import LineRef
 from openswe.walkthrough.planner import PlanWorkspace
@@ -103,7 +103,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 repo_context_bar_items(
                     {"owner": pr.owner, "name": pr.repo},
                     pr_url=pr.url,
-                    dashboard_url=dashboard_thread_url(self._thread_id) or "",
+                    web_url=web_thread_url(self._thread_id) or "",
                 ),
             )
         except SlackRequestError as exc:

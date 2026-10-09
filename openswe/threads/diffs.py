@@ -98,7 +98,7 @@ def _recovery_patch_command(metadata: dict[str, Any], thread_id: str) -> str:
     return f"python - <<'PY'\n{script}PY"
 
 
-async def get_dashboard_thread_recovery_patch(
+async def get_web_thread_recovery_patch(
     thread_id: str, login: str, *, email: str | None = None
 ) -> tuple[bytes, str]:
     thread = await _authorized_thread(thread_id, login, email=email)
@@ -168,7 +168,7 @@ def _missing_diff() -> dict[str, Any]:
     }
 
 
-async def get_dashboard_thread_working_tree_diff(
+async def get_web_thread_working_tree_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return the sandbox's live working tree against HEAD."""
@@ -203,7 +203,7 @@ def _safe_git_ref(value: Any) -> str | None:
     return value
 
 
-async def get_dashboard_thread_branch_diff(
+async def get_web_thread_branch_diff(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Everything the thread's branch changes against its base.

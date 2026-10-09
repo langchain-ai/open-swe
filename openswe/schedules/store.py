@@ -21,16 +21,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe import event_claims
-from openswe.dashboard.admin import is_admin
-from openswe.dashboard.options import gate_fable_model, normalize_model_choice
-from openswe.dashboard.profiles import get_profile, get_valid_access_token
-from openswe.dashboard.repo_access import (
-    repo_config_for_user,
-    repo_config_for_workspace,
-    repo_is_private,
-    require_repo_access_for_workspace,
-)
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.database import postgres
 from openswe.database.postgres import transaction
 from openswe.dispatch import create_durable_run
@@ -50,6 +40,16 @@ from openswe.threads.creation import create_thread
 from openswe.users import User
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.web.admin import is_admin
+from openswe.web.options import gate_fable_model, normalize_model_choice
+from openswe.web.profiles import get_profile, get_valid_access_token
+from openswe.web.repo_access import (
+    repo_config_for_user,
+    repo_config_for_workspace,
+    repo_is_private,
+    require_repo_access_for_workspace,
+)
+from openswe.web.workspace_settings import get_workspace_settings
 from openswe.webhooks.common import enforce_public_repo_org_gate, repo_private_from_payload
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
@@ -475,7 +475,7 @@ async def list_agent_schedules() -> list[dict[str, Any]]:
     return [_schedule_summary(record) for record in records]
 
 
-async def _ensure_dashboard_github_token(login: str) -> None:
+async def _ensure_web_github_token(login: str) -> None:
     token = await get_valid_access_token(login)
     if not token:
         raise HTTPException(401, "github token unavailable, re-login required")
@@ -677,7 +677,7 @@ async def create_agent_schedule(
         profile: dict[str, Any] = {}
         run_email = email
     else:
-        await _ensure_dashboard_github_token(login)
+        await _ensure_web_github_token(login)
         profile = await get_profile(login) or {}
         run_email = await resolve_run_email(login, profile) or email
     triggers = await _checked_triggers(

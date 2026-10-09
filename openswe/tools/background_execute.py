@@ -10,12 +10,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from openswe.dashboard.profiles import get_profile
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
 from openswe.utils.background_task_state import update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
+from openswe.web.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 

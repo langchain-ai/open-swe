@@ -1,29 +1,23 @@
 import { describe, expect, it } from "vitest"
 
-import { isCrossOriginApiBase, resolveDashboardApiBase } from "./api-base"
+import { isCrossOriginApiBase, resolveWebApiBase } from "./api-base"
 
-describe("resolveDashboardApiBase", () => {
+describe("resolveWebApiBase", () => {
   it("uses the configured API for the web UI", () => {
-    expect(resolveDashboardApiBase(undefined, "https:")).toBe("")
-    expect(resolveDashboardApiBase("", "https:", "/open-swe/")).toBe(
-      "/open-swe"
-    )
+    expect(resolveWebApiBase(undefined, "https:")).toBe("")
+    expect(resolveWebApiBase("", "https:", "/open-swe/")).toBe("/open-swe")
     expect(
-      resolveDashboardApiBase(
-        "https://backend.example/",
-        "https:",
-        "/open-swe/"
-      )
+      resolveWebApiBase("https://backend.example/", "https:", "/open-swe/")
     ).toBe("https://backend.example")
-    expect(resolveDashboardApiBase("https://backend.example/", "https:")).toBe(
+    expect(resolveWebApiBase("https://backend.example/", "https:")).toBe(
       "https://backend.example"
     )
   })
 
   it("uses the Electron proxy even if the build has a configured API", () => {
-    expect(
-      resolveDashboardApiBase("https://maintainer.example", "open-swe:")
-    ).toBe("")
+    expect(resolveWebApiBase("https://maintainer.example", "open-swe:")).toBe(
+      ""
+    )
   })
 })
 
@@ -33,7 +27,7 @@ describe("isCrossOriginApiBase", () => {
     expect(isCrossOriginApiBase("", "https://dash.example")).toBe(false)
   })
 
-  it("treats a base on the dashboard's own origin as same-origin", () => {
+  it("treats a base on the web app's own origin as same-origin", () => {
     expect(
       isCrossOriginApiBase("https://dash.example/", "https://dash.example")
     ).toBe(false)

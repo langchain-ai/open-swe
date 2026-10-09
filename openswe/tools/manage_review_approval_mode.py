@@ -3,7 +3,6 @@
 from typing import Literal
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.review.approvals import fetch_approvals_md
 from openswe.review.styles import (
     REVIEW_STYLES,
@@ -14,6 +13,7 @@ from openswe.review.styles import (
 )
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable
+from openswe.web.repo_access import require_repo_access_for_user
 
 _READ = Policy(trusted="admin_surface", actor="admin")
 _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "mode"))

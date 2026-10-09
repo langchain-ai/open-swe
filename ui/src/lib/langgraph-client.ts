@@ -3,7 +3,7 @@ import { Client } from "@langchain/langgraph-sdk"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
 /** Streams and client reads must carry the session cookie across origins. */
-export const dashboardFetch: typeof fetch = withRequestTiming((input, init) =>
+export const webFetch: typeof fetch = withRequestTiming((input, init) =>
   fetch(input, { ...init, credentials: "include" })
 )
 
@@ -16,10 +16,10 @@ export function absoluteApiUrl(url: string): string {
   return url
 }
 
-/** A LangGraph client for a dashboard-proxied graph endpoint. */
-export function createDashboardClient(
+/** A LangGraph client for a web-proxied graph endpoint. */
+export function createWebClient(
   apiUrl: string,
-  fetcher: typeof fetch = dashboardFetch
+  fetcher: typeof fetch = webFetch
 ): Client {
   return new Client({
     apiUrl: absoluteApiUrl(apiUrl),

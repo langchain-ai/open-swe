@@ -370,10 +370,10 @@ async def resolve_with_agent(
 
 
 async def typecheck() -> str | None:
-    """Errors from typechecking the dashboard at HEAD, or None when it is clean.
+    """Errors from typechecking the web app at HEAD, or None when it is clean.
 
     The Docker build installs and bundles the UI the same way but swallows failures, so this
-    is the only place a broken UI stops the preview instead of shipping without a dashboard.
+    is the only place a broken UI stops the preview instead of shipping without a web.
     The check runs the PRs' own toolchain, so it gets an exported copy of the tree in a
     container: no ``.git`` credentials, no runner environment, no view of this process.
     """

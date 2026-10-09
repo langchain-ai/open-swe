@@ -49,7 +49,7 @@ function fakeBackend(
     port: 0,
     async fetch(request) {
       const url = new URL(request.url)
-      const path = url.pathname.replace("/dashboard/api", "")
+      const path = url.pathname.replace("/api", "")
       if (request.method === "POST" && path === "/bridges") {
         const body: unknown = await request.json()
         if (isRecord(body)) opens.push(body)

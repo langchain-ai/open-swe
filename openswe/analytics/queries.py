@@ -1,4 +1,4 @@
-"""Bounded indexed analytics queries for dashboard metrics."""
+"""Bounded indexed analytics queries for web metrics."""
 
 import base64
 import binascii

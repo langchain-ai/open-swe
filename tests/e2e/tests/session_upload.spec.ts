@@ -7,7 +7,7 @@ import {
   SAME_USER,
   dismissOnboardingIfShown,
   loginAs,
-} from "./helpers/dashboard";
+} from "./helpers/web";
 
 const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 const transcript = readFileSync(
@@ -88,7 +88,7 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
   let threadId: string | undefined;
   try {
     await loginAs(page, SAME_USER);
-    const unpushed = await page.request.post("/dashboard/api/threads/uploads", {
+    const unpushed = await page.request.post("/api/threads/uploads", {
       headers: {
         ...SAME_ORIGIN_HEADERS,
         "content-type": "application/x-ndjson",
@@ -112,7 +112,7 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     expect(seeded.ok(), await seeded.text()).toBeTruthy();
     const { number } = (await seeded.json()) as { number: number };
 
-    const upload = await page.request.post("/dashboard/api/threads/uploads", {
+    const upload = await page.request.post("/api/threads/uploads", {
       headers: {
         ...SAME_ORIGIN_HEADERS,
         "content-type": "application/x-ndjson",
@@ -133,7 +133,7 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     threadId = (await upload.json()).id as string;
 
     const summary = await (
-      await page.request.get(`/dashboard/api/threads/${threadId}`)
+      await page.request.get(`/api/threads/${threadId}`)
     ).json();
     expect(summary).toMatchObject({
       title: "Environment system rewrite",

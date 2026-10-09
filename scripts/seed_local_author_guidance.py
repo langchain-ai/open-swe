@@ -3,7 +3,7 @@
 A local checkout has never run an agent, so no thread carries the messages
 :class:`SteeringHistory` looks for and the human input card can never populate.
 This writes them straight into a thread's checkpoint through the public SDK,
-wrapped in the same ``<input-message>`` envelope a dashboard message carries,
+wrapped in the same ``<input-message>`` envelope a web message carries,
 and links that thread to a real pull request.
 
 Summarising is not done here — the review scout does that through

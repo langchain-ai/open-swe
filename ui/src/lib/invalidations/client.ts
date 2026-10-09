@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query"
 
-import { dashboardApiUrl } from "@/lib/dashboard-fetch"
+import { webApiUrl } from "@/lib/web-fetch"
 
 import type { InvalidationTopic } from "./topics"
 
@@ -33,7 +33,7 @@ const MIN_BACKOFF_MS = 1_000
 const MAX_BACKOFF_MS = 30_000
 
 /**
- * One browser tab's part in the dashboard's single invalidation stream.
+ * One browser tab's part in the web app's single invalidation stream.
  *
  * Tabs elect a leader with the Web Locks API. Only the leader holds an
  * `EventSource`; the others tell it which topics their mounted queries read
@@ -363,12 +363,9 @@ class Connection {
     }
     const search = params.toString()
     const query = search ? `?${search}` : ""
-    this.source = new EventSource(
-      dashboardApiUrl(`/ui-invalidations${query}`),
-      {
-        withCredentials: true,
-      }
-    )
+    this.source = new EventSource(webApiUrl(`/ui-invalidations${query}`), {
+      withCredentials: true,
+    })
     this.source.addEventListener("hello", (event) =>
       this.frame(event, (data: InvalidationHello) => events.onHello(data))
     )

@@ -24,7 +24,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from openswe.dashboard.deps import SESSION_DEP
 from openswe.database import postgres
 
 # The ``thread.metadata`` mirror exists so this predicate is reused unchanged.
@@ -41,6 +40,7 @@ from openswe.transcript.snapshot import (
     measure_gap,
 )
 from openswe.utils.timing import phase, server_timing_header
+from openswe.web.deps import SESSION_DEP
 
 logger = logging.getLogger(__name__)
 

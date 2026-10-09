@@ -55,7 +55,7 @@ class EventName(StrEnum):
 
 
 class EntryPoint(StrEnum):
-    DASHBOARD = "dashboard"
+    WEB = "dashboard"
     GITHUB = "github"
     SLACK = "slack"
     SCHEDULED = "scheduled"

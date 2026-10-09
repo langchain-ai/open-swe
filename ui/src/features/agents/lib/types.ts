@@ -178,7 +178,7 @@ export interface ImageChunk {
  *
  * `credentials` says how the bytes are reachable — `"session"` needs the
  * session cookie, so the URL is fetched and shown through a blob URL rather
- * than handed to `<img src>` (a cross-origin dashboard deployment would
+ * than handed to `<img src>` (a cross-origin web deployment would
  * otherwise depend on the browser sending a third-party cookie for an image);
  * `"none"` is a plain URL the browser loads itself.
  */
@@ -537,7 +537,7 @@ export interface AgentThread {
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string
   triggerKind?: AgentTriggerKind | string
-  /** The allowed Slack bot that started the thread; the dashboard cannot steer it. */
+  /** The allowed Slack bot that started the thread; the web app cannot steer it. */
   triggeringBot?: { key: string; name: string } | null
   automationId?: string | null
   automationName?: string | null

@@ -1,4 +1,4 @@
-"""Dashboard thread detail, messaging and lifecycle endpoints backed by LangGraph."""
+"""Web thread detail, messaging and lifecycle endpoints backed by LangGraph."""
 
 import asyncio
 import logging
@@ -23,7 +23,7 @@ from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
 from openswe.threads.listing import (
     attach_task_workers,
-    list_unresolved_dashboard_threads,
+    list_unresolved_web_threads,
     settle_review_walkthrough,
 )
 from openswe.threads.machine_reads import machine_thread
@@ -35,7 +35,7 @@ from openswe.threads.runs import (
 )
 from openswe.threads.summary import (
     _SANDBOX_CREATING_SENTINEL,
-    DASHBOARD_SOURCE,
+    WEB_APP_SOURCE,
     _assert_thread_postable,
     _assert_thread_promptable,
     _now_ms,
@@ -103,7 +103,7 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
     )
 
 
-async def get_dashboard_terminal_sandbox(
+async def get_web_terminal_sandbox(
     thread_id: str, login: str, *, email: str | None = None
 ) -> tuple[str, str | None]:
     client = langgraph_client()
@@ -128,7 +128,7 @@ async def get_dashboard_terminal_sandbox(
     return sandbox_id, repo_name
 
 
-async def get_dashboard_thread(
+async def get_web_thread(
     thread_id: str,
     login: str,
     *,
@@ -186,7 +186,7 @@ async def get_dashboard_thread(
     return summary
 
 
-async def get_dashboard_thread_queued_messages(
+async def get_web_thread_queued_messages(
     thread_id: str, login: str, *, email: str | None = None
 ) -> list[QueuedPreview]:
     """Messages waiting in the thread's queue for its agent's next model call."""
@@ -250,7 +250,7 @@ async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> 
             )
 
 
-async def cancel_dashboard_thread(
+async def cancel_web_thread(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Interrupt every live run on a thread on behalf of its owner.
@@ -324,7 +324,7 @@ async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObj
     return await machine_thread(thread_id, principal)
 
 
-async def admin_cancel_dashboard_thread(
+async def admin_cancel_web_thread(
     thread_id: str, login: str | None = None, *, email: str | None = None
 ) -> dict[str, Any]:
     client = langgraph_client()
@@ -354,7 +354,7 @@ async def admin_cancel_dashboard_thread(
     return await _thread_summary(updated_thread)
 
 
-async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
+async def delete_web_thread(thread_id: str, login: str, *, email: str | None = None) -> None:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -384,7 +384,7 @@ async def delete_dashboard_thread(thread_id: str, login: str, *, email: str | No
         )
 
 
-async def rename_dashboard_thread(
+async def rename_web_thread(
     thread_id: str, login: str, *, title: str, email: str | None = None
 ) -> dict[str, Any]:
     client = langgraph_client()
@@ -500,8 +500,8 @@ async def continue_thread_privately(
         new_metadata["workspace"] = workspace
     new_metadata.update(
         {
-            "source": DASHBOARD_SOURCE,
-            "origin": DASHBOARD_SOURCE,
+            "source": WEB_APP_SOURCE,
+            "origin": WEB_APP_SOURCE,
             "owner_type": "user",
             "owner_login": login.strip(),
             "visibility": "private",
@@ -542,10 +542,10 @@ async def continue_thread_privately(
     return await _thread_summary(await client.threads.get(new_thread_id))
 
 
-async def resolve_all_dashboard_threads(login: str, *, email: str | None = None) -> int:
+async def resolve_all_web_threads(login: str, *, email: str | None = None) -> int:
     """Resolve every thread the caller has participated in."""
     client = langgraph_client()
-    threads = await list_unresolved_dashboard_threads(login, email=email)
+    threads = await list_unresolved_web_threads(login, email=email)
     now_ms = _now_ms()
 
     async def resolve(thread_id: str) -> None:
@@ -564,7 +564,7 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
     return len(threads)
 
 
-async def resolve_dashboard_thread(
+async def resolve_web_thread(
     thread_id: str, login: str, *, resolved: bool, email: str | None = None
 ) -> dict[str, Any]:
     """Mark a thread resolved/unresolved via thread metadata."""
@@ -612,7 +612,7 @@ def _tracked_pull_requests(metadata: Mapping[str, Any]) -> list[object]:
     ]
 
 
-async def get_dashboard_thread_pull_request_status(
+async def get_web_thread_pull_request_status(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
     """Return live GitHub health for every pull request tracked by the thread."""
@@ -624,7 +624,7 @@ async def get_dashboard_thread_pull_request_status(
         return {"pullRequests": await get_pull_request_statuses(github, tracked)}
 
 
-async def get_dashboard_pull_request_checks(
+async def get_web_pull_request_checks(
     records: Sequence[object], login: str
 ) -> dict[str, PullRequestState]:
     """Return batched live state for the pull requests the sidebar is showing."""
@@ -634,7 +634,7 @@ async def get_dashboard_pull_request_checks(
         return dict(await get_pull_request_check_states(github, records, login))
 
 
-async def get_dashboard_thread_pull_request_context(
+async def get_web_thread_pull_request_context(
     thread_id: str,
     login: str,
     *,
@@ -664,7 +664,7 @@ async def get_dashboard_thread_pull_request_context(
     return result
 
 
-async def get_dashboard_thread_state(
+async def get_web_thread_state(
     thread_id: str,
     login: str,
     *,

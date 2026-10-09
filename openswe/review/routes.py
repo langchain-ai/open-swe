@@ -10,9 +10,6 @@ from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, model_validat
 from pydantic.alias_generators import to_camel
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
-from openswe.dashboard.options import model_supports_effort
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repos import accessible_repo_full_names
@@ -76,6 +73,9 @@ from openswe.review.styles import (
 )
 from openswe.threads.handlers import mark_review_session_viewed
 from openswe.walkthrough.record import Walkthrough
+from openswe.web.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
+from openswe.web.options import model_supports_effort
+from openswe.web.repo_access import require_repo_access_for_user
 
 router = APIRouter(tags=["review"])
 
@@ -658,7 +658,7 @@ async def api_update_review_style_prompt(
     if not await REVIEW_STYLES.get(full_name):
         raise HTTPException(404, "review style not found")
     if "approval_mode" in body.model_fields_set:
-        from openswe.dashboard.deps import require_admin
+        from openswe.web.deps import require_admin
 
         require_admin(session)
     return await REVIEW_STYLES.update_prompts(full_name, body)
@@ -711,7 +711,7 @@ async def api_delete_review_style(
     if not record:
         raise HTTPException(404, "review style not found")
     if record.approval_mode is not None:
-        from openswe.dashboard.deps import require_admin
+        from openswe.web.deps import require_admin
 
         require_admin(session)
     if record.status == "running":

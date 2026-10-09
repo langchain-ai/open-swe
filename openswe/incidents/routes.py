@@ -1,4 +1,4 @@
-"""Authenticated dashboard projections and commands for Incidents."""
+"""Authenticated web projections and commands for Incidents."""
 
 from typing import Annotated, Any, Literal, Self
 
@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.admin import is_admin
-from openswe.dashboard.oauth import require_session
 from openswe.incidents.models import IncidentId
+from openswe.web.admin import is_admin
+from openswe.web.oauth import require_session
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
@@ -37,7 +37,7 @@ class IncidentSettingsBody(BaseModel):
 async def _responder(
     session: Annotated[dict[str, Any], Depends(require_session)],
 ) -> dict[str, Any]:
-    """Any signed-in dashboard user may read incidents; settings stay admin-only."""
+    """Any signed-in web user may read incidents; settings stay admin-only."""
     return session
 
 

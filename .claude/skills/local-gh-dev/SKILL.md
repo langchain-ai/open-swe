@@ -1,13 +1,13 @@
 ---
 name: local-gh-dev
-description: Run the Open SWE dashboard locally against real GitHub data, signed in with the `gh` CLI instead of a per-machine GitHub App. Use when asked to run the app locally, test a dashboard change against real PRs, reproduce something a screenshot shows, or when local login fails with "GITHUB_APP_CLIENT_ID not configured".
+description: Run the Open SWE web locally against real GitHub data, signed in with the `gh` CLI instead of a per-machine GitHub App. Use when asked to run the app locally, test a web change against real PRs, reproduce something a screenshot shows, or when local login fails with "GITHUB_APP_CLIENT_ID not configured".
 ---
 
-# Local dashboard on real GitHub data
+# Local web on real GitHub data
 
-The dashboard's per-user reads — the PR list, one PR's details, a PR preview — run on
+The web app's per-user reads — the PR list, one PR's details, a PR preview — run on
 the signed-in person's own OAuth token. `gh` already holds one, so local development
-needs no GitHub App: `/dashboard/api/auth/dev-login` turns `gh`'s credentials into a
+needs no GitHub App: `/api/auth/dev-login` turns `gh`'s credentials into a
 session. It is refused unless `langgraph dev` is the runtime, and the
 `ALLOWED_GITHUB_USERS` gate still applies.
 
@@ -29,11 +29,11 @@ session. It is refused unless `langgraph dev` is the runtime, and the
 
    | Key | Why |
    |---|---|
-   | `DASHBOARD_JWT_SECRET` | signs the session; any random string |
+   | `WEB_JWT_SECRET` | signs the session; any random string |
    | `ALLOWED_GITHUB_USERS` | your `gh api user --jq .login` |
    | `POSTGRES_URI` | skips the container step when one is already up |
-   | `DASHBOARD_BASE_URL` | `http://localhost:3000` |
-   | `DASHBOARD_API_BASE_URL` | `http://localhost:3000` |
+   | `WEB_BASE_URL` | `http://localhost:3000` |
+   | `WEB_API_BASE_URL` | `http://localhost:3000` |
 
    Startup aborts with `ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured`
    when the allowlist is missing.
@@ -48,12 +48,12 @@ session. It is refused unless `langgraph dev` is the runtime, and the
 5. Start Vite against it:
 
    ```bash
-   DASHBOARD_API_URL=http://127.0.0.1:2026 pnpm run dev
+   WEB_API_URL=http://127.0.0.1:2026 pnpm run dev
    ```
 
 6. Open `http://localhost:3000` and press **Continue with GitHub**. With no App
    configured it redirects to the `gh` login and lands you signed in. To skip the page,
-   go straight to `/dashboard/api/auth/dev-login?redirect_to=/agents/reviews`.
+   go straight to `/api/auth/dev-login?redirect_to=/agents/reviews`.
 
 ## Postgres
 
@@ -90,21 +90,21 @@ is stubbed; runs cost money and take minutes.
 
 2. Set `SANDBOX_TYPE=local`. `langsmith` sandboxes **cannot work from a laptop**: the
    run PATCHes a proxy config whose `match_hosts` is the hostname of your
-   `DASHBOARD_API_BASE_URL`, and the sandbox API rejects `localhost` with a bare
+   `WEB_API_BASE_URL`, and the sandbox API rejects `localhost` with a bare
    `422 unknown` whose body never reaches the log. It fails in
    `PrepareReviewerRunMiddleware.before_agent`, so the agent never starts and the
    review settles with zero findings — which reads exactly like a model that chose to
-   say nothing. Either use `local`, or expose the dashboard on a real hostname
+   say nothing. Either use `local`, or expose the web app on a real hostname
    (`make tunnel`, see docs/DEVELOPMENT.md) before using `langsmith`.
 
 3. Get a session cookie, then post the trigger. Mutations are CSRF-checked against
-   `DASHBOARD_BASE_URL`, so send a matching `Origin` — without it you get
+   `WEB_BASE_URL`, so send a matching `Origin` — without it you get
    `403 CSRF check failed`:
 
    ```bash
-   curl -sS -c /tmp/osw.txt -o /dev/null 'http://127.0.0.1:2026/dashboard/api/auth/dev-login?redirect_to=/review'
+   curl -sS -c /tmp/osw.txt -o /dev/null 'http://127.0.0.1:2026/api/auth/dev-login?redirect_to=/review'
    curl -sS -b /tmp/osw.txt -X POST -H 'Origin: http://localhost:3000' \
-     http://127.0.0.1:2026/dashboard/api/reviews/OWNER/REPO/NUMBER/re-review
+     http://127.0.0.1:2026/api/reviews/OWNER/REPO/NUMBER/re-review
    ```
 
    A `{"success": true, "thread_id": "..."}` means the run is queued, not finished.
@@ -117,7 +117,7 @@ is stubbed; runs cost money and take minutes.
    tail -f logs/backend.log | grep -E --line-buffered "sandbox|Traceback|error_detail=[^N]|publish_review"
    ```
 
-5. Reviewer output lands where the dashboard reads it — findings in reviewer thread
+5. Reviewer output lands where the web app reads it — findings in reviewer thread
    metadata, guidance points in `pull_request_guidance`. Check the table directly when
    a page looks empty, to tell "the agent recorded nothing" apart from "the read path
    is broken":
@@ -156,7 +156,7 @@ Vite hot-reloads `ui/src`. Python changes need the backend restarted — `langgr
 watches files, but a failed import leaves it down, so check it came back:
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:2026/dashboard/api/me
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:2026/api/me
 ```
 
 `401` is healthy: the server is up and asking for a session. `000` means it is down —

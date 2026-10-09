@@ -12,11 +12,11 @@ from starlette.routing import Route
 
 from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
+from openswe.api.legacy_paths import LegacyApiPathMiddleware
 from openswe.api.request_ids import add_request_ids
 from openswe.api.tracing import add_trace_resource_names, configure_datadog_environment
 from openswe.audit_logs.middleware import AuditLogMiddleware
 from openswe.config import ENV
-from openswe.dashboard import router as dashboard_router
 from openswe.github.routes import router as github_webhook_router
 from openswe.linear.routes import router as linear_webhook_router
 from openswe.openai_responses.routes import router as sandbox_openai_router
@@ -27,8 +27,9 @@ from openswe.slack.routes import router as slack_webhook_router
 from openswe.threads.plan_api import plan_router
 from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
-from openswe.utils.dashboard_ui import mount_dashboard_ui
 from openswe.utils.event_loop import pin_single_event_loop
+from openswe.utils.web_ui import mount_web_ui
+from openswe.web import router as web_router
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe import database
     from openswe.analytics.worker import start_worker, stop_worker
     from openswe.bridge import listener as bridge_listener
-    from openswe.dashboard.admin import configured_admins
-    from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.database.store_imports import run_store_import
@@ -60,6 +59,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.users.import_records import import_user_records
     from openswe.users.import_store import import_user_mappings
     from openswe.utils.model import validate_local_dev_llm_config
+    from openswe.web.admin import configured_admins
+    from openswe.web.oauth import validate_github_login_allowlist
 
     pin_single_event_loop()
     validate_github_login_allowlist()
@@ -140,7 +141,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         await HUB.start()
     except Exception:  # noqa: BLE001
-        # Dashboard pages still load and refetch on their own actions; what
+        # Web pages still load and refetch on their own actions; what
         # stops is hearing about changes made elsewhere.
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
@@ -165,14 +166,10 @@ def create_app() -> FastAPI:
     configure_datadog_environment()
     app = FastAPI(lifespan=lifespan)
     allowed_origins = [
-        origin.strip()
-        for origin in ENV.DASHBOARD_ALLOWED_ORIGINS.get().split(",")
-        if origin.strip()
+        origin.strip() for origin in ENV.WEB_ALLOWED_ORIGINS.get().split(",") if origin.strip()
     ]
     if "*" in allowed_origins:
-        raise RuntimeError(
-            "DASHBOARD_ALLOWED_ORIGINS must not include '*' when allow_credentials=True"
-        )
+        raise RuntimeError("WEB_ALLOWED_ORIGINS must not include '*' when allow_credentials=True")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[*allowed_origins, "open-swe://app"],
@@ -186,7 +183,7 @@ def create_app() -> FastAPI:
     add_request_ids(app)
     add_github_error_handlers(app)
     app.add_exception_handler(UnknownUser, _unknown_user)
-    app.include_router(dashboard_router)
+    app.include_router(web_router)
     app.include_router(plan_router)
     app.include_router(workflow_approval_router)
     app.include_router(linear_webhook_router)
@@ -203,7 +200,9 @@ def create_app() -> FastAPI:
     app.router.routes.append(
         Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
     )
-    mount_dashboard_ui(app)
+    mount_web_ui(app)
+    # Outermost, so every other middleware and route sees only the current paths.
+    app.add_middleware(LegacyApiPathMiddleware)
     return app
 
 

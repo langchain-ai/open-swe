@@ -1,4 +1,4 @@
-"""Record authenticated dashboard write-method requests, never their payloads."""
+"""Record authenticated web write-method requests, never their payloads."""
 
 from collections.abc import Callable
 from uuid import UUID
@@ -15,7 +15,7 @@ _STATE_KEY = "audit_log"
 
 
 def audit_endpoint[F: Callable[..., object]](endpoint: F) -> F:
-    """Opt a durable or security-sensitive dashboard mutation into audit capture."""
+    """Opt a durable or security-sensitive web mutation into audit capture."""
     vars(endpoint)["__audit_endpoint__"] = True
     return endpoint
 
@@ -73,7 +73,7 @@ class AuditLogMiddleware:
             route = scope.get("route")
             if (
                 isinstance(route, APIRoute)
-                and (path := _route_path(scope, route)).startswith("/dashboard/api/")
+                and (path := _route_path(scope, route)).startswith("/api/")
                 and getattr(route.endpoint, "__audit_endpoint__", False)
                 and entry.enrichments.actor_kind is not None
             ):

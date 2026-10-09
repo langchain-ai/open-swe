@@ -2,7 +2,7 @@
 
 The plan lives in two places:
   - the agent's sandbox, as a self-contained HTML file the agent creates and edits, and
-  - the LangGraph store, as the published snapshot the dashboard renders.
+  - the LangGraph store, as the published snapshot the web app renders.
 
 Reviewers leave whole-document comments, stored one item per comment under
 ``["plan", "comments", thread_id]`` so listing and deletion are simple plain
@@ -106,7 +106,7 @@ async def plan_is_dismissed(thread_id: str, revision: str | None) -> bool:
 async def write_plan_to_sandbox(
     thread_id: str, content: str, *, plan_file_path: str | None = None
 ) -> str:
-    """Mirror the dashboard plan edit into the thread's sandbox.
+    """Mirror the web app plan edit into the thread's sandbox.
 
     Best-effort: a missing sandbox must not block publishing the plan to the
     review page.

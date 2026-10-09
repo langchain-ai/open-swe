@@ -74,10 +74,10 @@ _SLACK_USERS: dict[str, dict[str, str]] = {
 from langgraph_sdk import get_client  # noqa: E402
 
 from openswe.api.app import app  # noqa: E402
-from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from openswe.slack.client import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
-from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
+from openswe.utils.web_ui import keep_web_ui_last  # noqa: E402
+from openswe.web.oauth import COOKIE_NAME, issue_session  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -137,8 +137,8 @@ async def control_reset_default_workspace() -> JSONResponse:
     """Put back the seeded ``default`` workspace, which the app itself refuses to delete."""
     from sqlalchemy import text
 
-    from openswe.dashboard.workspace_settings import delete_workspace_settings
     from openswe.database import postgres
+    from openswe.web.workspace_settings import delete_workspace_settings
     from openswe.workspaces import store
     from openswe.workspaces.refresh import remove_refresh_cron
 
@@ -399,14 +399,14 @@ async def control_team_settings(request: Request) -> JSONResponse:
     A patch, not a replace: the settings record is one store item shared by
     every spec and it outlives the dev server, so writing a bare update would
     reset unrelated fields — the default agent model included, which the
-    dashboard's first-run onboarding reads — for every spec that follows.
+    web's first-run onboarding reads — for every spec that follows.
     """
-    from openswe.dashboard.workspace_settings import (
+    from openswe.utils import ttl_cache
+    from openswe.web.workspace_settings import (
         WorkspaceSettingsUpdate,
         get_instance_settings,
         upsert_instance_settings,
     )
-    from openswe.utils import ttl_cache
 
     body = await request.json()
     current = await get_instance_settings()
@@ -796,7 +796,7 @@ async def _signed_in(login: str, email: str) -> User:
 
 @app.post("/control/login")
 async def control_login(request: Request) -> JSONResponse:
-    """Simulate a signed-in dashboard user by minting the real session cookie."""
+    """Simulate a signed-in web user by minting the real session cookie."""
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
@@ -811,11 +811,11 @@ async def control_login(request: Request) -> JSONResponse:
 async def control_login_get(login: str = "", email: str = "", next_url: str = "") -> Response:
     """Browser login. With no ``login``, render a dropdown of the test users;
     with ``?login=<u>`` (email resolved from the registry, or pass ``&email=``),
-    mint the session cookie and redirect into the dashboard. Use a separate
+    mint the session cookie and redirect into the web app. Use a separate
     browser/profile per user — each has its own cookie jar."""
-    # Land on the dashboard origin (DASHBOARD_BASE_URL — the Vite HMR server in
+    # Land on the web app origin (WEB_BASE_URL — the Vite HMR server in
     # dev:mock), not this harness, so the cookie + the hot-reloading UI line up.
-    ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    ui = os.environ.get("WEB_BASE_URL", "").rstrip("/")
     dest = next_url or (f"{ui}/agents" if ui else "/agents")
     if not login:
         options = "".join(f'<option value="{u["login"]}">{u["name"]}</option>' for u in TEST_USERS)
@@ -841,23 +841,23 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     return resp
 
 
-@app.get("/dashboard/api/auth/login")
+@app.get("/api/auth/login")
 async def mock_github_login(redirect_to: str = "") -> Response:
-    """E2E stand-in for the dashboard OAuth start route.
+    """E2E stand-in for the web app OAuth start route.
 
-    The real route would redirect to github.com. Keep the dashboard-facing URL
+    The real route would redirect to github.com. Keep the web app-facing URL
     intact, then hand off to the fake GitHub simulator so Playwright exercises a
     browser login flow instead of test code pre-minting a session cookie.
     """
-    ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    ui = os.environ.get("WEB_BASE_URL", "").rstrip("/")
     dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
     return RedirectResponse(f"/fake-gh/login/oauth/authorize?redirect_to={quote(dest)}", 302)
 
 
 @app.get("/fake-gh/login/oauth/authorize")
 async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Response:
-    """Fake GitHub OAuth consent/login page for dashboard e2e tests."""
-    ui = os.environ.get("DASHBOARD_BASE_URL", "").rstrip("/")
+    """Fake GitHub OAuth consent/login page for web e2e tests."""
+    ui = os.environ.get("WEB_BASE_URL", "").rstrip("/")
     dest = redirect_to or (f"{ui}/agents" if ui else "/agents")
     if not login:
         options = "".join(
@@ -890,7 +890,7 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
     return resp
 
 
-# The real dashboard registered /dashboard/api/auth/login first (via
+# The real web registered /api/auth/login first (via
 # include_router), so Starlette would match it before ours. Move ours to the
 # front of the table so the mock picker shadows the real OAuth redirect.
 for _i, _route in enumerate(app.router.routes):
@@ -1187,7 +1187,7 @@ async def gh_search_issues(
     sort: str = "updated",
     order: str = "desc",
 ) -> JSONResponse:
-    """Search authored or awaiting-review PRs for the dashboard."""
+    """Search authored or awaiting-review PRs for the web app."""
     terms = q.split()
     author = next(
         (term.removeprefix("author:") for term in terms if term.startswith("author:")), ""
@@ -1496,7 +1496,7 @@ async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) ->
 
 
 # Seeded reviews carry only ``{author, state}``, so the list has to be
-# normalised: the dashboard's review-decision read needs a login and an id.
+# normalised: the web app's review-decision read needs a login and an id.
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
 async def gh_list_pull_reviews(
     owner: str, repo: str, number: int, request: Request, page: int = 1
@@ -1986,9 +1986,9 @@ async def mock_slack_file(file_id: str) -> Response:
     return Response(content, media_type="image/png")
 
 
-# A dashboard build under ui/.output puts the UI catch-all on the app before the
+# A web build under ui/.output puts the UI catch-all on the app before the
 # mock pages above were registered; keep it behind them.
-keep_dashboard_ui_last(app)
+keep_web_ui_last(app)
 
 # Quietly reference imports used only for env side effects.
 _ = (e2e_env, HUMAN_USER)

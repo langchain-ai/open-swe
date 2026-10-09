@@ -1081,7 +1081,7 @@ describe("My PRs", () => {
     )
   })
 
-  it("surfaces a repository rule violation from a merge the dashboard could not predict", async () => {
+  it("surfaces a repository rule violation from a merge the web app could not predict", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
       pullRequests: [pull(1)],

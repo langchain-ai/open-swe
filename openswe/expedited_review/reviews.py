@@ -9,7 +9,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.slack.client import get_slack_permalink
 from openswe.slack.code_channels import is_code_channel_session
-from openswe.utils.dashboard_links import dashboard_base_url
+from openswe.utils.web_links import web_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ REVIEW_BODY_PREFIX = "Approved in Slack via"
 
 
 def settings_hint(action: str, path: str = "/my-settings") -> str:
-    base = dashboard_base_url()
+    base = web_base_url()
     return f"{action}: {base}{path}" if base else f"{action} in your Open SWE settings."
 
 

@@ -6,7 +6,6 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 
-from openswe.dashboard import profiles
 from openswe.github import http as github_http
 from openswe.github.checks import github_headers
 from openswe.github.http import GitHubError
@@ -19,6 +18,7 @@ from openswe.review.conversation import (
     api_get_review_conversation,
     api_post_review_conversation_comment,
 )
+from openswe.web import profiles
 
 Handler = Callable[[httpx2.Request], httpx2.Response]
 SESSION = {"sub": "octocat"}

@@ -4,7 +4,7 @@
 > This desktop client is experimental. The web UI is the recommended way to use Open SWE.
 
 The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
-compatible Open SWE backend; they do not need a separately hosted dashboard.
+compatible Open SWE backend; they do not need a separately hosted web.
 
 Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project. The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted box. The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back. This is the same bridge `oswe run` uses, from the shared `bridge-client` package.
 
@@ -22,8 +22,8 @@ The **Terminal** and file browser open in the same checkout, on this Mac.
 ## How it connects
 
 The bundled UI runs at an internal `open-swe://app` origin. Electron proxies its
-`/dashboard/api/*` requests to the selected backend, so the browser never receives a LangSmith API
-key and never calls the raw LangGraph API directly. GitHub login creates the same signed dashboard
+`/api/*` requests to the selected backend, so the browser never receives a LangSmith API
+key and never calls the raw LangGraph API directly. GitHub login creates the same signed web
 session used by the web UI.
 
 Packaged builds ask for the organization's backend URL on first launch and store it in the app's
@@ -32,7 +32,7 @@ deployments; switching clears the previous deployment's local session data.
 
 The shared backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a
 callback URL. Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which
-GitHub users can create dashboard sessions, including the ones "This Mac" threads run under.
+GitHub users can create web sessions, including the ones "This Mac" threads run under.
 
 ## Install on macOS
 
@@ -122,7 +122,7 @@ by the release workflow.
 
 ## Deployment security
 
-The backend URL is public configuration, not a credential. Dashboard routes require an
+The backend URL is public configuration, not a credential. Web routes require an
 `osw_session` cookie issued after GitHub login, and `ALLOWED_GITHUB_ORGS` or
 `ALLOWED_GITHUB_USERS` controls who may complete that login. CORS alone is not access control.
 

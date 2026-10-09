@@ -1,4 +1,4 @@
-"""Build/deploy identity discovery for the backend and its bundled dashboard."""
+"""Build/deploy identity discovery for the backend and its bundled web app."""
 
 import json
 import subprocess
@@ -18,10 +18,10 @@ def _fresh_caches(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OPEN_SWE_BUILD_INFO_DIR", "/nonexistent-build-info-dir")
     monkeypatch.delenv("LANGSMITH_LANGGRAPH_GIT_REF_SHA", raising=False)
     build_info_module.backend_build_info.cache_clear()
-    build_info_module.dashboard_build_info.cache_clear()
+    build_info_module.web_build_info.cache_clear()
     yield
     build_info_module.backend_build_info.cache_clear()
-    build_info_module.dashboard_build_info.cache_clear()
+    build_info_module.web_build_info.cache_clear()
 
 
 @pytest.fixture
@@ -63,28 +63,28 @@ def test_backend_reports_only_discovered_identifiers(
 
 
 @pytest.mark.parametrize("source_commit", ["explicit-image-sha"])
-@pytest.mark.parametrize("dashboard_kind", ["bundled", "custom", "replaced", "missing"])
-def test_image_stamp_and_dashboard_provenance(
+@pytest.mark.parametrize("web_kind", ["bundled", "custom", "replaced", "missing"])
+def test_image_stamp_and_web_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     source_commit: str,
-    dashboard_kind: str,
+    web_kind: str,
 ) -> None:
     backend = tmp_path / "backend"
-    dashboard = tmp_path / "dashboard"
-    dashboard.mkdir()
-    (dashboard / "_shell.html").write_text("shell")
-    stamp = dashboard / "open-swe-build-info.json"
-    if dashboard_kind != "missing":
+    web = tmp_path / "dashboard"
+    web.mkdir()
+    (web / "_shell.html").write_text("shell")
+    stamp = web / "open-swe-build-info.json"
+    if web_kind != "missing":
         stamp.write_text(json.dumps({"built_at": "2026-09-22T00:00:00Z"}))
     monkeypatch.setenv("SOURCE_COMMIT", source_commit)
     monkeypatch.setenv("LANGSMITH_LANGGRAPH_GIT_REF_SHA", "platform-sha")
     monkeypatch.setenv("OPEN_SWE_BUILD_INFO_DIR", str(backend))
-    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(dashboard))
+    monkeypatch.setenv("WEB_STATIC_DIR", str(web))
     monkeypatch.setattr(
         build_info_module,
-        "_IMAGE_DASHBOARD_DIR",
-        tmp_path / "other" if dashboard_kind == "custom" else dashboard,
+        "_IMAGE_WEB_DIR",
+        tmp_path / "other" if web_kind == "custom" else web,
     )
     before = datetime.now(UTC)
     subprocess.run(
@@ -92,15 +92,15 @@ def test_image_stamp_and_dashboard_provenance(
             sys.executable,
             str(Path(__file__).resolve().parents[2] / "scripts" / "stamp_build_info.py"),
             str(backend),
-            str(dashboard),
+            str(web),
         ],
         check=True,
     )
-    if dashboard_kind == "replaced":
+    if web_kind == "replaced":
         stamp.write_text(json.dumps({"built_at": "2026-09-23T00:00:00Z"}))
     info = build_info()
     assert before <= datetime.fromisoformat(info["backend"]["built_at"]) <= datetime.now(UTC)
     assert info["backend"]["commit"] == (source_commit or "platform-sha")
-    assert info["dashboard"]["commit"] == (
-        (source_commit or "platform-sha") if dashboard_kind == "bundled" else None
+    assert info["web"]["commit"] == (
+        (source_commit or "platform-sha") if web_kind == "bundled" else None
     )

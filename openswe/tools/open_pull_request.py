@@ -40,9 +40,9 @@ from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
-from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.run_usage import summarize_run_usage
+from openswe.utils.web_links import web_plan_url, web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ async def _resolve_pr_author_token(author: str | None = None) -> tuple[str | Non
     login = await pr_author_login(author)
     if login is None:
         return await get_github_app_installation_token(), "bot"
-    from openswe.dashboard.profiles import get_valid_access_token
+    from openswe.web.profiles import get_valid_access_token
 
     token = await get_valid_access_token(login)
     if not token:
@@ -314,8 +314,8 @@ def _branch_failure_payload(
 async def _revoked_token_payload(
     *, author: str | None, token: str, owner: str, repo: str, head: str, base: str
 ) -> dict[str, Any]:
-    from openswe.dashboard.oauth import build_settings_url
-    from openswe.dashboard.profiles import mark_access_token_revoked
+    from openswe.web.oauth import build_settings_url
+    from openswe.web.profiles import mark_access_token_revoked
 
     if login := await pr_author_login(author):
         await mark_access_token_revoked(login, token)
@@ -864,7 +864,7 @@ async def _record_pr_telemetry(
                         {"owner": owner, "name": repo},
                         branch=head,
                         pr_url=pr_url if isinstance(pr_url, str) else "",
-                        dashboard_url=dashboard_thread_url(thread_id) or "",
+                        web_url=web_thread_url(thread_id) or "",
                     ),
                 )
                 if isinstance(pr_url, str):
@@ -910,7 +910,7 @@ async def _plan_reference_line(cfg: RunConfig) -> str | None:
         return None
     if not plan or not str(plan.get("html") or plan.get("markdown") or "").strip():
         return None
-    plan_url = dashboard_plan_url(thread_id)
+    plan_url = web_plan_url(thread_id)
     if not plan_url:
         return None
     return f"- [Plan]({plan_url})"
@@ -991,7 +991,7 @@ async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = No
             logger.debug("Could not read the thread's model for the PR footer", exc_info=True)
     return add_pr_collaboration_note(
         body,
-        thread_url=dashboard_thread_url(cfg.thread_id) if cfg.thread_id else None,
+        thread_url=web_thread_url(cfg.thread_id) if cfg.thread_id else None,
         model_id=model_id,
         reasoning_effort=effort,
     )

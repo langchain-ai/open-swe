@@ -8,14 +8,14 @@ from typing import Any
 from langgraph.config import get_config
 
 from openswe.credential_scope import private_credential_login
-from openswe.dashboard.feature_flags import feature_flag_names
-from openswe.dashboard.personal_settings import PROFILE_SETTING_KEYS
-from openswe.dashboard.profiles import get_profile, normalize_profile_for_response
-from openswe.dashboard.user_instructions import get_user_instructions
-from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.tools.access import Policy, access
 from openswe.users import User, UserPreferencesPatch
 from openswe.utils.thread_participants import resolve_thread_participant_logins
+from openswe.web.feature_flags import feature_flag_names
+from openswe.web.personal_settings import PROFILE_SETTING_KEYS
+from openswe.web.profiles import get_profile, normalize_profile_for_response
+from openswe.web.user_instructions import get_user_instructions
+from openswe.web.user_preferences import get_user_preferences
 
 logger = logging.getLogger(__name__)
 

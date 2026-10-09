@@ -1,7 +1,7 @@
 import pytest
 
 from openswe.config import ENV
-from openswe.dashboard.user_preferences import (
+from openswe.web.user_preferences import (
     UserPreferencesUpdate,
     get_user_preferences,
     set_user_preferences,

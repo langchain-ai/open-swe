@@ -13,8 +13,8 @@ const ALLOWED_PERMISSIONS = new Set([
   "notifications",
 ]);
 const SESSION_COOKIE_NAME = "osw_session";
-const LOGIN_PATH = "/dashboard/api/auth/login";
-const DESKTOP_EXCHANGE_PATH = "/dashboard/api/auth/desktop/exchange";
+const LOGIN_PATH = "/api/auth/login";
+const DESKTOP_EXCHANGE_PATH = "/api/auth/desktop/exchange";
 const CONNECT_PROVIDERS = new Set(["slack", "langsmith"]);
 
 function resolveAppRuntime({ argv, isPackaged, appDataPath }) {
@@ -94,17 +94,14 @@ function isConnectProvider(value) {
 // the provider URL it redirects to — the browser never sees an endpoint that
 // needs the session.
 function connectLoginUrl(backendUrl, provider, { challenge, port }) {
-  const target = new URL(`/dashboard/api/${provider}/login`, backendUrl);
+  const target = new URL(`/api/${provider}/login`, backendUrl);
   target.searchParams.set("desktop_handoff", challenge);
   target.searchParams.set("desktop_port", String(port));
   return target.toString();
 }
 
 function connectExchangeUrl(backendUrl, provider) {
-  return new URL(
-    `/dashboard/api/${provider}/desktop/exchange`,
-    backendUrl,
-  ).toString();
+  return new URL(`/api/${provider}/desktop/exchange`, backendUrl).toString();
 }
 
 function desktopExchangeUrl(backendUrl) {
@@ -123,7 +120,7 @@ function backendRequestUrl(backendUrl, appRequestUrl) {
   if (!isAppUrl(appRequestUrl)) throw new Error("Invalid desktop request URL");
   const source = new URL(appRequestUrl);
   const target = new URL(`${source.pathname}${source.search}`, backendUrl);
-  if (source.pathname === "/dashboard/api/auth/login") {
+  if (source.pathname === "/api/auth/login") {
     target.searchParams.set("desktop", "true");
   }
   return target.toString();
@@ -136,7 +133,7 @@ function localCallbackUrl(navigationUrl, backendUrl) {
     if (
       !["http:", "https:"].includes(target.protocol) ||
       target.origin !== backend.origin ||
-      !/^\/dashboard\/api\/(?:auth|slack)\/callback$/.test(target.pathname)
+      !/^\/(?:dashboard\/)?api\/(?:auth|slack)\/callback$/.test(target.pathname)
     ) {
       return null;
     }

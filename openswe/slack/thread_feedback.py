@@ -23,9 +23,9 @@ from openswe.slack.responses import FeedbackResponse
 from openswe.source_context import SourceContext
 from openswe.store import TypedStore
 from openswe.thread_feedback import complete_feedback_prompt
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.langsmith import create_langsmith_thread_feedback
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ def _comment_input() -> dict[str, Any]:
 
 
 def feedback_blocks(run_id: str, thread_id: str) -> list[dict[str, Any]]:
-    url = dashboard_thread_url(thread_id)
+    url = web_thread_url(thread_id)
     thread_link = f"<{url}|this thread>" if url else "this thread"
     return [
         {

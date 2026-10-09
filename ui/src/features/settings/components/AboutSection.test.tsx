@@ -22,7 +22,7 @@ const user: SessionUser = {
       built_at: null,
       package_version: "0.1.0",
     },
-    dashboard: { commit: "def456", built_at: null, served: true },
+    web: { commit: "def456", built_at: null, served: true },
   },
 }
 
@@ -54,7 +54,7 @@ it("shows session build and safe API diagnostics without an analytics report", (
   expect(screen.getAllByRole("link")).toHaveLength(3)
   expect(screen.getByText(/different from the bundle/)).toBeTruthy()
   expect(screen.getByText(/API:/).textContent).toBe(
-    "API: https://backend.example.com /dashboard/api"
+    "API: https://backend.example.com /api"
   )
   expect(document.body.textContent).not.toContain("secret")
 })
@@ -127,7 +127,7 @@ it("copies only environment diagnostics from session data", async () => {
   const text = writeText.mock.calls[0]![0] as string
   expect(JSON.parse(text)).toMatchObject({
     report: "open-swe-environment-diagnostics",
-    api: { origin: "https://backend.example.com", path: "/dashboard/api" },
+    api: { origin: "https://backend.example.com", path: "/api" },
     build: { backend: { environment: "preview", revision_id: "rev-42" } },
     running_bundle: { commit: "running123" },
   })

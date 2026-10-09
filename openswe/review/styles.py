@@ -1,6 +1,6 @@
 """Per-repository review style profiles in LangGraph Store.
 
-Each record holds a synthesized custom prompt (editable in the dashboard),
+Each record holds a synthesized custom prompt (editable in the web app),
 analysis metadata, and the status of the background style-analysis run.
 """
 

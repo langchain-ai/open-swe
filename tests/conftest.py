@@ -41,14 +41,14 @@ def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str)
 
 
 def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:
-    """Rebind ``name`` in every dashboard thread module that imports it.
+    """Rebind ``name`` in every web thread module that imports it.
 
     The thread endpoints are split across modules that each hold their own
     binding, so patching one would leave the others pointing at the real thing.
     """
     modules = [module for module in _THREAD_MODULES if hasattr(module, name)]
     if not modules:
-        raise AttributeError(f"no dashboard thread module defines {name!r}")
+        raise AttributeError(f"no web thread module defines {name!r}")
     for module in modules:
         monkeypatch.setattr(module, name, value)
 
@@ -240,7 +240,7 @@ async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIter
 
 @pytest.fixture
 def findings_from_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Serve dashboard findings from thread metadata, as for threads not yet in PostgreSQL."""
+    """Serve web findings from thread metadata, as for threads not yet in PostgreSQL."""
     from openswe.review import reviews
     from openswe.review.findings import Finding, coerce_findings
 
@@ -327,9 +327,9 @@ def _default_github_login_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _no_bundled_dashboard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Serve no dashboard build by default, whatever ``ui/.output`` holds locally."""
-    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path / "no-dashboard-build"))
+def _no_bundled_web(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Serve no web build by default, whatever ``ui/.output`` holds locally."""
+    monkeypatch.setenv("WEB_STATIC_DIR", str(tmp_path / "no-web-build"))
 
 
 @pytest.fixture(autouse=True)
@@ -364,7 +364,7 @@ def _reset_sandbox_registries() -> Iterator[None]:
 def _default_enable_auto_review(monkeypatch: pytest.MonkeyPatch) -> None:
     """Treat automatic reviews as enabled for every repo by default.
 
-    The dashboard's opt-in list (loaded by :func:`openswe.review.enabled_repos.is_review_repo_enabled`)
+    The web app's opt-in list (loaded by :func:`openswe.review.enabled_repos.is_review_repo_enabled`)
     is empty in the test environment because there is no live LangGraph Store.
 
     Tests targeting the automatic-review gate should override this fixture or set

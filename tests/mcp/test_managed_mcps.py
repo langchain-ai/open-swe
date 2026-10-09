@@ -116,8 +116,8 @@ async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
 
 
 async def test_langsmith_outage_drops_only_the_gateway(monkeypatch):
-    from openswe.dashboard.langsmith_oauth import LangSmithOAuthError
     from openswe.mcp import MCPConnection
+    from openswe.web.langsmith_oauth import LangSmithOAuthError
 
     async def unavailable(login):
         raise LangSmithOAuthError(503, "LangSmith OAuth token refresh failed: network error")
@@ -228,7 +228,7 @@ async def test_only_the_card_owner_can_mint_its_consent_links(monkeypatch, card_
 async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, card_store):
     tool = importlib.import_module("openswe.tools.connect_managed_tools")
 
-    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example")
+    monkeypatch.setenv("WEB_API_BASE_URL", "https://api.example")
     monkeypatch.setattr(
         tool,
         "get_config",
@@ -263,7 +263,7 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
     parsed = urlparse(button["url"])
     assert (parsed.netloc, parsed.path) == (
         "api.example",
-        f"/dashboard/api/my-managed-tools/{GATEWAY_ID}/connect/linear",
+        f"/api/my-managed-tools/{GATEWAY_ID}/connect/linear",
     )
     assert parse_qs(parsed.query) == {"thread_id": ["t"], "card": ["call-1"]}
     assert await cards.ConnectCard.load("t", "call-1") is not None

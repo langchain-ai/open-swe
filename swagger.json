@@ -2398,7 +2398,7 @@
         "type": "object"
       },
       "MCPConnectionPublic": {
-        "description": "Connection settings safe to return to the dashboard; credentials stay server-side.",
+        "description": "Connection settings safe to return to the web app; credentials stay server-side.",
         "properties": {
           "allowed_tools": {
             "items": {
@@ -5516,7 +5516,7 @@
         "type": "object"
       },
       "ReviewSummary": {
-        "description": "A reviewer thread's durable state, as the dashboard reads it.",
+        "description": "A reviewer thread's durable state, as the web app reads it.",
         "properties": {
           "author": {
             "title": "Author",
@@ -8322,7 +8322,7 @@
       }
     },
     "securitySchemes": {
-      "DashboardSession": {
+      "WebSession": {
         "in": "cookie",
         "name": "osw_session",
         "type": "apiKey"
@@ -8335,9 +8335,9 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/dashboard/api/admin/api-keys": {
+    "/api/admin/api-keys": {
       "get": {
-        "operationId": "api_list_api_keys_dashboard_api_admin_api_keys_get",
+        "operationId": "api_list_api_keys_api_admin_api_keys_get",
         "parameters": [
           {
             "in": "query",
@@ -8364,7 +8364,7 @@
                   "items": {
                     "$ref": "#/components/schemas/ApiKeyView"
                   },
-                  "title": "Response Api List Api Keys Dashboard Api Admin Api Keys Get",
+                  "title": "Response Api List Api Keys Api Admin Api Keys Get",
                   "type": "array"
                 }
               }
@@ -8384,17 +8384,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Api Keys",
         "tags": [
-          "dashboard",
+          "web",
           "api-keys"
         ]
       },
       "post": {
-        "operationId": "api_create_api_key_dashboard_api_admin_api_keys_post",
+        "operationId": "api_create_api_key_api_admin_api_keys_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8429,19 +8429,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Api Key",
         "tags": [
-          "dashboard",
+          "web",
           "api-keys"
         ]
       }
     },
-    "/dashboard/api/admin/api-keys/{key_id}": {
+    "/api/admin/api-keys/{key_id}": {
       "delete": {
-        "operationId": "api_revoke_api_key_dashboard_api_admin_api_keys__key_id__delete",
+        "operationId": "api_revoke_api_key_api_admin_api_keys__key_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -8470,27 +8470,27 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Revoke Api Key",
         "tags": [
-          "dashboard",
+          "web",
           "api-keys"
         ]
       }
     },
-    "/dashboard/api/admin/evals/reviewer": {
+    "/api/admin/evals/reviewer": {
       "get": {
         "description": "Status of the latest reviewer eval.",
-        "operationId": "admin_get_reviewer_eval_dashboard_api_admin_evals_reviewer_get",
+        "operationId": "admin_get_reviewer_eval_api_admin_evals_reviewer_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Admin Get Reviewer Eval Dashboard Api Admin Evals Reviewer Get",
+                  "title": "Response Admin Get Reviewer Eval Api Admin Evals Reviewer Get",
                   "type": "object"
                 }
               }
@@ -8500,18 +8500,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Admin Get Reviewer Eval",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "post": {
         "description": "Launch the reviewer eval in a LangSmith sandbox with the given run config.",
-        "operationId": "admin_start_reviewer_eval_dashboard_api_admin_evals_reviewer_post",
+        "operationId": "admin_start_reviewer_eval_api_admin_evals_reviewer_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8528,7 +8528,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Admin Start Reviewer Eval Dashboard Api Admin Evals Reviewer Post",
+                  "title": "Response Admin Start Reviewer Eval Api Admin Evals Reviewer Post",
                   "type": "object"
                 }
               }
@@ -8548,19 +8548,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Admin Start Reviewer Eval",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/admin/threads/{thread_id}/cancel": {
+    "/api/admin/threads/{thread_id}/cancel": {
       "post": {
-        "operationId": "admin_cancel_thread_dashboard_api_admin_threads__thread_id__cancel_post",
+        "operationId": "admin_cancel_thread_api_admin_threads__thread_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -8578,7 +8578,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Admin Cancel Thread Dashboard Api Admin Threads  Thread Id  Cancel Post",
+                  "title": "Response Admin Cancel Thread Api Admin Threads  Thread Id  Cancel Post",
                   "type": "object"
                 }
               }
@@ -8598,20 +8598,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Admin Cancel Thread",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/admin/users": {
+    "/api/admin/users": {
       "get": {
         "description": "One page of users with the identities each one signed in or linked with.",
-        "operationId": "admin_list_users_dashboard_api_admin_users_get",
+        "operationId": "admin_list_users_api_admin_users_get",
         "parameters": [
           {
             "in": "query",
@@ -8653,7 +8653,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Admin List Users Dashboard Api Admin Users Get",
+                  "title": "Response Admin List Users Api Admin Users Get",
                   "type": "object"
                 }
               }
@@ -8673,19 +8673,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Admin List Users",
         "tags": [
-          "dashboard",
+          "web",
           "users"
         ]
       }
     },
-    "/dashboard/api/agent-instructions": {
+    "/api/agent-instructions": {
       "get": {
-        "operationId": "api_list_agent_instructions_dashboard_api_agent_instructions_get",
+        "operationId": "api_list_agent_instructions_api_agent_instructions_get",
         "responses": {
           "200": {
             "content": {
@@ -8694,7 +8694,7 @@
                   "items": {
                     "$ref": "#/components/schemas/AgentInstructions"
                   },
-                  "title": "Response Api List Agent Instructions Dashboard Api Agent Instructions Get",
+                  "title": "Response Api List Agent Instructions Api Agent Instructions Get",
                   "type": "array"
                 }
               }
@@ -8704,17 +8704,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Agent Instructions",
         "tags": [
-          "dashboard",
+          "web",
           "agent-instructions"
         ]
       },
       "post": {
-        "operationId": "api_create_agent_instructions_dashboard_api_agent_instructions_post",
+        "operationId": "api_create_agent_instructions_api_agent_instructions_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8749,19 +8749,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Agent Instructions",
         "tags": [
-          "dashboard",
+          "web",
           "agent-instructions"
         ]
       }
     },
-    "/dashboard/api/agent-instructions/{full_name}": {
+    "/api/agent-instructions/{full_name}": {
       "delete": {
-        "operationId": "api_delete_agent_instructions_dashboard_api_agent_instructions__full_name__delete",
+        "operationId": "api_delete_agent_instructions_api_agent_instructions__full_name__delete",
         "parameters": [
           {
             "in": "path",
@@ -8795,17 +8795,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Agent Instructions",
         "tags": [
-          "dashboard",
+          "web",
           "agent-instructions"
         ]
       },
       "get": {
-        "operationId": "api_get_agent_instructions_dashboard_api_agent_instructions__full_name__get",
+        "operationId": "api_get_agent_instructions_api_agent_instructions__full_name__get",
         "parameters": [
           {
             "in": "path",
@@ -8841,17 +8841,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Agent Instructions",
         "tags": [
-          "dashboard",
+          "web",
           "agent-instructions"
         ]
       },
       "put": {
-        "operationId": "api_update_agent_instructions_dashboard_api_agent_instructions__full_name__put",
+        "operationId": "api_update_agent_instructions_api_agent_instructions__full_name__put",
         "parameters": [
           {
             "in": "path",
@@ -8897,19 +8897,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Update Agent Instructions",
         "tags": [
-          "dashboard",
+          "web",
           "agent-instructions"
         ]
       }
     },
-    "/dashboard/api/agent-usage-leaderboard": {
+    "/api/agent-usage-leaderboard": {
       "get": {
-        "operationId": "api_agent_usage_leaderboard_dashboard_api_agent_usage_leaderboard_get",
+        "operationId": "api_agent_usage_leaderboard_api_agent_usage_leaderboard_get",
         "parameters": [
           {
             "in": "query",
@@ -9005,7 +9005,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Agent Usage Leaderboard Dashboard Api Agent Usage Leaderboard Get",
+                  "title": "Response Api Agent Usage Leaderboard Api Agent Usage Leaderboard Get",
                   "type": "object"
                 }
               }
@@ -9025,19 +9025,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Agent Usage Leaderboard",
         "tags": [
-          "dashboard",
+          "web",
           "analytics"
         ]
       }
     },
-    "/dashboard/api/analytics/config": {
+    "/api/analytics/config": {
       "get": {
-        "operationId": "api_telemetry_config_dashboard_api_analytics_config_get",
+        "operationId": "api_telemetry_config_api_analytics_config_get",
         "responses": {
           "200": {
             "content": {
@@ -9052,21 +9052,21 @@
         },
         "summary": "Api Telemetry Config",
         "tags": [
-          "dashboard",
+          "web",
           "analytics"
         ]
       }
     },
-    "/dashboard/api/analytics/outbox-status": {
+    "/api/analytics/outbox-status": {
       "get": {
-        "operationId": "api_analytics_outbox_status_dashboard_api_analytics_outbox_status_get",
+        "operationId": "api_analytics_outbox_status_api_analytics_outbox_status_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Analytics Outbox Status Dashboard Api Analytics Outbox Status Get",
+                  "title": "Response Api Analytics Outbox Status Api Analytics Outbox Status Get",
                   "type": "object"
                 }
               }
@@ -9076,19 +9076,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Analytics Outbox Status",
         "tags": [
-          "dashboard",
+          "web",
           "analytics"
         ]
       }
     },
-    "/dashboard/api/analytics/page": {
+    "/api/analytics/page": {
       "post": {
-        "operationId": "api_page_view_dashboard_api_analytics_page_post",
+        "operationId": "api_page_view_api_analytics_page_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9116,19 +9116,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Page View",
         "tags": [
-          "dashboard",
+          "web",
           "analytics"
         ]
       }
     },
-    "/dashboard/api/analytics/pr-merge-rate-by-model": {
+    "/api/analytics/pr-merge-rate-by-model": {
       "get": {
-        "operationId": "api_pr_merge_rate_by_model_dashboard_api_analytics_pr_merge_rate_by_model_get",
+        "operationId": "api_pr_merge_rate_by_model_api_analytics_pr_merge_rate_by_model_get",
         "parameters": [
           {
             "in": "query",
@@ -9172,7 +9172,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Pr Merge Rate By Model Dashboard Api Analytics Pr Merge Rate By Model Get",
+                  "title": "Response Api Pr Merge Rate By Model Api Analytics Pr Merge Rate By Model Get",
                   "type": "object"
                 }
               }
@@ -9192,26 +9192,26 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Pr Merge Rate By Model",
         "tags": [
-          "dashboard",
+          "web",
           "analytics"
         ]
       }
     },
-    "/dashboard/api/analytics/readiness": {
+    "/api/analytics/readiness": {
       "get": {
-        "operationId": "api_analytics_readiness_dashboard_api_analytics_readiness_get",
+        "operationId": "api_analytics_readiness_api_analytics_readiness_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Analytics Readiness Dashboard Api Analytics Readiness Get",
+                  "title": "Response Api Analytics Readiness Api Analytics Readiness Get",
                   "type": "object"
                 }
               }
@@ -9221,19 +9221,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Analytics Readiness",
         "tags": [
-          "dashboard",
+          "web",
           "analytics"
         ]
       }
     },
-    "/dashboard/api/audit-logs": {
+    "/api/audit-logs": {
       "get": {
-        "operationId": "api_list_audit_logs_dashboard_api_audit_logs_get",
+        "operationId": "api_list_audit_logs_api_audit_logs_get",
         "parameters": [
           {
             "in": "query",
@@ -9376,19 +9376,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Audit Logs",
         "tags": [
-          "dashboard",
+          "web",
           "audit-logs"
         ]
       }
     },
-    "/dashboard/api/auth/callback": {
+    "/api/auth/callback": {
       "get": {
-        "operationId": "auth_callback_dashboard_api_auth_callback_get",
+        "operationId": "auth_callback_api_auth_callback_get",
         "parameters": [
           {
             "in": "query",
@@ -9431,14 +9431,14 @@
         },
         "summary": "Auth Callback",
         "tags": [
-          "dashboard",
+          "web",
           "auth"
         ]
       }
     },
-    "/dashboard/api/auth/desktop/exchange": {
+    "/api/auth/desktop/exchange": {
       "post": {
-        "operationId": "auth_desktop_exchange_dashboard_api_auth_desktop_exchange_post",
+        "operationId": "auth_desktop_exchange_api_auth_desktop_exchange_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9455,7 +9455,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Auth Desktop Exchange Dashboard Api Auth Desktop Exchange Post",
+                  "title": "Response Auth Desktop Exchange Api Auth Desktop Exchange Post",
                   "type": "object"
                 }
               }
@@ -9475,15 +9475,15 @@
         },
         "summary": "Auth Desktop Exchange",
         "tags": [
-          "dashboard",
+          "web",
           "auth"
         ]
       }
     },
-    "/dashboard/api/auth/dev-login": {
+    "/api/auth/dev-login": {
       "get": {
         "description": "Sign in locally as the `gh` CLI's user, with no GitHub App involved.\n\nRefused outside `langgraph dev`, and still subject to the login allowlist.",
-        "operationId": "auth_dev_login_dashboard_api_auth_dev_login_get",
+        "operationId": "auth_dev_login_api_auth_dev_login_get",
         "parameters": [
           {
             "in": "query",
@@ -9524,14 +9524,14 @@
         },
         "summary": "Auth Dev Login",
         "tags": [
-          "dashboard",
+          "web",
           "auth"
         ]
       }
     },
-    "/dashboard/api/auth/login": {
+    "/api/auth/login": {
       "get": {
-        "operationId": "auth_login_dashboard_api_auth_login_get",
+        "operationId": "auth_login_api_auth_login_get",
         "parameters": [
           {
             "in": "query",
@@ -9616,14 +9616,14 @@
         },
         "summary": "Auth Login",
         "tags": [
-          "dashboard",
+          "web",
           "auth"
         ]
       }
     },
-    "/dashboard/api/auth/logout": {
+    "/api/auth/logout": {
       "post": {
-        "operationId": "auth_logout_dashboard_api_auth_logout_post",
+        "operationId": "auth_logout_api_auth_logout_post",
         "responses": {
           "200": {
             "content": {
@@ -9636,14 +9636,14 @@
         },
         "summary": "Auth Logout",
         "tags": [
-          "dashboard",
+          "web",
           "auth"
         ]
       }
     },
-    "/dashboard/api/bridges": {
+    "/api/bridges": {
       "post": {
-        "operationId": "api_open_bridge_dashboard_api_bridges_post",
+        "operationId": "api_open_bridge_api_bridges_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9678,14 +9678,14 @@
         },
         "summary": "Api Open Bridge",
         "tags": [
-          "dashboard",
+          "web",
           "sandbox-bridge"
         ]
       }
     },
-    "/dashboard/api/bridges/{bridge_id}": {
+    "/api/bridges/{bridge_id}": {
       "delete": {
-        "operationId": "api_close_bridge_dashboard_api_bridges__bridge_id__delete",
+        "operationId": "api_close_bridge_api_bridges__bridge_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -9719,14 +9719,14 @@
         },
         "summary": "Api Close Bridge",
         "tags": [
-          "dashboard",
+          "web",
           "sandbox-bridge"
         ]
       }
     },
-    "/dashboard/api/bridges/{bridge_id}/heartbeat": {
+    "/api/bridges/{bridge_id}/heartbeat": {
       "post": {
-        "operationId": "api_bridge_heartbeat_dashboard_api_bridges__bridge_id__heartbeat_post",
+        "operationId": "api_bridge_heartbeat_api_bridges__bridge_id__heartbeat_post",
         "parameters": [
           {
             "in": "path",
@@ -9760,14 +9760,14 @@
         },
         "summary": "Api Bridge Heartbeat",
         "tags": [
-          "dashboard",
+          "web",
           "sandbox-bridge"
         ]
       }
     },
-    "/dashboard/api/bridges/{bridge_id}/requests/claim": {
+    "/api/bridges/{bridge_id}/requests/claim": {
       "post": {
-        "operationId": "api_claim_bridge_requests_dashboard_api_bridges__bridge_id__requests_claim_post",
+        "operationId": "api_claim_bridge_requests_api_bridges__bridge_id__requests_claim_post",
         "parameters": [
           {
             "in": "path",
@@ -9813,14 +9813,14 @@
         },
         "summary": "Api Claim Bridge Requests",
         "tags": [
-          "dashboard",
+          "web",
           "sandbox-bridge"
         ]
       }
     },
-    "/dashboard/api/bridges/{bridge_id}/requests/{request_id}": {
+    "/api/bridges/{bridge_id}/requests/{request_id}": {
       "post": {
-        "operationId": "api_answer_bridge_request_dashboard_api_bridges__bridge_id__requests__request_id__post",
+        "operationId": "api_answer_bridge_request_api_bridges__bridge_id__requests__request_id__post",
         "parameters": [
           {
             "in": "path",
@@ -9873,14 +9873,14 @@
         },
         "summary": "Api Answer Bridge Request",
         "tags": [
-          "dashboard",
+          "web",
           "sandbox-bridge"
         ]
       }
     },
-    "/dashboard/api/cli/mcp/tools": {
+    "/api/cli/mcp/tools": {
       "get": {
-        "operationId": "cli_mcp_tools_dashboard_api_cli_mcp_tools_get",
+        "operationId": "cli_mcp_tools_api_cli_mcp_tools_get",
         "responses": {
           "200": {
             "content": {
@@ -9889,7 +9889,7 @@
                   "items": {
                     "$ref": "#/components/schemas/CLITool"
                   },
-                  "title": "Response Cli Mcp Tools Dashboard Api Cli Mcp Tools Get",
+                  "title": "Response Cli Mcp Tools Api Cli Mcp Tools Get",
                   "type": "array"
                 }
               }
@@ -9899,19 +9899,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Cli Mcp Tools",
         "tags": [
-          "dashboard",
+          "web",
           "cli-mcp-tools"
         ]
       }
     },
-    "/dashboard/api/cli/mcp/tools/{name}": {
+    "/api/cli/mcp/tools/{name}": {
       "post": {
-        "operationId": "cli_mcp_invoke_dashboard_api_cli_mcp_tools__name__post",
+        "operationId": "cli_mcp_invoke_api_cli_mcp_tools__name__post",
         "parameters": [
           {
             "in": "path",
@@ -9957,19 +9957,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Cli Mcp Invoke",
         "tags": [
-          "dashboard",
+          "web",
           "cli-mcp-tools"
         ]
       }
     },
-    "/dashboard/api/client-errors": {
+    "/api/client-errors": {
       "post": {
-        "operationId": "api_report_client_error_dashboard_api_client_errors_post",
+        "operationId": "api_report_client_error_api_client_errors_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9997,18 +9997,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Report Client Error",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/enabled-review-repos": {
+    "/api/enabled-review-repos": {
       "get": {
-        "operationId": "api_list_enabled_review_repos_dashboard_api_enabled_review_repos_get",
+        "operationId": "api_list_enabled_review_repos_api_enabled_review_repos_get",
         "responses": {
           "200": {
             "content": {
@@ -10020,7 +10020,7 @@
                     },
                     "type": "array"
                   },
-                  "title": "Response Api List Enabled Review Repos Dashboard Api Enabled Review Repos Get",
+                  "title": "Response Api List Enabled Review Repos Api Enabled Review Repos Get",
                   "type": "object"
                 }
               }
@@ -10030,17 +10030,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Enabled Review Repos",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "put": {
-        "operationId": "api_set_enabled_review_repo_dashboard_api_enabled_review_repos_put",
+        "operationId": "api_set_enabled_review_repo_api_enabled_review_repos_put",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10062,7 +10062,7 @@
                     },
                     "type": "array"
                   },
-                  "title": "Response Api Set Enabled Review Repo Dashboard Api Enabled Review Repos Put",
+                  "title": "Response Api Set Enabled Review Repo Api Enabled Review Repos Put",
                   "type": "object"
                 }
               }
@@ -10082,19 +10082,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Set Enabled Review Repo",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/incidents/documents/history": {
+    "/api/incidents/documents/history": {
       "get": {
-        "operationId": "search_history_dashboard_api_incidents_documents_history_get",
+        "operationId": "search_history_api_incidents_documents_history_get",
         "parameters": [
           {
             "in": "query",
@@ -10147,7 +10147,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Search History Dashboard Api Incidents Documents History Get",
+                  "title": "Response Search History Api Incidents Documents History Get",
                   "type": "object"
                 }
               }
@@ -10167,19 +10167,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Search History",
         "tags": [
-          "dashboard",
+          "web",
           "incidents"
         ]
       }
     },
-    "/dashboard/api/incidents/documents/{incident_id}": {
+    "/api/incidents/documents/{incident_id}": {
       "get": {
-        "operationId": "get_document_dashboard_api_incidents_documents__incident_id__get",
+        "operationId": "get_document_api_incidents_documents__incident_id__get",
         "parameters": [
           {
             "in": "path",
@@ -10197,7 +10197,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get Document Dashboard Api Incidents Documents  Incident Id  Get",
+                  "title": "Response Get Document Api Incidents Documents  Incident Id  Get",
                   "type": "object"
                 }
               }
@@ -10217,19 +10217,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get Document",
         "tags": [
-          "dashboard",
+          "web",
           "incidents"
         ]
       }
     },
-    "/dashboard/api/incidents/records": {
+    "/api/incidents/records": {
       "get": {
-        "operationId": "list_incidents_dashboard_api_incidents_records_get",
+        "operationId": "list_incidents_api_incidents_records_get",
         "parameters": [
           {
             "in": "query",
@@ -10303,7 +10303,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response List Incidents Dashboard Api Incidents Records Get",
+                  "title": "Response List Incidents Api Incidents Records Get",
                   "type": "object"
                 }
               }
@@ -10323,19 +10323,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "List Incidents",
         "tags": [
-          "dashboard",
+          "web",
           "incidents"
         ]
       }
     },
-    "/dashboard/api/incidents/records/{incident_id}": {
+    "/api/incidents/records/{incident_id}": {
       "get": {
-        "operationId": "get_incident_dashboard_api_incidents_records__incident_id__get",
+        "operationId": "get_incident_api_incidents_records__incident_id__get",
         "parameters": [
           {
             "in": "path",
@@ -10353,7 +10353,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get Incident Dashboard Api Incidents Records  Incident Id  Get",
+                  "title": "Response Get Incident Api Incidents Records  Incident Id  Get",
                   "type": "object"
                 }
               }
@@ -10373,19 +10373,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get Incident",
         "tags": [
-          "dashboard",
+          "web",
           "incidents"
         ]
       }
     },
-    "/dashboard/api/incidents/records/{incident_id}/commands": {
+    "/api/incidents/records/{incident_id}/commands": {
       "post": {
-        "operationId": "submit_command_dashboard_api_incidents_records__incident_id__commands_post",
+        "operationId": "submit_command_api_incidents_records__incident_id__commands_post",
         "parameters": [
           {
             "in": "path",
@@ -10413,7 +10413,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Submit Command Dashboard Api Incidents Records  Incident Id  Commands Post",
+                  "title": "Response Submit Command Api Incidents Records  Incident Id  Commands Post",
                   "type": "object"
                 }
               }
@@ -10433,26 +10433,26 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Submit Command",
         "tags": [
-          "dashboard",
+          "web",
           "incidents"
         ]
       }
     },
-    "/dashboard/api/incidents/settings": {
+    "/api/incidents/settings": {
       "get": {
-        "operationId": "get_settings_dashboard_api_incidents_settings_get",
+        "operationId": "get_settings_api_incidents_settings_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get Settings Dashboard Api Incidents Settings Get",
+                  "title": "Response Get Settings Api Incidents Settings Get",
                   "type": "object"
                 }
               }
@@ -10462,17 +10462,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get Settings",
         "tags": [
-          "dashboard",
+          "web",
           "incidents"
         ]
       },
       "patch": {
-        "operationId": "update_settings_dashboard_api_incidents_settings_patch",
+        "operationId": "update_settings_api_incidents_settings_patch",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10489,7 +10489,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Update Settings Dashboard Api Incidents Settings Patch",
+                  "title": "Response Update Settings Api Incidents Settings Patch",
                   "type": "object"
                 }
               }
@@ -10509,19 +10509,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Update Settings",
         "tags": [
-          "dashboard",
+          "web",
           "incidents"
         ]
       }
     },
-    "/dashboard/api/langsmith/callback": {
+    "/api/langsmith/callback": {
       "get": {
-        "operationId": "langsmith_callback_dashboard_api_langsmith_callback_get",
+        "operationId": "langsmith_callback_api_langsmith_callback_get",
         "parameters": [
           {
             "in": "query",
@@ -10603,15 +10603,15 @@
         },
         "summary": "Langsmith Callback",
         "tags": [
-          "dashboard",
+          "web",
           "langsmith"
         ]
       }
     },
-    "/dashboard/api/langsmith/desktop/exchange": {
+    "/api/langsmith/desktop/exchange": {
       "post": {
         "description": "Finish a desktop LangSmith connection with the app's own session.",
-        "operationId": "langsmith_desktop_exchange_dashboard_api_langsmith_desktop_exchange_post",
+        "operationId": "langsmith_desktop_exchange_api_langsmith_desktop_exchange_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10630,7 +10630,7 @@
                   "additionalProperties": {
                     "type": "boolean"
                   },
-                  "title": "Response Langsmith Desktop Exchange Dashboard Api Langsmith Desktop Exchange Post",
+                  "title": "Response Langsmith Desktop Exchange Api Langsmith Desktop Exchange Post",
                   "type": "object"
                 }
               }
@@ -10650,19 +10650,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Langsmith Desktop Exchange",
         "tags": [
-          "dashboard",
+          "web",
           "langsmith"
         ]
       }
     },
-    "/dashboard/api/langsmith/login": {
+    "/api/langsmith/login": {
       "get": {
-        "operationId": "langsmith_login_dashboard_api_langsmith_login_get",
+        "operationId": "langsmith_login_api_langsmith_login_get",
         "parameters": [
           {
             "in": "query",
@@ -10737,20 +10737,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Langsmith Login",
         "tags": [
-          "dashboard",
+          "web",
           "langsmith"
         ]
       }
     },
-    "/dashboard/api/managed-tools/gateways": {
+    "/api/managed-tools/gateways": {
       "get": {
         "description": "Gateways an admin can pick for a workspace, read with the admin's own LangSmith login.",
-        "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
+        "operationId": "api_list_managed_tools_gateways_api_managed_tools_gateways_get",
         "responses": {
           "200": {
             "content": {
@@ -10759,7 +10759,7 @@
                   "items": {
                     "$ref": "#/components/schemas/Gateway"
                   },
-                  "title": "Response Api List Managed Tools Gateways Dashboard Api Managed Tools Gateways Get",
+                  "title": "Response Api List Managed Tools Gateways Api Managed Tools Gateways Get",
                   "type": "array"
                 }
               }
@@ -10769,18 +10769,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Managed Tools Gateways",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/mcps": {
+    "/api/mcps": {
       "get": {
-        "operationId": "api_list_instance_mcps_dashboard_api_mcps_get",
+        "operationId": "api_list_instance_mcps_api_mcps_get",
         "responses": {
           "200": {
             "content": {
@@ -10789,7 +10789,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MCPConnectionPublic"
                   },
-                  "title": "Response Api List Instance Mcps Dashboard Api Mcps Get",
+                  "title": "Response Api List Instance Mcps Api Mcps Get",
                   "type": "array"
                 }
               }
@@ -10799,18 +10799,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Instance Mcps",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/mcps/{name}": {
+    "/api/mcps/{name}": {
       "delete": {
-        "operationId": "api_delete_instance_mcp_dashboard_api_mcps__name__delete",
+        "operationId": "api_delete_instance_mcp_api_mcps__name__delete",
         "parameters": [
           {
             "in": "path",
@@ -10839,16 +10839,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Instance Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "put": {
-        "operationId": "api_save_instance_mcp_dashboard_api_mcps__name__put",
+        "operationId": "api_save_instance_mcp_api_mcps__name__put",
         "parameters": [
           {
             "in": "path",
@@ -10894,18 +10894,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Save Instance Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/mcps/{name}/discover": {
+    "/api/mcps/{name}/discover": {
       "post": {
-        "operationId": "api_discover_instance_mcp_dashboard_api_mcps__name__discover_post",
+        "operationId": "api_discover_instance_mcp_api_mcps__name__discover_post",
         "parameters": [
           {
             "in": "path",
@@ -10942,7 +10942,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MCPToolDescription"
                   },
-                  "title": "Response Api Discover Instance Mcp Dashboard Api Mcps  Name  Discover Post",
+                  "title": "Response Api Discover Instance Mcp Api Mcps  Name  Discover Post",
                   "type": "array"
                 }
               }
@@ -10962,18 +10962,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Discover Instance Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/mcps/{name}/headers/reveal": {
+    "/api/mcps/{name}/headers/reveal": {
       "post": {
-        "operationId": "api_reveal_instance_mcp_headers_dashboard_api_mcps__name__headers_reveal_post",
+        "operationId": "api_reveal_instance_mcp_headers_api_mcps__name__headers_reveal_post",
         "parameters": [
           {
             "in": "path",
@@ -11007,25 +11007,25 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Reveal Instance Mcp Headers",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/me": {
+    "/api/me": {
       "get": {
-        "operationId": "me_dashboard_api_me_get",
+        "operationId": "me_api_me_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Me Dashboard Api Me Get",
+                  "title": "Response Me Api Me Get",
                   "type": "object"
                 }
               }
@@ -11035,19 +11035,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Me",
         "tags": [
-          "dashboard",
+          "web",
           "auth"
         ]
       }
     },
-    "/dashboard/api/me/instructions": {
+    "/api/me/instructions": {
       "delete": {
-        "operationId": "api_delete_my_instructions_dashboard_api_me_instructions_delete",
+        "operationId": "api_delete_my_instructions_api_me_instructions_delete",
         "responses": {
           "200": {
             "content": {
@@ -11060,24 +11060,24 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete My Instructions",
         "tags": [
-          "dashboard",
+          "web",
           "user-instructions"
         ]
       },
       "get": {
-        "operationId": "api_get_my_instructions_dashboard_api_me_instructions_get",
+        "operationId": "api_get_my_instructions_api_me_instructions_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get My Instructions Dashboard Api Me Instructions Get",
+                  "title": "Response Api Get My Instructions Api Me Instructions Get",
                   "type": "object"
                 }
               }
@@ -11087,17 +11087,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get My Instructions",
         "tags": [
-          "dashboard",
+          "web",
           "user-instructions"
         ]
       },
       "put": {
-        "operationId": "api_put_my_instructions_dashboard_api_me_instructions_put",
+        "operationId": "api_put_my_instructions_api_me_instructions_put",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11114,7 +11114,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Put My Instructions Dashboard Api Me Instructions Put",
+                  "title": "Response Api Put My Instructions Api Me Instructions Put",
                   "type": "object"
                 }
               }
@@ -11134,19 +11134,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Put My Instructions",
         "tags": [
-          "dashboard",
+          "web",
           "user-instructions"
         ]
       }
     },
-    "/dashboard/api/me/local-trace-url/{thread_id}": {
+    "/api/me/local-trace-url/{thread_id}": {
       "get": {
-        "operationId": "api_get_local_trace_url_dashboard_api_me_local_trace_url__thread_id__get",
+        "operationId": "api_get_local_trace_url_api_me_local_trace_url__thread_id__get",
         "parameters": [
           {
             "in": "path",
@@ -11174,7 +11174,7 @@
                       }
                     ]
                   },
-                  "title": "Response Api Get Local Trace Url Dashboard Api Me Local Trace Url  Thread Id  Get",
+                  "title": "Response Api Get Local Trace Url Api Me Local Trace Url  Thread Id  Get",
                   "type": "object"
                 }
               }
@@ -11194,26 +11194,26 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Local Trace Url",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/me/preferences": {
+    "/api/me/preferences": {
       "get": {
-        "operationId": "api_get_my_preferences_dashboard_api_me_preferences_get",
+        "operationId": "api_get_my_preferences_api_me_preferences_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get My Preferences Dashboard Api Me Preferences Get",
+                  "title": "Response Api Get My Preferences Api Me Preferences Get",
                   "type": "object"
                 }
               }
@@ -11223,17 +11223,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get My Preferences",
         "tags": [
-          "dashboard",
+          "web",
           "user-preferences"
         ]
       },
       "put": {
-        "operationId": "api_put_my_preferences_dashboard_api_me_preferences_put",
+        "operationId": "api_put_my_preferences_api_me_preferences_put",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11250,7 +11250,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Put My Preferences Dashboard Api Me Preferences Put",
+                  "title": "Response Api Put My Preferences Api Me Preferences Put",
                   "type": "object"
                 }
               }
@@ -11270,26 +11270,26 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Put My Preferences",
         "tags": [
-          "dashboard",
+          "web",
           "user-preferences"
         ]
       }
     },
-    "/dashboard/api/my-credentials/langsmith": {
+    "/api/my-credentials/langsmith": {
       "delete": {
-        "operationId": "disconnect_my_langsmith_dashboard_api_my_credentials_langsmith_delete",
+        "operationId": "disconnect_my_langsmith_api_my_credentials_langsmith_delete",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Disconnect My Langsmith Dashboard Api My Credentials Langsmith Delete",
+                  "title": "Response Disconnect My Langsmith Api My Credentials Langsmith Delete",
                   "type": "object"
                 }
               }
@@ -11299,24 +11299,24 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Disconnect My Langsmith",
         "tags": [
-          "dashboard",
+          "web",
           "langsmith"
         ]
       },
       "get": {
-        "operationId": "get_my_langsmith_status_dashboard_api_my_credentials_langsmith_get",
+        "operationId": "get_my_langsmith_status_api_my_credentials_langsmith_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get My Langsmith Status Dashboard Api My Credentials Langsmith Get",
+                  "title": "Response Get My Langsmith Status Api My Credentials Langsmith Get",
                   "type": "object"
                 }
               }
@@ -11326,19 +11326,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get My Langsmith Status",
         "tags": [
-          "dashboard",
+          "web",
           "langsmith"
         ]
       }
     },
-    "/dashboard/api/my-managed-tools": {
+    "/api/my-managed-tools": {
       "get": {
-        "operationId": "api_my_managed_tools_dashboard_api_my_managed_tools_get",
+        "operationId": "api_my_managed_tools_api_my_managed_tools_get",
         "responses": {
           "200": {
             "content": {
@@ -11353,19 +11353,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api My Managed Tools",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/my-managed-tools/{gateway}/connect/{slug}": {
+    "/api/my-managed-tools/{gateway}/connect/{slug}": {
       "get": {
         "description": "A Slack card button: mint the consent link here, for the signed-in owner only.",
-        "operationId": "connect_managed_tool_from_card_dashboard_api_my_managed_tools__gateway__connect__slug__get",
+        "operationId": "connect_managed_tool_from_card_api_my_managed_tools__gateway__connect__slug__get",
         "parameters": [
           {
             "in": "path",
@@ -11426,17 +11426,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Connect Managed Tool From Card",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "post": {
         "description": "A consent link for one service; from a thread's card, the thread resumes once connected.",
-        "operationId": "api_connect_managed_tool_dashboard_api_my_managed_tools__gateway__connect__slug__post",
+        "operationId": "api_connect_managed_tool_api_my_managed_tools__gateway__connect__slug__post",
         "parameters": [
           {
             "in": "path",
@@ -11513,18 +11513,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Connect Managed Tool",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/my-mcps": {
+    "/api/my-mcps": {
       "get": {
-        "operationId": "api_list_my_mcps_dashboard_api_my_mcps_get",
+        "operationId": "api_list_my_mcps_api_my_mcps_get",
         "responses": {
           "200": {
             "content": {
@@ -11533,7 +11533,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MCPConnectionPublic"
                   },
-                  "title": "Response Api List My Mcps Dashboard Api My Mcps Get",
+                  "title": "Response Api List My Mcps Api My Mcps Get",
                   "type": "array"
                 }
               }
@@ -11543,18 +11543,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List My Mcps",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/my-mcps/{name}": {
+    "/api/my-mcps/{name}": {
       "delete": {
-        "operationId": "api_delete_my_mcp_dashboard_api_my_mcps__name__delete",
+        "operationId": "api_delete_my_mcp_api_my_mcps__name__delete",
         "parameters": [
           {
             "in": "path",
@@ -11583,16 +11583,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete My Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "put": {
-        "operationId": "api_save_my_mcp_dashboard_api_my_mcps__name__put",
+        "operationId": "api_save_my_mcp_api_my_mcps__name__put",
         "parameters": [
           {
             "in": "path",
@@ -11638,18 +11638,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Save My Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/my-mcps/{name}/discover": {
+    "/api/my-mcps/{name}/discover": {
       "post": {
-        "operationId": "api_discover_my_mcp_dashboard_api_my_mcps__name__discover_post",
+        "operationId": "api_discover_my_mcp_api_my_mcps__name__discover_post",
         "parameters": [
           {
             "in": "path",
@@ -11686,7 +11686,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MCPToolDescription"
                   },
-                  "title": "Response Api Discover My Mcp Dashboard Api My Mcps  Name  Discover Post",
+                  "title": "Response Api Discover My Mcp Api My Mcps  Name  Discover Post",
                   "type": "array"
                 }
               }
@@ -11706,18 +11706,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Discover My Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/my-mcps/{name}/headers/reveal": {
+    "/api/my-mcps/{name}/headers/reveal": {
       "post": {
-        "operationId": "api_reveal_my_mcp_headers_dashboard_api_my_mcps__name__headers_reveal_post",
+        "operationId": "api_reveal_my_mcp_headers_api_my_mcps__name__headers_reveal_post",
         "parameters": [
           {
             "in": "path",
@@ -11751,19 +11751,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Reveal My Mcp Headers",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/options": {
+    "/api/options": {
       "get": {
         "description": "The models and defaults a composer may offer for ``workspace``.\n\nModel defaults and the Fable flag resolve per workspace (the instance record\nplus the workspace's overrides), so a picker that asked without one would\nadvertise the default workspace's values wherever the run will not land there.",
-        "operationId": "options_dashboard_api_options_get",
+        "operationId": "options_api_options_get",
         "parameters": [
           {
             "in": "query",
@@ -11782,7 +11782,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Options Dashboard Api Options Get",
+                  "title": "Response Options Api Options Get",
                   "type": "object"
                 }
               }
@@ -11802,14 +11802,14 @@
         },
         "summary": "Options",
         "tags": [
-          "dashboard",
+          "web",
           "options"
         ]
       }
     },
-    "/dashboard/api/organization-skills": {
+    "/api/organization-skills": {
       "get": {
-        "operationId": "api_list_organization_skills_dashboard_api_organization_skills_get",
+        "operationId": "api_list_organization_skills_api_organization_skills_get",
         "parameters": [
           {
             "in": "query",
@@ -11847,7 +11847,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api List Organization Skills Dashboard Api Organization Skills Get",
+                  "title": "Response Api List Organization Skills Api Organization Skills Get",
                   "type": "object"
                 }
               }
@@ -11867,16 +11867,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Organization Skills",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "post": {
-        "operationId": "api_create_organization_skill_dashboard_api_organization_skills_post",
+        "operationId": "api_create_organization_skill_api_organization_skills_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11893,7 +11893,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Create Organization Skill Dashboard Api Organization Skills Post",
+                  "title": "Response Api Create Organization Skill Api Organization Skills Post",
                   "type": "object"
                 }
               }
@@ -11913,18 +11913,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Organization Skill",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/organization-skills/{name}": {
+    "/api/organization-skills/{name}": {
       "delete": {
-        "operationId": "api_delete_organization_skill_dashboard_api_organization_skills__name__delete",
+        "operationId": "api_delete_organization_skill_api_organization_skills__name__delete",
         "parameters": [
           {
             "in": "path",
@@ -11958,16 +11958,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Organization Skill",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "put": {
-        "operationId": "api_update_organization_skill_dashboard_api_organization_skills__name__put",
+        "operationId": "api_update_organization_skill_api_organization_skills__name__put",
         "parameters": [
           {
             "in": "path",
@@ -11995,7 +11995,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Update Organization Skill Dashboard Api Organization Skills  Name  Put",
+                  "title": "Response Api Update Organization Skill Api Organization Skills  Name  Put",
                   "type": "object"
                 }
               }
@@ -12015,18 +12015,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Update Organization Skill",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/plan/{thread_id}": {
+    "/api/plan/{thread_id}": {
       "get": {
-        "operationId": "get_plan_dashboard_api_plan__thread_id__get",
+        "operationId": "get_plan_api_plan__thread_id__get",
         "parameters": [
           {
             "in": "path",
@@ -12044,7 +12044,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get Plan Dashboard Api Plan  Thread Id  Get",
+                  "title": "Response Get Plan Api Plan  Thread Id  Get",
                   "type": "object"
                 }
               }
@@ -12064,7 +12064,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get Plan",
@@ -12074,7 +12074,7 @@
       },
       "put": {
         "description": "Save an edited HTML artifact while preserving review comments.",
-        "operationId": "update_plan_dashboard_api_plan__thread_id__put",
+        "operationId": "update_plan_api_plan__thread_id__put",
         "parameters": [
           {
             "in": "path",
@@ -12102,7 +12102,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Update Plan Dashboard Api Plan  Thread Id  Put",
+                  "title": "Response Update Plan Api Plan  Thread Id  Put",
                   "type": "object"
                 }
               }
@@ -12122,7 +12122,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Update Plan",
@@ -12131,9 +12131,9 @@
         ]
       }
     },
-    "/dashboard/api/plan/{thread_id}/comments": {
+    "/api/plan/{thread_id}/comments": {
       "get": {
-        "operationId": "get_plan_comments_dashboard_api_plan__thread_id__comments_get",
+        "operationId": "get_plan_comments_api_plan__thread_id__comments_get",
         "parameters": [
           {
             "in": "path",
@@ -12151,7 +12151,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get Plan Comments Dashboard Api Plan  Thread Id  Comments Get",
+                  "title": "Response Get Plan Comments Api Plan  Thread Id  Comments Get",
                   "type": "object"
                 }
               }
@@ -12171,7 +12171,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get Plan Comments",
@@ -12180,7 +12180,7 @@
         ]
       },
       "post": {
-        "operationId": "post_plan_comment_dashboard_api_plan__thread_id__comments_post",
+        "operationId": "post_plan_comment_api_plan__thread_id__comments_post",
         "parameters": [
           {
             "in": "path",
@@ -12208,7 +12208,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Post Plan Comment Dashboard Api Plan  Thread Id  Comments Post",
+                  "title": "Response Post Plan Comment Api Plan  Thread Id  Comments Post",
                   "type": "object"
                 }
               }
@@ -12228,7 +12228,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Post Plan Comment",
@@ -12237,9 +12237,9 @@
         ]
       }
     },
-    "/dashboard/api/plan/{thread_id}/comments/submit": {
+    "/api/plan/{thread_id}/comments/submit": {
       "post": {
-        "operationId": "submit_plan_comments_dashboard_api_plan__thread_id__comments_submit_post",
+        "operationId": "submit_plan_comments_api_plan__thread_id__comments_submit_post",
         "parameters": [
           {
             "in": "path",
@@ -12259,7 +12259,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Submit Plan Comments Dashboard Api Plan  Thread Id  Comments Submit Post",
+                  "title": "Response Submit Plan Comments Api Plan  Thread Id  Comments Submit Post",
                   "type": "object"
                 }
               }
@@ -12279,7 +12279,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Submit Plan Comments",
@@ -12288,9 +12288,9 @@
         ]
       }
     },
-    "/dashboard/api/plan/{thread_id}/comments/{comment_id}": {
+    "/api/plan/{thread_id}/comments/{comment_id}": {
       "delete": {
-        "operationId": "remove_plan_comment_dashboard_api_plan__thread_id__comments__comment_id__delete",
+        "operationId": "remove_plan_comment_api_plan__thread_id__comments__comment_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -12317,7 +12317,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Remove Plan Comment Dashboard Api Plan  Thread Id  Comments  Comment Id  Delete",
+                  "title": "Response Remove Plan Comment Api Plan  Thread Id  Comments  Comment Id  Delete",
                   "type": "object"
                 }
               }
@@ -12337,7 +12337,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Remove Plan Comment",
@@ -12346,16 +12346,16 @@
         ]
       }
     },
-    "/dashboard/api/profile": {
+    "/api/profile": {
       "get": {
-        "operationId": "get_my_profile_dashboard_api_profile_get",
+        "operationId": "get_my_profile_api_profile_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Get My Profile Dashboard Api Profile Get",
+                  "title": "Response Get My Profile Api Profile Get",
                   "type": "object"
                 }
               }
@@ -12365,17 +12365,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get My Profile",
         "tags": [
-          "dashboard",
+          "web",
           "profiles"
         ]
       },
       "put": {
-        "operationId": "put_my_profile_dashboard_api_profile_put",
+        "operationId": "put_my_profile_api_profile_put",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12392,7 +12392,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Put My Profile Dashboard Api Profile Put",
+                  "title": "Response Put My Profile Api Profile Put",
                   "type": "object"
                 }
               }
@@ -12412,26 +12412,26 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Put My Profile",
         "tags": [
-          "dashboard",
+          "web",
           "profiles"
         ]
       }
     },
-    "/dashboard/api/profile/slack-onboarding-dismissal": {
+    "/api/profile/slack-onboarding-dismissal": {
       "post": {
-        "operationId": "dismiss_slack_onboarding_dashboard_api_profile_slack_onboarding_dismissal_post",
+        "operationId": "dismiss_slack_onboarding_api_profile_slack_onboarding_dismissal_post",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Dismiss Slack Onboarding Dashboard Api Profile Slack Onboarding Dismissal Post",
+                  "title": "Response Dismiss Slack Onboarding Api Profile Slack Onboarding Dismissal Post",
                   "type": "object"
                 }
               }
@@ -12441,19 +12441,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Dismiss Slack Onboarding",
         "tags": [
-          "dashboard",
+          "web",
           "profiles"
         ]
       }
     },
-    "/dashboard/api/pull-requests": {
+    "/api/pull-requests": {
       "get": {
-        "operationId": "api_list_pull_requests_dashboard_api_pull_requests_get",
+        "operationId": "api_list_pull_requests_api_pull_requests_get",
         "parameters": [
           {
             "in": "query",
@@ -12552,19 +12552,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Pull Requests",
         "tags": [
-          "dashboard",
+          "web",
           "pull-requests"
         ]
       }
     },
-    "/dashboard/api/pull-requests/search": {
+    "/api/pull-requests/search": {
       "get": {
-        "operationId": "api_search_pull_requests_dashboard_api_pull_requests_search_get",
+        "operationId": "api_search_pull_requests_api_pull_requests_search_get",
         "parameters": [
           {
             "in": "query",
@@ -12625,20 +12625,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Search Pull Requests",
         "tags": [
-          "dashboard",
+          "web",
           "pull-requests"
         ]
       }
     },
-    "/dashboard/api/repos": {
+    "/api/repos": {
       "get": {
         "description": "List repos where Open SWE is installed and the user has access.\n\nServed from the per-login cache (stale-while-revalidate) unless\n``refresh=true``, because the fan-out over every installation takes 10s+\nfor users with hundreds of accessible repos.",
-        "operationId": "list_repos_dashboard_api_repos_get",
+        "operationId": "list_repos_api_repos_get",
         "parameters": [
           {
             "in": "query",
@@ -12657,7 +12657,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response List Repos Dashboard Api Repos Get",
+                  "title": "Response List Repos Api Repos Get",
                   "type": "object"
                 }
               }
@@ -12677,19 +12677,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "List Repos",
         "tags": [
-          "dashboard",
+          "web",
           "github"
         ]
       }
     },
-    "/dashboard/api/repos/{owner}/{repo}/merge-methods": {
+    "/api/repos/{owner}/{repo}/merge-methods": {
       "get": {
-        "operationId": "api_repository_merge_methods_dashboard_api_repos__owner___repo__merge_methods_get",
+        "operationId": "api_repository_merge_methods_api_repos__owner___repo__merge_methods_get",
         "parameters": [
           {
             "in": "path",
@@ -12734,19 +12734,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Repository Merge Methods",
         "tags": [
-          "dashboard",
+          "web",
           "github"
         ]
       }
     },
-    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}": {
+    "/api/repos/{owner}/{repo}/pulls/{number}": {
       "get": {
-        "operationId": "api_pull_request_details_dashboard_api_repos__owner___repo__pulls__number__get",
+        "operationId": "api_pull_request_details_api_repos__owner___repo__pulls__number__get",
         "parameters": [
           {
             "in": "path",
@@ -12789,7 +12789,7 @@
                       "type": "null"
                     }
                   ],
-                  "title": "Response Api Pull Request Details Dashboard Api Repos  Owner   Repo  Pulls  Number  Get"
+                  "title": "Response Api Pull Request Details Api Repos  Owner   Repo  Pulls  Number  Get"
                 }
               }
             },
@@ -12808,19 +12808,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Pull Request Details",
         "tags": [
-          "dashboard",
+          "web",
           "pull-requests"
         ]
       }
     },
-    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/action": {
+    "/api/repos/{owner}/{repo}/pulls/{number}/action": {
       "post": {
-        "operationId": "api_act_on_pull_request_dashboard_api_repos__owner___repo__pulls__number__action_post",
+        "operationId": "api_act_on_pull_request_api_repos__owner___repo__pulls__number__action_post",
         "parameters": [
           {
             "in": "path",
@@ -12907,19 +12907,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Act On Pull Request",
         "tags": [
-          "dashboard",
+          "web",
           "pull-requests"
         ]
       }
     },
-    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review": {
+    "/api/repos/{owner}/{repo}/pulls/{number}/human-review": {
       "get": {
-        "operationId": "api_human_review_availability_dashboard_api_repos__owner___repo__pulls__number__human_review_get",
+        "operationId": "api_human_review_availability_api_repos__owner___repo__pulls__number__human_review_get",
         "parameters": [
           {
             "in": "path",
@@ -12973,17 +12973,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Human Review Availability",
         "tags": [
-          "dashboard",
+          "web",
           "human-review"
         ]
       },
       "post": {
-        "operationId": "api_request_human_review_dashboard_api_repos__owner___repo__pulls__number__human_review_post",
+        "operationId": "api_request_human_review_api_repos__owner___repo__pulls__number__human_review_post",
         "parameters": [
           {
             "in": "path",
@@ -13054,20 +13054,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Request Human Review",
         "tags": [
-          "dashboard",
+          "web",
           "human-review"
         ]
       }
     },
-    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review/dismiss": {
+    "/api/repos/{owner}/{repo}/pulls/{number}/human-review/dismiss": {
       "post": {
         "description": "Take down a pull request's open review request, as its card's Dismiss button does.",
-        "operationId": "api_dismiss_human_review_request_dashboard_api_repos__owner___repo__pulls__number__human_review_dismiss_post",
+        "operationId": "api_dismiss_human_review_request_api_repos__owner___repo__pulls__number__human_review_dismiss_post",
         "parameters": [
           {
             "in": "path",
@@ -13138,19 +13138,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Dismiss Human Review Request",
         "tags": [
-          "dashboard",
+          "web",
           "human-review"
         ]
       }
     },
-    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/review-threads/resolve": {
+    "/api/repos/{owner}/{repo}/pulls/{number}/review-threads/resolve": {
       "post": {
-        "operationId": "api_resolve_review_threads_dashboard_api_repos__owner___repo__pulls__number__review_threads_resolve_post",
+        "operationId": "api_resolve_review_threads_api_repos__owner___repo__pulls__number__review_threads_resolve_post",
         "parameters": [
           {
             "in": "path",
@@ -13214,19 +13214,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Resolve Review Threads",
         "tags": [
-          "dashboard",
+          "web",
           "pull-requests"
         ]
       }
     },
-    "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/thread": {
+    "/api/repos/{owner}/{repo}/pulls/{number}/thread": {
       "get": {
-        "operationId": "api_pull_request_thread_status_dashboard_api_repos__owner___repo__pulls__number__thread_get",
+        "operationId": "api_pull_request_thread_status_api_repos__owner___repo__pulls__number__thread_get",
         "parameters": [
           {
             "in": "path",
@@ -13280,17 +13280,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Pull Request Thread Status",
         "tags": [
-          "dashboard",
+          "web",
           "pull-requests"
         ]
       },
       "post": {
-        "operationId": "api_start_pull_request_thread_dashboard_api_repos__owner___repo__pulls__number__thread_post",
+        "operationId": "api_start_pull_request_thread_api_repos__owner___repo__pulls__number__thread_post",
         "parameters": [
           {
             "in": "path",
@@ -13385,19 +13385,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Start Pull Request Thread",
         "tags": [
-          "dashboard",
+          "web",
           "pull-requests"
         ]
       }
     },
-    "/dashboard/api/review-assignments": {
+    "/api/review-assignments": {
       "get": {
-        "operationId": "api_review_assignments_dashboard_api_review_assignments_get",
+        "operationId": "api_review_assignments_api_review_assignments_get",
         "parameters": [
           {
             "in": "query",
@@ -13473,19 +13473,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Review Assignments",
         "tags": [
-          "dashboard",
+          "web",
           "human-review"
         ]
       }
     },
-    "/dashboard/api/review-styles": {
+    "/api/review-styles": {
       "get": {
-        "operationId": "api_list_review_styles_dashboard_api_review_styles_get",
+        "operationId": "api_list_review_styles_api_review_styles_get",
         "responses": {
           "200": {
             "content": {
@@ -13494,7 +13494,7 @@
                   "items": {
                     "$ref": "#/components/schemas/ReviewStyle"
                   },
-                  "title": "Response Api List Review Styles Dashboard Api Review Styles Get",
+                  "title": "Response Api List Review Styles Api Review Styles Get",
                   "type": "array"
                 }
               }
@@ -13504,17 +13504,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Review Styles",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "post": {
-        "operationId": "api_create_review_style_dashboard_api_review_styles_post",
+        "operationId": "api_create_review_style_api_review_styles_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -13549,19 +13549,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Review Style",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/review-styles/{full_name}": {
+    "/api/review-styles/{full_name}": {
       "delete": {
-        "operationId": "api_delete_review_style_dashboard_api_review_styles__full_name__delete",
+        "operationId": "api_delete_review_style_api_review_styles__full_name__delete",
         "parameters": [
           {
             "in": "path",
@@ -13595,17 +13595,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Review Style",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "get": {
-        "operationId": "api_get_review_style_dashboard_api_review_styles__full_name__get",
+        "operationId": "api_get_review_style_api_review_styles__full_name__get",
         "parameters": [
           {
             "in": "path",
@@ -13641,17 +13641,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review Style",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "put": {
-        "operationId": "api_update_review_style_prompt_dashboard_api_review_styles__full_name__put",
+        "operationId": "api_update_review_style_prompt_api_review_styles__full_name__put",
         "parameters": [
           {
             "in": "path",
@@ -13697,19 +13697,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Update Review Style Prompt",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/review-styles/{full_name}/analyze": {
+    "/api/review-styles/{full_name}/analyze": {
       "post": {
-        "operationId": "api_analyze_review_style_dashboard_api_review_styles__full_name__analyze_post",
+        "operationId": "api_analyze_review_style_api_review_styles__full_name__analyze_post",
         "parameters": [
           {
             "in": "path",
@@ -13745,19 +13745,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Analyze Review Style",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/review-styles/{full_name}/approvals-file": {
+    "/api/review-styles/{full_name}/approvals-file": {
       "get": {
-        "operationId": "api_get_review_style_approvals_file_dashboard_api_review_styles__full_name__approvals_file_get",
+        "operationId": "api_get_review_style_approvals_file_api_review_styles__full_name__approvals_file_get",
         "parameters": [
           {
             "in": "path",
@@ -13793,19 +13793,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review Style Approvals File",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/review-styles/{full_name}/cancel": {
+    "/api/review-styles/{full_name}/cancel": {
       "post": {
-        "operationId": "api_cancel_review_style_dashboard_api_review_styles__full_name__cancel_post",
+        "operationId": "api_cancel_review_style_api_review_styles__full_name__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -13841,19 +13841,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Cancel Review Style",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews": {
+    "/api/reviews": {
       "get": {
-        "operationId": "api_list_reviews_dashboard_api_reviews_get",
+        "operationId": "api_list_reviews_api_reviews_get",
         "parameters": [
           {
             "in": "query",
@@ -13882,7 +13882,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api List Reviews Dashboard Api Reviews Get",
+                  "title": "Response Api List Reviews Api Reviews Get",
                   "type": "object"
                 }
               }
@@ -13902,19 +13902,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Reviews",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/summaries": {
+    "/api/reviews/summaries": {
       "post": {
-        "operationId": "api_get_review_summaries_dashboard_api_reviews_summaries_post",
+        "operationId": "api_get_review_summaries_api_reviews_summaries_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -13940,7 +13940,7 @@
                       }
                     ]
                   },
-                  "title": "Response Api Get Review Summaries Dashboard Api Reviews Summaries Post",
+                  "title": "Response Api Get Review Summaries Api Reviews Summaries Post",
                   "type": "object"
                 }
               }
@@ -13960,19 +13960,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review Summaries",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}": {
+    "/api/reviews/{owner}/{repo}/{pr_number}": {
       "get": {
-        "operationId": "api_get_review_dashboard_api_reviews__owner___repo___pr_number__get",
+        "operationId": "api_get_review_api_reviews__owner___repo___pr_number__get",
         "parameters": [
           {
             "in": "path",
@@ -14008,7 +14008,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get Review Dashboard Api Reviews  Owner   Repo   Pr Number  Get",
+                  "title": "Response Api Get Review Api Reviews  Owner   Repo   Pr Number  Get",
                   "type": "object"
                 }
               }
@@ -14028,19 +14028,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/chat": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/chat": {
       "get": {
-        "operationId": "api_get_review_chat_dashboard_api_reviews__owner___repo___pr_number__chat_get",
+        "operationId": "api_get_review_chat_api_reviews__owner___repo___pr_number__chat_get",
         "parameters": [
           {
             "in": "path",
@@ -14094,19 +14094,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review Chat",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/commands": {
       "post": {
-        "operationId": "api_review_chat_commands_dashboard_api_reviews__owner___repo___pr_number__chat_threads__thread_id__commands_post",
+        "operationId": "api_review_chat_commands_api_reviews__owner___repo___pr_number__chat_threads__thread_id__commands_post",
         "parameters": [
           {
             "in": "path",
@@ -14167,19 +14167,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Review Chat Commands",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/history": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/history": {
       "post": {
-        "operationId": "api_review_chat_history_dashboard_api_reviews__owner___repo___pr_number__chat_threads__thread_id__history_post",
+        "operationId": "api_review_chat_history_api_reviews__owner___repo___pr_number__chat_threads__thread_id__history_post",
         "parameters": [
           {
             "in": "path",
@@ -14240,19 +14240,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Review Chat History",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/state": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/state": {
       "get": {
-        "operationId": "api_review_chat_state_dashboard_api_reviews__owner___repo___pr_number__chat_threads__thread_id__state_get",
+        "operationId": "api_review_chat_state_api_reviews__owner___repo___pr_number__chat_threads__thread_id__state_get",
         "parameters": [
           {
             "in": "path",
@@ -14313,19 +14313,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Review Chat State",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/stream/events": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/chat/threads/{thread_id}/stream/events": {
       "post": {
-        "operationId": "api_review_chat_stream_events_dashboard_api_reviews__owner___repo___pr_number__chat_threads__thread_id__stream_events_post",
+        "operationId": "api_review_chat_stream_events_api_reviews__owner___repo___pr_number__chat_threads__thread_id__stream_events_post",
         "parameters": [
           {
             "in": "path",
@@ -14386,19 +14386,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Review Chat Stream Events",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/comments": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/comments": {
       "post": {
-        "operationId": "api_post_review_comment_dashboard_api_reviews__owner___repo___pr_number__comments_post",
+        "operationId": "api_post_review_comment_api_reviews__owner___repo___pr_number__comments_post",
         "parameters": [
           {
             "in": "path",
@@ -14462,19 +14462,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Post Review Comment",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/conversation": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/conversation": {
       "get": {
-        "operationId": "api_get_review_conversation_dashboard_api_reviews__owner___repo___pr_number__conversation_get",
+        "operationId": "api_get_review_conversation_api_reviews__owner___repo___pr_number__conversation_get",
         "parameters": [
           {
             "in": "path",
@@ -14528,19 +14528,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review Conversation",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/conversation/comments": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/conversation/comments": {
       "post": {
-        "operationId": "api_post_review_conversation_comment_dashboard_api_reviews__owner___repo___pr_number__conversation_comments_post",
+        "operationId": "api_post_review_conversation_comment_api_reviews__owner___repo___pr_number__conversation_comments_post",
         "parameters": [
           {
             "in": "path",
@@ -14604,19 +14604,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Post Review Conversation Comment",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/diff": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/diff": {
       "get": {
-        "operationId": "api_get_review_diff_dashboard_api_reviews__owner___repo___pr_number__diff_get",
+        "operationId": "api_get_review_diff_api_reviews__owner___repo___pr_number__diff_get",
         "parameters": [
           {
             "in": "path",
@@ -14652,7 +14652,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get Review Diff Dashboard Api Reviews  Owner   Repo   Pr Number  Diff Get",
+                  "title": "Response Api Get Review Diff Api Reviews  Owner   Repo   Pr Number  Diff Get",
                   "type": "object"
                 }
               }
@@ -14672,19 +14672,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review Diff",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/feedback/{review_id}": {
       "get": {
-        "operationId": "get_assessment_feedback_dashboard_api_reviews__owner___repo___pr_number__feedback__review_id__get",
+        "operationId": "get_assessment_feedback_api_reviews__owner___repo___pr_number__feedback__review_id__get",
         "parameters": [
           {
             "in": "path",
@@ -14736,7 +14736,7 @@
                       "type": "null"
                     }
                   ],
-                  "title": "Response Get Assessment Feedback Dashboard Api Reviews  Owner   Repo   Pr Number  Feedback  Review Id  Get"
+                  "title": "Response Get Assessment Feedback Api Reviews  Owner   Repo   Pr Number  Feedback  Review Id  Get"
                 }
               }
             },
@@ -14755,17 +14755,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get Assessment Feedback",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "put": {
-        "operationId": "submit_assessment_feedback_dashboard_api_reviews__owner___repo___pr_number__feedback__review_id__put",
+        "operationId": "submit_assessment_feedback_api_reviews__owner___repo___pr_number__feedback__review_id__put",
         "parameters": [
           {
             "in": "path",
@@ -14838,19 +14838,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Submit Assessment Feedback",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/file-contents": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/file-contents": {
       "get": {
-        "operationId": "api_get_review_file_contents_dashboard_api_reviews__owner___repo___pr_number__file_contents_get",
+        "operationId": "api_get_review_file_contents_api_reviews__owner___repo___pr_number__file_contents_get",
         "parameters": [
           {
             "in": "path",
@@ -14932,7 +14932,7 @@
                       }
                     ]
                   },
-                  "title": "Response Api Get Review File Contents Dashboard Api Reviews  Owner   Repo   Pr Number  File Contents Get",
+                  "title": "Response Api Get Review File Contents Api Reviews  Owner   Repo   Pr Number  File Contents Get",
                   "type": "object"
                 }
               }
@@ -14952,19 +14952,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review File Contents",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/image": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/image": {
       "get": {
-        "operationId": "api_get_review_image_dashboard_api_reviews__owner___repo___pr_number__image_get",
+        "operationId": "api_get_review_image_api_reviews__owner___repo___pr_number__image_get",
         "parameters": [
           {
             "in": "path",
@@ -15025,19 +15025,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Review Image",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/labels": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/labels": {
       "get": {
-        "operationId": "api_get_pull_request_labels_dashboard_api_reviews__owner___repo___pr_number__labels_get",
+        "operationId": "api_get_pull_request_labels_api_reviews__owner___repo___pr_number__labels_get",
         "parameters": [
           {
             "in": "path",
@@ -15091,17 +15091,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Pull Request Labels",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "patch": {
-        "operationId": "api_change_pull_request_label_dashboard_api_reviews__owner___repo___pr_number__labels_patch",
+        "operationId": "api_change_pull_request_label_api_reviews__owner___repo___pr_number__labels_patch",
         "parameters": [
           {
             "in": "path",
@@ -15158,19 +15158,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Change Pull Request Label",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/pending-review": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/pending-review": {
       "delete": {
-        "operationId": "api_discard_pending_review_dashboard_api_reviews__owner___repo___pr_number__pending_review_delete",
+        "operationId": "api_discard_pending_review_api_reviews__owner___repo___pr_number__pending_review_delete",
         "parameters": [
           {
             "in": "path",
@@ -15224,17 +15224,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Discard Pending Review",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "get": {
-        "operationId": "api_get_pending_review_dashboard_api_reviews__owner___repo___pr_number__pending_review_get",
+        "operationId": "api_get_pending_review_api_reviews__owner___repo___pr_number__pending_review_get",
         "parameters": [
           {
             "in": "path",
@@ -15277,7 +15277,7 @@
                       "type": "null"
                     }
                   ],
-                  "title": "Response Api Get Pending Review Dashboard Api Reviews  Owner   Repo   Pr Number  Pending Review Get"
+                  "title": "Response Api Get Pending Review Api Reviews  Owner   Repo   Pr Number  Pending Review Get"
                 }
               }
             },
@@ -15296,19 +15296,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Pending Review",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/pending-review/comments": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/pending-review/comments": {
       "post": {
-        "operationId": "api_add_pending_review_comment_dashboard_api_reviews__owner___repo___pr_number__pending_review_comments_post",
+        "operationId": "api_add_pending_review_comment_api_reviews__owner___repo___pr_number__pending_review_comments_post",
         "parameters": [
           {
             "in": "path",
@@ -15372,19 +15372,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Add Pending Review Comment",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/pending-review/comments/{comment_id}": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/pending-review/comments/{comment_id}": {
       "delete": {
-        "operationId": "api_delete_pending_review_comment_dashboard_api_reviews__owner___repo___pr_number__pending_review_comments__comment_id__delete",
+        "operationId": "api_delete_pending_review_comment_api_reviews__owner___repo___pr_number__pending_review_comments__comment_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -15436,7 +15436,7 @@
                       "type": "null"
                     }
                   ],
-                  "title": "Response Api Delete Pending Review Comment Dashboard Api Reviews  Owner   Repo   Pr Number  Pending Review Comments  Comment Id  Delete"
+                  "title": "Response Api Delete Pending Review Comment Api Reviews  Owner   Repo   Pr Number  Pending Review Comments  Comment Id  Delete"
                 }
               }
             },
@@ -15455,17 +15455,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Pending Review Comment",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       },
       "patch": {
-        "operationId": "api_update_pending_review_comment_dashboard_api_reviews__owner___repo___pr_number__pending_review_comments__comment_id__patch",
+        "operationId": "api_update_pending_review_comment_api_reviews__owner___repo___pr_number__pending_review_comments__comment_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -15538,19 +15538,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Update Pending Review Comment",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/preview": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/preview": {
       "get": {
-        "operationId": "api_get_pull_request_preview_dashboard_api_reviews__owner___repo___pr_number__preview_get",
+        "operationId": "api_get_pull_request_preview_api_reviews__owner___repo___pr_number__preview_get",
         "parameters": [
           {
             "in": "path",
@@ -15604,19 +15604,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Pull Request Preview",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/re-review": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/re-review": {
       "post": {
-        "operationId": "api_re_review_dashboard_api_reviews__owner___repo___pr_number__re_review_post",
+        "operationId": "api_re_review_api_reviews__owner___repo___pr_number__re_review_post",
         "parameters": [
           {
             "in": "path",
@@ -15652,7 +15652,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Re Review Dashboard Api Reviews  Owner   Repo   Pr Number  Re Review Post",
+                  "title": "Response Api Re Review Api Reviews  Owner   Repo   Pr Number  Re Review Post",
                   "type": "object"
                 }
               }
@@ -15672,19 +15672,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Re Review",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/scout": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/scout": {
       "post": {
-        "operationId": "api_run_review_scout_dashboard_api_reviews__owner___repo___pr_number__scout_post",
+        "operationId": "api_run_review_scout_api_reviews__owner___repo___pr_number__scout_post",
         "parameters": [
           {
             "in": "path",
@@ -15738,19 +15738,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Run Review Scout",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/submit-review": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/submit-review": {
       "post": {
-        "operationId": "api_submit_pull_request_review_dashboard_api_reviews__owner___repo___pr_number__submit_review_post",
+        "operationId": "api_submit_pull_request_review_api_reviews__owner___repo___pr_number__submit_review_post",
         "parameters": [
           {
             "in": "path",
@@ -15814,19 +15814,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Submit Pull Request Review",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/threads/{comment_id}/replies": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/threads/{comment_id}/replies": {
       "post": {
-        "operationId": "api_reply_to_review_thread_dashboard_api_reviews__owner___repo___pr_number__threads__comment_id__replies_post",
+        "operationId": "api_reply_to_review_thread_api_reviews__owner___repo___pr_number__threads__comment_id__replies_post",
         "parameters": [
           {
             "in": "path",
@@ -15899,19 +15899,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Reply To Review Thread",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/threads/{thread_node_id}/resolution": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/threads/{thread_node_id}/resolution": {
       "put": {
-        "operationId": "api_set_review_thread_resolution_dashboard_api_reviews__owner___repo___pr_number__threads__thread_node_id__resolution_put",
+        "operationId": "api_set_review_thread_resolution_api_reviews__owner___repo___pr_number__threads__thread_node_id__resolution_put",
         "parameters": [
           {
             "in": "path",
@@ -15977,19 +15977,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Set Review Thread Resolution",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/viewed": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/viewed": {
       "post": {
-        "operationId": "api_mark_review_viewed_dashboard_api_reviews__owner___repo___pr_number__viewed_post",
+        "operationId": "api_mark_review_viewed_api_reviews__owner___repo___pr_number__viewed_post",
         "parameters": [
           {
             "in": "path",
@@ -16036,20 +16036,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Mark Review Viewed",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/reviews/{owner}/{repo}/{pr_number}/walkthrough": {
+    "/api/reviews/{owner}/{repo}/{pr_number}/walkthrough": {
       "delete": {
         "description": "Drop the stored walkthrough so the next scout run rebuilds it.",
-        "operationId": "api_dismiss_walkthrough_dashboard_api_reviews__owner___repo___pr_number__walkthrough_delete",
+        "operationId": "api_dismiss_walkthrough_api_reviews__owner___repo___pr_number__walkthrough_delete",
         "parameters": [
           {
             "in": "path",
@@ -16103,19 +16103,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Dismiss Walkthrough",
         "tags": [
-          "dashboard",
+          "web",
           "review"
         ]
       }
     },
-    "/dashboard/api/sandbox-openai/v1/models": {
+    "/api/sandbox-openai/v1/models": {
       "get": {
-        "operationId": "list_models_dashboard_api_sandbox_openai_v1_models_get",
+        "operationId": "list_models_api_sandbox_openai_v1_models_get",
         "responses": {
           "200": {
             "content": {
@@ -16134,9 +16134,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-openai/v1/responses": {
+    "/api/sandbox-openai/v1/responses": {
       "post": {
-        "operationId": "create_response_dashboard_api_sandbox_openai_v1_responses_post",
+        "operationId": "create_response_api_sandbox_openai_v1_responses_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16180,9 +16180,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-openai/v1/responses/{response_id}": {
+    "/api/sandbox-openai/v1/responses/{response_id}": {
       "get": {
-        "operationId": "get_response_dashboard_api_sandbox_openai_v1_responses__response_id__get",
+        "operationId": "get_response_api_sandbox_openai_v1_responses__response_id__get",
         "parameters": [
           {
             "in": "path",
@@ -16237,9 +16237,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-openai/v1/responses/{response_id}/cancel": {
+    "/api/sandbox-openai/v1/responses/{response_id}/cancel": {
       "post": {
-        "operationId": "cancel_response_dashboard_api_sandbox_openai_v1_responses__response_id__cancel_post",
+        "operationId": "cancel_response_api_sandbox_openai_v1_responses__response_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -16279,9 +16279,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools": {
+    "/api/sandbox-tools": {
       "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_get",
+        "operationId": "list_tools_api_sandbox_tools_get",
         "parameters": [
           {
             "in": "query",
@@ -16346,9 +16346,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools/background-tasks/{task_id}/complete": {
+    "/api/sandbox-tools/background-tasks/{task_id}/complete": {
       "post": {
-        "operationId": "background_task_complete_dashboard_api_sandbox_tools_background_tasks__task_id__complete_post",
+        "operationId": "background_task_complete_api_sandbox_tools_background_tasks__task_id__complete_post",
         "parameters": [
           {
             "in": "path",
@@ -16382,9 +16382,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools/background-tasks/{task_id}/heartbeat": {
+    "/api/sandbox-tools/background-tasks/{task_id}/heartbeat": {
       "post": {
-        "operationId": "background_task_heartbeat_dashboard_api_sandbox_tools_background_tasks__task_id__heartbeat_post",
+        "operationId": "background_task_heartbeat_api_sandbox_tools_background_tasks__task_id__heartbeat_post",
         "parameters": [
           {
             "in": "path",
@@ -16418,9 +16418,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools/invoke/{tool_name}": {
+    "/api/sandbox-tools/invoke/{tool_name}": {
       "post": {
-        "operationId": "invoke_tool_dashboard_api_sandbox_tools_invoke__tool_name__post",
+        "operationId": "invoke_tool_api_sandbox_tools_invoke__tool_name__post",
         "parameters": [
           {
             "in": "path",
@@ -16472,9 +16472,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools/list": {
+    "/api/sandbox-tools/list": {
       "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_list_get",
+        "operationId": "list_tools_api_sandbox_tools_list_get",
         "parameters": [
           {
             "in": "query",
@@ -16539,9 +16539,9 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools/search": {
+    "/api/sandbox-tools/search": {
       "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_search_get",
+        "operationId": "list_tools_api_sandbox_tools_search_get",
         "parameters": [
           {
             "in": "query",
@@ -16606,9 +16606,9 @@
         ]
       }
     },
-    "/dashboard/api/schedules": {
+    "/api/schedules": {
       "get": {
-        "operationId": "api_list_schedules_dashboard_api_schedules_get",
+        "operationId": "api_list_schedules_api_schedules_get",
         "responses": {
           "200": {
             "content": {
@@ -16618,7 +16618,7 @@
                     "additionalProperties": true,
                     "type": "object"
                   },
-                  "title": "Response Api List Schedules Dashboard Api Schedules Get",
+                  "title": "Response Api List Schedules Api Schedules Get",
                   "type": "array"
                 }
               }
@@ -16628,16 +16628,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Schedules",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "post": {
-        "operationId": "api_create_schedule_dashboard_api_schedules_post",
+        "operationId": "api_create_schedule_api_schedules_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16654,7 +16654,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Create Schedule Dashboard Api Schedules Post",
+                  "title": "Response Api Create Schedule Api Schedules Post",
                   "type": "object"
                 }
               }
@@ -16674,18 +16674,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Schedule",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/schedules/{schedule_id}": {
+    "/api/schedules/{schedule_id}": {
       "delete": {
-        "operationId": "api_delete_schedule_dashboard_api_schedules__schedule_id__delete",
+        "operationId": "api_delete_schedule_api_schedules__schedule_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -16719,16 +16719,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Schedule",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "patch": {
-        "operationId": "api_update_schedule_dashboard_api_schedules__schedule_id__patch",
+        "operationId": "api_update_schedule_api_schedules__schedule_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -16756,7 +16756,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Update Schedule Dashboard Api Schedules  Schedule Id  Patch",
+                  "title": "Response Api Update Schedule Api Schedules  Schedule Id  Patch",
                   "type": "object"
                 }
               }
@@ -16776,18 +16776,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Update Schedule",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/schedules/{schedule_id}/trigger": {
+    "/api/schedules/{schedule_id}/trigger": {
       "post": {
-        "operationId": "api_trigger_schedule_dashboard_api_schedules__schedule_id__trigger_post",
+        "operationId": "api_trigger_schedule_api_schedules__schedule_id__trigger_post",
         "parameters": [
           {
             "in": "path",
@@ -16805,7 +16805,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Trigger Schedule Dashboard Api Schedules  Schedule Id  Trigger Post",
+                  "title": "Response Api Trigger Schedule Api Schedules  Schedule Id  Trigger Post",
                   "type": "object"
                 }
               }
@@ -16825,26 +16825,26 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Trigger Schedule",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/settings": {
+    "/api/settings": {
       "get": {
         "description": "The instance record: what every workspace inherits.",
-        "operationId": "api_get_instance_settings_dashboard_api_settings_get",
+        "operationId": "api_get_instance_settings_api_settings_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get Instance Settings Dashboard Api Settings Get",
+                  "title": "Response Api Get Instance Settings Api Settings Get",
                   "type": "object"
                 }
               }
@@ -16854,17 +16854,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Instance Settings",
         "tags": [
-          "dashboard",
+          "web",
           "settings"
         ]
       },
       "put": {
-        "operationId": "api_put_instance_settings_dashboard_api_settings_put",
+        "operationId": "api_put_instance_settings_api_settings_put",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16881,7 +16881,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Put Instance Settings Dashboard Api Settings Put",
+                  "title": "Response Api Put Instance Settings Api Settings Put",
                   "type": "object"
                 }
               }
@@ -16901,19 +16901,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Put Instance Settings",
         "tags": [
-          "dashboard",
+          "web",
           "settings"
         ]
       }
     },
-    "/dashboard/api/skills": {
+    "/api/skills": {
       "get": {
-        "operationId": "api_list_skills_dashboard_api_skills_get",
+        "operationId": "api_list_skills_api_skills_get",
         "parameters": [
           {
             "in": "query",
@@ -16945,7 +16945,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api List Skills Dashboard Api Skills Get",
+                  "title": "Response Api List Skills Api Skills Get",
                   "type": "object"
                 }
               }
@@ -16965,16 +16965,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Skills",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "post": {
-        "operationId": "api_create_skill_dashboard_api_skills_post",
+        "operationId": "api_create_skill_api_skills_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16991,7 +16991,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Create Skill Dashboard Api Skills Post",
+                  "title": "Response Api Create Skill Api Skills Post",
                   "type": "object"
                 }
               }
@@ -17011,18 +17011,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Skill",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/skills/{name}": {
+    "/api/skills/{name}": {
       "delete": {
-        "operationId": "api_delete_skill_dashboard_api_skills__name__delete",
+        "operationId": "api_delete_skill_api_skills__name__delete",
         "parameters": [
           {
             "in": "path",
@@ -17056,16 +17056,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Skill",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "put": {
-        "operationId": "api_update_skill_dashboard_api_skills__name__put",
+        "operationId": "api_update_skill_api_skills__name__put",
         "parameters": [
           {
             "in": "path",
@@ -17093,7 +17093,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Update Skill Dashboard Api Skills  Name  Put",
+                  "title": "Response Api Update Skill Api Skills  Name  Put",
                   "type": "object"
                 }
               }
@@ -17113,18 +17113,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Update Skill",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/slack/allowed-bots": {
+    "/api/slack/allowed-bots": {
       "get": {
-        "operationId": "api_list_allowed_slack_bots_dashboard_api_slack_allowed_bots_get",
+        "operationId": "api_list_allowed_slack_bots_api_slack_allowed_bots_get",
         "responses": {
           "200": {
             "content": {
@@ -17133,7 +17133,7 @@
                   "items": {
                     "$ref": "#/components/schemas/AllowedSlackBot"
                   },
-                  "title": "Response Api List Allowed Slack Bots Dashboard Api Slack Allowed Bots Get",
+                  "title": "Response Api List Allowed Slack Bots Api Slack Allowed Bots Get",
                   "type": "array"
                 }
               }
@@ -17143,17 +17143,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Allowed Slack Bots",
         "tags": [
-          "dashboard",
+          "web",
           "slack"
         ]
       },
       "post": {
-        "operationId": "api_allow_slack_bot_dashboard_api_slack_allowed_bots_post",
+        "operationId": "api_allow_slack_bot_api_slack_allowed_bots_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -17188,20 +17188,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Allow Slack Bot",
         "tags": [
-          "dashboard",
+          "web",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/allowed-bots/directory": {
+    "/api/slack/allowed-bots/directory": {
       "get": {
         "description": "Names and avatars of allowed bots, for the Bots view every user can open.",
-        "operationId": "api_allowed_slack_bot_directory_dashboard_api_slack_allowed_bots_directory_get",
+        "operationId": "api_allowed_slack_bot_directory_api_slack_allowed_bots_directory_get",
         "responses": {
           "200": {
             "content": {
@@ -17210,7 +17210,7 @@
                   "items": {
                     "$ref": "#/components/schemas/AllowedSlackBotEntry"
                   },
-                  "title": "Response Api Allowed Slack Bot Directory Dashboard Api Slack Allowed Bots Directory Get",
+                  "title": "Response Api Allowed Slack Bot Directory Api Slack Allowed Bots Directory Get",
                   "type": "array"
                 }
               }
@@ -17220,19 +17220,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Allowed Slack Bot Directory",
         "tags": [
-          "dashboard",
+          "web",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/allowed-bots/{team_id}/{bot_id}": {
+    "/api/slack/allowed-bots/{team_id}/{bot_id}": {
       "delete": {
-        "operationId": "api_remove_allowed_slack_bot_dashboard_api_slack_allowed_bots__team_id___bot_id__delete",
+        "operationId": "api_remove_allowed_slack_bot_api_slack_allowed_bots__team_id___bot_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -17261,7 +17261,7 @@
                   "additionalProperties": {
                     "type": "boolean"
                   },
-                  "title": "Response Api Remove Allowed Slack Bot Dashboard Api Slack Allowed Bots  Team Id   Bot Id  Delete",
+                  "title": "Response Api Remove Allowed Slack Bot Api Slack Allowed Bots  Team Id   Bot Id  Delete",
                   "type": "object"
                 }
               }
@@ -17281,19 +17281,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Remove Allowed Slack Bot",
         "tags": [
-          "dashboard",
+          "web",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/bots": {
+    "/api/slack/bots": {
       "get": {
-        "operationId": "api_list_slack_bots_dashboard_api_slack_bots_get",
+        "operationId": "api_list_slack_bots_api_slack_bots_get",
         "responses": {
           "200": {
             "content": {
@@ -17302,7 +17302,7 @@
                   "items": {
                     "$ref": "#/components/schemas/SlackBotOption"
                   },
-                  "title": "Response Api List Slack Bots Dashboard Api Slack Bots Get",
+                  "title": "Response Api List Slack Bots Api Slack Bots Get",
                   "type": "array"
                 }
               }
@@ -17312,20 +17312,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Slack Bots",
         "tags": [
-          "dashboard",
+          "web",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/callback": {
+    "/api/slack/callback": {
       "get": {
         "description": "Link the verified Slack identity to the logged-in GitHub user.\n\nThe Slack member id and email come from Slack's verified OIDC claims, so a\nuser can only ever link their own Slack account \u2014 no self-asserted values.",
-        "operationId": "slack_callback_dashboard_api_slack_callback_get",
+        "operationId": "slack_callback_api_slack_callback_get",
         "parameters": [
           {
             "in": "query",
@@ -17368,16 +17368,16 @@
         },
         "summary": "Slack Callback",
         "tags": [
-          "dashboard",
+          "web",
           "slack",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/channels": {
+    "/api/slack/channels": {
       "get": {
         "description": "Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.\n\nPrivate channels are listed for admins only.",
-        "operationId": "api_list_slack_channels_dashboard_api_slack_channels_get",
+        "operationId": "api_list_slack_channels_api_slack_channels_get",
         "parameters": [
           {
             "in": "query",
@@ -17414,19 +17414,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Slack Channels",
         "tags": [
-          "dashboard",
+          "web",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/concierge": {
+    "/api/slack/concierge": {
       "get": {
-        "operationId": "api_concierge_dashboard_api_slack_concierge_get",
+        "operationId": "api_concierge_api_slack_concierge_get",
         "responses": {
           "200": {
             "content": {
@@ -17442,7 +17442,7 @@
                       }
                     ]
                   },
-                  "title": "Response Api Concierge Dashboard Api Slack Concierge Get",
+                  "title": "Response Api Concierge Api Slack Concierge Get",
                   "type": "object"
                 }
               }
@@ -17452,20 +17452,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Concierge",
         "tags": [
-          "dashboard",
+          "web",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/desktop/exchange": {
+    "/api/slack/desktop/exchange": {
       "post": {
         "description": "Finish a desktop Slack link with the app's own session.",
-        "operationId": "slack_desktop_exchange_dashboard_api_slack_desktop_exchange_post",
+        "operationId": "slack_desktop_exchange_api_slack_desktop_exchange_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -17482,7 +17482,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Slack Desktop Exchange Dashboard Api Slack Desktop Exchange Post",
+                  "title": "Response Slack Desktop Exchange Api Slack Desktop Exchange Post",
                   "type": "object"
                 }
               }
@@ -17502,21 +17502,21 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Slack Desktop Exchange",
         "tags": [
-          "dashboard",
+          "web",
           "slack",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/login": {
+    "/api/slack/login": {
       "get": {
         "description": "Start the Sign in with Slack flow to link the current GitHub account.",
-        "operationId": "slack_login_dashboard_api_slack_login_get",
+        "operationId": "slack_login_api_slack_login_get",
         "parameters": [
           {
             "in": "query",
@@ -17575,20 +17575,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Slack Login",
         "tags": [
-          "dashboard",
+          "web",
           "slack",
           "slack"
         ]
       }
     },
-    "/dashboard/api/slack/users/{user_id}/name": {
+    "/api/slack/users/{user_id}/name": {
       "get": {
-        "operationId": "api_slack_user_name_dashboard_api_slack_users__user_id__name_get",
+        "operationId": "api_slack_user_name_api_slack_users__user_id__name_get",
         "parameters": [
           {
             "in": "path",
@@ -17610,7 +17610,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Api Slack User Name Dashboard Api Slack Users  User Id  Name Get",
+                  "title": "Response Api Slack User Name Api Slack Users  User Id  Name Get",
                   "type": "object"
                 }
               }
@@ -17630,19 +17630,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Slack User Name",
         "tags": [
-          "dashboard",
+          "web",
           "slack"
         ]
       }
     },
-    "/dashboard/api/threads": {
+    "/api/threads": {
       "get": {
-        "operationId": "api_list_threads_dashboard_api_threads_get",
+        "operationId": "api_list_threads_api_threads_get",
         "parameters": [
           {
             "in": "query",
@@ -17674,7 +17674,7 @@
                     "additionalProperties": true,
                     "type": "object"
                   },
-                  "title": "Response Api List Threads Dashboard Api Threads Get",
+                  "title": "Response Api List Threads Api Threads Get",
                   "type": "array"
                 }
               }
@@ -17694,12 +17694,12 @@
         },
         "summary": "Api List Threads",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       },
       "post": {
-        "operationId": "api_create_session_dashboard_api_threads_post",
+        "operationId": "api_create_session_api_threads_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -17718,7 +17718,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Api Create Session Dashboard Api Threads Post",
+                  "title": "Response Api Create Session Api Threads Post",
                   "type": "object"
                 }
               }
@@ -17738,19 +17738,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Session",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/page": {
+    "/api/threads/page": {
       "get": {
-        "operationId": "api_list_threads_page_dashboard_api_threads_page_get",
+        "operationId": "api_list_threads_page_api_threads_page_get",
         "parameters": [
           {
             "in": "query",
@@ -17978,7 +17978,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api List Threads Page Dashboard Api Threads Page Get",
+                  "title": "Response Api List Threads Page Api Threads Page Get",
                   "type": "object"
                 }
               }
@@ -17998,19 +17998,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Threads Page",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/pinned": {
+    "/api/threads/pinned": {
       "get": {
-        "operationId": "api_list_pinned_threads_dashboard_api_threads_pinned_get",
+        "operationId": "api_list_pinned_threads_api_threads_pinned_get",
         "responses": {
           "200": {
             "content": {
@@ -18020,7 +18020,7 @@
                     "additionalProperties": true,
                     "type": "object"
                   },
-                  "title": "Response Api List Pinned Threads Dashboard Api Threads Pinned Get",
+                  "title": "Response Api List Pinned Threads Api Threads Pinned Get",
                   "type": "array"
                 }
               }
@@ -18030,19 +18030,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Pinned Threads",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/pull-request-checks": {
+    "/api/threads/pull-request-checks": {
       "post": {
-        "operationId": "api_get_pull_request_checks_dashboard_api_threads_pull_request_checks_post",
+        "operationId": "api_get_pull_request_checks_api_threads_pull_request_checks_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -18061,7 +18061,7 @@
                   "additionalProperties": {
                     "$ref": "#/components/schemas/PullRequestState"
                   },
-                  "title": "Response Api Get Pull Request Checks Dashboard Api Threads Pull Request Checks Post",
+                  "title": "Response Api Get Pull Request Checks Api Threads Pull Request Checks Post",
                   "type": "object"
                 }
               }
@@ -18081,19 +18081,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Pull Request Checks",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/repos": {
+    "/api/threads/repos": {
       "get": {
-        "operationId": "api_list_thread_repos_dashboard_api_threads_repos_get",
+        "operationId": "api_list_thread_repos_api_threads_repos_get",
         "parameters": [
           {
             "in": "query",
@@ -18145,7 +18145,7 @@
                     "additionalProperties": true,
                     "type": "object"
                   },
-                  "title": "Response Api List Thread Repos Dashboard Api Threads Repos Get",
+                  "title": "Response Api List Thread Repos Api Threads Repos Get",
                   "type": "array"
                 }
               }
@@ -18165,19 +18165,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Thread Repos",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/resolve-all": {
+    "/api/threads/resolve-all": {
       "post": {
-        "operationId": "api_resolve_all_threads_dashboard_api_threads_resolve_all_post",
+        "operationId": "api_resolve_all_threads_api_threads_resolve_all_post",
         "responses": {
           "200": {
             "content": {
@@ -18186,7 +18186,7 @@
                   "additionalProperties": {
                     "type": "integer"
                   },
-                  "title": "Response Api Resolve All Threads Dashboard Api Threads Resolve All Post",
+                  "title": "Response Api Resolve All Threads Api Threads Resolve All Post",
                   "type": "object"
                 }
               }
@@ -18196,19 +18196,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Resolve All Threads",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/uploads": {
+    "/api/threads/uploads": {
       "post": {
-        "operationId": "api_upload_session_dashboard_api_threads_uploads_post",
+        "operationId": "api_upload_session_api_threads_uploads_post",
         "requestBody": {
           "content": {
             "application/x-ndjson": {
@@ -18288,7 +18288,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Upload Session Dashboard Api Threads Uploads Post",
+                  "title": "Response Api Upload Session Api Threads Uploads Post",
                   "type": "object"
                 }
               }
@@ -18298,19 +18298,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Upload Session",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}": {
+    "/api/threads/{thread_id}": {
       "delete": {
-        "operationId": "api_delete_thread_dashboard_api_threads__thread_id__delete",
+        "operationId": "api_delete_thread_api_threads__thread_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -18344,17 +18344,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Thread",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       },
       "get": {
-        "operationId": "api_get_thread_dashboard_api_threads__thread_id__get",
+        "operationId": "api_get_thread_api_threads__thread_id__get",
         "parameters": [
           {
             "in": "path",
@@ -18398,12 +18398,12 @@
         },
         "summary": "Api Get Thread",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       },
       "patch": {
-        "operationId": "api_rename_thread_dashboard_api_threads__thread_id__patch",
+        "operationId": "api_rename_thread_api_threads__thread_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -18431,7 +18431,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Rename Thread Dashboard Api Threads  Thread Id  Patch",
+                  "title": "Response Api Rename Thread Api Threads  Thread Id  Patch",
                   "type": "object"
                 }
               }
@@ -18451,19 +18451,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Rename Thread",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/branch-diff": {
+    "/api/threads/{thread_id}/branch-diff": {
       "get": {
-        "operationId": "api_get_thread_branch_diff_dashboard_api_threads__thread_id__branch_diff_get",
+        "operationId": "api_get_thread_branch_diff_api_threads__thread_id__branch_diff_get",
         "parameters": [
           {
             "in": "path",
@@ -18481,7 +18481,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get Thread Branch Diff Dashboard Api Threads  Thread Id  Branch Diff Get",
+                  "title": "Response Api Get Thread Branch Diff Api Threads  Thread Id  Branch Diff Get",
                   "type": "object"
                 }
               }
@@ -18501,19 +18501,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Branch Diff",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/cancel": {
+    "/api/threads/{thread_id}/cancel": {
       "post": {
-        "operationId": "api_cancel_thread_dashboard_api_threads__thread_id__cancel_post",
+        "operationId": "api_cancel_thread_api_threads__thread_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -18531,7 +18531,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Cancel Thread Dashboard Api Threads  Thread Id  Cancel Post",
+                  "title": "Response Api Cancel Thread Api Threads  Thread Id  Cancel Post",
                   "type": "object"
                 }
               }
@@ -18551,15 +18551,15 @@
         },
         "summary": "Api Cancel Thread",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/commands": {
+    "/api/threads/{thread_id}/commands": {
       "post": {
-        "description": "Every way a thread is started or continued, whoever is asking.\n\nThe dashboard, an API key and a federated workflow all post the same command\nhere; what differs is the thread the first one stamps.",
-        "operationId": "api_thread_commands_dashboard_api_threads__thread_id__commands_post",
+        "description": "Every way a thread is started or continued, whoever is asking.\n\nThe web app, an API key and a federated workflow all post the same command\nhere; what differs is the thread the first one stamps.",
+        "operationId": "api_thread_commands_api_threads__thread_id__commands_post",
         "parameters": [
           {
             "in": "path",
@@ -18593,14 +18593,14 @@
         },
         "summary": "Api Thread Commands",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/continue-private": {
+    "/api/threads/{thread_id}/continue-private": {
       "post": {
-        "operationId": "api_continue_thread_privately_dashboard_api_threads__thread_id__continue_private_post",
+        "operationId": "api_continue_thread_privately_api_threads__thread_id__continue_private_post",
         "parameters": [
           {
             "in": "path",
@@ -18618,7 +18618,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Continue Thread Privately Dashboard Api Threads  Thread Id  Continue Private Post",
+                  "title": "Response Api Continue Thread Privately Api Threads  Thread Id  Continue Private Post",
                   "type": "object"
                 }
               }
@@ -18638,19 +18638,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Continue Thread Privately",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/feedback": {
+    "/api/threads/{thread_id}/feedback": {
       "get": {
-        "operationId": "get_thread_feedback_dashboard_api_threads__thread_id__feedback_get",
+        "operationId": "get_thread_feedback_api_threads__thread_id__feedback_get",
         "parameters": [
           {
             "in": "path",
@@ -18686,18 +18686,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Get Thread Feedback",
         "tags": [
-          "dashboard",
+          "web",
           "threads",
           "thread-feedback"
         ]
       },
       "post": {
-        "operationId": "submit_thread_feedback_dashboard_api_threads__thread_id__feedback_post",
+        "operationId": "submit_thread_feedback_api_threads__thread_id__feedback_post",
         "parameters": [
           {
             "in": "path",
@@ -18743,20 +18743,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Submit Thread Feedback",
         "tags": [
-          "dashboard",
+          "web",
           "threads",
           "thread-feedback"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/file-index": {
+    "/api/threads/{thread_id}/file-index": {
       "get": {
-        "operationId": "api_get_thread_file_index_dashboard_api_threads__thread_id__file_index_get",
+        "operationId": "api_get_thread_file_index_api_threads__thread_id__file_index_get",
         "parameters": [
           {
             "in": "path",
@@ -18792,19 +18792,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread File Index",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/files": {
+    "/api/threads/{thread_id}/files": {
       "get": {
-        "operationId": "api_get_thread_path_dashboard_api_threads__thread_id__files_get",
+        "operationId": "api_get_thread_path_api_threads__thread_id__files_get",
         "parameters": [
           {
             "in": "path",
@@ -18846,7 +18846,7 @@
                       "$ref": "#/components/schemas/WorkspaceFile"
                     }
                   ],
-                  "title": "Response Api Get Thread Path Dashboard Api Threads  Thread Id  Files Get"
+                  "title": "Response Api Get Thread Path Api Threads  Thread Id  Files Get"
                 }
               }
             },
@@ -18865,19 +18865,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Path",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/history": {
+    "/api/threads/{thread_id}/history": {
       "post": {
-        "operationId": "api_thread_history_dashboard_api_threads__thread_id__history_post",
+        "operationId": "api_thread_history_api_threads__thread_id__history_post",
         "parameters": [
           {
             "in": "path",
@@ -18911,19 +18911,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Thread History",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/pin": {
+    "/api/threads/{thread_id}/pin": {
       "delete": {
-        "operationId": "api_unpin_thread_dashboard_api_threads__thread_id__pin_delete",
+        "operationId": "api_unpin_thread_api_threads__thread_id__pin_delete",
         "parameters": [
           {
             "in": "path",
@@ -18952,17 +18952,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Unpin Thread",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       },
       "post": {
-        "operationId": "api_pin_thread_dashboard_api_threads__thread_id__pin_post",
+        "operationId": "api_pin_thread_api_threads__thread_id__pin_post",
         "parameters": [
           {
             "in": "path",
@@ -18991,19 +18991,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Pin Thread",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/pr-diff": {
+    "/api/threads/{thread_id}/pr-diff": {
       "get": {
-        "operationId": "api_get_thread_pr_diff_dashboard_api_threads__thread_id__pr_diff_get",
+        "operationId": "api_get_thread_pr_diff_api_threads__thread_id__pr_diff_get",
         "parameters": [
           {
             "in": "path",
@@ -19021,7 +19021,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get Thread Pr Diff Dashboard Api Threads  Thread Id  Pr Diff Get",
+                  "title": "Response Api Get Thread Pr Diff Api Threads  Thread Id  Pr Diff Get",
                   "type": "object"
                 }
               }
@@ -19041,19 +19041,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Pr Diff",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/pull-request-context": {
+    "/api/threads/{thread_id}/pull-request-context": {
       "get": {
-        "operationId": "api_get_thread_pull_request_context_dashboard_api_threads__thread_id__pull_request_context_get",
+        "operationId": "api_get_thread_pull_request_context_api_threads__thread_id__pull_request_context_get",
         "parameters": [
           {
             "in": "path",
@@ -19103,7 +19103,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get Thread Pull Request Context Dashboard Api Threads  Thread Id  Pull Request Context Get",
+                  "title": "Response Api Get Thread Pull Request Context Api Threads  Thread Id  Pull Request Context Get",
                   "type": "object"
                 }
               }
@@ -19123,19 +19123,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Pull Request Context",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/pull-request-status": {
+    "/api/threads/{thread_id}/pull-request-status": {
       "get": {
-        "operationId": "api_get_thread_pull_request_status_dashboard_api_threads__thread_id__pull_request_status_get",
+        "operationId": "api_get_thread_pull_request_status_api_threads__thread_id__pull_request_status_get",
         "parameters": [
           {
             "in": "path",
@@ -19153,7 +19153,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get Thread Pull Request Status Dashboard Api Threads  Thread Id  Pull Request Status Get",
+                  "title": "Response Api Get Thread Pull Request Status Api Threads  Thread Id  Pull Request Status Get",
                   "type": "object"
                 }
               }
@@ -19173,19 +19173,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Pull Request Status",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/queued-messages": {
+    "/api/threads/{thread_id}/queued-messages": {
       "get": {
-        "operationId": "api_get_thread_queued_messages_dashboard_api_threads__thread_id__queued_messages_get",
+        "operationId": "api_get_thread_queued_messages_api_threads__thread_id__queued_messages_get",
         "parameters": [
           {
             "in": "path",
@@ -19205,7 +19205,7 @@
                   "items": {
                     "$ref": "#/components/schemas/QueuedPreview"
                   },
-                  "title": "Response Api Get Thread Queued Messages Dashboard Api Threads  Thread Id  Queued Messages Get",
+                  "title": "Response Api Get Thread Queued Messages Api Threads  Thread Id  Queued Messages Get",
                   "type": "array"
                 }
               }
@@ -19225,19 +19225,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Queued Messages",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/recovery.patch": {
+    "/api/threads/{thread_id}/recovery.patch": {
       "get": {
-        "operationId": "api_get_thread_recovery_patch_dashboard_api_threads__thread_id__recovery_patch_get",
+        "operationId": "api_get_thread_recovery_patch_api_threads__thread_id__recovery_patch_get",
         "parameters": [
           {
             "in": "path",
@@ -19271,19 +19271,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Recovery Patch",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/resolve": {
+    "/api/threads/{thread_id}/resolve": {
       "post": {
-        "operationId": "api_resolve_thread_dashboard_api_threads__thread_id__resolve_post",
+        "operationId": "api_resolve_thread_api_threads__thread_id__resolve_post",
         "parameters": [
           {
             "in": "path",
@@ -19311,7 +19311,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Resolve Thread Dashboard Api Threads  Thread Id  Resolve Post",
+                  "title": "Response Api Resolve Thread Api Threads  Thread Id  Resolve Post",
                   "type": "object"
                 }
               }
@@ -19331,19 +19331,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Resolve Thread",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/runs": {
+    "/api/threads/{thread_id}/runs": {
       "get": {
-        "operationId": "api_list_thread_runs_dashboard_api_threads__thread_id__runs_get",
+        "operationId": "api_list_thread_runs_api_threads__thread_id__runs_get",
         "parameters": [
           {
             "in": "path",
@@ -19432,17 +19432,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Thread Runs",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       },
       "post": {
-        "operationId": "api_create_thread_run_dashboard_api_threads__thread_id__runs_post",
+        "operationId": "api_create_thread_run_api_threads__thread_id__runs_post",
         "parameters": [
           {
             "in": "path",
@@ -19460,7 +19460,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Create Thread Run Dashboard Api Threads  Thread Id  Runs Post",
+                  "title": "Response Api Create Thread Run Api Threads  Thread Id  Runs Post",
                   "type": "object"
                 }
               }
@@ -19480,19 +19480,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Thread Run",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/runs/{run_id}/cancel": {
+    "/api/threads/{thread_id}/runs/{run_id}/cancel": {
       "post": {
-        "operationId": "api_cancel_thread_run_dashboard_api_threads__thread_id__runs__run_id__cancel_post",
+        "operationId": "api_cancel_thread_run_api_threads__thread_id__runs__run_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -19555,19 +19555,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Cancel Thread Run",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/share-to-workspace": {
+    "/api/threads/{thread_id}/share-to-workspace": {
       "post": {
-        "operationId": "api_share_thread_with_workspace_dashboard_api_threads__thread_id__share_to_workspace_post",
+        "operationId": "api_share_thread_with_workspace_api_threads__thread_id__share_to_workspace_post",
         "parameters": [
           {
             "in": "path",
@@ -19585,7 +19585,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Share Thread With Workspace Dashboard Api Threads  Thread Id  Share To Workspace Post",
+                  "title": "Response Api Share Thread With Workspace Api Threads  Thread Id  Share To Workspace Post",
                   "type": "object"
                 }
               }
@@ -19605,19 +19605,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Share Thread With Workspace",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/state": {
+    "/api/threads/{thread_id}/state": {
       "get": {
-        "operationId": "api_get_thread_state_dashboard_api_threads__thread_id__state_get",
+        "operationId": "api_get_thread_state_api_threads__thread_id__state_get",
         "parameters": [
           {
             "in": "path",
@@ -19651,19 +19651,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread State",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/stream/events": {
+    "/api/threads/{thread_id}/stream/events": {
       "post": {
-        "operationId": "api_thread_stream_events_dashboard_api_threads__thread_id__stream_events_post",
+        "operationId": "api_thread_stream_events_api_threads__thread_id__stream_events_post",
         "parameters": [
           {
             "in": "path",
@@ -19697,14 +19697,14 @@
         },
         "summary": "Api Thread Stream Events",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/terminal/connect": {
+    "/api/threads/{thread_id}/terminal/connect": {
       "post": {
-        "operationId": "api_thread_terminal_connection_dashboard_api_threads__thread_id__terminal_connect_post",
+        "operationId": "api_thread_terminal_connection_api_threads__thread_id__terminal_connect_post",
         "parameters": [
           {
             "in": "path",
@@ -19724,7 +19724,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Api Thread Terminal Connection Dashboard Api Threads  Thread Id  Terminal Connect Post",
+                  "title": "Response Api Thread Terminal Connection Api Threads  Thread Id  Terminal Connect Post",
                   "type": "object"
                 }
               }
@@ -19744,20 +19744,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Thread Terminal Connection",
         "tags": [
-          "dashboard",
+          "web",
           "threads",
           "threads"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/transcript": {
+    "/api/threads/{thread_id}/transcript": {
       "get": {
-        "operationId": "api_get_thread_transcript_dashboard_api_threads__thread_id__transcript_get",
+        "operationId": "api_get_thread_transcript_api_threads__thread_id__transcript_get",
         "parameters": [
           {
             "in": "path",
@@ -19791,20 +19791,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Transcript",
         "tags": [
-          "dashboard",
+          "web",
           "transcript"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/transcript/attachments/{attachment_id}": {
+    "/api/threads/{thread_id}/transcript/attachments/{attachment_id}": {
       "get": {
         "description": "The bytes of one file attached to a message in this thread.",
-        "operationId": "api_get_thread_attachment_dashboard_api_threads__thread_id__transcript_attachments__attachment_id__get",
+        "operationId": "api_get_thread_attachment_api_threads__thread_id__transcript_attachments__attachment_id__get",
         "parameters": [
           {
             "in": "path",
@@ -19848,19 +19848,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Attachment",
         "tags": [
-          "dashboard",
+          "web",
           "transcript"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/transcript/events": {
+    "/api/threads/{thread_id}/transcript/events": {
       "get": {
-        "operationId": "api_stream_thread_transcript_dashboard_api_threads__thread_id__transcript_events_get",
+        "operationId": "api_stream_thread_transcript_api_threads__thread_id__transcript_events_get",
         "parameters": [
           {
             "in": "path",
@@ -19904,19 +19904,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Stream Thread Transcript",
         "tags": [
-          "dashboard",
+          "web",
           "transcript"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/transcript/tool-calls/{tool_call_id}/output": {
+    "/api/threads/{thread_id}/transcript/tool-calls/{tool_call_id}/output": {
       "get": {
-        "operationId": "api_get_thread_tool_output_dashboard_api_threads__thread_id__transcript_tool_calls__tool_call_id__output_get",
+        "operationId": "api_get_thread_tool_output_api_threads__thread_id__transcript_tool_calls__tool_call_id__output_get",
         "parameters": [
           {
             "in": "path",
@@ -19945,7 +19945,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "title": "Response Api Get Thread Tool Output Dashboard Api Threads  Thread Id  Transcript Tool Calls  Tool Call Id  Output Get",
+                  "title": "Response Api Get Thread Tool Output Api Threads  Thread Id  Transcript Tool Calls  Tool Call Id  Output Get",
                   "type": "object"
                 }
               }
@@ -19965,20 +19965,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Tool Output",
         "tags": [
-          "dashboard",
+          "web",
           "transcript"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/transcript/turns": {
+    "/api/threads/{thread_id}/transcript/turns": {
       "get": {
         "description": "The page of turns immediately older than ``before``.\n\nA cursor that does not decode, or that was minted for another thread, is a\nclient bug rather than a stale window: serving this thread's newest page\ninstead would silently duplicate history the client already has, so it is\nrejected.",
-        "operationId": "api_get_thread_transcript_turns_dashboard_api_threads__thread_id__transcript_turns_get",
+        "operationId": "api_get_thread_transcript_turns_api_threads__thread_id__transcript_turns_get",
         "parameters": [
           {
             "in": "path",
@@ -20039,19 +20039,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Transcript Turns",
         "tags": [
-          "dashboard",
+          "web",
           "transcript"
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/working-tree-diff": {
+    "/api/threads/{thread_id}/working-tree-diff": {
       "get": {
-        "operationId": "api_get_thread_working_tree_diff_dashboard_api_threads__thread_id__working_tree_diff_get",
+        "operationId": "api_get_thread_working_tree_diff_api_threads__thread_id__working_tree_diff_get",
         "parameters": [
           {
             "in": "path",
@@ -20069,7 +20069,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Get Thread Working Tree Diff Dashboard Api Threads  Thread Id  Working Tree Diff Get",
+                  "title": "Response Api Get Thread Working Tree Diff Api Threads  Thread Id  Working Tree Diff Get",
                   "type": "object"
                 }
               }
@@ -20089,20 +20089,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Thread Working Tree Diff",
         "tags": [
-          "dashboard",
+          "web",
           "threads"
         ]
       }
     },
-    "/dashboard/api/ui-invalidations": {
+    "/api/ui-invalidations": {
       "get": {
         "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``.",
-        "operationId": "api_ui_invalidations_dashboard_api_ui_invalidations_get",
+        "operationId": "api_ui_invalidations_api_ui_invalidations_get",
         "parameters": [
           {
             "in": "query",
@@ -20146,19 +20146,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Ui Invalidations",
         "tags": [
-          "dashboard",
+          "web",
           "ui-invalidations"
         ]
       }
     },
-    "/dashboard/api/workflow-approval/{thread_id}": {
+    "/api/workflow-approval/{thread_id}": {
       "get": {
-        "operationId": "list_workflow_push_approvals_dashboard_api_workflow_approval__thread_id__get",
+        "operationId": "list_workflow_push_approvals_api_workflow_approval__thread_id__get",
         "parameters": [
           {
             "in": "path",
@@ -20176,7 +20176,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response List Workflow Push Approvals Dashboard Api Workflow Approval  Thread Id  Get",
+                  "title": "Response List Workflow Push Approvals Api Workflow Approval  Thread Id  Get",
                   "type": "object"
                 }
               }
@@ -20196,7 +20196,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "List Workflow Push Approvals",
@@ -20205,9 +20205,9 @@
         ]
       }
     },
-    "/dashboard/api/workflow-approval/{thread_id}/{fingerprint}/approve": {
+    "/api/workflow-approval/{thread_id}/{fingerprint}/approve": {
       "post": {
-        "operationId": "approve_workflow_push_dashboard_api_workflow_approval__thread_id___fingerprint__approve_post",
+        "operationId": "approve_workflow_push_api_workflow_approval__thread_id___fingerprint__approve_post",
         "parameters": [
           {
             "in": "path",
@@ -20234,7 +20234,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Approve Workflow Push Dashboard Api Workflow Approval  Thread Id   Fingerprint  Approve Post",
+                  "title": "Response Approve Workflow Push Api Workflow Approval  Thread Id   Fingerprint  Approve Post",
                   "type": "object"
                 }
               }
@@ -20254,7 +20254,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Approve Workflow Push",
@@ -20263,9 +20263,9 @@
         ]
       }
     },
-    "/dashboard/api/workflow-approval/{thread_id}/{fingerprint}/reject": {
+    "/api/workflow-approval/{thread_id}/{fingerprint}/reject": {
       "post": {
-        "operationId": "reject_workflow_push_dashboard_api_workflow_approval__thread_id___fingerprint__reject_post",
+        "operationId": "reject_workflow_push_api_workflow_approval__thread_id___fingerprint__reject_post",
         "parameters": [
           {
             "in": "path",
@@ -20292,7 +20292,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Reject Workflow Push Dashboard Api Workflow Approval  Thread Id   Fingerprint  Reject Post",
+                  "title": "Response Reject Workflow Push Api Workflow Approval  Thread Id   Fingerprint  Reject Post",
                   "type": "object"
                 }
               }
@@ -20312,7 +20312,7 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Reject Workflow Push",
@@ -20321,16 +20321,16 @@
         ]
       }
     },
-    "/dashboard/api/workspaces": {
+    "/api/workspaces": {
       "get": {
-        "operationId": "api_list_workspaces_dashboard_api_workspaces_get",
+        "operationId": "api_list_workspaces_api_workspaces_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api List Workspaces Dashboard Api Workspaces Get",
+                  "title": "Response Api List Workspaces Api Workspaces Get",
                   "type": "object"
                 }
               }
@@ -20340,17 +20340,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Workspaces",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       },
       "post": {
-        "operationId": "api_create_workspace_dashboard_api_workspaces_post",
+        "operationId": "api_create_workspace_api_workspaces_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -20385,27 +20385,27 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Create Workspace",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       }
     },
-    "/dashboard/api/workspaces/options": {
+    "/api/workspaces/options": {
       "get": {
         "description": "Pickable workspaces for any signed-in user; refresh logs only for admins.\n\nEach option carries ``default_repo`` so the composer can preselect it when\nthe workspace is chosen first.",
-        "operationId": "api_workspace_options_dashboard_api_workspaces_options_get",
+        "operationId": "api_workspace_options_api_workspaces_options_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Workspace Options Dashboard Api Workspaces Options Get",
+                  "title": "Response Api Workspace Options Api Workspaces Options Get",
                   "type": "object"
                 }
               }
@@ -20415,19 +20415,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Workspace Options",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       }
     },
-    "/dashboard/api/workspaces/{slug}": {
+    "/api/workspaces/{slug}": {
       "delete": {
-        "operationId": "api_delete_workspace_dashboard_api_workspaces__slug__delete",
+        "operationId": "api_delete_workspace_api_workspaces__slug__delete",
         "parameters": [
           {
             "in": "path",
@@ -20461,17 +20461,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Workspace",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       },
       "get": {
-        "operationId": "api_get_workspace_dashboard_api_workspaces__slug__get",
+        "operationId": "api_get_workspace_api_workspaces__slug__get",
         "parameters": [
           {
             "in": "path",
@@ -20507,17 +20507,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Workspace",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       },
       "put": {
-        "operationId": "api_update_workspace_dashboard_api_workspaces__slug__put",
+        "operationId": "api_update_workspace_api_workspaces__slug__put",
         "parameters": [
           {
             "in": "path",
@@ -20563,20 +20563,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Update Workspace",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       }
     },
-    "/dashboard/api/workspaces/{slug}/refresh": {
+    "/api/workspaces/{slug}/refresh": {
       "post": {
-        "description": "Start a snapshot rebuild from the workspace's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the dashboard to poll.",
-        "operationId": "api_refresh_workspace_dashboard_api_workspaces__slug__refresh_post",
+        "description": "Start a snapshot rebuild from the workspace's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the web app to poll.",
+        "operationId": "api_refresh_workspace_api_workspaces__slug__refresh_post",
         "parameters": [
           {
             "in": "path",
@@ -20594,7 +20594,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Refresh Workspace Dashboard Api Workspaces  Slug  Refresh Post",
+                  "title": "Response Api Refresh Workspace Api Workspaces  Slug  Refresh Post",
                   "type": "object"
                 }
               }
@@ -20614,19 +20614,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Refresh Workspace",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       }
     },
-    "/dashboard/api/workspaces/{slug}/repositories": {
+    "/api/workspaces/{slug}/repositories": {
       "get": {
-        "operationId": "api_list_workspace_repositories_dashboard_api_workspaces__slug__repositories_get",
+        "operationId": "api_list_workspace_repositories_api_workspaces__slug__repositories_get",
         "parameters": [
           {
             "in": "path",
@@ -20646,7 +20646,7 @@
                   "items": {
                     "$ref": "#/components/schemas/RepositorySettings"
                   },
-                  "title": "Response Api List Workspace Repositories Dashboard Api Workspaces  Slug  Repositories Get",
+                  "title": "Response Api List Workspace Repositories Api Workspaces  Slug  Repositories Get",
                   "type": "array"
                 }
               }
@@ -20666,20 +20666,20 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Workspace Repositories",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       }
     },
-    "/dashboard/api/workspaces/{slug}/repositories/{owner}/{name}": {
+    "/api/workspaces/{slug}/repositories/{owner}/{name}": {
       "put": {
         "description": "Change how one of a workspace's repositories is configured there.",
-        "operationId": "api_configure_workspace_repository_dashboard_api_workspaces__slug__repositories__owner___name__put",
+        "operationId": "api_configure_workspace_repository_api_workspaces__slug__repositories__owner___name__put",
         "parameters": [
           {
             "in": "path",
@@ -20743,19 +20743,19 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Configure Workspace Repository",
         "tags": [
-          "dashboard",
+          "web",
           "workspaces"
         ]
       }
     },
-    "/dashboard/api/workspaces/{workspace}/mcps": {
+    "/api/workspaces/{workspace}/mcps": {
       "get": {
-        "operationId": "api_list_workspace_mcps_dashboard_api_workspaces__workspace__mcps_get",
+        "operationId": "api_list_workspace_mcps_api_workspaces__workspace__mcps_get",
         "parameters": [
           {
             "in": "path",
@@ -20775,7 +20775,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MCPConnectionPublic"
                   },
-                  "title": "Response Api List Workspace Mcps Dashboard Api Workspaces  Workspace  Mcps Get",
+                  "title": "Response Api List Workspace Mcps Api Workspaces  Workspace  Mcps Get",
                   "type": "array"
                 }
               }
@@ -20795,18 +20795,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api List Workspace Mcps",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/workspaces/{workspace}/mcps/{name}": {
+    "/api/workspaces/{workspace}/mcps/{name}": {
       "delete": {
-        "operationId": "api_delete_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__delete",
+        "operationId": "api_delete_workspace_mcp_api_workspaces__workspace__mcps__name__delete",
         "parameters": [
           {
             "in": "path",
@@ -20844,16 +20844,16 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Delete Workspace Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       },
       "put": {
-        "operationId": "api_save_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__put",
+        "operationId": "api_save_workspace_mcp_api_workspaces__workspace__mcps__name__put",
         "parameters": [
           {
             "in": "path",
@@ -20908,18 +20908,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Save Workspace Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/workspaces/{workspace}/mcps/{name}/discover": {
+    "/api/workspaces/{workspace}/mcps/{name}/discover": {
       "post": {
-        "operationId": "api_discover_workspace_mcp_dashboard_api_workspaces__workspace__mcps__name__discover_post",
+        "operationId": "api_discover_workspace_mcp_api_workspaces__workspace__mcps__name__discover_post",
         "parameters": [
           {
             "in": "path",
@@ -20965,7 +20965,7 @@
                   "items": {
                     "$ref": "#/components/schemas/MCPToolDescription"
                   },
-                  "title": "Response Api Discover Workspace Mcp Dashboard Api Workspaces  Workspace  Mcps  Name  Discover Post",
+                  "title": "Response Api Discover Workspace Mcp Api Workspaces  Workspace  Mcps  Name  Discover Post",
                   "type": "array"
                 }
               }
@@ -20985,18 +20985,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Discover Workspace Mcp",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/workspaces/{workspace}/mcps/{name}/headers/reveal": {
+    "/api/workspaces/{workspace}/mcps/{name}/headers/reveal": {
       "post": {
-        "operationId": "api_reveal_workspace_mcp_headers_dashboard_api_workspaces__workspace__mcps__name__headers_reveal_post",
+        "operationId": "api_reveal_workspace_mcp_headers_api_workspaces__workspace__mcps__name__headers_reveal_post",
         "parameters": [
           {
             "in": "path",
@@ -21039,18 +21039,18 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Reveal Workspace Mcp Headers",
         "tags": [
-          "dashboard"
+          "web"
         ]
       }
     },
-    "/dashboard/api/workspaces/{workspace}/settings": {
+    "/api/workspaces/{workspace}/settings": {
       "get": {
-        "operationId": "api_get_workspace_settings_dashboard_api_workspaces__workspace__settings_get",
+        "operationId": "api_get_workspace_settings_api_workspaces__workspace__settings_get",
         "parameters": [
           {
             "in": "path",
@@ -21086,17 +21086,17 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Get Workspace Settings",
         "tags": [
-          "dashboard",
+          "web",
           "settings"
         ]
       },
       "put": {
-        "operationId": "api_put_workspace_settings_dashboard_api_workspaces__workspace__settings_put",
+        "operationId": "api_put_workspace_settings_api_workspaces__workspace__settings_put",
         "parameters": [
           {
             "in": "path",
@@ -21142,12 +21142,12 @@
         },
         "security": [
           {
-            "DashboardSession": []
+            "WebSession": []
           }
         ],
         "summary": "Api Put Workspace Settings",
         "tags": [
-          "dashboard",
+          "web",
           "settings"
         ]
       }

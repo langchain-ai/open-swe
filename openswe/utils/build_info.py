@@ -1,4 +1,4 @@
-"""Build identity of the running backend and its bundled dashboard.
+"""Build identity of the running backend and its bundled web app.
 
 Every value is discovered through the path that produced the artifact or
 reported as ``None`` (shown as "Unavailable"): ``LANGCHAIN_REVISION_ID`` is not
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from openswe.config import ENV
-from openswe.utils.dashboard_ui import dashboard_static_dir
+from openswe.utils.web_ui import web_static_dir
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ _BUILD_INFO_NAME = "open-swe-build-info.json"
 # Image builds stamp here (scripts/stamp_build_info.py); the directory must be
 # created explicitly because custom dockerfile_lines run before the source copy.
 _IMAGE_BUILD_INFO_DIR = Path("/opt/open-swe-backend")
-_IMAGE_DASHBOARD_DIR = Path("/opt/open-swe-dashboard")
+_IMAGE_WEB_DIR = Path("/opt/open-swe-dashboard")
 
 
 def _read_build_info(path: Path) -> dict[str, str]:
@@ -75,19 +75,19 @@ def backend_build_info() -> dict[str, str | None]:
 
 
 @functools.lru_cache(maxsize=1)
-def dashboard_build_info() -> dict[str, str | bool | None]:
-    """Identifiers recorded in the dashboard bundle this backend serves, if any."""
-    static = dashboard_static_dir()
+def web_build_info() -> dict[str, str | bool | None]:
+    """Identifiers recorded in the web app bundle this backend serves, if any."""
+    static = web_static_dir()
     info = _read_build_info(static / _BUILD_INFO_NAME) if static else {}
     commit = info.get("commit")
-    if not commit and info and static == _IMAGE_DASHBOARD_DIR:
+    if not commit and info and static == _IMAGE_WEB_DIR:
         backend = _read_build_info(_backend_sidecar_path())
         try:
             stamp_hash = sha256((static / _BUILD_INFO_NAME).read_bytes()).hexdigest()
         except OSError:
-            logger.warning("Unable to verify bundled dashboard build stamp", exc_info=True)
+            logger.warning("Unable to verify bundled web app build stamp", exc_info=True)
         else:
-            if stamp_hash == backend.get("dashboard_stamp_sha256"):
+            if stamp_hash == backend.get("web_stamp_sha256"):
                 commit = backend_build_info()["commit"]
     return {
         "commit": commit,
@@ -98,4 +98,4 @@ def dashboard_build_info() -> dict[str, str | bool | None]:
 
 def build_info() -> dict[str, Any]:
     """The two artifacts' identifiers side by side; ``None`` means unavailable."""
-    return {"backend": backend_build_info(), "dashboard": dashboard_build_info()}
+    return {"backend": backend_build_info(), "web": web_build_info()}

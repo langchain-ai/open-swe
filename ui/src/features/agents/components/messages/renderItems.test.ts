@@ -16,7 +16,7 @@ function iframeChunk(): ToolExecutionChunk {
     toolKind: "other",
     input: { path: "/tmp/chart.html" },
     status: "completed",
-    output: "Displayed the HTML output in the dashboard.",
+    output: "Displayed the HTML output in the web app.",
     display: {
       type: "output_iframe",
       previewUrl: "https://downloads.example/preview?token=secret",

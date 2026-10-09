@@ -9,8 +9,8 @@ from fastapi import Depends, HTTPException, Request
 from openswe.api_keys.models import ApiKey
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
-from openswe.dashboard.deps import ADMIN_DEP
 from openswe.database import postgres
+from openswe.web.deps import ADMIN_DEP
 
 logger = logging.getLogger(__name__)
 

@@ -20,13 +20,13 @@ async function loginAs(page: Page) {
 }
 
 async function saveDefaultModel(page: Page) {
-  const optionsResponse = await page.request.get("/dashboard/api/options");
+  const optionsResponse = await page.request.get("/api/options");
   expect(optionsResponse.ok()).toBeTruthy();
   const options = (await optionsResponse.json()) as {
     default_agent_model: string;
     default_agent_reasoning_effort: string;
   };
-  const response = await page.request.put("/dashboard/api/profile", {
+  const response = await page.request.put("/api/profile", {
     headers: SAME_ORIGIN_HEADERS,
     data: {
       default_model: options.default_agent_model,

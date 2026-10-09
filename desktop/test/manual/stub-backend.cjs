@@ -20,39 +20,39 @@ const MODEL = {
   supports_images: true,
 };
 
-// Enough shape for the dashboard to render once signed in; everything else
+// Enough shape for the web app to render once signed in; everything else
 // falls through to an empty list.
 const SIGNED_IN_ROUTES = {
-  "/dashboard/api/me": {
+  "/api/me": {
     login: "stub-user",
     email: "stub@example.com",
     avatar_url: null,
     is_admin: false,
     slack_oauth_enabled: false,
   },
-  "/dashboard/api/threads/projects": [],
-  "/dashboard/api/threads/pinned": [],
-  "/dashboard/api/threads/page": {
+  "/api/threads/projects": [],
+  "/api/threads/pinned": [],
+  "/api/threads/page": {
     items: [],
     limit: 10,
     offset: 0,
     hasMore: false,
   },
-  "/dashboard/api/my-mapping": {},
-  "/dashboard/api/profile": {},
-  "/dashboard/api/environments/options": {
+  "/api/my-mapping": {},
+  "/api/profile": {},
+  "/api/environments/options": {
     environments: [],
     default_slug: "default",
   },
-  "/dashboard/api/options": {
+  "/api/options": {
     models: [MODEL],
     default_agent_model: MODEL.id,
     default_agent_reasoning_effort: "high",
     default_agent_subagent_model: MODEL.id,
     default_agent_subagent_reasoning_effort: "high",
   },
-  "/dashboard/api/repos": { installations: [], repositories: [] },
-  "/dashboard/api/skills": { items: [], next_offset: null },
+  "/api/repos": { installations: [], repositories: [] },
+  "/api/skills": { items: [], next_offset: null },
 };
 
 function send(response, status, body, headers = {}) {
@@ -71,7 +71,7 @@ const server = http.createServer(async (request, response) => {
     `${request.method} ${url.pathname}${url.search}  cookie: ${cookie}`,
   );
 
-  if (url.pathname === "/dashboard/api/auth/login") {
+  if (url.pathname === "/api/auth/login") {
     const challenge = url.searchParams.get("desktop_handoff");
     // Mirror the backend: only a port number crosses the wire, so the redirect
     // target can never be steered off loopback.
@@ -97,7 +97,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (
-    url.pathname === "/dashboard/api/auth/desktop/exchange" &&
+    url.pathname === "/api/auth/desktop/exchange" &&
     request.method === "POST"
   ) {
     const chunks = [];
@@ -125,11 +125,11 @@ const server = http.createServer(async (request, response) => {
 
   const signedIn = (request.headers.cookie || "").includes("osw_session=");
   if (!signedIn) {
-    if (url.pathname === "/dashboard/api/me")
+    if (url.pathname === "/api/me")
       console.log("  ✗ /me without a session cookie");
     return send(response, 401, { detail: "not authenticated" });
   }
-  if (url.pathname === "/dashboard/api/me") {
+  if (url.pathname === "/api/me") {
     console.log("  ✓ /me carried the session cookie — desktop login works");
   }
   send(response, 200, SIGNED_IN_ROUTES[url.pathname] ?? []);

@@ -37,7 +37,7 @@ class TraceResourceNameMiddleware:
     """Give each request the resource name its route deserves.
 
     The platform tracer instruments the server this app is mounted behind, so it
-    resolves no route for these paths: every dashboard request lands on a single
+    resolves no route for these paths: every web request lands on a single
     ``GET`` resource, which cannot be searched, compared or alerted on in APM.
     """
 

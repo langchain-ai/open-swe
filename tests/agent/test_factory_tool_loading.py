@@ -10,10 +10,10 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.server import get_agent
+from openswe.web.workspace_settings import WorkspaceSettings
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-5.6-sol",

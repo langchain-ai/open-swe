@@ -13,10 +13,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.pregel import Pregel
 
 import openswe.server as server
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.middleware.model_selection import ModelSelectionMiddleware
 from openswe.tools.access import Access
 from openswe.utils.thread_settings import ThreadSettings
+from openswe.web.workspace_settings import WorkspaceSettings
 
 
 @pytest.fixture

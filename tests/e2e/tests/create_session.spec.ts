@@ -2,11 +2,7 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "@playwright/test";
-import {
-  SAME_USER,
-  dismissOnboardingIfShown,
-  loginAs,
-} from "./helpers/dashboard";
+import { SAME_USER, dismissOnboardingIfShown, loginAs } from "./helpers/web";
 
 const exec = promisify(execFile);
 const root = resolve(__dirname, "../../..");
@@ -106,7 +102,7 @@ for (const start of [undefined, false]) {
       }
     } finally {
       if (threadId) {
-        await page.request.post(`/dashboard/api/threads/${threadId}/cancel`, {
+        await page.request.post(`/api/threads/${threadId}/cancel`, {
           headers: { origin: harness },
         });
         await api.delete(`/threads/${threadId}`);

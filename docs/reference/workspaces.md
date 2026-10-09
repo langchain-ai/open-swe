@@ -62,7 +62,7 @@ Settings resolve from the least to the most specific tier, each overriding the o
    original Store key so an upgrade needs no migration. Admins edit it on the Admin page.
 2. **Workspace.** A sparse record of overrides per workspace slug. A field that is unset inherits
    the instance value, so a new workspace behaves exactly like the instance until an admin
-   changes something. `GET /dashboard/api/workspaces/{slug}/settings` returns the effective
+   changes something. `GET /api/workspaces/{slug}/settings` returns the effective
    values and the overrides separately; `PUT` replaces the overrides, and a `null` field means
    "inherit".
 3. **User.** The existing profile fields (model and effort, subagent model, default repository,
@@ -72,7 +72,7 @@ Settings resolve from the least to the most specific tier, each overriding the o
    of the above for that thread.
 
 MCP connections follow the same shape without a thread tier: **instance** connections
-(`/dashboard/api/mcps`) are loaded for every run, the **workspace** connections are added, then
+(`/api/mcps`) are loaded for every run, the **workspace** connections are added, then
 the **user's** personal connections. A later tier's connection replaces a same-named one from
 the tier before, which is how a workspace or a user swaps in different credentials for a shared
 server. The connections configured before workspaces existed are the instance tier: they
@@ -89,7 +89,7 @@ not the LangGraph Store: a `workspace` table (one row per workspace, slug unique
 (`repository_id`, referencing the `repository` table, and `channel_id`), so the database itself
 enforces that a repository is preferred by, and a Slack channel bound to, at most one workspace. Settings and MCP connections stay exactly where this design places
 them: in the LangGraph Store, keyed by workspace slug. `Workspace`, `WorkspaceCreate`, and
-`WorkspaceUpdate` remain the domain and API shape that the dashboard, the agent tools, and routing
+`WorkspaceUpdate` remain the domain and API shape that the web app, the agent tools, and routing
 read and write; the tables are an implementation detail behind `WorkspaceStore`, swappable again
 without touching a caller.
 
@@ -121,7 +121,7 @@ a **public** repository record that repository in their metadata when created, s
 never from run configuration, and receive a token narrowed to that repository, including on every
 proxy refresh. Unknown repository visibility also causes repository-scoped access. Reviewer,
 analyzer, and review-scout sandboxes explicitly scope their tokens to the repository being
-examined. Coding threads that members start from Slack, the dashboard, or Linear normally get
+examined. Coding threads that members start from Slack, the web app, or Linear normally get
 the installation-wide token, as do workspace image builds.
 
 A workspace's preferred repositories are what its image preloads: the setup and update scripts
@@ -136,13 +136,13 @@ Every signed-in user may view and use every workspace, and every configured admi
 every workspace. Public threads remain visible to all signed-in users and private threads to their
 owner and admins, as today. Role-based access per workspace is explicitly deferred.
 
-### Dashboard
+### Web
 
 The Environments page becomes the Workspaces page, with repositories and Slack channels editable.
 The composer picks the workspace first and the repository second: every workspace lists every
 accessible repository, and choosing a workspace preselects its default repository. A repository
 named from outside — a link or the profile default — selects the workspace that prefers it. The
-dashboard has no separate "project" notion: the sidebar nests each repository folder under the
+web has no separate "project" notion: the sidebar nests each repository folder under the
 workspace that prefers it, and `default` for one no workspace prefers. Admin
 settings and MCP connections gain a workspace selector.
 
@@ -183,7 +183,7 @@ workspace they belong to.
 ## Alternatives
 
 - **Deploy a second instance for OSS.** Works today with no code, but doubles operations for a
-  split that many teams will want, and gives no shared dashboard or identity.
+  split that many teams will want, and gives no shared web or identity.
 - **Multiple GitHub Apps, one per workspace.** Couples sign-in and webhook secrets to
   workspaces and requires separate credentials. Shared bindings work with one installation.
 - **Workspaces bound to installations rather than repositories.** Simpler routing, but one
@@ -213,7 +213,7 @@ Known gaps this design leaves open, so they survive outside the pull requests th
   close it.
 - **A corrupt workspace row is skipped rather than repaired.** A record an older release wrote that
   no longer validates is left out of the listing and reads as missing, logged at error. Nothing
-  reports it to an admin, and there is no way to fix it from the dashboard.
+  reports it to an admin, and there is no way to fix it from the web app.
 - **Concurrent edits to one workspace overwrite each other.** `apply_update` reads a record, applies
   the patch, and writes the whole row back, so the last save wins; two admins editing the same
   workspace need optimistic concurrency on `updated_at` to notice.
@@ -228,6 +228,6 @@ Known gaps this design leaves open, so they survive outside the pull requests th
   by each thread's own workspace needs `/threads/repos` to return one entry per repository and
   thread workspace, a workspace filter on `/threads/page`, and folder keys (and the pin and
   collapse preferences stored under them) that include the workspace.
-- **Unfinished dashboard pieces.** The review page's guidelines and toggles are
+- **Unfinished web pieces.** The review page's guidelines and toggles are
   per workspace, but the repository list above them is still every installed repository grouped by
   GitHub owner, which does not say which workspace each one belongs to.

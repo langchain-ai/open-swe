@@ -1,4 +1,4 @@
-"""Validated records shared by incident channels, agent tools, and the dashboard."""
+"""Validated records shared by incident channels, agent tools, and the web app."""
 
 import re
 from typing import Literal, NewType

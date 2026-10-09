@@ -1,6 +1,6 @@
-"""Bearer-token detection for dashboard API requests.
+"""Bearer-token detection for web API requests.
 
-The dashboard API is cookie-authenticated through the GitHub OAuth login flow.
+The web app API is cookie-authenticated through the GitHub OAuth login flow.
 A request that carries a bearer token instead is not a browser form post, so it
 is exempt from the CSRF origin check.
 """

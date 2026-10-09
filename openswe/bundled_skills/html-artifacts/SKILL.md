@@ -1,6 +1,6 @@
 ---
 name: html-artifacts
-description: Author the HTML for a plan artifact, dashboard iframe, or Slack attachment — structure, design plan, available runtime, theming, and craft. Read this before writing HTML for save_plan, output_iframe, or slack_attach_html.
+description: Author the HTML for a plan artifact, web iframe, or Slack attachment — structure, design plan, available runtime, theming, and craft. Read this before writing HTML for save_plan, output_iframe, or slack_attach_html.
 ---
 
 # HTML artifacts
@@ -27,9 +27,9 @@ Assume no network at runtime: no CDN scripts, `fetch`, or XHR. The viewer frames
 
 ## Theming
 
-Default user-facing HTML to the viewer's system light/dark preference using `prefers-color-scheme`; provide both palettes unless the user explicitly requests a single theme. Honor an explicit viewer theme supplied by the dashboard over the system preference.
+Default user-facing HTML to the viewer's system light/dark preference using `prefers-color-scheme`; provide both palettes unless the user explicitly requests a single theme. Honor an explicit viewer theme supplied by the web app over the system preference.
 
-The dashboard stamps `data-theme="light"` or `data-theme="dark"` on `<html>`, so `:root[data-theme="dark"]` is the authoritative dark layer and must be complete on its own.
+The web app stamps `data-theme="light"` or `data-theme="dark"` on `<html>`, so `:root[data-theme="dark"]` is the authoritative dark layer and must be complete on its own.
 
 ```css
 :root { /* the full light palette, as tokens */ }
@@ -39,7 +39,7 @@ The dashboard stamps `data-theme="light"` or `data-theme="dark"` on `<html>`, so
 :root[data-theme="dark"] { /* redefine them again — this layer wins */ }
 ```
 
-Declare `color-scheme` in each layer too (`light` on `:root`, `dark` in both dark layers) so scrollbars, form controls, and UA defaults follow the artifact instead of staying light under a dark palette. The dashboard seeds it from the viewer's theme; your own declaration wins.
+Declare `color-scheme` in each layer too (`light` on `:root`, `dark` in both dark layers) so scrollbars, form controls, and UA defaults follow the artifact instead of staying light under a dark palette. The web app seeds it from the viewer's theme; your own declaration wins.
 
 The media-query layer covers surfaces that stamp nothing, such as a downloaded file or a Slack attachment. Paint `body` with an explicit token background and style components only through tokens: a color whose only definition sits inside a media or `[data-theme]` block is the classic unreadable-artifact bug. Give the second theme the same care as the first — don't naively invert; keep contrast legible and the accent working on both grounds. Only a user-requested single-theme artifact may omit both dark layers, and every background and foreground must still be explicit.
 
@@ -51,7 +51,7 @@ Space sibling groups with flex or grid `gap` rather than per-element margins tha
 
 Keep keyboard focus visible, honor `prefers-reduced-motion`, close every non-void element, and watch selector specificity: classes that cancel each other out silently undo your spacing.
 
-When the artifact is a tool or dashboard rather than a document, the craft shifts to information design. Surface the summary before the detail and encode state in form as well as number — a pill, a chip, a severity stripe — so what needs attention reads at a glance. Semantic color (good / warning / critical) is separate from the accent hue and does not count as your accent.
+When the artifact is a tool or web rather than a document, the craft shifts to information design. Surface the summary before the detail and encode state in form as well as number — a pill, a chip, a severity stripe — so what needs attention reads at a glance. Semantic color (good / warning / critical) is separate from the accent hue and does not count as your accent.
 
 ## Point of view
 

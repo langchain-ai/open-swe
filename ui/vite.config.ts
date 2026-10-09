@@ -10,10 +10,12 @@ import { nitro } from "nitro/vite"
 import type { IncomingMessage } from "node:http"
 import type { Plugin } from "vite"
 
-// Paths the backend owns, not the app router. `/dashboard/api` is the only one a
-// deployed dashboard serves; the rest exist when the backend is the mock harness,
+// Paths the backend owns, not the app router. `/api` (and `/dashboard/api`, its
+// old name, where the OAuth callbacks are still registered) is the only one a
+// deployed web app serves; the rest exist when the backend is the mock harness,
 // and a browser navigates to `/fake-gh` mid-login, so dev has to reach them too.
 const BACKEND_PREFIXES = [
+  "/api",
   "/dashboard/api",
   "/webhooks",
   "/mock",
@@ -31,7 +33,8 @@ const BACKEND_PREFIXES = [
 // The harness-owned subset: everything but the two a deployment fronts and
 // `/static`, which would shadow nitro's own assets.
 const E2E_HARNESS_PREFIXES = BACKEND_PREFIXES.filter(
-  (prefix) => !["/dashboard/api", "/webhooks", "/static"].includes(prefix)
+  (prefix) =>
+    !["/api", "/dashboard/api", "/webhooks", "/static"].includes(prefix)
 )
 
 function matchesBackendPrefix(url?: string): boolean {
@@ -136,7 +139,7 @@ const SHIKI_LANGS = [
   "yaml",
 ]
 
-// Browser `/dashboard/api/*` calls are proxied to the Python backend by the
+// Browser `/api/*` calls are proxied to the Python backend by the
 // server rather than sent cross-origin, so the session cookie stays same-origin.
 const IS_PRODUCTION = process.env.NODE_ENV === "production"
 
@@ -150,7 +153,7 @@ const devRouteRules = IS_PRODUCTION
         `${prefix}/**`,
         {
           proxy: {
-            to: `${process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${prefix}/**`,
+            to: `${process.env.WEB_API_URL ?? process.env.DASHBOARD_API_URL ?? "http://localhost:2024"}${prefix}/**`,
             fetchOptions: { redirect: "manual" as const },
           },
         },
@@ -180,7 +183,7 @@ function setRequestHeader(
 // module and HMR requests keep the origin they arrived with.
 function deployedBackendSession(): Plugin | null {
   const session = process.env.OPEN_SWE_DEV_SESSION
-  const backend = process.env.DASHBOARD_API_URL
+  const backend = process.env.WEB_API_URL ?? process.env.DASHBOARD_API_URL
   if (!session || !backend) return null
   const origin = new URL(backend).origin
   return {
@@ -235,9 +238,10 @@ const SHELL_PAGE = {
 // Where the app is served from. "/" for the dev server and the standalone image;
 // a LangGraph `http.mount_prefix` (plus trailing slash) when the backend bundles
 // the build and serves it under that prefix.
-const BASE_PATH = process.env.DASHBOARD_BASE_PATH || "/"
+const BASE_PATH =
+  process.env.WEB_BASE_PATH || process.env.DASHBOARD_BASE_PATH || "/"
 
-// The backend can front this dev server (DASHBOARD_DEV_SERVER_URL) so the UI
+// The backend can front this dev server (WEB_DEV_SERVER_URL) so the UI
 // hot-reloads on its origin. HTTP is proxied; the HMR WebSocket is not, so the
 // client is told to open it against this port whatever page origin it loaded from.
 const DEV_PORT = Number(process.env.PORT) || 3000
@@ -313,7 +317,7 @@ const config = defineConfig({
       // directory under the vite plugin. The backend prefixes are proxied by a
       // deployed build only — dev proxies them through devRouteRules, which has
       // a localhost default the handler deliberately refuses to have. Only the
-      // two prefixes a deployed dashboard fronts, since proxying `/static`
+      // two prefixes a deployed web fronts, since proxying `/static`
       // would shadow nitro's assets.
       handlers: IS_PRODUCTION
         ? [
@@ -322,6 +326,7 @@ const config = defineConfig({
               handler: "./server/apple-app-site-association.ts",
             },
             ...[
+              "/api",
               "/dashboard/api",
               "/webhooks",
               // A built server fronting the mock harness fronts its fake-SaaS and

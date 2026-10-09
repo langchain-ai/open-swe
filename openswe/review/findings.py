@@ -293,7 +293,7 @@ def _str_list(value: Any) -> list[str]:
 
 
 # Read accessors take a plain mapping so callers holding a raw persisted record
-# (dashboard serializers, usage rollups) can use them without a cast.
+# (web serializers, usage rollups) can use them without a cast.
 FindingLike = Mapping[str, Any]
 
 

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dismissOnboardingIfShown } from "./helpers/dashboard";
+import { dismissOnboardingIfShown } from "./helpers/web";
 
 const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 
@@ -54,9 +54,7 @@ test("private threads require owner confirmation to expose the entire thread", a
     createdId = new URL(page.url()).pathname.split("/").pop()!;
     await expect
       .poll(async () => {
-        const response = await page.request.get(
-          `/dashboard/api/threads/${createdId}`,
-        );
+        const response = await page.request.get(`/api/threads/${createdId}`);
         return response.ok() ? (await response.json()).visibility : null;
       })
       .toBe("private");
@@ -73,21 +71,15 @@ test("private threads require owner confirmation to expose the entire thread", a
     ).toBeDisabled();
     await page.getByRole("button", { name: "Keep private" }).click();
     expect(
-      (
-        await (
-          await page.request.get(`/dashboard/api/threads/${createdId}`)
-        ).json()
-      ).visibility,
+      (await (await page.request.get(`/api/threads/${createdId}`)).json())
+        .visibility,
     ).toBe("private");
 
     // The title PATCH cannot bypass the explicit sharing endpoint.
-    const flip = await page.request.patch(
-      `/dashboard/api/threads/${createdId}`,
-      {
-        headers: { origin: new URL(page.url()).origin },
-        data: { visibility: "public" },
-      },
-    );
+    const flip = await page.request.patch(`/api/threads/${createdId}`, {
+      headers: { origin: new URL(page.url()).origin },
+      data: { visibility: "public" },
+    });
     expect(flip.status()).toBe(422);
 
     // A shared thread continues privately as a new thread; the source is untouched.
@@ -97,7 +89,7 @@ test("private threads require owner confirmation to expose the entire thread", a
     await expect(page).toHaveURL(new RegExp(`/agents/(?!${sharedId})[^/]+$`));
     continuedId = new URL(page.url()).pathname.split("/").pop()!;
     const continued = await (
-      await page.request.get(`/dashboard/api/threads/${continuedId}`)
+      await page.request.get(`/api/threads/${continuedId}`)
     ).json();
     expect(continued.visibility).toBe("private");
     expect(continued.continuedFromThreadId).toBe(sharedId);
@@ -115,7 +107,7 @@ test("private threads require owner confirmation to expose the entire thread", a
       ),
     ).toBe(true);
     const source = await (
-      await page.request.get(`/dashboard/api/threads/${sharedId}`)
+      await page.request.get(`/api/threads/${sharedId}`)
     ).json();
     expect(source.visibility).toBe("public");
 
@@ -126,13 +118,11 @@ test("private threads require owner confirmation to expose the entire thread", a
       page.getByText("Shared project planning", { exact: true }).first(),
     ).toBeVisible();
     for (const threadId of [createdId, continuedId]) {
-      const denied = await page.request.get(
-        `/dashboard/api/threads/${threadId}`,
-      );
+      const denied = await page.request.get(`/api/threads/${threadId}`);
       expect(denied.status()).toBe(404);
     }
     const forbidden = await page.request.post(
-      `/dashboard/api/threads/${createdId}/share-to-workspace`,
+      `/api/threads/${createdId}/share-to-workspace`,
       { headers: { origin: new URL(page.url()).origin } },
     );
     expect(forbidden.status()).toBe(404);
@@ -164,7 +154,7 @@ test("private threads require owner confirmation to expose the entire thread", a
     ).toHaveText(/Workspace/);
     await expect(page).toHaveURL(new RegExp(`/agents/${createdId}$`));
     const shared = await (
-      await page.request.get(`/dashboard/api/threads/${createdId}`)
+      await page.request.get(`/api/threads/${createdId}`)
     ).json();
     expect(shared.visibility).toBe("public");
     expect(shared.adminThread).toBe(false);
@@ -174,7 +164,7 @@ test("private threads require owner confirmation to expose the entire thread", a
       page.getByText("Private planning notes", { exact: true }).first(),
     ).toBeVisible();
     expect(
-      (await page.request.get(`/dashboard/api/threads/${createdId}`)).ok(),
+      (await page.request.get(`/api/threads/${createdId}`)).ok(),
     ).toBeTruthy();
   } finally {
     for (const threadId of [createdId, continuedId, sharedId]) {

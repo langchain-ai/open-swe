@@ -10,7 +10,7 @@ describe("reviewImageProxyUrl", () => {
       7,
       "https://github.com/user-attachments/assets/abc-123"
     )
-    expect(out).toContain("/dashboard/api/reviews/acme/repo/7/image?url=")
+    expect(out).toContain("/api/reviews/acme/repo/7/image?url=")
     expect(out).toContain(
       encodeURIComponent("https://github.com/user-attachments/assets/abc-123")
     )
@@ -23,7 +23,7 @@ describe("reviewImageProxyUrl", () => {
       7,
       "https://private-user-images.githubusercontent.com/1/x.png?jwt=y"
     )
-    expect(out).toContain("/dashboard/api/reviews/acme/repo/7/image?url=")
+    expect(out).toContain("/api/reviews/acme/repo/7/image?url=")
   })
 
   it("leaves non-github image hosts untouched", () => {

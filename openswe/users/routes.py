@@ -1,11 +1,11 @@
-"""Dashboard routes for people: the admin listing of who Open SWE knows."""
+"""Web routes for people: the admin listing of who Open SWE knows."""
 
 from typing import Any
 
 from fastapi import APIRouter, Query
 
-from openswe.dashboard.deps import ADMIN_DEP
 from openswe.users.models import User
+from openswe.web.deps import ADMIN_DEP
 
 router = APIRouter(tags=["users"])
 

@@ -6,7 +6,7 @@ Records have no cascading foreign keys: deleting an account, key, or workspace m
 
 ## Coverage
 
-- Authenticated dashboard `POST`, `PUT`, `PATCH`, and `DELETE` requests, including API-key and federated GitHub Actions thread requests. Operation names use the endpoint name without its `api_` prefix. This is **API activity**, not proof of a committed business mutation: some POST endpoints are reads, and HTTP success follows the response status.
+- Authenticated web `POST`, `PUT`, `PATCH`, and `DELETE` requests, including API-key and federated GitHub Actions thread requests. Operation names use the endpoint name without its `api_` prefix. This is **API activity**, not proof of a committed business mutation: some POST endpoints are reads, and HTTP success follows the response status.
 - The `save_user_settings`, `save_user_instructions`, `manage_feature_flags`, and `manage_review_approval_mode` tools, whether called by the agent or through the sandbox tool endpoint. Read actions are excluded. Exceptions and returned `ok: false`, `success: false`, or errors count as failures.
 - Workspace lifecycle, repository-configuration, and workspace-settings HTTP operations attach the target workspace ID before deletion or after creation. Feature-flag tool writes attach their explicit target workspace; instance-wide writes have no workspace ID. Other operations may have no workspace scope.
 
@@ -20,9 +20,9 @@ Unauthenticated failures, failures before an actor is bound (including CSRF), GE
 
 ## Querying
 
-Installation administrators can browse **Administration → Audit logs** (`/admin/audit-logs`) in the dashboard. The viewer defaults to the last 24 hours, with local-time date inputs and exact-match operation, user ID, API key ID, and workspace ID filters. Apply filters to start a new query; load more to page through the same fixed range. Event details include actor and execution metadata and recorded settings changes, preserving redacted and unset values.
+Installation administrators can browse **Administration → Audit logs** (`/admin/audit-logs`) in the web app. The viewer defaults to the last 24 hours, with local-time date inputs and exact-match operation, user ID, API key ID, and workspace ID filters. Apply filters to start a new query; load more to page through the same fixed range. Event details include actor and execution metadata and recorded settings changes, preserving redacted and unset values.
 
-Installation administrators can call `GET /dashboard/api/audit-logs` using their dashboard session:
+Installation administrators can call `GET /api/audit-logs` using their web session:
 
 - Required `start_time` and `end_time`: timezone-aware timestamps, ordered, at most 31 days apart.
 - Optional `operation_name`, `user_id`, `api_key_id`, and `workspace_id` filters.

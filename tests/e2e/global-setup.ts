@@ -28,7 +28,7 @@ function reclaimStaleUiServer(port: string, server: string) {
 
 // Build the real ui/ app once, then run its Nitro server — the origin the specs
 // drive, exactly as a deployed browser does. The client API base is left empty
-// so its `/dashboard/api/*` calls are same-origin and reach the backend through
+// so its `/api/*` calls are same-origin and reach the backend through
 // the app server's own proxy handler, which is the only path a deployment has.
 // Baking the harness in as the API base instead pointed the browser straight at
 // the backend, so the suite never ran the proxy and stayed green while it was
@@ -61,14 +61,14 @@ export default async function globalSetup() {
       stdio: "inherit",
       env: {
         ...process.env,
-        VITE_DASHBOARD_API_BASE_URL: "",
-        DASHBOARD_API_URL: harness,
+        VITE_WEB_API_BASE_URL: "",
+        WEB_API_URL: harness,
         E2E_HARNESS: harness,
       },
     });
   }
 
-  // DASHBOARD_API_URL is read per request, so the running server needs it too —
+  // WEB_API_URL is read per request, so the running server needs it too —
   // not just the build.
   const child = spawn("node", [server], {
     cwd: ui,
@@ -77,7 +77,7 @@ export default async function globalSetup() {
       ...process.env,
       HOST: "127.0.0.1",
       PORT: uiPort,
-      DASHBOARD_API_URL: harness,
+      WEB_API_URL: harness,
     },
   });
   child.on("exit", (code) => {

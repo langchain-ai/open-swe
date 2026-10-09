@@ -355,7 +355,7 @@ async def test_slack_reply_rejects_oversized_message_with_options(
     post.assert_not_awaited()
 
 
-async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_gone(
+async def test_reply_moves_the_thread_to_the_web_when_its_slack_thread_is_gone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -379,16 +379,16 @@ async def test_reply_moves_the_thread_to_the_dashboard_when_its_slack_thread_is_
         AsyncMock(side_effect=SlackRequestError("thread_not_found")),
     )
     moved = AsyncMock(return_value=True)
-    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", moved)
+    monkeypatch.setattr(slack_reply_tool, "move_thread_to_web", moved)
 
     result = await slack_reply_tool.slack_reply("The answer", "final")
 
-    assert result["moved_to_dashboard"] is True
+    assert result["moved_to_web"] is True
     assert result["retry"] is False
     assert moved.await_args.args[1:] == ("T1", "C1", "1.0")
 
 
-async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
+async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_web(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -402,13 +402,11 @@ async def test_reply_stops_calling_slack_once_the_thread_lives_in_the_dashboard(
         },
     )
     monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", AsyncMock(return_value=None))
-    monkeypatch.setattr(
-        slack_reply_tool, "_already_moved_to_dashboard", AsyncMock(return_value=True)
-    )
+    monkeypatch.setattr(slack_reply_tool, "_already_moved_to_web", AsyncMock(return_value=True))
     post = AsyncMock()
     monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
 
-    assert (await slack_reply_tool.slack_reply("The answer", "final"))["moved_to_dashboard"] is True
+    assert (await slack_reply_tool.slack_reply("The answer", "final"))["moved_to_web"] is True
     post.assert_not_awaited()
 
 
@@ -435,9 +433,9 @@ async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
         "post_slack_thread_reply_with_ts",
         AsyncMock(side_effect=SlackRequestError("thread_not_found")),
     )
-    monkeypatch.setattr(slack_reply_tool, "move_thread_to_dashboard", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_reply_tool, "move_thread_to_web", AsyncMock(return_value=False))
 
     result = await slack_reply_tool.slack_reply("The answer", "final")
 
-    assert result["moved_to_dashboard"] is False
+    assert result["moved_to_web"] is False
     assert result["retry"] is True

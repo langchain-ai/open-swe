@@ -5,9 +5,9 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from openswe.dashboard import oauth, routes
 from openswe.database import postgres
 from openswe.users.models import User, UserIdentity
+from openswe.web import oauth, routes
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 _ADMIN_SESSION = {"sub": "admin", "email": "admin@example.com"}
@@ -28,7 +28,7 @@ def _client_for(session: dict[str, str]) -> httpx.AsyncClient:
 @pytest.fixture
 async def workspace(monkeypatch: pytest.MonkeyPatch, registry_db: None) -> AsyncIterator[str]:
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://test")
+    monkeypatch.setenv("WEB_BASE_URL", "http://test")
     record = await WORKSPACES.create(WorkspaceCreate(name="Core", repos=["acme/api"]), "admin")
     yield record.slug
 
@@ -55,7 +55,7 @@ async def test_mint_returns_the_secret_once_and_never_again(
     admin_client: httpx.AsyncClient, workspace: str
 ) -> None:
     response = await admin_client.post(
-        "/dashboard/api/admin/api-keys",
+        "/api/admin/api-keys",
         json={"workspace": workspace, "name": "CI", "expires_at": _expiry(30)},
     )
 
@@ -71,7 +71,7 @@ async def test_mint_returns_the_secret_once_and_never_again(
     assert creator.display_name == "Admin Person"
     assert created["created_by_name"] == "Admin Person"
 
-    listing = await admin_client.get("/dashboard/api/admin/api-keys")
+    listing = await admin_client.get("/api/admin/api-keys")
     assert listing.status_code == 200
     assert secret not in listing.text
     [key] = listing.json()
@@ -89,15 +89,15 @@ async def test_listing_filters_by_workspace(
 ) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "admin")
     await admin_client.post(
-        "/dashboard/api/admin/api-keys",
+        "/api/admin/api-keys",
         json={"workspace": workspace, "name": "CI", "expires_at": _expiry(30)},
     )
     await admin_client.post(
-        "/dashboard/api/admin/api-keys",
+        "/api/admin/api-keys",
         json={"workspace": "oss", "name": "CI", "expires_at": _expiry(30)},
     )
 
-    scoped = await admin_client.get("/dashboard/api/admin/api-keys", params={"workspace": "oss"})
+    scoped = await admin_client.get("/api/admin/api-keys", params={"workspace": "oss"})
     assert [key["workspace"] for key in scoped.json()] == ["oss"]
 
 
@@ -106,20 +106,16 @@ async def test_revoke_is_idempotent_and_shows_up_in_the_listing(
 ) -> None:
     created = (
         await admin_client.post(
-            "/dashboard/api/admin/api-keys",
+            "/api/admin/api-keys",
             json={"workspace": workspace, "name": "CI", "expires_at": _expiry(30)},
         )
     ).json()
 
-    assert (
-        await admin_client.delete(f"/dashboard/api/admin/api-keys/{created['id']}")
-    ).status_code == 204
-    assert (
-        await admin_client.delete(f"/dashboard/api/admin/api-keys/{created['id']}")
-    ).status_code == 204
-    assert (await admin_client.delete("/dashboard/api/admin/api-keys/nope")).status_code == 404
+    assert (await admin_client.delete(f"/api/admin/api-keys/{created['id']}")).status_code == 204
+    assert (await admin_client.delete(f"/api/admin/api-keys/{created['id']}")).status_code == 204
+    assert (await admin_client.delete("/api/admin/api-keys/nope")).status_code == 404
 
-    [key] = (await admin_client.get("/dashboard/api/admin/api-keys")).json()
+    [key] = (await admin_client.get("/api/admin/api-keys")).json()
     assert key["status"] == "revoked"
     assert key["revoked_at"] is not None
 
@@ -136,21 +132,19 @@ async def test_revoke_is_idempotent_and_shows_up_in_the_listing(
 async def test_creation_rejects_bad_input(
     admin_client: httpx.AsyncClient, workspace: str, body: dict[str, str], expected: int
 ) -> None:
-    response = await admin_client.post(
-        "/dashboard/api/admin/api-keys", json={"workspace": workspace, **body}
-    )
+    response = await admin_client.post("/api/admin/api-keys", json={"workspace": workspace, **body})
     assert response.status_code == expected
 
 
 async def test_non_admin_sessions_cannot_reach_the_admin_routes(workspace: str) -> None:
     async with _client_for(_USER_SESSION) as client:
-        assert (await client.get("/dashboard/api/admin/api-keys")).status_code == 403
+        assert (await client.get("/api/admin/api-keys")).status_code == 403
         created = await client.post(
-            "/dashboard/api/admin/api-keys",
+            "/api/admin/api-keys",
             json={"workspace": workspace, "name": "CI", "expires_at": _expiry(30)},
         )
         assert created.status_code == 403
-        assert (await client.delete("/dashboard/api/admin/api-keys/whatever")).status_code == 403
+        assert (await client.delete("/api/admin/api-keys/whatever")).status_code == 403
 
 
 @pytest.mark.parametrize("user_id", [None, "not-a-uuid", "00000000-0000-0000-0000-000000000001"])
@@ -160,8 +154,8 @@ async def test_creation_requires_an_existing_user(workspace: str, user_id: str |
         session["user_id"] = user_id
     async with _client_for(session) as client:
         response = await client.post(
-            "/dashboard/api/admin/api-keys",
+            "/api/admin/api-keys",
             json={"workspace": workspace, "name": "CI", "expires_at": _expiry(30)},
         )
         assert response.status_code == 403
-        assert (await client.get("/dashboard/api/admin/api-keys")).json() == []
+        assert (await client.get("/api/admin/api-keys")).json() == []

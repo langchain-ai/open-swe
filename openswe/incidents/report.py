@@ -140,7 +140,7 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
     if dropped:
         gaps.append("Claims with missing or unknown evidence citations were omitted.")
     # A turn that fills the sections but skips the headline has still concluded something.
-    # Falling back to the problem keeps the dashboard readable and, because the outcome is
+    # Falling back to the problem keeps the web app readable and, because the outcome is
     # what releases the automatic post, stops a real investigation from going unpublished.
     headline = summary or problem
     return IncidentReport(

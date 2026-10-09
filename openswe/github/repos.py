@@ -1,4 +1,4 @@
-"""Dashboard API for the repos a user can reach through the GitHub App."""
+"""Web API for the repos a user can reach through the GitHub App."""
 
 import logging
 from collections.abc import AsyncIterable
@@ -8,8 +8,8 @@ from fastapi import HTTPException
 from githubkit.auth import TokenAuthStrategy
 from githubkit.exception import RequestError, RequestFailed, RequestTimeout
 
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
+from openswe.web.profiles import get_valid_access_token
 
 logger = logging.getLogger(__name__)
 

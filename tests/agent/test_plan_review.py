@@ -158,8 +158,8 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
     await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), author)
     dispatch = AsyncMock()
     monkeypatch.setattr(plan_api, "dispatch_agent_run", dispatch)
-    monkeypatch.setattr(plan_api, "_ensure_dashboard_github_token", AsyncMock())
-    monkeypatch.setattr(plan_api, "_build_dashboard_configurable", AsyncMock(return_value={}))
+    monkeypatch.setattr(plan_api, "_ensure_web_github_token", AsyncMock())
+    monkeypatch.setattr(plan_api, "_build_web_configurable", AsyncMock(return_value={}))
     monkeypatch.setattr(plan_api, "langgraph_client", lambda: None)
 
     with pytest.raises(HTTPException) as exc:

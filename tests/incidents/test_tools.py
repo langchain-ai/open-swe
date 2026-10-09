@@ -52,7 +52,7 @@ async def configured(fake_store, monkeypatch):
     monkeypatch.setattr(SlackChannel, "fetch", AsyncMock(return_value=dict(CHANNEL)))
     monkeypatch.setattr(tools, "current_run_id", lambda: "run-now")
     monkeypatch.setattr(
-        tools, "dashboard_incident_url", lambda incident_id: f"https://dash/incidents/{incident_id}"
+        tools, "web_incident_url", lambda incident_id: f"https://dash/incidents/{incident_id}"
     )
     record = Incident(
         id=service.incident_id("T1", "C7"),

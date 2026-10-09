@@ -38,8 +38,8 @@ from openswe.config import ENV
 from openswe.database.analytics import workspace_id
 
 _ENTRY_POINTS = {
-    "dashboard": EntryPoint.DASHBOARD,
-    "web": EntryPoint.DASHBOARD,
+    "dashboard": EntryPoint.WEB,
+    "web": EntryPoint.WEB,
     "github": EntryPoint.GITHUB,
     "github_issue": EntryPoint.GITHUB,
     "slack": EntryPoint.SLACK,

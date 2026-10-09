@@ -14,14 +14,14 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
 )
 from openswe.slack.http import SlackRequestError
-from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.web_links import web_thread_url
 
 logger = logging.getLogger(__name__)
 
 
 async def origin_footer(thread_id: str, location: tuple[str, str] | None = None) -> list[Block]:
     links: list[str] = []
-    if url := dashboard_thread_url(thread_id):
+    if url := web_thread_url(thread_id):
         links.append(f"<{url}|Web thread>")
     if location is None and thread_id:
         source = await get_active_slack_thread(get_client(), thread_id)

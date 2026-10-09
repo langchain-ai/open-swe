@@ -1,4 +1,4 @@
-"""Incident settings, dashboard projections, and responder commands."""
+"""Incident settings, web projections, and responder commands."""
 
 from unittest.mock import AsyncMock
 

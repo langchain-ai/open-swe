@@ -2,15 +2,15 @@ import runpy
 
 import pytest
 
-from openswe.dashboard import options
-from openswe.dashboard.agent_overrides import normalize_profile_overrides
-from openswe.dashboard.options import (
+from openswe.web import options
+from openswe.web.agent_overrides import normalize_profile_overrides
+from openswe.web.options import (
     FABLE_MODEL_IDS,
     fable_disabled_fallback,
     provider_fallback_pair,
 )
-from openswe.dashboard.profiles import normalize_profile_for_response
-from openswe.dashboard.workspace_settings import (
+from openswe.web.profiles import normalize_profile_for_response
+from openswe.web.workspace_settings import (
     WorkspaceSettingsUpdate,
 )
 

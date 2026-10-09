@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.review.assessment_feedback import ASSESSMENTS
 from openswe.review.findings import Finding, new_finding
 from openswe.review.publish import (
@@ -14,6 +13,7 @@ from openswe.review.publish import (
     post_pull_request_review,
     render_inline_comment_body,
 )
+from openswe.web.workspace_settings import WorkspaceSettings
 from tests.conftest import FakeStore
 
 

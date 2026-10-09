@@ -5,8 +5,8 @@ import langgraph_sdk
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.server import get_agent
+from openswe.web.workspace_settings import WorkspaceSettings
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",

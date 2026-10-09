@@ -33,7 +33,7 @@ async def test_fills_an_empty_display_name_from_slack() -> None:
 async def test_the_conditional_update_preserves_a_concurrent_github_name() -> None:
     user = await _sign_in_named()
 
-    # A dashboard sign in lands between the caller's lookup and the backfill:
+    # A web sign in lands between the caller's lookup and the backfill:
     # the UPDATE must still refuse to overwrite the name it just claimed.
     await user.rename("GitHub Claimed Name")
     await persist_display_name("U1", "Slack Name")

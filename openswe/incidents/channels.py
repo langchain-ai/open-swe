@@ -24,7 +24,7 @@ from openswe.slack.http import SlackClient, SlackRequestError
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.store import store_client
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_incident_url
+from openswe.utils.web_links import web_incident_url
 from openswe.webhooks.common import post_account_link_prompt, upsert_agent_thread_metadata
 
 logger = logging.getLogger(__name__)
@@ -112,14 +112,14 @@ async def prompt_to_connect(channel_id: str, thread_ts: str, user_id: str, threa
 
 def _introduction(record: Incident) -> str:
     text = "Incidents is following this channel. Findings will appear here"
-    link = dashboard_incident_url(record.id)
+    link = web_incident_url(record.id)
     if link:
         text += f"; the full incident is at <{link}|Open incident>"
     return (
         text
         + ". Mention me with a question, or ask me to pause, resume, or complete this incident. "
         "Anyone here can turn it off: mention me with `pause` to stop automatic analysis or "
-        "`complete` to close the incident. The Incidents page in the dashboard has the same "
+        "`complete` to close the incident. The Incidents page in the web app has the same "
         "controls."
     )
 
@@ -248,7 +248,7 @@ async def apply_control(
                 text, blocks = report_message(
                     latest.report,
                     "Incident complete. " + latest.report.summary,
-                    dashboard_incident_url(record.id),
+                    web_incident_url(record.id),
                     reason="completion",
                 )
     elif action in {"resume", "reopen"}:

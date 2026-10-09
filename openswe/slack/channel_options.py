@@ -1,4 +1,4 @@
-"""The Slack channels the dashboard offers when binding one to a workspace, paged from Slack.
+"""The Slack channels the web app offers when binding one to a workspace, paged from Slack.
 
 Distinct from :mod:`openswe.slack.channels`, the stored per-channel directory: this lists the
 whole workspace for a picker and is cached briefly rather than persisted.

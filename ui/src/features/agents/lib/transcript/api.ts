@@ -10,10 +10,10 @@ import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
 import { inSendOrder } from "@/features/agents/lib/runStartOrder"
 import {
   REQUEST_ID_HEADER,
-  dashboardApiUrl,
+  webApiUrl,
   networkError,
   newRequestId,
-} from "@/lib/dashboard-fetch"
+} from "@/lib/web-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
@@ -84,13 +84,13 @@ export function fetchToolOutput(
 
 /** Where one image attachment's bytes are served from. */
 export function attachmentUrl(threadId: string, attachmentId: string): string {
-  return dashboardApiUrl(
+  return webApiUrl(
     transcriptPath(threadId, `/attachments/${encodeURIComponent(attachmentId)}`)
   )
 }
 
 /**
- * The bytes behind a dashboard image URL, fetched with the session cookie. An
+ * The bytes behind a web image URL, fetched with the session cookie. An
  * `<img src>` would carry it only same-origin (a split deployment's images are
  * a third-party request), so the caller shows the blob instead.
  */
@@ -134,7 +134,7 @@ export function openTranscriptEvents(
   after: number,
   handlers: TranscriptEventHandlers
 ): TranscriptEventStream {
-  const url = `${dashboardApiUrl(transcriptPath(threadId, "/events"))}?after=${after}`
+  const url = `${webApiUrl(transcriptPath(threadId, "/events"))}?after=${after}`
   const source = new EventSource(url, { withCredentials: true })
   let closed = false
 
@@ -277,18 +277,15 @@ export async function startRun(
 ): Promise<void> {
   const requestId = newRequestId()
   const response = await inSendOrder(threadId, () =>
-    timedFetch(
-      dashboardApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`),
-      {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          [REQUEST_ID_HEADER]: requestId,
-        },
-        body: JSON.stringify(command),
-      }
-    )
+    timedFetch(webApiUrl(`/threads/${encodeURIComponent(threadId)}/commands`), {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        [REQUEST_ID_HEADER]: requestId,
+      },
+      body: JSON.stringify(command),
+    })
   ).catch((cause: unknown) => {
     throw networkError(cause, requestId)
   })

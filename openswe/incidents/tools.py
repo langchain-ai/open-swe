@@ -7,7 +7,7 @@ from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.incidents.runtime import current_run_id
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
-from openswe.utils.dashboard_links import dashboard_incident_url
+from openswe.utils.web_links import web_incident_url
 
 IncidentAction = Literal["start", "pause", "resume", "complete"]
 
@@ -51,7 +51,7 @@ async def manage_incident(action: IncidentAction) -> dict[str, Any]:
     control = _CONTROLS[action].get(record.status)
     if control is None:
         return _result(record, action, changed=False)
-    # Both sides must name a real run: a dashboard completion records no run id and
+    # Both sides must name a real run: a web completion records no run id and
     # current_run_id() is empty outside a run, which must not read as a match.
     closed_by_this_run = (
         bool(record.completed_run_id) and record.completed_run_id == current_run_id()
@@ -79,7 +79,7 @@ async def _start(cfg: RunConfig, policy: IncidentPolicy, channel_id: str) -> dic
             "success": False,
             "error": (
                 "Starting an incident needs a connected Open SWE account "
-                "(Sign in with Slack in the dashboard)"
+                "(Sign in with Slack in the web app)"
             ),
         }
     info = await SlackChannel.fetch(channel_id, use_cache=False)
@@ -99,7 +99,7 @@ async def _start(cfg: RunConfig, policy: IncidentPolicy, channel_id: str) -> dic
     if record.status == "needs_attention":
         return {
             "success": False,
-            "error": "Channel setup failed; the incident's dashboard page has the details",
+            "error": "Channel setup failed; the incident's web page has the details",
             "incident_id": record.id,
         }
     return _result(record, "start", changed=True)
@@ -123,9 +123,9 @@ def _result(record: Incident, action: str, *, changed: bool) -> dict[str, Any]:
         "channel_id": record.channel_id,
         "incident_id": record.id,
     }
-    url = dashboard_incident_url(record.id)
+    url = web_incident_url(record.id)
     if url:
-        result["dashboard_url"] = url
+        result["web_url"] = url
     if changed:
         result["note"] = "The channel has been notified; do not post a duplicate status message."
     return result

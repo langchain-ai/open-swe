@@ -1,5 +1,5 @@
 /**
- * Client-side performance spans for the dashboard.
+ * Client-side performance spans for the web app.
  *
  * A span is one user-visible operation (opening a thread, one agent run) with
  * named steps along the way. Every span is mirrored into the User Timing API

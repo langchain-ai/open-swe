@@ -33,7 +33,7 @@ export interface PollOptions {
   signal?: AbortSignal
 }
 
-/** The backend's `/dashboard/api/bridges` routes, as the machine side calls them. */
+/** The backend's `/api/bridges` routes, as the machine side calls them. */
 export interface BridgeApi {
   createBridge(input: CreateBridgeInput): Promise<BridgeSession>
   heartbeat(bridgeId: string): Promise<void>
@@ -48,7 +48,7 @@ export interface BridgeApi {
 }
 
 /**
- * Sends one request to `<backend>/dashboard/api<path>` and resolves to its
+ * Sends one request to `<backend>/api<path>` and resolves to its
  * parsed JSON body, or rejects with an error carrying the HTTP `status`.
  */
 export type BridgeSender = (

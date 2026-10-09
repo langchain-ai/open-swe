@@ -2,7 +2,7 @@
 
 The PR chat agent has no sandbox, so it reads source at a specific ref through
 the GitHub contents API. Repo coordinates and a read-only token come from the
-run config (seeded by the dashboard chat proxy).
+run config (seeded by the web app chat proxy).
 """
 
 import base64

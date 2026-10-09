@@ -44,7 +44,7 @@ _IGNORED_SLACK_SUBTYPES = frozenset(
     {"channel_join", "channel_leave", "group_join", "group_leave", "message_deleted"}
 )
 _REFUSED = (
-    "This tool is not available in this thread. Use a private dashboard thread or an "
+    "This tool is not available in this thread. Use a private web thread or an "
     "authenticated Slack DM, where only you can write and read the results."
 )
 _WITHHELD = "The result was withheld because other people can read this thread."

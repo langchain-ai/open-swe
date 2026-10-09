@@ -1,4 +1,4 @@
-// The dashboard learns what went stale from the invalidation stream
+// The web app learns what went stale from the invalidation stream
 // (ui/src/lib/invalidations), so a query declares `meta.invalidatedBy` topics
 // instead of polling. Files that still poll are listed in .oxlintrc.json; that
 // list only shrinks.

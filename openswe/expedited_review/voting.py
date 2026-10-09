@@ -12,7 +12,6 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.expedited_review.channels import sendable_channel, still_internal
 from openswe.expedited_review.eligibility import ChangedFile, fingerprint_matches
 from openswe.expedited_review.reviews import github_token_hint, submit_approval
@@ -36,6 +35,7 @@ from openswe.input_messages import PersonIdentity, split_person_id
 from openswe.prompts import prompt
 from openswe.slack.dm import note_for_concierge
 from openswe.users import User
+from openswe.web.profiles import get_valid_access_token
 
 logger = logging.getLogger(__name__)
 

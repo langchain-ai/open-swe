@@ -5,11 +5,11 @@ from typing import Any
 from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.merge import merge_approved
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
+from openswe.web.workspace_settings import get_workspace_settings
 
 
 @audit_tool()

@@ -18,9 +18,9 @@ from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from openswe.threads.summary import (
     _SURFACED_SOURCES,
-    DASHBOARD_SOURCE,
     SLACK_BOT_TRIGGER_KIND,
     TRIGGERING_BOT_KEY,
+    WEB_APP_SOURCE,
     _is_automation_thread,
     _is_thread_resolved,
     _metadata_repo,
@@ -61,7 +61,7 @@ _PINNED_THREADS_BATCH_SIZE = 1000
 _RUN_REFRESH_CONCURRENCY = 8
 _RUNNING_METADATA_STATUSES = {"pending", "running"}
 
-DashboardThreadScope = Literal["all", "interactive", "automation", "bot"]
+WebThreadScope = Literal["all", "interactive", "automation", "bot"]
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def _search_metadata_filter(
     metadata = dict(search_filter)
     if resolved is True:
         metadata["resolved"] = True
-    if source and source != DASHBOARD_SOURCE:
+    if source and source != WEB_APP_SOURCE:
         metadata["source"] = source
     if automation_id:
         metadata["schedule_id"] = automation_id
@@ -138,7 +138,7 @@ def _metadata_matches_filters(
     resolved: bool | None,
     source: str | None,
     query: str | None,
-    scope: DashboardThreadScope = "all",
+    scope: WebThreadScope = "all",
     automation_id: str | None = None,
     bot: str | None = None,
     repo: str | None = None,
@@ -564,7 +564,7 @@ async def _collect_thread_candidates(
     resolved: bool | None = None,
     source: str | None = None,
     query: str | None = None,
-    scope: DashboardThreadScope = "all",
+    scope: WebThreadScope = "all",
     automation_id: str | None = None,
     bot: str | None = None,
     repo: str | None = None,
@@ -708,9 +708,7 @@ async def _collect_thread_candidates(
     )
 
 
-async def list_unresolved_dashboard_threads(
-    login: str, *, email: str | None = None
-) -> list[ThreadLike]:
+async def list_unresolved_web_threads(login: str, *, email: str | None = None) -> list[ThreadLike]:
     client = langgraph_client()
     seen: dict[str, ThreadLike] = {}
     for metadata in _participant_search_filters(login, email=email):
@@ -733,10 +731,10 @@ async def list_unresolved_dashboard_threads(
     return list(seen.values())
 
 
-async def list_dashboard_threads(
+async def list_web_threads(
     login: str, *, email: str | None = None, limit: int = 50, include_all: bool = False
 ) -> list[dict[str, Any]]:
-    page = await list_dashboard_threads_page(
+    page = await list_web_threads_page(
         login,
         email=email,
         limit=limit,
@@ -776,7 +774,7 @@ async def _pinned_thread_summaries(
     return summaries
 
 
-async def list_dashboard_pinned_threads(
+async def list_web_pinned_threads(
     login: str,
     *,
     email: str | None = None,
@@ -784,7 +782,7 @@ async def list_dashboard_pinned_threads(
     return await _pinned_thread_summaries(langgraph_client(), login, email)
 
 
-async def list_dashboard_thread_repos(
+async def list_web_thread_repos(
     login: str,
     *,
     email: str | None = None,
@@ -828,7 +826,7 @@ async def list_dashboard_thread_repos(
     return sorted(repos.values(), key=lambda entry: entry["updatedAt"], reverse=True)
 
 
-async def pin_dashboard_thread(thread_id: str, login: str) -> None:
+async def pin_web_thread(thread_id: str, login: str) -> None:
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
@@ -840,11 +838,11 @@ async def pin_dashboard_thread(thread_id: str, login: str) -> None:
     await pin_thread(login, thread_id)
 
 
-async def unpin_dashboard_thread(thread_id: str, login: str) -> None:
+async def unpin_web_thread(thread_id: str, login: str) -> None:
     await unpin_thread(login, thread_id)
 
 
-async def list_dashboard_threads_page(
+async def list_web_threads_page(
     login: str,
     *,
     email: str | None = None,
@@ -856,7 +854,7 @@ async def list_dashboard_threads_page(
     source: str | None = None,
     status: str | None = None,
     query: str | None = None,
-    scope: DashboardThreadScope = "all",
+    scope: WebThreadScope = "all",
     automation_id: str | None = None,
     bot: str | None = None,
     repo: str | None = None,

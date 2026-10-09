@@ -39,7 +39,7 @@ UNLINKED_USER = "U_CAROL"
 PORT = os.environ.setdefault("E2E_PORT", "2024")
 BASE_URL = os.environ.setdefault("E2E_BASE", f"http://127.0.0.1:{PORT}")
 
-# Where a browser reaches the dashboard: the app's own server, not this harness.
+# Where a browser reaches the web app: the app's own server, not this harness.
 # It is a separate origin from the backend here only because the two run as
 # separate processes; the browser sees the single origin a deployment gives it.
 APP_URL = os.environ.get("E2E_UI_SERVER", "http://127.0.0.1:3100").rstrip("/")
@@ -85,19 +85,19 @@ _DEFAULTS = {
     "LANGSMITH_CONTROL_PLANE_API_KEY": "",
     # SDK client target (same dev server).
     "LANGGRAPH_URL": BASE_URL,
-    # Dashboard: the "Open in Web" link target + session-cookie signing. Use
+    # Web: the "Open in Web" link target + session-cookie signing. Use
     # 127.0.0.1 (not localhost) so the local-dev LLM-key check stays skipped.
     # The link points at the app server, so following it lands the browser on
     # the origin a real user is on rather than on the backend.
-    "DASHBOARD_BASE_URL": APP_URL,
-    "DASHBOARD_API_BASE_URL": BASE_URL,
-    "DASHBOARD_ALLOWED_ORIGINS": f"{APP_URL},{BASE_URL},open-swe://app",
-    "DASHBOARD_JWT_SECRET": "test-dashboard-jwt-secret",
+    "WEB_BASE_URL": APP_URL,
+    "WEB_API_BASE_URL": BASE_URL,
+    "WEB_ALLOWED_ORIGINS": f"{APP_URL},{BASE_URL},open-swe://app",
+    "WEB_JWT_SECRET": "test-web-jwt-secret",
 }
 
-# Named test users (the Slack sender dropdown + the dashboard login picker, and
+# Named test users (the Slack sender dropdown + the web app login picker, and
 # the identities the automated tests log in as). Each maps a Slack sender id to
-# a dashboard login with a matching email, so the Slack thread's owner (resolved
+# a web login with a matching email, so the Slack thread's owner (resolved
 # by email) is the same person when they sign in. The first (Alice) is the
 # default Slack sender, hence the default thread owner.
 # ``github_id`` is the immutable numeric id GitHub keys an account on, which is
@@ -126,7 +126,7 @@ TEST_USERS = [
     },
 ]
 
-# Alice is the workspace admin (so admin threads + the workspaces dashboard are
+# Alice is the workspace admin (so admin threads + the workspaces web are
 # reachable); Bob is a plain member, which is what the deny-side assertions use.
 ADMIN_USER = TEST_USERS[0]
 _DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(

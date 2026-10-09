@@ -15,9 +15,6 @@ from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.admin import is_admin
-from openswe.dashboard.oauth import enforce_github_login_gate
-from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
 from openswe.input_messages import dynamic_context_hash, input_message_text, message_sender_id
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
@@ -26,15 +23,15 @@ from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, pa
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
-    admin_cancel_dashboard_thread,
-    cancel_dashboard_thread,
-    get_dashboard_thread,
-    resolve_dashboard_thread,
+    admin_cancel_web_thread,
+    cancel_web_thread,
+    get_web_thread,
+    resolve_web_thread,
 )
-from openswe.threads.listing import list_dashboard_threads_page
+from openswe.threads.listing import list_web_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
-from openswe.threads.proxy import proxy_dashboard_thread_commands
-from openswe.threads.runs import start_dashboard_thread
+from openswe.threads.proxy import proxy_web_thread_commands
+from openswe.threads.runs import start_web_thread
 from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
@@ -43,11 +40,6 @@ from openswe.threads.workflow_approval import (
 )
 from openswe.tools.sandbox_preference import sandbox_only
 from openswe.users import User
-from openswe.utils.dashboard_links import (
-    dashboard_plan_url,
-    dashboard_thread_id,
-    dashboard_thread_url,
-)
 from openswe.utils.json_types import as_json_object, thread_metadata
 from openswe.utils.langsmith import (
     LangSmithCostUnavailable,
@@ -57,6 +49,14 @@ from openswe.utils.langsmith import (
 )
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
+from openswe.utils.web_links import (
+    web_plan_url,
+    web_thread_id,
+    web_thread_url,
+)
+from openswe.web.admin import is_admin
+from openswe.web.oauth import enforce_github_login_gate
+from openswe.web.options import SUPPORTED_MODEL_IDS, model_supports_effort
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ def _http_failure(exc: HTTPException) -> dict[str, Any]:
 
 def _web_link(item: Mapping[str, Any]) -> str | None:
     thread_id = item.get("id")
-    return dashboard_thread_url(thread_id) if isinstance(thread_id, str) else None
+    return web_thread_url(thread_id) if isinstance(thread_id, str) else None
 
 
 def _langsmith_identifiers(trace_url: Any, locator: str | None = None) -> dict[str, Any]:
@@ -251,7 +251,7 @@ async def list_threads(
     exact_locator = (
         parse_langsmith_locator(normalized_query) is not None
         or parse_slack_thread_url(normalized_query) is not None
-        or (dashboard_thread_id(normalized_query) is not None and "/" in normalized_query)
+        or (web_thread_id(normalized_query) is not None and "/" in normalized_query)
     )
     if exact_locator or _looks_uuid(normalized_query):
         incompatible = _exact_locator_filters(
@@ -295,7 +295,7 @@ async def list_threads(
         requested if requested and requested.lower() != actor.login.lower() else None
     )
     try:
-        page = await list_dashboard_threads_page(
+        page = await list_web_threads_page(
             actor.login,
             email=actor.email,
             limit=limit,
@@ -635,7 +635,7 @@ async def _authorized_locator(
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
     slack_locator = parse_slack_thread_url(locator)
-    thread_id = dashboard_thread_id(locator) or ""
+    thread_id = web_thread_id(locator) or ""
     if langsmith_locator:
         thread_id = await get_open_swe_thread_id_from_langsmith(locator) or ""
         if not thread_id:
@@ -652,11 +652,11 @@ async def _authorized_locator(
             return _failure("Could not resolve Slack link to an Open SWE thread")
     if not thread_id:
         return _failure(
-            "thread_id must be an exact thread ID, Open SWE dashboard URL, Slack link, "
+            "thread_id must be an exact thread ID, Open SWE web URL, Slack link, "
             "or LangSmith trace URL"
         )
     try:
-        summary = await get_dashboard_thread(
+        summary = await get_web_thread(
             thread_id,
             actor.login,
             email=actor.email,
@@ -669,7 +669,7 @@ async def _authorized_locator(
         if not resolved or resolved == thread_id:
             raise
         thread_id = resolved
-        summary = await get_dashboard_thread(
+        summary = await get_web_thread(
             thread_id,
             actor.login,
             email=actor.email,
@@ -793,8 +793,8 @@ async def get_thread(
     pr = summary.get("pr")
     pr_url = pr.get("url") if isinstance(pr, Mapping) else None
     links = {
-        "web": dashboard_thread_url(thread_id),
-        "plan": dashboard_plan_url(thread_id) if plan.get("status") else None,
+        "web": web_thread_url(thread_id),
+        "plan": web_plan_url(thread_id) if plan.get("status") else None,
         "trace": summary.get("traceUrl"),
         "source": summary.get("sourceUrl"),
         "pull_request": pr_url,
@@ -857,7 +857,7 @@ async def _send_message(
     model_id: str | None,
     effort: str | None,
 ) -> dict[str, Any]:
-    # The dashboard's own send: a busy thread gets the message steered into its
+    # The web app's own send: a busy thread gets the message steered into its
     # open turn or queued as a follow-up run, both shown on the transcript at once.
     configurable: dict[str, Any] = {}
     if model_id and effort:
@@ -870,7 +870,7 @@ async def _send_message(
             "config": {"configurable": configurable},
         },
     }
-    status_code, content, _ = await proxy_dashboard_thread_commands(
+    status_code, content, _ = await proxy_web_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
@@ -1011,10 +1011,10 @@ async def manage_thread(
                 effort=effort,
             )
         if action == "cancel":
-            thread = await cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
+            thread = await cancel_web_thread(thread_id, actor.login, email=actor.email)
             return {"success": True, "thread": _list_item(thread)}
         if action == "admin_cancel":
-            thread = await admin_cancel_dashboard_thread(thread_id, actor.login, email=actor.email)
+            thread = await admin_cancel_web_thread(thread_id, actor.login, email=actor.email)
             if summary.get("visibility") == "private":
                 return {
                     "success": True,
@@ -1022,7 +1022,7 @@ async def manage_thread(
                 }
             return {"success": True, "thread": _list_item(thread)}
         if action in {"resolve", "unresolve"}:
-            thread = await resolve_dashboard_thread(
+            thread = await resolve_web_thread(
                 thread_id,
                 actor.login,
                 resolved=action == "resolve",
@@ -1069,7 +1069,7 @@ async def manage_thread(
                 "status": result.get("status"),
                 "format": content_format,
                 "content_length": len(content or ""),
-                "plan_url": dashboard_plan_url(thread_id),
+                "plan_url": web_plan_url(thread_id),
             }
         if action in {"approve_workflow_push", "reject_workflow_push"}:
             if error := _required(fingerprint, "fingerprint", action):
@@ -1111,7 +1111,7 @@ async def start_thread(
         return _failure(f"instructions must be at most {_MAX_MESSAGE_CHARS} characters")
     clean_repos = list(dict.fromkeys(repo.strip() for repo in repos or () if repo.strip()))
     try:
-        thread_id = await start_dashboard_thread(
+        thread_id = await start_web_thread(
             actor.login,
             actor.email,
             title=title[:_MAX_TITLE_CHARS],
@@ -1129,5 +1129,5 @@ async def start_thread(
     return {
         "success": True,
         "thread_id": thread_id,
-        "dashboard_url": dashboard_thread_url(thread_id),
+        "web_url": web_thread_url(thread_id),
     }

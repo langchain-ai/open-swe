@@ -231,7 +231,7 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
     monkeypatch: pytest.MonkeyPatch, tool_name: str
 ) -> None:
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
+    monkeypatch.setenv("WEB_BASE_URL", "https://web.example")
     guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
         cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
     )

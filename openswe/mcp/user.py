@@ -1,4 +1,4 @@
-"""Personal MCP connections owned by one dashboard user and used only in their runs."""
+"""Personal MCP connections owned by one web user and used only in their runs."""
 
 from functools import partial
 from typing import Any

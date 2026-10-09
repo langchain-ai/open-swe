@@ -61,9 +61,9 @@ oswe login --backend https://dev.open-swe.langchain.dev
 ```
 
 This is the desktop app's sign-in: your browser opens the GitHub login the
-dashboard uses, a loopback port catches the handoff, and PKCE S256 exchanges it
+web uses, a loopback port catches the handoff, and PKCE S256 exchanges it
 for the same session the desktop app stores. Requests then carry it as the
-dashboard's own `osw_session` cookie. The session is stored in
+web's own `osw_session` cookie. The session is stored in
 `~/.open-swe/config.json` (mode 0600) under the backend that minted it, and
 `oswe logout` forgets the current backend's session. `--backend` also makes
 that backend the shared one, so it repoints the desktop app too.
@@ -121,9 +121,9 @@ What happens:
    one directory never serve each other's requests. The thread's bridge is
    remembered in `~/.open-swe/bridges.json` for `--thread`.
 2. A thread is created on the deployment, with `origin` repo detected from
-   `git remote get-url origin`, and its dashboard URL is printed to stderr.
+   `git remote get-url origin`, and its web URL is printed to stderr.
 3. The agent works. Nothing it says or runs is printed; follow it on the
-   dashboard. If the event stream drops, for example while the backend
+   web. If the event stream drops, for example while the backend
    restarts, the CLI reconnects with backoff; it gives up after 10 reconnects
    in a row that each lasted under a minute.
 4. The agent ends the run by calling `cli_result` with `stdout` and an
@@ -192,7 +192,7 @@ server on stdio, signed in with the same credential as the rest of the CLI:
 
 Every tool needs a person's session; API keys and CI tokens cannot use them.
 
-`list_threads` lists your threads newest first with the dashboard sidebar's
+`list_threads` lists your threads newest first with the web app sidebar's
 filters: `repo` (owner/name) or `no_repo`, `include_archived`,
 `include_automations`, `sort` (`created` or `updated`), plus `status`, `unread`,
 `source`, `query`, `limit` and `offset`. Archived threads and automation runs
@@ -201,21 +201,21 @@ are left out unless asked for.
 `create_session` creates a fresh cloud session from `prompt` and immediately
 starts the agent. Set `start=false` to create an idle session instead. Optional
 `repo` (owner/name), `workspace` (slug), and `visibility` (`public` or `private`)
-use your saved dashboard defaults and workspace routing when omitted. It returns
-`thread_id` and the dashboard `url`; no local transcript or sandbox bridge is used.
+use your saved web defaults and workspace routing when omitted. It returns
+`thread_id` and the web app `url`; no local transcript or sandbox bridge is used.
 
 `upload_session` moves a local coding session into a new Open SWE thread. It
 takes `type` (`claude`), `transcript_path` (the session's JSONL, sent verbatim),
 where the working directory was pushed — `repo` and `branch`, or `pr_url` — and
 `visibility` (`workspace` by default, or `private`). Commit and push the whole
 working directory first: the cloud agent sees only the pushed branch. No run
-starts; continue the thread from the dashboard. A Claude Code transcript lives
+starts; continue the thread from the web app. A Claude Code transcript lives
 at `~/.claude/projects/<cwd with non-alphanumerics as ->/$CLAUDE_CODE_SESSION_ID.jsonl`.
 
 `request_human_review` posts a pull request's review card in its repository's
 Slack review channel (or `channel`), with `inline_summary` as the card's
 summary. It needs **Request human reviews in Slack** turned on for you on the
-dashboard's Feature Flags page. Asking again for a pull request you already
+web's Feature Flags page. Asking again for a pull request you already
 asked about replaces the open card's summary.
 
 `dismiss_human_review_request` takes a pull request's open review request down,

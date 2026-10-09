@@ -56,7 +56,7 @@ export const humanReviewDismissSchema = z.object(
 export type HumanReviewRequestResult = z.infer<typeof humanReviewRequestSchema>
 export type HumanReviewDismissResult = z.infer<typeof humanReviewDismissSchema>
 
-/** The dashboard API path of a pull request URL the schema already checked. */
+/** The web app API path of a pull request URL the schema already checked. */
 export function pullRequestApiPath(url: string): string {
   const match = PULL_REQUEST_URL.exec(url)
   if (match === null) throw new Error(`not a pull request URL: ${url}`)

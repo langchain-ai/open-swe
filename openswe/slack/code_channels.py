@@ -458,7 +458,7 @@ def repo_context_bar_items(
     *,
     branch: str = "",
     pr_url: str = "",
-    dashboard_url: str = "",
+    web_url: str = "",
 ) -> list[dict[str, Any]]:
     """Build the standard context bar for an Open SWE session."""
     items: list[dict[str, Any]] = []
@@ -480,6 +480,6 @@ def repo_context_bar_items(
         items.append(item)
     if pr_url.startswith("https://"):
         items.append({"key": "pr", "label": "Pull request", "icon": "hierarchy", "url": pr_url})
-    if dashboard_url.startswith("https://"):
-        items.append({"key": "web", "label": "Open in Web", "icon": "globe", "url": dashboard_url})
+    if web_url.startswith("https://"):
+        items.append({"key": "web", "label": "Open in Web", "icon": "globe", "url": web_url})
     return items

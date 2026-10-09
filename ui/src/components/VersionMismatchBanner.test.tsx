@@ -24,7 +24,7 @@ it("warns about a lagging frontend even when it matches the backend-served bundl
     login: "alice",
     build_info: {
       backend: { commit },
-      dashboard: { commit: "old", served: true },
+      web: { commit: "old", served: true },
     },
   })
   client.setQueryData(["session"], session(null))

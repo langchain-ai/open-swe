@@ -12,8 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from openswe.api_keys.deps import ADMIN_KEY_DEP
 from openswe.api_keys.models import MAX_EXPIRY_DAYS, NAME_MAX_CHARS, ApiKey, ApiKeyStatus
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.oauth import session_user_id
 from openswe.users.models import User
+from openswe.web.oauth import session_user_id
 from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)

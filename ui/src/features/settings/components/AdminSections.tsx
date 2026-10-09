@@ -22,7 +22,7 @@ import {
   slackAppManifestJson,
   slackManifestPlaceholdersRemain,
 } from "@/lib/slack-manifest"
-import { dashboardApiBase } from "@/lib/api-base"
+import { webApiBase } from "@/lib/api-base"
 
 const SLACK_CODE_CHANNELS_STORAGE_KEY =
   "open-swe.admin.slack-code-channels-enabled"
@@ -55,7 +55,7 @@ export function SlackIntegrationSection({
   const manifestConfig = {
     backendUrl:
       backendUrl ||
-      dashboardApiBase() ||
+      webApiBase() ||
       (typeof window === "undefined" ? "" : window.location.origin),
   }
   const placeholdersRemain = slackManifestPlaceholdersRemain(manifestConfig)

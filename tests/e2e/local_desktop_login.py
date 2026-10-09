@@ -1,4 +1,4 @@
-"""Real dashboard login against a fake GitHub, for testing desktop sign-in locally.
+"""Real web login against a fake GitHub, for testing desktop sign-in locally.
 
 Runs the actual `/auth/login`, `/auth/callback`, handoff and exchange code —
 only GitHub itself is faked, so the loopback flow is exercised end to end.
@@ -17,21 +17,21 @@ from urllib.parse import quote
 
 PORT = int(os.environ.get("PORT", "8765"))
 BASE_URL = f"http://127.0.0.1:{PORT}"
-os.environ.setdefault("DASHBOARD_JWT_SECRET", "local-desktop-login-secret")
+os.environ.setdefault("WEB_JWT_SECRET", "local-desktop-login-secret")
 os.environ.setdefault("GITHUB_APP_CLIENT_ID", "local-client-id")
 os.environ.setdefault("GITHUB_APP_CLIENT_SECRET", "local-client-secret")
-os.environ.setdefault("DASHBOARD_BASE_URL", BASE_URL)
-os.environ.setdefault("DASHBOARD_API_BASE_URL", BASE_URL)
-os.environ.setdefault("DASHBOARD_ALLOWED_ORIGINS", BASE_URL)
+os.environ.setdefault("WEB_BASE_URL", BASE_URL)
+os.environ.setdefault("WEB_API_BASE_URL", BASE_URL)
+os.environ.setdefault("WEB_ALLOWED_ORIGINS", BASE_URL)
 os.environ.setdefault("ALLOWED_GITHUB_USERS", os.environ.get("FAKE_GITHUB_LOGIN", "local-tester"))
 
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
 
-from openswe.dashboard import auth_routes, routes  # noqa: E402
-from openswe.dashboard.oauth import GithubUser  # noqa: E402
 from openswe.users import User  # noqa: E402
+from openswe.web import auth_routes, routes  # noqa: E402
+from openswe.web.oauth import GithubUser  # noqa: E402
 
 LOGIN = os.environ.get("FAKE_GITHUB_LOGIN", "local-tester")
 EMAIL = os.environ.get("FAKE_GITHUB_EMAIL", "local-tester@example.com")
@@ -95,7 +95,7 @@ async def fake_github_authorize(redirect_uri: str, state: str, client_id: str = 
 
 @app.get("/")
 async def index() -> RedirectResponse:
-    return RedirectResponse("/dashboard/api/me")
+    return RedirectResponse("/api/me")
 
 
 if __name__ == "__main__":

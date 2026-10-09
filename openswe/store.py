@@ -2,7 +2,7 @@
 
 Error policy, applied everywhere: **a missing item reads as ``None``; every
 other failure raises.** A store outage is not the same thing as an empty
-record, and collapsing the two hides data loss behind an empty dashboard.
+record, and collapsing the two hides data loss behind an empty web.
 
 Call sites that genuinely must survive an outage — the ones on the agent's
 critical path, where failing a run is worse than falling back to a default —

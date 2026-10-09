@@ -3,12 +3,12 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 from langchain.chat_models import init_chat_model
 
 from openswe.config import ENV
-from openswe.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 from openswe.utils.gateway import gateway_env_default, gateway_overrides
 from openswe.utils.openai_oauth import (
     build_desktop_openai_oauth_model,
     desktop_openai_oauth_available,
 )
+from openswe.web.options import DEFAULT_MODEL_ID, model_profile_with_context_override
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
@@ -218,7 +218,7 @@ def anthropic_thinking_for(profile_effort: str | None) -> AnthropicThinking | No
         # `display: "summarized"` makes Opus 4.7+ return the (summarized) reasoning
         # text in the response. The adaptive default is "omitted", which streams a
         # reasoning block carrying only a signature and no visible thinking — so the
-        # dashboard never has any text to render.
+        # web never has any text to render.
         return {"type": "adaptive", "display": "summarized"}
     return None
 
@@ -235,7 +235,7 @@ def fireworks_reasoning_effort_for(profile_effort: str | None) -> FireworksReaso
     Fireworks' OpenAI-compatible API accepts ``reasoning_effort`` on its reasoning
     models. ``none`` disables reasoning; ``xhigh``/``max`` are only honored by models
     that advertise them (e.g. DeepSeek V4 Pro). The per-model ``efforts`` lists in
-    ``dashboard/options.py`` gate which values can actually reach this function.
+    ``web/options.py`` gate which values can actually reach this function.
     """
     if profile_effort == "none":
         return "none"
@@ -308,13 +308,13 @@ def validate_local_dev_llm_config() -> None:
     via LLM_MODEL_ID/DEFAULT_MODEL_ID. Runtime model selection may come
     from workspace, profile, or thread configuration and is not validated here.
 
-    Only an explicitly configured localhost dashboard URL counts: the derived
+    Only an explicitly configured localhost web URL counts: the derived
     default follows LANGGRAPH_URL, which is unset (so localhost) on a fresh
     LangGraph Platform deployment until its URL exists, and failing startup
     there would leave the deployment unable to ever get one.
     """
-    dashboard_url = ENV.DASHBOARD_BASE_URL.optional() or ""
-    if not dashboard_url.startswith("http://localhost"):
+    web_url = ENV.WEB_BASE_URL.optional() or ""
+    if not web_url.startswith("http://localhost"):
         return
 
     model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)

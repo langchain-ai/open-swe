@@ -1,21 +1,21 @@
 /** Client for the sandboxed HTML plan-artifact review API. */
 
-import { dashboardApiBase } from "./api-base"
+import { webApiBase } from "./api-base"
 import {
-  DashboardRequestError,
+  WebRequestError,
   REQUEST_ID_HEADER,
-  dashboardForwardedHeaders,
-  dashboardRequestOrigin,
+  webForwardedHeaders,
+  webRequestOrigin,
   networkError,
   newRequestId,
-} from "./dashboard-fetch"
+} from "./web-fetch"
 
-const API_BASE = dashboardApiBase()
+const API_BASE = webApiBase()
 
 function apiBase(): string {
   if (API_BASE) return API_BASE
   if (typeof window !== "undefined") return window.location.origin
-  return dashboardRequestOrigin()
+  return webRequestOrigin()
 }
 
 export interface PlanUser {
@@ -53,7 +53,7 @@ export interface PlanComment {
   anchor: PlanTextAnchor | null
 }
 
-export class PlanApiError extends DashboardRequestError {
+export class PlanApiError extends WebRequestError {
   constructor(status: number, message: string, requestId?: string) {
     super(status, message, requestId)
     this.name = "PlanApiError"
@@ -62,13 +62,13 @@ export class PlanApiError extends DashboardRequestError {
 
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
   const requestId = newRequestId()
-  const res = await fetch(`${apiBase()}/dashboard/api${path}`, {
+  const res = await fetch(`${apiBase()}/api${path}`, {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
+      ...webForwardedHeaders(),
       ...init.headers,
     },
   }).catch((cause: unknown) => {

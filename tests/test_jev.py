@@ -6,9 +6,9 @@ import httpx2
 import pytest
 from langchain_core.messages import HumanMessage
 
-from openswe.dashboard.options import available_requested_models
 from openswe.model_request import ModelRequestIntent, infer_requested_model
 from openswe.utils.jev import JevDecision, select_jev_choice
+from openswe.web.options import available_requested_models
 
 type ResponseHandler = (
     Callable[[httpx2.Request], httpx2.Response]

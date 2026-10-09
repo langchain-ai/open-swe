@@ -1,7 +1,4 @@
-import {
-  dashboardApiUrl,
-  dashboardForwardedHeaders,
-} from "@/lib/dashboard-fetch"
+import { webApiUrl, webForwardedHeaders } from "@/lib/web-fetch"
 import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
 import type { PullRequestRef } from "@/features/reviews/lib/reviewKeys"
 
@@ -92,12 +89,12 @@ async function errorDetail(res: Response): Promise<string> {
 }
 
 async function send(path: string, init: RequestInit = {}): Promise<Response> {
-  const res = await fetch(dashboardApiUrl(path), {
+  const res = await fetch(webApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...dashboardForwardedHeaders(),
+      ...webForwardedHeaders(),
       ...init.headers,
     },
   })

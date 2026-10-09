@@ -1,10 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // Runs that Open SWE dispatches itself (Slack, Linear, GitHub, schedules) must
-// stream the same v3 protocol events as runs the dashboard starts: `tools`
+// stream the same v3 protocol events as runs the web app starts: `tools`
 // events for the root agent and namespaced events for its subagents. The
 // server fixes a run's streaming protocol at creation, so a legacy-shaped
-// `runs.create` leaves the dashboard with `values` only — subagent cards then
+// `runs.create` leaves the web app with `values` only — subagent cards then
 // never show nested activity, and tool status comes from message replay alone.
 const USER = { login: "alice", email: "alice@example.com" };
 
@@ -27,7 +27,7 @@ async function dispatchFromSlack(page: Page, text: string): Promise<string> {
   return threadId;
 }
 
-// Replay the thread's event stream from the beginning (what the dashboard's
+// Replay the thread's event stream from the beginning (what the web app's
 // `useStream` does when it joins a run it did not start) until the root run
 // completes, and return every event seen.
 async function replayEvents(page: Page, threadId: string) {
@@ -36,23 +36,20 @@ async function replayEvents(page: Page, threadId: string) {
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), 60_000);
     try {
-      const response = await fetch(
-        `/dashboard/api/threads/${id}/stream/events`,
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            accept: "text/event-stream",
-          },
-          body: JSON.stringify({
-            channels: ["values", "lifecycle", "tools"],
-            namespaces: [[]],
-            depth: 5,
-            since: 0,
-          }),
-          signal: controller.signal,
+      const response = await fetch(`/api/threads/${id}/stream/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "text/event-stream",
         },
-      );
+        body: JSON.stringify({
+          channels: ["values", "lifecycle", "tools"],
+          namespaces: [[]],
+          depth: 5,
+          since: 0,
+        }),
+        signal: controller.signal,
+      });
       if (!response.ok) {
         throw new Error(
           `events stream failed: ${response.status} ${await response.text()}`,
@@ -136,7 +133,7 @@ test.describe("dispatched run events", () => {
     ]);
 
     // Each subagent runs under its own namespace and reports its own shell
-    // steps there — the events the dashboard's subagent cards subscribe to.
+    // steps there — the events the web app's subagent cards subscribe to.
     const nested = toolEvents.filter((event) => namespaceOf(event).length > 0);
     const nestedNamespaces = new Set(
       nested.map((event) => namespaceOf(event).join("/")),

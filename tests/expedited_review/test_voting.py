@@ -9,7 +9,6 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from openswe.dashboard import profiles
 from openswe.expedited_review import voting
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github import http as github_http
@@ -22,6 +21,7 @@ from openswe.human_review.requests import HumanReviewParticipant, HumanReviewReq
 from openswe.slack import cards
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
+from openswe.web import profiles
 from tests.expedited_review.conftest import OpenApproval
 
 

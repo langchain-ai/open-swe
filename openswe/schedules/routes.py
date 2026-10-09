@@ -1,4 +1,4 @@
-"""Dashboard API for recurring agent schedules."""
+"""Web API for recurring agent schedules."""
 
 from typing import Any
 
@@ -6,7 +6,6 @@ from fastapi import APIRouter
 from fastapi.responses import Response
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.schedules.store import (
     ScheduleCreateBody,
     ScheduleUpdateBody,
@@ -16,6 +15,7 @@ from openswe.schedules.store import (
     trigger_agent_schedule,
     update_agent_schedule,
 )
+from openswe.web.deps import ADMIN_DEP, SESSION_DEP
 
 router = APIRouter()
 

@@ -80,9 +80,9 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert created["multitask_strategy"] == "interrupt"
     assert created["if_not_exists"] == "create"
     assert created["webhook"] == "https://app/webhooks/run-complete"
-    # Resumable by default so the dashboard can join (and stop) a run it did not start.
+    # Resumable by default so the web app can join (and stop) a run it did not start.
     assert created["stream_resumable"] is True
-    # The v3 run shape, so the dashboard gets `tools` events and subagent
+    # The v3 run shape, so the web app gets `tools` events and subagent
     # namespaces from runs it did not start — exactly what its own `run.start` sends.
     assert created["stream_mode"] == [
         "values",
@@ -217,7 +217,7 @@ def test_prepare_run_config_rejects_conflicting_invocation_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dashboard_followup_records_activity_even_if_dispatch_fails(
+async def test_web_followup_records_activity_even_if_dispatch_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient()

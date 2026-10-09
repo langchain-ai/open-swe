@@ -105,8 +105,8 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
     monkeypatch.setattr(breakout, "langgraph_client", lambda: object())
     monkeypatch.setattr(
         breakout,
-        "dashboard_thread_url",
-        lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
+        "web_thread_url",
+        lambda thread_id: f"https://web.example/agents/{thread_id}",
     )
     update = AsyncMock(return_value=None)
     monkeypatch.setattr(breakout, "update_slack_message", update)
@@ -163,7 +163,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         expected,
         "200.0",
         "`/breakout`: fix it · <https://slack/p105|(source)> · <@U_ALICE> "
-        "<https://dashboard.example/agents/new-thread|Open in Web>",
+        "<https://web.example/agents/new-thread|Open in Web>",
         blocks=ANY,
         unfurl_links=False,
         unfurl_media=False,

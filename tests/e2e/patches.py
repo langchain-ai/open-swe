@@ -217,12 +217,12 @@ def apply() -> None:
     authorship._identity_from_github_token = _no_github_identity  # noqa: SLF001
 
     # OAuth-token store is an external credential boundary. Stub it so a web
-    # follow-up (dashboard run.start) and PR-as-user resolution have a token;
+    # follow-up (web run.start) and PR-as-user resolution have a token;
     # the real ownership/authorization checks still run.
-    from openswe.dashboard import profiles, repo_access
     from openswe.github import http as github_http
     from openswe.github import pull_request_actions, pull_request_context, pull_request_status
     from openswe.threads import access as thread_access
+    from openswe.web import profiles, repo_access
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:
         # Carries the login so the fake GitHub can attribute a write (a submitted
@@ -369,7 +369,7 @@ async def _fake_assert_repo_access(full_name: str, token: str) -> str:
     import httpx2
     from e2e_env import FAKE_GITHUB_API
 
-    from openswe.dashboard import repo_access
+    from openswe.web import repo_access
 
     normalized = repo_access.normalize_repo_full_name(full_name)
     owner, name = normalized.split("/", 1)

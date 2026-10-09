@@ -10,20 +10,20 @@ from langgraph_sdk.schema import Thread
 from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.pull_requests import PullRequest
 from openswe.prompts import prompt
-from openswe.threads.access import _ensure_dashboard_github_token
+from openswe.threads.access import _ensure_web_github_token
 from openswe.threads.runs import (
-    _build_dashboard_configurable,
-    create_dashboard_thread_record,
+    _build_web_configurable,
+    create_web_thread_record,
 )
 from openswe.threads.summary import _assert_thread_postable
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.web.repo_access import require_repo_access_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +297,7 @@ async def _find_or_create_pr_thread(
     candidates = await find_pr_threads(owner, repo, number, login, email)
     if candidates:
         return candidates[0]["thread_id"]
-    thread = await create_dashboard_thread_record(
+    thread = await create_web_thread_record(
         str(uuid.uuid4()),
         login=login,
         email=email,
@@ -358,7 +358,7 @@ async def start_pull_request_thread(
     if pull_request_identity({"repo_full_name": full_name, "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     await require_repo_access_for_user(login, full_name)
-    await _ensure_dashboard_github_token(login)
+    await _ensure_web_github_token(login)
     url = f"https://github.com/{full_name}/pull/{number}"
     prompt = intent.prompt(url)
     client = langgraph_client()
@@ -392,9 +392,7 @@ async def start_pull_request_thread(
             )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
-        configurable = await _build_dashboard_configurable(
-            thread_id, login, thread_metadata(current)
-        )
+        configurable = await _build_web_configurable(thread_id, login, thread_metadata(current))
         await dispatch_agent_run(
             thread_id,
             prompt,
@@ -431,9 +429,7 @@ async def dispatch_pull_request_prompt(
         await before_dispatch(thread_id)
         await client.threads.update(thread_id=thread_id, metadata={"review_chat": False})
         current = await client.threads.get(thread_id)
-        configurable = await _build_dashboard_configurable(
-            thread_id, login, thread_metadata(current)
-        )
+        configurable = await _build_web_configurable(thread_id, login, thread_metadata(current))
         await dispatch_agent_run(
             thread_id,
             prompt,

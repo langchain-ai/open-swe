@@ -72,7 +72,7 @@ variables snapRid = None, snapBusy = FALSE, tgt = None, newRun = None, queued = 
 begin
 R0: \* Fix: the client sends B only once the server has answered A
   await self = A \/ IF Fix THEN pc[A] = "Done" ELSE pc[A] # "R0";
-R1: \* proxy_dashboard_thread_commands reads the thread
+R1: \* proxy_web_thread_commands reads the thread
   sentAt[self] := Len(log);
   snapRid := meta.rid;
   snapBusy := LGBusy \/ meta.st \in {"pending", "running"};

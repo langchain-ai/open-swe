@@ -1,6 +1,6 @@
 import asyncio
 
-from openswe.dashboard import oauth_refresh
+from openswe.web import oauth_refresh
 
 
 async def test_refresh_guard_serializes_a_credential_across_processes(registry_db, monkeypatch):

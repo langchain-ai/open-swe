@@ -64,7 +64,7 @@ describe("filterThreads", () => {
     ).toEqual([automation])
   })
 
-  it("filters by source, defaulting missing source to dashboard", () => {
+  it("filters by source, defaulting missing source to web", () => {
     const gh = makeThread({ source: "github" })
     const noSource = makeThread({ source: undefined })
     expect(

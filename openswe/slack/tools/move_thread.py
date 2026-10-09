@@ -12,9 +12,9 @@ from openswe.slack.client import get_active_slack_thread
 from openswe.slack.move import move_slack_thread, rebind_slack_thread
 from openswe.source_context import SlackThreadRef
 from openswe.threads.summary import thread_is_private
-from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.web_links import web_thread_url
 
 _MESSAGE_MAX_CHARS = 2800
 _CHANNEL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
@@ -35,7 +35,7 @@ async def _finish_existing_move(
         "thread_id": thread_id,
         "channel_id": destination.channel_id,
         "thread_ts": destination.thread_ts,
-        "dashboard_url": dashboard_thread_url(thread_id),
+        "web_url": web_thread_url(thread_id),
     }
 
 

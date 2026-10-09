@@ -119,7 +119,7 @@ class User(Base):
 
     @classmethod
     async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
-        """The person a dashboard session belongs to.
+        """The person a web session belongs to.
 
         The session's ``user_id`` wins while that row still holds any GitHub
         identity, so a renamed login never falls through to whoever took the old
@@ -180,7 +180,7 @@ class User(Base):
     async def canonical_person(cls, person: PersonIdentity) -> PersonIdentity:
         """``person`` re-keyed on the ``users`` row behind it, unchanged when unknown.
 
-        One person reaching Open SWE from Slack and from the dashboard is one
+        One person reaching Open SWE from Slack and from the web app is one
         entity the model can match across surfaces, instead of two whose
         relationship it has to infer. Provider handles stay on the record.
 

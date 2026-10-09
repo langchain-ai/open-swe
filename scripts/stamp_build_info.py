@@ -21,7 +21,7 @@ info = {"built_at": datetime.now(UTC).isoformat()}
 if commit:
     info["commit"] = commit
 if len(sys.argv) > 2:
-    dashboard_stamp = Path(sys.argv[2]) / "open-swe-build-info.json"
-    if dashboard_stamp.is_file():
-        info["dashboard_stamp_sha256"] = sha256(dashboard_stamp.read_bytes()).hexdigest()
+    web_stamp = Path(sys.argv[2]) / "open-swe-build-info.json"
+    if web_stamp.is_file():
+        info["web_stamp_sha256"] = sha256(web_stamp.read_bytes()).hexdigest()
 (directory / "open-swe-build-info.json").write_text(json.dumps(info))

@@ -3,11 +3,11 @@
 from typing import Literal
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
 from openswe.review.styles import normalize_repo_full_name
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable
+from openswe.web.repo_access import require_repo_access_for_user
 
 _READ = Policy(trusted="admin_surface", actor="admin")
 _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "enabled"))

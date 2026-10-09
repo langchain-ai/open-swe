@@ -13,8 +13,6 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from openswe.claude_code.transcript import ClaudeTranscript, TranscriptError
-from openswe.dashboard.profiles import get_profile
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, GitHubError
 from openswe.github.pull_requests import PullRequest
 from openswe.input_messages import SystemIdentity, build_input_messages
@@ -27,9 +25,11 @@ from openswe.threads.runs import (
     _resolve_agent_model_choice,
     _resolve_requested_workspace,
 )
-from openswe.threads.summary import DASHBOARD_SOURCE, _now_ms, _parse_repo, _thread_summary
+from openswe.threads.summary import WEB_APP_SOURCE, _now_ms, _parse_repo, _thread_summary
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_metadata
+from openswe.web.profiles import get_profile
+from openswe.web.repo_access import require_repo_access_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -288,8 +288,8 @@ async def upload_session(
     now_ms = _now_ms()
     title = session.title or f"Uploaded session on {target.branch}"
     metadata: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
-        "origin": DASHBOARD_SOURCE,
+        "source": WEB_APP_SOURCE,
+        "origin": WEB_APP_SOURCE,
         "owner_type": "user",
         "owner_login": login.strip(),
         "visibility": "private" if header.visibility == "private" else "public",

@@ -10,20 +10,20 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 import type { WorkspaceFileIndex, WorkspacePath } from "./workspaceFiles"
-import { dashboardApiBase } from "@/lib/api-base"
+import { webApiBase } from "@/lib/api-base"
 import {
-  DashboardRequestError,
+  WebRequestError,
   REQUEST_ID_HEADER,
-  dashboardApiUrl,
-  dashboardForwardedHeaders,
+  webApiUrl,
+  webForwardedHeaders,
   networkError,
   newRequestId,
-} from "@/lib/dashboard-fetch"
+} from "@/lib/web-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
 export type { AgentSchedule, AgentThread, Message }
 
-export class AgentsApiError extends DashboardRequestError {
+export class AgentsApiError extends WebRequestError {
   constructor(status: number, message: string, requestId?: string) {
     super(status, message, requestId)
     this.name = "AgentsApiError"
@@ -145,9 +145,9 @@ export interface SidebarRepo {
   workspace: string
 }
 
-const API_BASE = dashboardApiBase()
+const API_BASE = webApiBase()
 
-export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
+export const agentsLangGraphApiUrl = `${API_BASE}/api`
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
@@ -156,13 +156,13 @@ export async function agentsRequest<T>(
   init: RequestInit = {}
 ): Promise<T> {
   const requestId = newRequestId()
-  const res = await timedFetch(dashboardApiUrl(path), {
+  const res = await timedFetch(webApiUrl(path), {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
+      ...webForwardedHeaders(),
       ...init.headers,
     },
   }).catch((cause: unknown) => {
@@ -195,12 +195,12 @@ function filenameFromContentDisposition(value: string | null): string | null {
 
 async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
   const requestId = newRequestId()
-  const res = await fetch(dashboardApiUrl(path), {
+  const res = await fetch(webApiUrl(path), {
     credentials: "include",
     headers: {
       Accept: "text/x-diff",
       [REQUEST_ID_HEADER]: requestId,
-      ...dashboardForwardedHeaders(),
+      ...webForwardedHeaders(),
     },
   }).catch((cause: unknown) => {
     throw networkError(cause, requestId)

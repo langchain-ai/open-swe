@@ -29,7 +29,7 @@ Open SWE turns engineering work into a repeatable system: investigate a codebase
 
 ## Getting started
 
-- **[Deploy for a team](docs/INSTALLATION.md)** — Set up the backend, dashboard, GitHub and Slack apps, and model credentials. Production standalone Agent Server deployments require a license key.
+- **[Deploy for a team](docs/INSTALLATION.md)** — Set up the backend, web app, GitHub and Slack apps, and model credentials. Production standalone Agent Server deployments require a license key.
 - **[Develop locally](docs/DEVELOPMENT.md)** — Follow the ordered setup for dependencies, credentials, the database, hot reload, and a webhook-only tunnel.
 - **[Desktop (experimental)](docs/DEVELOPMENT.md#desktop-app-experimental)** — Work against local repositories. Packaged app releases target macOS; source builds also support Windows and Linux.
 - **[Use the CLI](cli/README.md)** — Connect a local directory to an agent on your deployment. Commands execute locally as you, without sandbox isolation.
@@ -52,7 +52,7 @@ flowchart LR
 - **Operate:** Schedule recurring tasks and monitor opted-in PRs with `/baby-sit`, diagnosing failures and rerunning only evidence-backed flaky jobs.
 - **Customize:** Choose models, reasoning effort, instructions, skills, integrations, and sandbox providers.
 
-Start and continue work from the **dashboard**, **GitHub issues and PR conversations**, or **Slack**. [Linear](docs/INSTALLATION.md#linear) supports issue-comment triggers and replies through a configured Linear MCP connection. Cloud coding follow-ups reuse the thread’s context and sandbox; independent threads can run in parallel.
+Start and continue work from the **web app**, **GitHub issues and PR conversations**, or **Slack**. [Linear](docs/INSTALLATION.md#linear) supports issue-comment triggers and replies through a configured Linear MCP connection. Cloud coding follow-ups reuse the thread’s context and sandbox; independent threads can run in parallel.
 
 ## How it works
 

@@ -1,4 +1,4 @@
-"""Dashboard API for asking a repository's Slack review channel to review a pull request."""
+"""Web API for asking a repository's Slack review channel to review a pull request."""
 
 import asyncio
 import logging
@@ -9,8 +9,6 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.http import GitHubClient, GitHubError, or_none
 from openswe.github.pull_request_status import (
@@ -25,6 +23,8 @@ from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import Origin, RequestResult, request_review
 from openswe.slack.client import GitHubPrRef
 from openswe.users import User
+from openswe.web.deps import SESSION_DEP
+from openswe.web.repo_access import require_repo_access_for_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["human-review"])

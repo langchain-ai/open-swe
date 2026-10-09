@@ -124,7 +124,7 @@ test("only grants expected permissions to the bundled app", () => {
   assert.equal(isTrustedPermissionRequest("media", APP_URL), false);
   assert.equal(isTrustedPermissionRequest("camera", APP_URL), false);
   assert.equal(
-    isTrustedPermissionRequest("notifications", "https://dashboard.example"),
+    isTrustedPermissionRequest("notifications", "https://web.example"),
     false,
   );
 });
@@ -139,16 +139,10 @@ test("only proxies requests from the bundled app window", () => {
 });
 
 test("sends login to the user's browser instead of the app window", () => {
-  assert.equal(isAppLoginUrl(`${APP_URL}dashboard/api/auth/login`), true);
-  assert.equal(
-    isAppLoginUrl(`${APP_URL}dashboard/api/auth/login?redirect_to=%2F`),
-    true,
-  );
+  assert.equal(isAppLoginUrl(`${APP_URL}api/auth/login`), true);
+  assert.equal(isAppLoginUrl(`${APP_URL}api/auth/login?redirect_to=%2F`), true);
   assert.equal(isAppLoginUrl(`${APP_URL}dashboard/api/auth/callback`), false);
-  assert.equal(
-    isAppLoginUrl("https://backend.example/dashboard/api/auth/login"),
-    false,
-  );
+  assert.equal(isAppLoginUrl("https://backend.example/api/auth/login"), false);
 });
 
 test("carries the loopback port and PKCE challenge into the browser login", () => {
@@ -157,22 +151,22 @@ test("carries the loopback port and PKCE challenge into the browser login", () =
       challenge: "abc",
       port: 51234,
     }),
-    "https://backend.example/dashboard/api/auth/login?desktop=true&desktop_handoff=abc&desktop_port=51234",
+    "https://backend.example/api/auth/login?desktop=true&desktop_handoff=abc&desktop_port=51234",
   );
   assert.equal(
     desktopExchangeUrl("https://backend.example/base/"),
-    "https://backend.example/dashboard/api/auth/desktop/exchange",
+    "https://backend.example/api/auth/desktop/exchange",
   );
   assert.equal(
     connectLoginUrl("https://backend.example", "slack", {
       challenge: "abc",
       port: 51234,
     }),
-    "https://backend.example/dashboard/api/slack/login?desktop_handoff=abc&desktop_port=51234",
+    "https://backend.example/api/slack/login?desktop_handoff=abc&desktop_port=51234",
   );
   assert.equal(
     connectExchangeUrl("https://backend.example", "langsmith"),
-    "https://backend.example/dashboard/api/langsmith/desktop/exchange",
+    "https://backend.example/api/langsmith/desktop/exchange",
   );
 });
 
@@ -180,16 +174,13 @@ test("maps desktop API requests to the selected backend", () => {
   assert.equal(
     backendRequestUrl(
       "https://backend.example/base/",
-      `${APP_URL}dashboard/api/threads?limit=20`,
+      `${APP_URL}api/threads?limit=20`,
     ),
-    "https://backend.example/dashboard/api/threads?limit=20",
+    "https://backend.example/api/threads?limit=20",
   );
   assert.equal(
-    backendRequestUrl(
-      "https://backend.example",
-      `${APP_URL}dashboard/api/auth/login`,
-    ),
-    "https://backend.example/dashboard/api/auth/login?desktop=true",
+    backendRequestUrl("https://backend.example", `${APP_URL}api/auth/login`),
+    "https://backend.example/api/auth/login?desktop=true",
   );
 });
 
@@ -214,20 +205,18 @@ test("localizes backend OAuth callbacks and post-login redirects", () => {
   );
   assert.equal(
     localCallbackUrl(
-      "https://backend.example/dashboard/api/me",
+      "https://backend.example/api/me",
       "https://backend.example",
     ),
     null,
   );
   assert.equal(
-    appRedirectUrl(
-      "https://dashboard.example/agents/thread-1?from=oauth#latest",
-    ),
+    appRedirectUrl("https://web.example/agents/thread-1?from=oauth#latest"),
     `${APP_URL}agents/thread-1?from=oauth#latest`,
   );
 });
 
-test("opens only dashboard links from the configured backend", () => {
+test("opens only web links from the configured backend", () => {
   const backend = "https://openswe.langchain.dev";
   assert.equal(
     desktopDeepLinkUrl(`${backend}/agents/thread-1?tab=plan#latest`, backend),

@@ -3,7 +3,7 @@ from langgraph_sdk import get_client
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.slack.client import GitHubPrRef, get_active_slack_thread, parse_github_pr_url
-from openswe.utils.dashboard_links import dashboard_review_url
+from openswe.utils.web_links import web_review_url
 
 
 async def trigger_pr_review_from_ref(
@@ -59,7 +59,7 @@ async def request_pr_review(pr_url: str, use_mda: bool = False) -> dict[str, obj
         use_mda=use_mda,
     )
     if result.get("success") and (
-        review_url := dashboard_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        review_url := web_review_url(pr_ref.owner, pr_ref.repo, pr_ref.number)
     ):
         result["review_url"] = review_url
     return result

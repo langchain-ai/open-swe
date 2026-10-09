@@ -93,7 +93,7 @@ export async function login(backend: string): Promise<string> {
     desktop_handoff: challenge,
     desktop_port: String(server.port),
   })
-  const loginUrl = `${backend}/dashboard/api/auth/login?${query.toString()}`
+  const loginUrl = `${backend}/api/auth/login?${query.toString()}`
   process.stdout.write(`Opening ${loginUrl}\n`)
   openBrowser(loginUrl)
 

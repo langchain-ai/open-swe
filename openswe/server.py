@@ -70,25 +70,6 @@ from openswe.bridge.store import Bridge
 from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
 from openswe.bridge.worktree_handoff import worktree_handoff
 from openswe.credential_scope import private_credential_login
-from openswe.dashboard.agent_overrides import (
-    load_profile,
-    normalize_profile_overrides,
-    normalize_profile_subagent_overrides,
-    profile_draft_prs,
-    profile_model_routing_enabled,
-    resolve_github_login,
-)
-from openswe.dashboard.options import (
-    SUPPORTED_MODEL_IDS,
-    ModelOption,
-    available_requested_models,
-    default_vision_model_pair,
-    gate_fable_model,
-    model_supports_effort,
-    model_supports_images,
-)
-from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.desktop import (
     create_desktop_backend,
     desktop_artifact_routes,
@@ -190,7 +171,7 @@ from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_ti
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
-from openswe.threads.summary import DASHBOARD_SOURCE
+from openswe.threads.summary import WEB_APP_SOURCE
 from openswe.tools import (
     assign_human_reviewer,
     auto_assign_human_reviewer,
@@ -293,7 +274,6 @@ from openswe.utils.authorship import (
     resolve_participant_identities,
     resolve_triggering_user_identity,
 )
-from openswe.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.gateway import gateway_env_default
 from openswe.utils.json_types import as_json_object, thread_metadata
@@ -312,6 +292,26 @@ from openswe.utils.thread_settings import (
     normalize_thread_settings,
     store_thread_settings,
 )
+from openswe.utils.web_links import web_base_url, web_plan_url
+from openswe.web.agent_overrides import (
+    load_profile,
+    normalize_profile_overrides,
+    normalize_profile_subagent_overrides,
+    profile_draft_prs,
+    profile_model_routing_enabled,
+    resolve_github_login,
+)
+from openswe.web.options import (
+    SUPPORTED_MODEL_IDS,
+    ModelOption,
+    available_requested_models,
+    default_vision_model_pair,
+    gate_fable_model,
+    model_supports_effort,
+    model_supports_images,
+)
+from openswe.web.workspace_settings import WorkspaceSettings, get_workspace_settings
+from openswe.web.workspace_settings_cache import cached_workspace_settings
 from openswe.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     load_workspace,
@@ -403,7 +403,7 @@ async def _resolve_repo_custom_instructions(
     if not default_repo or not default_repo.get("owner") or not default_repo.get("name"):
         return None
     try:
-        from openswe.dashboard.agent_instructions import get_repo_agent_instructions
+        from openswe.web.agent_instructions import get_repo_agent_instructions
 
         return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
     except Exception:
@@ -525,7 +525,7 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
     if not login:
         return None
     try:
-        from openswe.dashboard.user_instructions import get_user_custom_instructions
+        from openswe.web.user_instructions import get_user_custom_instructions
 
         return await get_user_custom_instructions(login)
     except Exception:
@@ -842,7 +842,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
     metadata, never from the client, and keeping the tools registered across a
     surface switch is what keeps the prompt prefix cacheable.
     """
-    if cfg.source not in {"slack", "schedule", "incidents_agent", DASHBOARD_SOURCE}:
+    if cfg.source not in {"slack", "schedule", "incidents_agent", WEB_APP_SOURCE}:
         return False
     if cfg.slack_thread is None:
         return False
@@ -853,7 +853,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
 
 def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
     """Where this run owes its answer, before anything moves mid-run."""
-    if cfg.source == DASHBOARD_SOURCE or not _slack_tools_enabled(cfg):
+    if cfg.source == WEB_APP_SOURCE or not _slack_tools_enabled(cfg):
         return WEB_REPLY_SURFACE
     return SLACK_REPLY_SURFACE
 
@@ -1375,8 +1375,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             **({"model_route": attribution_route} if attribution_route is not None else {}),
             "rendered_system_prompt": construct_system_prompt(
                 working_dir=work_dir,
-                dashboard_base_url=dashboard_base_url(),
-                artifact_url=dashboard_plan_url(self._thread_id),
+                web_base_url=web_base_url(),
+                artifact_url=web_plan_url(self._thread_id),
                 linear_project_id=self._linear_project_id,
                 linear_issue_number=self._linear_issue_number,
                 default_repo=prompt_default_repo,
@@ -1499,7 +1499,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     settings: WorkspaceSettings | None = None
     routing_defaults: dict[str, tuple[str, str | None]]
     if local_run:
-        from openswe.dashboard.options import default_model_pair
+        from openswe.web.options import default_model_pair
 
         model_defaults = (default_model_pair(), default_model_pair())
         routing_defaults = {
@@ -1543,7 +1543,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         overridden_model, overridden_effort = normalize_profile_overrides(profile)
         if overridden_model:
             logger.info(
-                "Applying dashboard profile override for %s: model=%s effort=%s",
+                "Applying web profile override for %s: model=%s effort=%s",
                 profile_login,
                 overridden_model,
                 overridden_effort,
@@ -1557,7 +1557,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         )
         if overridden_subagent_model:
             logger.info(
-                "Applying dashboard profile subagent override for %s: model=%s effort=%s",
+                "Applying web profile subagent override for %s: model=%s effort=%s",
                 profile_login,
                 overridden_subagent_model,
                 overridden_subagent_effort,
@@ -2250,7 +2250,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             if incident_automatic
             else DEEP_AGENT_EXCLUDED_TOOLS
         )
-    elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional() and not local_run:
+    elif tools_base_url() and ENV.WEB_JWT_SECRET.optional() and not local_run:
         await save_tool_context(thread_id, config)
     return graph
 

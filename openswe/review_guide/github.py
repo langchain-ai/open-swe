@@ -6,11 +6,11 @@ import httpx2
 from fastapi import HTTPException
 from pydantic import AliasPath, BaseModel, Field, ValidationError
 
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.expedited_review.reviews import github_error, github_token_hint
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.http import GITHUB_API_BASE, github_client, github_request
 from openswe.github.pull_request_actions import MarkReadyAction
+from openswe.web.profiles import get_valid_access_token
 
 logger = logging.getLogger(__name__)
 

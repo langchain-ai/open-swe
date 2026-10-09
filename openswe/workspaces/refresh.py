@@ -19,7 +19,7 @@ starts on the image as captured and warns its requester that checkouts may be
 behind.
 
 The outcome — status, kind, timestamps, a capped log — lands on the workspace
-record for the dashboard. A failed refresh of either kind leaves the previous
+record for the web app. A failed refresh of either kind leaves the previous
 snapshot in place: runs keep booting from the last image that worked.
 """
 

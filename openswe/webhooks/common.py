@@ -19,22 +19,6 @@ from pydantic import BaseModel
 
 from openswe.analytics.usage import update_agent_pr_usage_from_webhook
 from openswe.config import ENV
-from openswe.dashboard.agent_overrides import (
-    get_profile_default_repo,
-    resolve_agent_model_id,  # noqa: F401
-)
-from openswe.dashboard.oauth import build_settings_url
-from openswe.dashboard.options import (
-    default_vision_model_pair,
-    model_supports_images,  # noqa: F401
-    normalize_model_choice,
-)
-from openswe.dashboard.profiles import (  # noqa: F401
-    get_profile,
-    get_valid_access_token,
-    has_access_token_record,
-)
-from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import (
     get_github_app_installation_token,  # noqa: F401
@@ -143,7 +127,6 @@ from openswe.threads.summary import (
 from openswe.threads.workflow_approval import decide_workflow_push_approval
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_thread_url  # noqa: F401
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.json_types import ThreadLike, as_thread_dict
 from openswe.utils.langsmith import create_langsmith_thread_feedback
@@ -157,6 +140,23 @@ from openswe.utils.repo import extract_repo_from_text
 from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.utils.web_links import web_thread_url  # noqa: F401
+from openswe.web.agent_overrides import (
+    get_profile_default_repo,
+    resolve_agent_model_id,  # noqa: F401
+)
+from openswe.web.oauth import build_settings_url
+from openswe.web.options import (
+    default_vision_model_pair,
+    model_supports_images,  # noqa: F401
+    normalize_model_choice,
+)
+from openswe.web.profiles import (  # noqa: F401
+    get_profile,
+    get_valid_access_token,
+    has_access_token_record,
+)
+from openswe.web.workspace_settings import get_workspace_settings
 from openswe.workspaces.routing import workspace_for_repo, workspace_for_slack_channel
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
@@ -223,7 +223,7 @@ __all__ = [
     "claim_slack_event",
     "complete_review_check_run",
     "create_review_check_run",
-    "dashboard_thread_url",
+    "web_thread_url",
     "decide_workflow_push_approval",
     "dedupe_urls",
     "default_vision_model_pair",
@@ -533,7 +533,7 @@ async def upsert_agent_thread_metadata(
     unlisted: bool = False,
     token_repositories: Sequence[str] | None = None,
 ) -> bool:
-    """Persist source/participant metadata so the dashboard can surface non-dashboard threads.
+    """Persist source/participant metadata so the web app can surface non-web threads.
 
     Returns whether the write succeeded so private-thread callers can fail closed.
 
@@ -569,7 +569,7 @@ async def upsert_agent_thread_metadata(
         metadata["title"] = title[:80]
     if workspace:
         metadata["workspace"] = workspace
-    # Only ever set here: the dashboard clears it when someone continues the
+    # Only ever set here: the web app clears it when someone continues the
     # thread on the web, and that promotion must survive later Slack events.
     if unlisted:
         metadata["unlisted"] = True
@@ -733,7 +733,7 @@ async def get_slack_repo_config(
     Priority, the first two explicit and the rest defaults:
         1. Repo carried over from the existing Slack thread's metadata.
         2. A ``repo:owner/name`` token in the channel's topic/purpose.
-        3. The triggering user's dashboard ``default_repo`` (if they have a
+        3. The triggering user's web ``default_repo`` (if they have a
            profile and their Slack email maps to a known GitHub login).
         4. The default repo of the workspace this channel is bound to.
         5. ``SLACK_REPO_*`` env defaults.
@@ -797,14 +797,14 @@ async def get_slack_repo_config(
             profile_repo = await get_profile_default_repo(await User.login_for_email(slack_email))
             if profile_repo:
                 logger.info(
-                    "Applying dashboard default_repo for Slack user %s: %s/%s",
+                    "Applying web default_repo for Slack user %s: %s/%s",
                     slack_user_id,
                     profile_repo["owner"],
                     profile_repo["name"],
                 )
                 repo_config = profile_repo
         except Exception:  # noqa: BLE001
-            logger.exception("Failed to apply dashboard default_repo for Slack user")
+            logger.exception("Failed to apply web default_repo for Slack user")
 
     if not repo_config:
         # A channel bound to a workspace takes the default repository that
@@ -907,23 +907,21 @@ async def post_account_link_prompt(
     agent_thread_id: str | None = None,
     ephemeral: bool = False,
 ) -> None:
-    """Prompt a Slack user to connect their account via the dashboard.
+    """Prompt a Slack user to connect their account via the web app.
 
     ``reason`` is ``"unlinked"`` (never signed in with GitHub) or ``"revoked"``
     (signed in before, but the stored GitHub authorization is no longer usable).
     Open SWE opens PRs as the triggering user, so it cannot start until the user
-    has signed in with GitHub and connected their Slack account in the dashboard.
+    has signed in with GitHub and connected their Slack account in the web app.
 
-    Posts a plain, token-free dashboard link as a visible threaded reply. The
+    Posts a plain, token-free web link as a visible threaded reply. The
     link carries no per-user identity, so it's safe to show in a shared channel:
     the user signs in with GitHub from their own session and connects Slack via
     verified OIDC on the settings page.
     """
     settings_url = build_settings_url()
     if not settings_url:
-        logger.debug(
-            "Dashboard settings URL unavailable (DASHBOARD_BASE_URL unset); skipping prompt"
-        )
+        logger.debug("Web settings URL unavailable (WEB_BASE_URL unset); skipping prompt")
         return
     if reason == "revoked":
         text = (

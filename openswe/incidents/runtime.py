@@ -32,7 +32,7 @@ from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef
 from openswe.store import now_iso
-from openswe.utils.dashboard_links import dashboard_incident_url
+from openswe.utils.web_links import web_incident_url
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ class IncidentSession:
             text, blocks = report_message(
                 report,
                 report.summary,
-                dashboard_incident_url(record.id),
+                web_incident_url(record.id),
                 reason="answer" if explicit else "findings",
             )
             try:

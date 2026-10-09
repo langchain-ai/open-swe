@@ -99,7 +99,7 @@ async def schedule_agent_cost_refresh(
 
 
 async def _store_run_cost(payload: AgentCostRefresh, cost: float, client: LangGraphClient) -> None:
-    """Record the run's cost on its thread's metadata for the dashboard."""
+    """Record the run's cost on its thread's metadata for the web app."""
     try:
         await client.threads.update(
             payload["thread_id"],

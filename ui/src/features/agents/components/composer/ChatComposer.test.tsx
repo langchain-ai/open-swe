@@ -43,9 +43,9 @@ vi.mock("@langchain/react", () => ({
 }))
 
 vi.mock("@/lib/langgraph-client", () => ({
-  createDashboardClient: () => ({}),
+  createWebClient: () => ({}),
   createLocalGraphClient: () => ({}),
-  dashboardFetch: fetch,
+  webFetch: fetch,
 }))
 
 const cancelThread = vi.fn((threadId: string) =>

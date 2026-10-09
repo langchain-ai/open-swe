@@ -21,7 +21,7 @@ from openswe.sandboxes.tool_access import (
     TOOLS_HEADER,
     authenticate_tool_access,
 )
-from openswe.threads.runs import create_dashboard_thread_record, start_sandbox_guest_run
+from openswe.threads.runs import create_web_thread_record, start_sandbox_guest_run
 from openswe.threads.summary import repo_config_from_metadata
 from openswe.utils.json_types import JsonObject, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -122,7 +122,7 @@ class SandboxCaller:
             "private" if self.host_metadata.get("visibility") == "private" else "public"
         )
         workspace = self.host_metadata.get("workspace")
-        await create_dashboard_thread_record(
+        await create_web_thread_record(
             thread_id,
             login=self.owner_login,
             repo_config=repo_config_from_metadata(self.host_metadata),

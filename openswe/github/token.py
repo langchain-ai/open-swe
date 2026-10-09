@@ -72,15 +72,15 @@ def _cache_resolved_github_token(
     return token, expires_at
 
 
-async def _resolve_dashboard_user_token(
+async def _resolve_web_user_token(
     thread_id: str, github_login: str
 ) -> tuple[str, str | None] | None:
-    """Resolve a per-user GitHub token from the dashboard OAuth store."""
+    """Resolve a per-user GitHub token from the web app OAuth store."""
     login = github_login.strip()
     if not login:
         raise ValueError("missing github_login")
 
-    from openswe.dashboard.profiles import get_oauth_token_record, get_valid_access_token
+    from openswe.web.profiles import get_oauth_token_record, get_valid_access_token
 
     token = await get_valid_access_token(login)
     if not token:
@@ -118,7 +118,7 @@ async def resolve_github_token(
     await invalidate_cached_github_token(thread_id)
     if login is None:
         return await _resolve_bot_installation_token(thread_id)
-    user_token = await _resolve_dashboard_user_token(thread_id, login)
+    user_token = await _resolve_web_user_token(thread_id, login)
     if user_token is None:
         raise GitHubUserAuthRequired(cfg.source or "private", login)
     return user_token

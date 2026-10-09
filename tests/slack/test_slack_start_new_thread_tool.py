@@ -251,8 +251,8 @@ async def test_slack_breakout_thread_success(
     monkeypatch.setattr(slack_breakout_tool, "get_slack_permalink", get_permalink)
     monkeypatch.setattr(
         slack_breakout_tool,
-        "dashboard_thread_url",
-        lambda thread_id: f"https://dashboard.example/agents/{thread_id}",
+        "web_thread_url",
+        lambda thread_id: f"https://web.example/agents/{thread_id}",
     )
     source_line = AsyncMock(return_value="<https://p/src|(source)>")
     react = AsyncMock()
@@ -271,7 +271,7 @@ async def test_slack_breakout_thread_success(
         "success": True,
         "thread_id": expected_thread_id,
         "thread_ts": new_ts,
-        "dashboard_url": f"https://dashboard.example/agents/{expected_thread_id}",
+        "web_url": f"https://web.example/agents/{expected_thread_id}",
         "slack_url": permalink or f"https://slack.com/archives/{target}/p1700000000111111",
         "next_step": "End the turn with slack_no_reply_needed; do not reply in the current thread.",
     }
@@ -279,7 +279,7 @@ async def test_slack_breakout_thread_success(
     assert captured["top_level_post"]["channel_id"] == target
     assert captured["top_level_post"]["text"] == (
         "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1> "
-        f"<https://dashboard.example/agents/{expected_thread_id}|Open in Web>"
+        f"<https://web.example/agents/{expected_thread_id}|Open in Web>"
     )
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
     react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", target, new_ts)
@@ -328,7 +328,7 @@ async def test_slack_breakout_thread_success(
     assert dispatch["configurable"]["agent_model_id"] == "anthropic:claude-sonnet-4-5"
     assert "Breakout Instructions" in dispatch["content"]
     assert "## Open SWE Links" in dispatch["content"]
-    assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
+    assert f"- Web: https://web.example/agents/{expected_thread_id}" in dispatch["content"]
     assert "- Trace: https://smith/x" in dispatch["content"]
     assert dispatch["content"].endswith(
         "## Breakout Instructions\n"

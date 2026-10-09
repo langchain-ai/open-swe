@@ -12,10 +12,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.web.deps import SESSION_DEP
+from openswe.web.repo_access import require_repo_access_for_user
 
 logger = logging.getLogger(__name__)
 

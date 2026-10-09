@@ -313,7 +313,7 @@ def _setup_slack_mention_fakes(
         runs = _FakeRunsClient()
         threads = _FakeThreadsClientForProcess()
 
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://app.example.com")
+    monkeypatch.setenv("WEB_BASE_URL", "https://app.example.com")
     monkeypatch.setattr(slack_webhooks, "get_langsmith_trace_url", _fake_trace_url)
     monkeypatch.setattr(webhook_common, "SLACK_BOT_USERNAME", "open-swe")
     monkeypatch.setattr(webhook_common, "get_slack_user_info", fake_get_slack_user_info)
@@ -555,7 +555,7 @@ def test_slack_followup_publishes_as_requester_and_preserves_owner(
 
     import langgraph_sdk
 
-    from openswe.dashboard import profiles
+    from openswe.web import profiles
 
     opr = importlib.import_module("openswe.tools.open_pull_request")
     captured: dict[str, object] = {}

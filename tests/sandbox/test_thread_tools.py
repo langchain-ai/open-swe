@@ -30,8 +30,8 @@ TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
 
 @pytest.fixture
 def capability_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DASHBOARD_JWT_SECRET", TEST_SIGNING_KEY)
-    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://agent.example.test")
+    monkeypatch.setenv("WEB_JWT_SECRET", TEST_SIGNING_KEY)
+    monkeypatch.setenv("WEB_API_BASE_URL", "https://agent.example.test")
 
 
 async def test_task_event_preserves_latest_human_actor(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -118,7 +118,7 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
     assert issued is not None
     url, token = issued
-    assert url == "https://agent.example.test/dashboard/api/sandbox-tools"
+    assert url == "https://agent.example.test/api/sandbox-tools"
     claims = jwt.decode(
         token, TEST_SIGNING_KEY, algorithms=["HS256"], audience=tool_access.TOOLS_AUDIENCE
     )
@@ -151,11 +151,11 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     fake_store: FakeStore,
     enabled: bool,
 ) -> None:
-    from openswe.dashboard.workspace_settings import (
+    from openswe.sandboxes.providers import langsmith
+    from openswe.web.workspace_settings import (
         WorkspaceSettingsUpdate,
         upsert_instance_settings,
     )
-    from openswe.sandboxes.providers import langsmith
 
     await upsert_instance_settings(WorkspaceSettingsUpdate(sandbox_openai_enabled=enabled))
 
@@ -178,11 +178,11 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert rule["match_hosts"] == ["agent.example.test"]
     assert rule["headers"][0]["type"] == "opaque"
     expected_env = {
-        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/dashboard/api/sandbox-tools",
+        "OPEN_SWE_TOOLS_URL": "https://agent.example.test/api/sandbox-tools",
     }
     if enabled:
         expected_env.update(
-            OPENAI_BASE_URL="https://agent.example.test/dashboard/api/sandbox-openai/v1",
+            OPENAI_BASE_URL="https://agent.example.test/api/sandbox-openai/v1",
             OPENAI_API_KEY=tool_access.OPENAI_API_KEY_PLACEHOLDER,
         )
     assert rule["env_vars"] == expected_env
@@ -274,22 +274,22 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="https://test"
     ) as http:
-        assert (await http.get("/dashboard/api/sandbox-tools/list")).status_code == 401
+        assert (await http.get("/api/sandbox-tools/list")).status_code == 401
         headers = {tool_access.TOOLS_HEADER: token}
-        result = await http.get("/dashboard/api/sandbox-tools/search?q=connected", headers=headers)
+        result = await http.get("/api/sandbox-tools/search?q=connected", headers=headers)
         assert result.status_code == 200
         assert result.json()["tools"][0]["name"] == "integration_echo"
         assert result.headers["cache-control"] == "no-store"
-        listed = await http.get("/dashboard/api/sandbox-tools/list", headers=headers)
+        listed = await http.get("/api/sandbox-tools/list", headers=headers)
         assert listed.json()["total"] == 1
         invoked = await http.post(
-            "/dashboard/api/sandbox-tools/invoke/integration_echo",
+            "/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             json={"value": "hello"},
         )
         assert invoked.json() == {"status": "success", "content": "hello"}
         forged = await http.post(
-            "/dashboard/api/sandbox-tools/invoke/integration_echo",
+            "/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             json={
                 "value": "hello",
@@ -298,7 +298,7 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
         )
         assert forged.status_code == 422
         large = await http.post(
-            "/dashboard/api/sandbox-tools/invoke/integration_echo",
+            "/api/sandbox-tools/invoke/integration_echo",
             headers=headers,
             content=b" " * (tool_routes.MAX_REQUEST_BYTES + 1),
         )
@@ -310,17 +310,15 @@ async def test_http_list_search_invoke_and_reject_context_overrides(
             '{"name":"integration_echo","arguments":{"value":"hello"}}',
         ):
             invalid = await http.post(
-                "/dashboard/api/sandbox-tools/invoke/integration_echo",
+                "/api/sandbox-tools/invoke/integration_echo",
                 headers=headers,
                 content=content,
             )
             assert invalid.status_code == 422
-        unknown = await http.post(
-            "/dashboard/api/sandbox-tools/invoke/unknown", headers=headers, json={}
-        )
+        unknown = await http.post("/api/sandbox-tools/invoke/unknown", headers=headers, json={})
         assert unknown.status_code == 404
         unauthorized = await http.post(
-            "/dashboard/api/sandbox-tools/invoke/integration_echo", json={"value": "hello"}
+            "/api/sandbox-tools/invoke/integration_echo", json={"value": "hello"}
         )
         assert unauthorized.status_code == 401
 
@@ -372,7 +370,7 @@ def test_invocation_openapi_declares_raw_arguments_and_result() -> None:
     app = FastAPI()
     app.include_router(tool_routes.router)
     schema = app.openapi()
-    operation = schema["paths"]["/dashboard/api/sandbox-tools/invoke/{tool_name}"]["post"]
+    operation = schema["paths"]["/api/sandbox-tools/invoke/{tool_name}"]["post"]
     assert operation["requestBody"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ToolArguments"
     }
@@ -396,7 +394,7 @@ async def test_chunked_request_limit_precedes_json_parsing(monkeypatch: pytest.M
         transport=httpx.ASGITransport(app=app), base_url="https://test"
     ) as http:
         response = await http.post(
-            "/dashboard/api/sandbox-tools/invoke/integration_echo",
+            "/api/sandbox-tools/invoke/integration_echo",
             content=chunks(),
             headers={"Content-Type": "application/json"},
         )

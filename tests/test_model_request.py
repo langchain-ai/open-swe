@@ -6,8 +6,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import var_child_runnable_config
 from langsmith import get_current_run_tree, trace, tracing_context
 
-from openswe.dashboard.options import available_requested_models
 from openswe.model_request import ModelRequestIntent, infer_requested_model
+from openswe.web.options import available_requested_models
 
 
 @pytest.mark.parametrize("trigger_kind", ["missing", "system"])

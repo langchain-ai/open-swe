@@ -1,4 +1,4 @@
-from openswe.dashboard.options import DEFAULT_MODEL_ID
+from openswe.web.options import DEFAULT_MODEL_ID
 
 DEFAULT_LLM_MODEL_ID = DEFAULT_MODEL_ID
 DEFAULT_LLM_MAX_TOKENS = 64_000

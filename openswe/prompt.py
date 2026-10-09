@@ -50,7 +50,9 @@ def _render_source_guidance(
         name = "background-task"
     elif source == "slack" and slack_context:
         name = "slack-by-the-way" if slack_by_the_way else "slack-ask" if slack_ask else "slack"
-    elif source in {"linear", "github", "schedule", "dashboard"}:
+    elif source == "dashboard":
+        name = "web-app"
+    elif source in {"linear", "github", "schedule"}:
         name = source
     else:
         name = "generic"
@@ -112,7 +114,7 @@ def _working_environment_prompt(source: str, *, local_checkout: bool) -> str:
 
 def construct_system_prompt(
     working_dir: str,
-    dashboard_base_url: str = "",
+    web_base_url: str = "",
     artifact_url: str | None = None,
     linear_project_id: str = "",
     linear_issue_number: str = "",
@@ -166,10 +168,10 @@ def construct_system_prompt(
             desktop=local_checkout_client == "desktop",
             prefer_tools_in_sandbox=prefer_tools_in_sandbox,
         ),
-        dashboard_context_section=prompt(
-            "system/dashboard-context",
+        web_context_section=prompt(
+            "system/web-context",
             environment=ENV.OPENSWE_ENV.optional(),
-            dashboard_base_url=dashboard_base_url or "(dashboard URL unavailable)",
+            web_base_url=web_base_url or "(web URL unavailable)",
             artifact_url=artifact_url or "(artifact link unavailable)",
         ),
         source_guidance_section=prompt(

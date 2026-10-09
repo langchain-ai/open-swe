@@ -124,7 +124,7 @@ class MCPToolDescription(BaseModel):
 
 
 class MCPConnectionPublic(BaseModel):
-    """Connection settings safe to return to the dashboard; credentials stay server-side."""
+    """Connection settings safe to return to the web app; credentials stay server-side."""
 
     model_config = ConfigDict(hide_input_in_errors=True)
 

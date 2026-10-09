@@ -40,14 +40,14 @@ stores the report, updates the postmortem summary, and posts to the channel when
 responder asked a question, or once for the first automatic investigation that reaches a
 supported conclusion; never post findings through other Slack tools. Record the report on
 every turn either way, including turns that will not post: the stored report and the
-postmortem are what later turns and the dashboard read, so never repost one by hand.
+postmortem are what later turns and the web app read, so never repost one by hand.
 
 Fill every field the investigation covered, because they are published as named sections:
 problem, previous_occurrence, impact, cause, and next_steps as the steps to solve. Keep
 each to one or two sentences. State previous_occurrence explicitly even when the search
 came back empty, so a responder can see the check happened. Answer the directed question
 in summary, and otherwise use summary for a one-sentence headline of the current verdict;
-it is what the dashboard and the completion notice show. Preserve replay/test context and
+it is what the web app and the completion notice show. Preserve replay/test context and
 uncertainty. Keep detailed hypotheses, checks, and open questions in their own fields.
 Consolidate repeated access failures into one gap per source. Use next_steps for up to
 three concrete recommendations, highest priority first, citing the observations motivating

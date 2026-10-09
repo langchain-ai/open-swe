@@ -87,7 +87,7 @@ function normalizeBackendUrl(value) {
 }
 
 /**
- * `DASHBOARD_API_URL` as `.env` sets it. Only this one key is read: the rest of
+ * `WEB_API_URL` as `.env` sets it. Only this one key is read: the rest of
  * that file is the local backend's secrets, which have no business in the
  * environment of a dev server the browser talks to.
  */
@@ -100,7 +100,8 @@ function backendUrlFromEnvFile() {
   }
   // Last assignment wins, the way sourcing the file would resolve it.
   for (const line of contents.split("\n").reverse()) {
-    const match = /^\s*(?:export\s+)?DASHBOARD_API_URL\s*=\s*(.*)$/.exec(line)
+    const match =
+      /^\s*(?:export\s+)?(?:WEB|DASHBOARD)_API_URL\s*=\s*(.*)$/.exec(line)
     if (match) return match[1].trim().replace(/^(['"])(.*)\1$/, "$2")
   }
   return undefined
@@ -108,18 +109,20 @@ function backendUrlFromEnvFile() {
 
 function resolveBackendUrl() {
   const configured =
-    process.env.DASHBOARD_API_URL?.trim() || backendUrlFromEnvFile()
+    process.env.WEB_API_URL?.trim() ||
+    process.env.DASHBOARD_API_URL?.trim() ||
+    backendUrlFromEnvFile()
   if (!configured) {
     fail(
-      "no DASHBOARD_API_URL. Add the backend to develop against to .env:\n" +
-        "  DASHBOARD_API_URL=https://your-deployment.example.com\n" +
+      "no WEB_API_URL. Add the backend to develop against to .env:\n" +
+        "  WEB_API_URL=https://your-deployment.example.com\n" +
         "There is no default: a fallback would be someone else's production."
     )
   }
   try {
     return normalizeBackendUrl(configured)
   } catch (error) {
-    return fail(`DASHBOARD_API_URL ${error.message}`)
+    return fail(`WEB_API_URL ${error.message}`)
   }
 }
 
@@ -241,7 +244,7 @@ async function login(backendUrl) {
   const challenge = createHash("sha256").update(verifier).digest("base64url")
   const { port, code } = await awaitHandoffCode()
 
-  const loginUrl = new URL("/dashboard/api/auth/login", backendUrl)
+  const loginUrl = new URL("/api/auth/login", backendUrl)
   loginUrl.searchParams.set("desktop_handoff", challenge)
   loginUrl.searchParams.set("desktop_port", String(port))
 
@@ -253,7 +256,7 @@ async function login(backendUrl) {
   if (!handoffCode) fail("no sign-in code received")
 
   const response = await fetch(
-    new URL("/dashboard/api/auth/desktop/exchange", backendUrl),
+    new URL("/api/auth/desktop/exchange", backendUrl),
     {
       method: "POST",
       headers: {
@@ -296,7 +299,7 @@ async function main() {
     stdio: "inherit",
     env: {
       ...process.env,
-      DASHBOARD_API_URL: backendUrl,
+      WEB_API_URL: backendUrl,
       OPEN_SWE_DEV_SESSION: session,
     },
   })

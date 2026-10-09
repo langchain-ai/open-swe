@@ -53,7 +53,7 @@ export async function createMcpServer(
     {
       title: "List Open SWE threads",
       description:
-        "List your Open SWE agent threads, newest first, filtered the way the dashboard sidebar filters them. By default archived threads and automation runs are left out.",
+        "List your Open SWE agent threads, newest first, filtered the way the web app sidebar filters them. By default archived threads and automation runs are left out.",
       inputSchema: listThreadsArgs,
       outputSchema: listThreadsResult,
       annotations: { readOnlyHint: true, openWorldHint: true },
@@ -64,7 +64,7 @@ export async function createMcpServer(
         .listThreadsPage(threadsPageQuery(args))
         .catch(rejectedSession(api))
       const result = listThreadsResultFrom(page, (id) =>
-        api.dashboardUrl(`/agents/${encodeURIComponent(id)}`)
+        api.webUrl(`/agents/${encodeURIComponent(id)}`)
       )
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -77,7 +77,7 @@ export async function createMcpServer(
     {
       title: "Create an Open SWE session",
       description:
-        "Create a fresh Open SWE session from a prompt, without uploading a local transcript. Starts the agent immediately by default; set start=false to create an idle session. Uses the signed-in person's dashboard defaults and repository access.",
+        "Create a fresh Open SWE session from a prompt, without uploading a local transcript. Starts the agent immediately by default; set start=false to create an idle session. Uses the signed-in person's web defaults and repository access.",
       inputSchema: createSessionArgs,
       outputSchema: createSessionResult,
       annotations: { readOnlyHint: false, openWorldHint: true },
@@ -87,7 +87,7 @@ export async function createMcpServer(
       const threadId = await api.createSession(args).catch(rejectedSession(api))
       const result = {
         thread_id: threadId,
-        url: api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`),
+        url: api.webUrl(`/agents/${encodeURIComponent(threadId)}`),
       }
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -100,7 +100,7 @@ export async function createMcpServer(
     {
       title: "Upload this session to Open SWE",
       description:
-        "Move this local coding session to Open SWE: its transcript becomes a new thread you continue from the dashboard, where a cloud agent picks up the work. No agent run starts until you send a message there. Before calling, commit every change in the working directory, including untracked files, and push it to `branch` on `repo`, or to the head branch of the pull request at `pr_url`; the cloud agent sees only what was pushed.",
+        "Move this local coding session to Open SWE: its transcript becomes a new thread you continue from the web app, where a cloud agent picks up the work. No agent run starts until you send a message there. Before calling, commit every change in the working directory, including untracked files, and push it to `branch` on `repo`, or to the head branch of the pull request at `pr_url`; the cloud agent sees only what was pushed.",
       inputSchema: uploadSessionArgs,
       outputSchema: uploadSessionResult,
       annotations: { readOnlyHint: false, openWorldHint: true },
@@ -113,7 +113,7 @@ export async function createMcpServer(
         .catch(rejectedSession(api))
       const result = {
         thread_id: threadId,
-        url: api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`),
+        url: api.webUrl(`/agents/${encodeURIComponent(threadId)}`),
       }
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -126,7 +126,7 @@ export async function createMcpServer(
     {
       title: "Request a human review in Slack",
       description:
-        "Ask people in Slack to review an open GitHub pull request: posts a card with its title, your inline_summary, and an \"I'll review\" button in the repository's review channel. It merges on its own once every reviewer who signs up approves on GitHub, or two hours after the request with at least one approval, when checks pass. Refused while the pull request is a draft (if you authored it, run `gh pr ready` first), has merge conflicts, or fails a required check, and unless the person signed in turned on human review requests on the dashboard's Feature Flags page. Asking again for a pull request you already asked about replaces the open card's summary. The card is the announcement: never link to it, since Slack unfurls the link into a second copy.",
+        "Ask people in Slack to review an open GitHub pull request: posts a card with its title, your inline_summary, and an \"I'll review\" button in the repository's review channel. It merges on its own once every reviewer who signs up approves on GitHub, or two hours after the request with at least one approval, when checks pass. Refused while the pull request is a draft (if you authored it, run `gh pr ready` first), has merge conflicts, or fails a required check, and unless the person signed in turned on human review requests on the web app's Feature Flags page. Asking again for a pull request you already asked about replaces the open card's summary. The card is the announcement: never link to it, since Slack unfurls the link into a second copy.",
       inputSchema: requestHumanReviewArgs,
       outputSchema: requestHumanReviewResult,
       annotations: { readOnlyHint: false, openWorldHint: true },

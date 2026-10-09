@@ -12,7 +12,7 @@ import {
 import { useStreamRuntime } from "@assistant-ui/react-langchain"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { agentsApi } from "@/features/agents/lib/api"
-import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
+import { createWebClient, webFetch } from "@/lib/langgraph-client"
 import { useSession } from "@/lib/session"
 import {
   createThreadListAdapter,
@@ -46,11 +46,8 @@ function useOpenSweThreadRuntime() {
     refetchInterval: (query) =>
       query.state.data?.status === "running" ? 3000 : false,
   })
-  const client = useMemo(
-    () => createDashboardClient(agentsApi.langGraphApiUrl),
-    []
-  )
-  const runStarts = useMemo(() => createRunStartTracker(dashboardFetch), [])
+  const client = useMemo(() => createWebClient(agentsApi.langGraphApiUrl), [])
+  const runStarts = useMemo(() => createRunStartTracker(webFetch), [])
   const attachments = useMemo(() => {
     const adapter = new SimpleImageAttachmentAdapter()
     adapter.accept = "image/png,image/jpeg,image/gif,image/webp"

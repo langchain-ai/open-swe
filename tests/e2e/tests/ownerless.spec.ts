@@ -12,7 +12,7 @@ async function loginAs(page: Page, user: { login: string; email: string }) {
   expect(res.ok()).toBeTruthy();
 }
 
-// Start a Slack thread as `sender` and land on the real dashboard app via the
+// Start a Slack thread as `sender` and land on the real web app via the
 // bot's own "Open in Web" link. Returns the agent thread id.
 async function openThreadViaSlack(
   page: Page,
@@ -57,7 +57,7 @@ async function sidebarThreadIds(page: Page): Promise<Array<string>> {
     let offset = 0;
     while (true) {
       const res = await page.request.get(
-        `/dashboard/api/threads/page?limit=50&offset=${offset}&resolved=${resolved}&scope=interactive`,
+        `/api/threads/page?limit=50&offset=${offset}&resolved=${resolved}&scope=interactive`,
       );
       expect(res.ok(), await res.text()).toBeTruthy();
       const payload = (await res.json()) as {
@@ -87,9 +87,7 @@ async function waitForStateToContain(
   await expect
     .poll(
       async () => {
-        const res = await page.request.get(
-          `/dashboard/api/threads/${threadId}/state`,
-        );
+        const res = await page.request.get(`/api/threads/${threadId}/state`);
         if (!res.ok()) return false;
         return JSON.stringify(await res.json()).includes(text);
       },
@@ -156,7 +154,7 @@ test.describe("ownerless threads", () => {
 
     const headers = { origin: baseURL ?? "", referer: `${baseURL ?? ""}/` };
     const resolved = await bob.request.post(
-      `/dashboard/api/threads/${threadId}/resolve`,
+      `/api/threads/${threadId}/resolve`,
       { data: { resolved: true }, headers },
     );
     expect(resolved.ok(), await resolved.text()).toBeTruthy();
@@ -164,15 +162,14 @@ test.describe("ownerless threads", () => {
       true,
     );
 
-    const deleted = await bob.request.delete(
-      `/dashboard/api/threads/${threadId}`,
-      { headers },
-    );
+    const deleted = await bob.request.delete(`/api/threads/${threadId}`, {
+      headers,
+    });
     expect([200, 204]).toContain(deleted.status());
 
     // Gone for the person who started it too.
     const afterDelete = await page.request.get(
-      `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+      `/api/threads/${threadId}?mark_viewed=false`,
     );
     expect(afterDelete.status()).toBe(404);
 

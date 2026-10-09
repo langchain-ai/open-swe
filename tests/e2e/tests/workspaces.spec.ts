@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// Workspaces end-to-end: dashboard management, the admin gate, and an admin
+// Workspaces end-to-end: web management, the admin gate, and an admin
 // thread that creates, provisions, and captures its own sandbox. The agent, the
 // tools, store writes, and prompt injection are real; only the LLM and snapshot
 // service are faked (see patches.py).
@@ -48,7 +48,7 @@ async function loginAs(page: Page, user: { login: string; email: string }) {
 }
 
 async function listWorkspaces(page: Page): Promise<Array<Workspace>> {
-  const res = await page.request.get("/dashboard/api/workspaces");
+  const res = await page.request.get("/api/workspaces");
   expect(res.ok()).toBeTruthy();
   return ((await res.json()) as { workspaces: Array<Workspace> }).workspaces;
 }
@@ -62,12 +62,12 @@ async function findWorkspace(
 
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 
-// The dashboard's mutating routes enforce same-origin, which a browser sets for
+// The web app's mutating routes enforce same-origin, which a browser sets for
 // itself but APIRequestContext does not.
 const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
 
 async function deleteWorkspace(page: Page, slug: string) {
-  await page.request.delete(`/dashboard/api/workspaces/${slug}`, {
+  await page.request.delete(`/api/workspaces/${slug}`, {
     headers: SAME_ORIGIN_HEADERS,
   });
 }
@@ -79,23 +79,21 @@ async function resetDefaultWorkspace(page: Page) {
 }
 
 async function setDefaultWorkspacePrompt(page: Page, prompt: string) {
-  const res = await page.request.put(
-    `/dashboard/api/workspaces/${DEFAULT_SLUG}`,
-    { headers: SAME_ORIGIN_HEADERS, data: { prompt, repos: ["e2e/default"] } },
-  );
+  const res = await page.request.put(`/api/workspaces/${DEFAULT_SLUG}`, {
+    headers: SAME_ORIGIN_HEADERS,
+    data: { prompt, repos: ["e2e/default"] },
+  });
   expect(res.ok()).toBeTruthy();
 }
 
 // Saving a default model retires the first-run onboarding modal, which otherwise
 // covers the composer on the new-agent page.
 async function saveDefaultModel(page: Page) {
-  const options = (await (
-    await page.request.get("/dashboard/api/options")
-  ).json()) as {
+  const options = (await (await page.request.get("/api/options")).json()) as {
     default_agent_model: string;
     default_agent_reasoning_effort: string;
   };
-  const res = await page.request.put("/dashboard/api/profile", {
+  const res = await page.request.put("/api/profile", {
     headers: SAME_ORIGIN_HEADERS,
     data: {
       default_model: options.default_agent_model,
@@ -148,7 +146,7 @@ async function createWorkspace(
   // A workspace owns at least one repository and a repository has exactly one
   // owner, so every test workspace claims one named after itself.
   const repo = `e2e/${name.toLowerCase().replace(/\s+/g, "-")}`;
-  const created = await page.request.post("/dashboard/api/workspaces", {
+  const created = await page.request.post("/api/workspaces", {
     headers: SAME_ORIGIN_HEADERS,
     data: { name, prompt, repos: [repo] },
   });
@@ -194,7 +192,7 @@ test.describe("Workspaces", () => {
         await page.getByRole("button", { name: "Done", exact: true }).click();
       }
       await expect(page.getByRole("dialog")).toHaveCount(0);
-      await page.route("**/dashboard/api/workspaces", async (route) => {
+      await page.route("**/api/workspaces", async (route) => {
         const request = route.request();
         if (request.method() !== "POST") return route.continue();
         await route.continue({
@@ -270,7 +268,7 @@ test.describe("Workspaces", () => {
   }) => {
     await loginAs(page, MEMBER);
 
-    const res = await page.request.get("/dashboard/api/workspaces");
+    const res = await page.request.get("/api/workspaces");
     expect(res.status()).toBe(403);
 
     await page.goto("/agents/workspaces");
@@ -284,7 +282,7 @@ test.describe("Workspaces", () => {
     await expect(page).toHaveURL(/\/workspaces$/);
     await expect(page.getByRole("button", { name: /^Delete / })).toHaveCount(0);
     const deletion = await page.request.delete(
-      `/dashboard/api/workspaces/${DRAFT_SLUG}`,
+      `/api/workspaces/${DRAFT_SLUG}`,
       {
         headers: SAME_ORIGIN_HEADERS,
       },
@@ -334,7 +332,7 @@ test.describe("Workspaces", () => {
     await expect
       .poll(async () => {
         const res = await page.request.get(
-          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+          `/api/threads/${threadId}?mark_viewed=false`,
         );
         return res.ok()
           ? ((await res.json()) as { workspace?: string | null }).workspace
@@ -403,7 +401,7 @@ test.describe("Workspaces", () => {
     await expect
       .poll(async () => {
         const response = await page.request.get(
-          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+          `/api/threads/${threadId}?mark_viewed=false`,
         );
         if (!response.ok()) return undefined;
         const thread = (await response.json()) as {
@@ -481,7 +479,7 @@ test.describe("Workspaces", () => {
     ]);
     expect(captures.map((c) => c.tag)).toEqual(["latest", "latest"]);
     const threadRes = await page.request.get(
-      `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+      `/api/threads/${threadId}?mark_viewed=false`,
     );
     expect(threadRes.ok()).toBeTruthy();
     const thread = (await threadRes.json()) as { sandboxId?: string | null };

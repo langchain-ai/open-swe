@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from openswe.transcript.snapshot import reading
 
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
-"""Matches the per-attachment cap the dashboard command path already enforces."""
+"""Matches the per-attachment cap the web app command path already enforces."""
 
 ALLOWED_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 """The bytes are served back with their stored type, so the list is exact."""

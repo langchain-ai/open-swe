@@ -14,7 +14,6 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
-from openswe.dashboard.options import model_supports_images
 from openswe.input_messages import (
     PersonIdentity,
     SystemIdentity,
@@ -31,9 +30,10 @@ from openswe.middleware.require_user_reply import (
 )
 from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.users import User
-from openswe.utils.dashboard_handoff import DASHBOARD_HANDOFF_BODY
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
+from openswe.utils.web_handoff import WEB_HANDOFF_BODY
+from openswe.web.options import model_supports_images
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ async def _build_blocks_from_payload(
     return blocks
 
 
-def _is_dashboard_queued_message(content: object) -> bool:
+def _is_web_queued_message(content: object) -> bool:
     return isinstance(content, dict) and content.get("source") == "dashboard"
 
 
@@ -221,17 +221,17 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         surface = current_reply_surface(state)
         moved_surface: ReplySurface | None = None
         for content in contents:
-            if _is_dashboard_queued_message(content):
+            if _is_web_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on
                 # every later web follow-up stacks identical handoff notices in
-                # the dashboard stream.
+                # the web app stream.
                 if surface == SLACK_REPLY_SURFACE:
                     queued_updates.extend(
                         cast(
                             list[dict[str, Any]],
                             build_input_messages(
-                                DASHBOARD_HANDOFF_BODY,
+                                WEB_HANDOFF_BODY,
                                 {
                                     "sender_id": "system:dashboard-handoff",
                                     "surface": "automation",
@@ -240,7 +240,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                                 systems=[
                                     {
                                         "id": "system:dashboard-handoff",
-                                        "display_name": "Dashboard handoff",
+                                        "display_name": "Web handoff",
                                         "platform": "open-swe",
                                     }
                                 ],
