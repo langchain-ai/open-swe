@@ -224,24 +224,12 @@ async def purge_expired_wakeup_crons(client: Any, *, now: datetime) -> int:
 
 async def cancel_thread_wakeups(thread_id: str) -> None:
     client = get_client(url=langgraph_url())
-    cron_ids: list[str] = []
-    offset = 0
-    while True:
-        page = await client.crons.search(
-            thread_id=thread_id,
-            metadata={"kind": _WAKEUP_KIND},
-            limit=_PURGE_PAGE_SIZE,
-            offset=offset,
-        )
-        cron_ids.extend(cron["cron_id"] for cron in page)
-        if len(page) < _PURGE_PAGE_SIZE:
-            break
-        offset += len(page)
-    for cron_id in cron_ids:
+    for cron in await _wakeup_crons(client, thread_id=thread_id):
         try:
-            await client.crons.delete(cron_id)
+            await client.crons.delete(cron["cron_id"])
         except NotFoundError:
-            logger.info("Thread wakeup already removed", extra={"cron_id": cron_id})
+            logger.info("Thread wakeup already removed", extra={"cron_id": cron["cron_id"]})
+    await sync_next_wakeup(client, thread_id)
 
 
 async def _purge_expired_wakeups_best_effort() -> None:
@@ -385,5 +373,5 @@ async def schedule_thread_wakeup(delay_minutes: int, prompt: str | None = None) 
         except Exception as exc:
             logger.exception("Failed to schedule thread wakeup for %s", thread_id)
             return {"success": False, "error": str(exc)}
-    await sync_next_wakeup(client, thread_id)
+        await sync_next_wakeup(client, thread_id)
     return result

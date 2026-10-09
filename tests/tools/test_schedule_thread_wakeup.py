@@ -141,6 +141,7 @@ async def test_cancel_thread_wakeups_removes_every_timer_only_for_that_thread(
     await wakeup_tool.cancel_thread_wakeups("worker")
 
     assert await client.crons.search() == unrelated
+    assert client.threads.metadata["next_wakeup_at_ms"] is None
 
 
 def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:
