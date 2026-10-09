@@ -1,11 +1,13 @@
+import {
+  GearRegularIcon,
+  MoonRegularIcon,
+  SignOutRegularIcon,
+  SunRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Avatar } from "@langchain/macaw-components/Avatar"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { DesktopIcon } from "@phosphor-icons/react/dist/ssr/Desktop"
-import { GearIcon } from "@phosphor-icons/react/dist/ssr/Gear"
-import { MoonIcon } from "@phosphor-icons/react/dist/ssr/Moon"
-import { SignOutIcon } from "@phosphor-icons/react/dist/ssr/SignOut"
-import { SunIcon } from "@phosphor-icons/react/dist/ssr/Sun"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -27,8 +29,8 @@ const THEME_OPTIONS: Array<{
   label: string
   icon: IconComponent
 }> = [
-  { value: "light", label: "Light", icon: SunIcon },
-  { value: "dark", label: "Dark", icon: MoonIcon },
+  { value: "light", label: "Light", icon: SunRegularIcon },
+  { value: "dark", label: "Dark", icon: MoonRegularIcon },
   { value: "system", label: "System", icon: DesktopIcon },
 ]
 
@@ -178,7 +180,7 @@ export function SidebarUserMenu({
               onClick={() => setOpen(false)}
               className="flex w-full items-center gap-space-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-elevated-hover"
             >
-              <GearIcon size={14} weight="regular" />
+              <GearRegularIcon size={14} />
               Settings
             </Link>
           )}
@@ -188,7 +190,7 @@ export function SidebarUserMenu({
             onClick={() => void onLogout()}
             className="flex w-full items-center gap-space-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-elevated-hover"
           >
-            <SignOutIcon size={14} weight="regular" />
+            <SignOutRegularIcon size={14} />
             Sign out
           </button>
         </div>

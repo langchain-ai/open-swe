@@ -1,3 +1,11 @@
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+  MagnifyingGlassRegularIcon,
+  PlusIcon,
+  PushPinRegularIcon,
+  StackRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -12,18 +20,11 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner, SpinnerIcon } from "@langchain/macaw-components/Spinner"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
-import { NotePencilIcon } from "@phosphor-icons/react/dist/ssr/NotePencil"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
-import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
-import { StackIcon } from "@phosphor-icons/react/dist/ssr/Stack"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -726,7 +727,7 @@ export function AgentsSidebar({
         </Link>
         <div className="flex items-center gap-1">
           <IconButton
-            icon={MagnifyingGlassIcon}
+            icon={MagnifyingGlassRegularIcon}
             label="Search"
             size="sm"
             color="secondary"
@@ -746,7 +747,7 @@ export function AgentsSidebar({
           onClick={layout.closeOnMobile}
           className={NAV_ROW_CLASS}
         >
-          <NotePencilIcon size={16} weight="regular" />
+          <PlusIcon size={16} weight="regular" />
           New Thread
         </Link>
         {profile.data?.concierge_mode && (
@@ -931,7 +932,7 @@ export function AgentsSidebar({
                 action={
                   <SidebarSectionAction
                     label="New thread"
-                    icon={NotePencilIcon}
+                    icon={PlusIcon}
                     onClick={() => {
                       layout.closeOnMobile()
                       void navigate({ to: chat.home })
@@ -1031,7 +1032,7 @@ function WorkspaceGroupSection({
         aria-expanded={!collapsed}
         className="group/workspace flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
       >
-        <StackIcon size={14} weight="regular" className="shrink-0" />
+        <StackRegularIcon size={14} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
         <Caret
           weight="regular"
@@ -1147,7 +1148,7 @@ function RepoGroup({
           <span className="min-w-0 flex-1 truncate">{group.label}</span>
         </button>
         <IconButton
-          icon={pinned ? PushPinSlashIcon : PushPinIcon}
+          icon={pinned ? PushPinSlashIcon : PushPinRegularIcon}
           label={pinned ? `Unpin ${group.label}` : `Pin ${group.label}`}
           tooltipProps={{
             title: pinned ? "Unpin repository" : "Pin repository",
@@ -1159,7 +1160,7 @@ function RepoGroup({
           className="hidden group-hover/folder:inline-flex"
         />
         <IconButton
-          icon={NotePencilIcon}
+          icon={PlusIcon}
           label={`Compose message in ${group.label}`}
           tooltipProps={{ title: "Compose message" }}
           size="xs"

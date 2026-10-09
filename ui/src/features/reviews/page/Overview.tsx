@@ -1,7 +1,7 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
 import { cn, formatRelativeTime } from "@/lib/utils"

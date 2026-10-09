@@ -1,17 +1,19 @@
+import {
+  CaretDownIcon,
+  CheckIcon,
+  GlobeRegularIcon,
+  WrenchRegularIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
 import { useCallback, useEffect, useState } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
-import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 import { HammerIcon } from "@phosphor-icons/react/dist/ssr/Hammer"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
-import { WrenchIcon } from "@phosphor-icons/react/dist/ssr/Wrench"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { ToolResultBody } from "./ToolResultBody"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
@@ -26,12 +28,12 @@ const ICONS: Record<WorkEntryIconName, IconComponent> = {
   check: CheckIcon,
   "circle-alert": WarningCircleIcon,
   eye: EyeIcon,
-  globe: GlobeIcon,
+  globe: GlobeRegularIcon,
   hammer: HammerIcon,
   "message-circle": ChatCircleIcon,
   "square-pen": PencilSimpleIcon,
   terminal: TerminalIcon,
-  wrench: WrenchIcon,
+  wrench: WrenchRegularIcon,
   zap: LightningIcon,
 }
 

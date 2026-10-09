@@ -1,11 +1,14 @@
+import {
+  CaretDownIcon,
+  GlobeRegularIcon,
+} from "@langchain/macaw-components/icons"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
 
 import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
@@ -13,10 +16,10 @@ import type { ThreadVisibility } from "@/lib/api"
 
 const OPTIONS: Record<
   ThreadVisibility,
-  { label: string; Icon: typeof LockIcon }
+  { label: string; Icon: IconComponent }
 > = {
   private: { label: "Private", Icon: LockIcon },
-  public: { label: "Workspace", Icon: GlobeIcon },
+  public: { label: "Workspace", Icon: GlobeRegularIcon },
 }
 const ORDER: ThreadVisibility[] = ["private", "public"]
 

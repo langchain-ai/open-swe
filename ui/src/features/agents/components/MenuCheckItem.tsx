@@ -1,9 +1,9 @@
+import { CheckIcon } from "@langchain/macaw-components/icons"
 import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
 } from "@langchain/macaw-components/DropdownMenu"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import type { ComponentProps } from "react"
 
 import { cn } from "@/lib/utils"

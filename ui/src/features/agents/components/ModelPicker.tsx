@@ -1,4 +1,10 @@
 import {
+  CaretDownIcon,
+  CaretRightIcon,
+  CheckIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
+import {
   useCallback,
   useEffect,
   useEffectEvent,
@@ -13,10 +19,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 
 import type { ModelOption } from "@/lib/api"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
@@ -467,7 +469,7 @@ export function ModelPicker({
                 autoFocus
                 variant="plain"
                 size="md"
-                leftIcon={MagnifyingGlassIcon}
+                leftIcon={MagnifyingGlassRegularIcon}
                 value={query}
                 onChange={setQuery}
                 placeholder="Search models"

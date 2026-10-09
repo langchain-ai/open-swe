@@ -1,5 +1,5 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useState } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 

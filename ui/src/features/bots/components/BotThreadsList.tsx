@@ -1,3 +1,7 @@
+import {
+  ArrowLeftIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
 import { Link } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { Avatar } from "@langchain/macaw-components/Avatar"
@@ -6,9 +10,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
-import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
