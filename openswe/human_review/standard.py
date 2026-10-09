@@ -59,6 +59,7 @@ from openswe.human_review.lifecycle import (
 )
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
+from openswe.human_review.pick_message import PickMessage
 from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from openswe.prompts import prompt
@@ -73,7 +74,7 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
     remove_slack_reaction,
 )
-from openswe.slack.dm import send_dm
+from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
@@ -719,7 +720,7 @@ async def assign(
             f"Open SWE picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
         )
         origin = added.dm_origin
-        await send_dm(
+        sent = await send_dm_with_location(
             user.slack_user_id,
             dm_text,
             blocks=block_payload(
@@ -731,6 +732,10 @@ async def assign(
             ),
             origin=origin,
         )
+        if sent is not None:
+            await added.record_pick_message(
+                user.id, PickMessage(channel_id=sent[0], ts=sent[1], text=dm_text)
+            )
     await _schedule(added, f"remind:{user.id}", timedelta(0))
     return RequestResult(
         success=True,
@@ -1465,7 +1470,7 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         if participant.user.slack_user_id:
             text = f"Your review snooze ended: {request.pull_request.url}."
             origin = request.dm_origin
-            await send_dm(
+            sent = await send_dm_with_location(
                 participant.user.slack_user_id,
                 text,
                 blocks=block_payload(
@@ -1481,6 +1486,10 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
                 ),
                 origin=origin,
             )
+            if sent is not None:
+                await request.record_pick_message(
+                    user_id, PickMessage(channel_id=sent[0], ts=sent[1], text=text)
+                )
         return {"status": "reminded"}
     if step.startswith("remind:"):
         return {"status": await _remind_reviewer(request, step.removeprefix("remind:"))}
