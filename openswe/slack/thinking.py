@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
+from pydantic import BaseModel
 
 from openswe.slack.client import (
     SlackStreamError,
@@ -37,6 +38,10 @@ _FLUSH_INTERVAL_SECONDS = 1.0
 _DEFAULT_RETRY_SECONDS = 30.0
 _MAX_RETRY_SECONDS = 300.0
 _THINKING_STATUS = "Thinking..."
+_UNFINISHED_RUN_STATUSES = frozenset({"pending", "running"})
+_RESUBSCRIBE_SECONDS = 1.0
+# About ten minutes of a queued run waiting its turn before the timeline gives up.
+_MAX_SUBSCRIPTIONS = 600
 _STATUS_REFRESH_SECONDS = 90.0
 _LOCATION_CHECK_SECONDS = 15.0
 _STATUS_RETRY_DELAYS = (1.0, 2.0)
@@ -276,6 +281,18 @@ class SlackThinkingStream:
                 self.pending.clear()
 
 
+class _RunStatus(BaseModel):
+    status: str = ""
+
+
+async def _run_status(client: LangGraphClient, thread_id: str, run_id: str) -> str:
+    try:
+        return _RunStatus.model_validate(await client.runs.get(thread_id, run_id)).status
+    except Exception:
+        logger.warning("Could not read a run's status for Slack Thinking Steps", exc_info=True)
+        return ""
+
+
 async def stream_slack_thinking_steps(
     *,
     client: LangGraphClient,
@@ -305,21 +322,39 @@ async def stream_slack_thinking_steps(
     status = "error"
     try:
         active = False
-        async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
-            async for event in thread_stream.subscribe(["lifecycle", "tools"]):
-                lifecycle = root_lifecycle(event)
-                if lifecycle is not None and lifecycle[0] == run_id:
-                    if lifecycle[1] == "running":
-                        active = True
-                    elif lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
-                        status = "success" if lifecycle[1] == "completed" else lifecycle[1]
-                        break
-                if active:
-                    stream.consume(event)
-                    if await stream.moved_away():
-                        status = "moved"
-                        break
-                    await stream.flush()
+        for _ in range(_MAX_SUBSCRIPTIONS):
+            done = False
+            async with client.threads.stream(thread_id, assistant_id="agent") as thread_stream:
+                # The SDK ends every subscription when any run on the thread ends, such
+                # as the one this run queued behind; the open stream resumes on a new one.
+                received = True
+                while received and not done:
+                    received = False
+                    async for event in thread_stream.subscribe(["lifecycle", "tools"]):
+                        received = True
+                        lifecycle = root_lifecycle(event)
+                        if lifecycle is not None and lifecycle[0] == run_id:
+                            if lifecycle[1] == "running":
+                                active = True
+                            elif lifecycle[1] in TERMINAL_LIFECYCLE_EVENTS:
+                                status = "success" if lifecycle[1] == "completed" else lifecycle[1]
+                                done = True
+                                break
+                        if active:
+                            stream.consume(event)
+                            if await stream.moved_away():
+                                status = "moved"
+                                done = True
+                                break
+                            await stream.flush()
+            if done:
+                break
+            # A subscription that got nothing means the stream itself closed.
+            run_status = await _run_status(client, thread_id, run_id)
+            if run_status not in _UNFINISHED_RUN_STATUSES:
+                status = "success" if run_status == "success" else run_status or "error"
+                break
+            await asyncio.sleep(_RESUBSCRIBE_SECONDS)
     except asyncio.CancelledError:
         status = "interrupted"
         raise

@@ -44,13 +44,18 @@ import { useProfile } from "@/lib/profile"
 export const agentThreadKeys = {
   lists: ["agent-threads", "lists"] as const,
   pinned: ["agent-threads", "lists", "pinned"] as const,
-  repos: (params: { includeResolved: boolean; includeAutomations: boolean }) =>
-    ["agent-threads", "lists", "repos", params] as const,
+  repos: (params: {
+    includeResolved: boolean
+    includeAutomations: boolean
+    owned: boolean
+  }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
   detail: (threadId: string) => ["agent-threads", threadId] as const,
   pullRequestStatus: (threadId: string) =>
     ["agent-threads", threadId, "pull-request-status"] as const,
+  queuedMessages: (threadId: string) =>
+    ["agent-threads", threadId, "queued-messages"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -612,15 +617,18 @@ export const SIDEBAR_PAGE_SIZE = 10
 function sidebarPageParams({
   includeAutomations,
   includeResolved,
+  owned,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
+  owned: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
     hierarchy: false,
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
+    ...(owned ? { owned } : {}),
   }
 }
 
@@ -642,13 +650,15 @@ export function useSidebarPinnedThreads({ enabled = true } = {}) {
 export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   enabled = true,
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   enabled?: boolean
 }) {
-  const params = { includeAutomations, includeResolved }
+  const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
     queryKey: agentThreadKeys.repos(params),
@@ -725,15 +735,17 @@ export function sidebarRecentsParams({
   repoMode,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
 }: {
   repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
-    ...sidebarPageParams({ includeAutomations, includeResolved }),
+    ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
   }
@@ -743,12 +755,14 @@ export function useSidebarRecents({
   repoMode,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
   enabled = true,
 }: {
   repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -757,6 +771,7 @@ export function useSidebarRecents({
       repoMode,
       includeAutomations,
       includeResolved,
+      owned,
       sort,
     }),
     enabled
@@ -767,18 +782,20 @@ export function useSidebarRepoThreads({
   repoFullName,
   includeAutomations = false,
   includeResolved = false,
+  owned = false,
   sort = "created",
   enabled = true,
 }: {
   repoFullName: string | null
   includeAutomations?: boolean
   includeResolved?: boolean
+  owned?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
-      ...sidebarPageParams({ includeAutomations, includeResolved }),
+      ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
       ...(repoFullName ? { repo: repoFullName } : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
@@ -786,11 +803,15 @@ export function useSidebarRepoThreads({
   )
 }
 
+// Run costs land through a deferred refresh 15s+ after a run ends (see
+// `agent_cost._RETRY_DELAYS_SECONDS`), after the running-state poll has stopped.
+const RUN_COST_REFETCH_DELAYS_MS = [20_000, 60_000, 120_000]
+
 export function useAgentThread(threadId: string) {
   const queryClient = useQueryClient()
   const queryKey = agentThreadKeys.detail(threadId)
 
-  return useQuery({
+  const query = useQuery({
     queryKey,
     queryFn: async ({ queryKey: key }) => {
       const thread = await agentsApi.getThread(threadId)
@@ -810,6 +831,21 @@ export function useAgentThread(threadId: string) {
     // would 404 and replace the seeded view with a load error.
     staleTime: 30_000,
   })
+
+  const isRunning = query.data?.status === "running"
+  const { refetch } = query
+  const wasRunning = useRef(isRunning)
+  useEffect(() => {
+    const settled = wasRunning.current && !isRunning
+    wasRunning.current = isRunning
+    if (!settled) return
+    const timers = RUN_COST_REFETCH_DELAYS_MS.map((delay) =>
+      window.setTimeout(() => void refetch(), delay)
+    )
+    return () => timers.forEach(window.clearTimeout)
+  }, [isRunning, refetch])
+
+  return query
 }
 
 export function useAgentThreadPullRequestStatus(
@@ -824,6 +860,15 @@ export function useAgentThreadPullRequestStatus(
     refetchInterval: 30_000,
     refetchOnWindowFocus: "always",
     retry: false,
+  })
+}
+
+export function useAgentThreadQueuedMessages(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.queuedMessages(threadId),
+    queryFn: () => agentsApi.getThreadQueuedMessages(threadId),
+    enabled: Boolean(threadId),
+    meta: { invalidatedBy: [invalidationTopic("thread-queues", threadId)] },
   })
 }
 

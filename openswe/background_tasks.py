@@ -15,7 +15,7 @@ from typing import Any, Literal, NamedTuple
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError
 
-from openswe.dispatch import dispatch_agent_run
+from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox
@@ -126,29 +126,6 @@ def _notification(task: dict[str, Any]) -> str:
         durations=f"{duration}s",
         output_path=output_path,
     )
-
-
-def _thread_workspace(metadata: dict[str, Any]) -> str | None:
-    """The workspace to carry into a follow-up run; ``environment`` is the pre-workspace key."""
-    for key in ("workspace", "environment"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _dispatch_config(metadata: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    configurable: dict[str, Any] = {"thread_id": thread_id}
-    for key in ("source", "repo", "github_login", "triggering_user_email"):
-        value = metadata.get(key)
-        if value is not None:
-            configurable["user_email" if key == "triggering_user_email" else key] = value
-    workspace = _thread_workspace(metadata)
-    if workspace is not None:
-        configurable["workspace"] = workspace
-        configurable["environment"] = workspace
-    configurable.update(SourceContext.from_metadata(metadata).dump())
-    return configurable
 
 
 async def _claim(backend: Any, task_id: str) -> bool:
@@ -299,7 +276,7 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
 
                 configurable = await recipient_config(thread_id)
             else:
-                configurable = _dispatch_config(metadata, thread_id)
+                configurable = follow_up_configurable(metadata, thread_id)
             configurable["background_task_completion"] = True
             # A completion run can change task state before delivery finishes.
             status_metadata = None

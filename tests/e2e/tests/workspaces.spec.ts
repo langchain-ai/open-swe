@@ -248,7 +248,7 @@ test.describe("Workspaces", () => {
     await page
       .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
       .click();
-    const confirmation = page.getByRole("alertdialog");
+    const confirmation = page.getByRole("dialog");
     await expect(confirmation).toContainText(`Delete ${DRAFT_NAME}?`);
     await confirmation.getByRole("button", { name: "Cancel" }).click();
     expect(await findWorkspace(page, DRAFT_SLUG)).toBeDefined();
@@ -352,7 +352,7 @@ test.describe("Workspaces", () => {
     await resetDefaultWorkspace(page);
   });
 
-  test("an env: tag on the opening Slack message selects the workspace", async ({
+  test("a /workspace: command on the opening Slack message selects the workspace", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
@@ -365,7 +365,7 @@ test.describe("Workspaces", () => {
     await page
       .locator("#text")
       .fill(
-        `<@U0BOT> env:${ALT_SLUG} please add a greet() helper and open a PR`,
+        `<@U0BOT> /workspace:${ALT_SLUG} please add a greet() helper and open a PR`,
       );
     await page.locator("#send").click();
 
@@ -375,8 +375,8 @@ test.describe("Workspaces", () => {
 
     const systemPrompt = await lastSystemPrompt(page);
     expect(systemPrompt).toContain(ALT_WORKSPACE_PROMPT);
-    // The tag itself is consumed, so the agent never sees it in the request.
-    expect(systemPrompt).not.toContain(`env:${ALT_SLUG}`);
+    // The command itself is consumed, so the agent never sees it in the request.
+    expect(systemPrompt).not.toContain(`/workspace:${ALT_SLUG}`);
 
     await deleteWorkspace(page, ALT_SLUG);
   });
@@ -508,7 +508,9 @@ test.describe("Workspaces", () => {
     await expect(page.getByText("Refresh log")).toBeVisible();
     // Each stage is visible to everyone, not only through the agent's tools.
     for (const label of ["boot", "setup", "update", "capture"]) {
-      await expect(page.getByText(`✓ ${label}`)).toBeVisible();
+      await expect(
+        page.getByText(label, { exact: true }).getByLabel("Succeeded"),
+      ).toBeVisible();
     }
     await expect(
       page.getByRole("link", { name: "Configure default", exact: true }),
