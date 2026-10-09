@@ -538,9 +538,9 @@ async def slack_webhook(
     if bot_user_id and user_id == bot_user_id:
         return ignored("Event from this bot user")
 
-    # Watching a person's pull request post or offering to get it reviewed never takes over
-    # the message's own routing, and a post that mentions Open SWE is the agent's to handle,
-    # or both would open a review request.
+    # Watching a person's pull request post or suggesting a review never takes over the
+    # message's own routing, and a post the agent will handle anyway is left to it, or both
+    # would open a review request.
     person_post = (
         not is_message_update
         and allowed_bot is None
@@ -557,20 +557,25 @@ async def slack_webhook(
         and "/pull/" in text
     ):
         background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
-    # Queued after the watch, which may already count the post as the review request.
-    if (
-        person_post
+    reviewable_link = (
+        new_pr_links[0]
+        if person_post
         and event.subtype in {"", "file_share", "thread_broadcast"}
         and len(new_pr_links) == 1
-    ):
-        background_tasks.add_task(
-            review_offer.offer_review,
-            channel_id,
-            thread_ts,
-            reply_thread_ts,
-            user_id,
-            new_pr_links[0],
-        )
+        else None
+    )
+
+    def suggest_review() -> None:
+        # Queued after the watch, which may already count the post as the review request.
+        if reviewable_link is not None:
+            background_tasks.add_task(
+                review_offer.offer_review,
+                channel_id,
+                thread_ts,
+                reply_thread_ts,
+                user_id,
+                reviewable_link,
+            )
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
     explicit_mention = bool(
@@ -584,6 +589,7 @@ async def slack_webhook(
         and leading_mention
         and leading_mention.group(1) != bot_user_id
     ):
+        suggest_review()
         return ignored("Message addressed to another user")
 
     message = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
@@ -613,6 +619,8 @@ async def slack_webhook(
             user_id=user_id,
             explicit_mention=explicit_mention,
         )
+    if not (in_kitchen_channel or solo_followup):
+        suggest_review()
     if not (
         explicit_mention
         or is_message_update

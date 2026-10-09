@@ -322,10 +322,19 @@ async def test_pr_links_are_recorded_without_starting_runs(
     assert {link.team_id for link in links} == {"T1", "T2"}
 
 
+@pytest.mark.parametrize("handled_by", ["", "kitchen", "solo_followup"])
 async def test_a_newly_linked_pull_request_is_offered_for_review_once(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, handled_by: str
 ) -> None:
     monkeypatch.setattr(slack_routes, "watch_post", AsyncMock())
+    monkeypatch.setattr(
+        slack_routes, "is_kitchen_channel", AsyncMock(return_value=handled_by == "kitchen")
+    )
+    monkeypatch.setattr(
+        slack_routes,
+        "allow_solo_thread_followup",
+        AsyncMock(return_value=handled_by == "solo_followup"),
+    )
     payload = _message_payload("can someone look at https://github.com/lc/repo/pull/7", "Ev-pr")
     payload["team_id"] = "T1"
     background_tasks = _FakeBackgroundTasks()
@@ -336,6 +345,10 @@ async def test_a_newly_linked_pull_request_is_offered_for_review_once(
         )
 
     offers = [args for func, args in background_tasks.tasks if func is review_offer.offer_review]
+    # The agent already gets this message, so a suggestion would ask it twice.
+    if handled_by:
+        assert offers == []
+        return
     assert len(offers) == 1
     channel_id, thread_ts, reply_thread_ts, user_id, ref = offers[0]
     assert (channel_id, thread_ts, reply_thread_ts, user_id) == (
