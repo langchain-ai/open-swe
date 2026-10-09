@@ -29,19 +29,19 @@ from openswe.slack.client import (
     remove_slack_reaction,
     replace_slack_command_message,
 )
+from openswe.slack.parsed_message import SlackAction
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
 from openswe.slack.thinking import settle_slack_thread_status
 from openswe.slack.webhook import workspace_scoped_default_repo
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User
-from openswe.utils.message_commands import BY_THE_WAY
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
 ASK_COMMAND = "/oswe"
-BY_THE_WAY_COMMAND = BY_THE_WAY.name
+BY_THE_WAY_COMMAND = SlackAction.BY_THE_WAY.value
 _CONTEXT_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_context)", re.IGNORECASE)
 MAX_QUESTION_CHARS = 2000
 CHANNEL_CONTEXT_MESSAGE_LIMIT = 30
@@ -71,12 +71,6 @@ class SlackAskRequest(BaseModel):
     # `/btw` only: the Slack thread the public answer goes to, and the mention's own ts.
     reply_thread_ts: str = ""
     message_ts: str = ""
-
-    @staticmethod
-    def by_the_way_question(text: str, bot_user_id: str) -> str | None:
-        """The question in an `@Open SWE /btw ...` mention; None when it is not one."""
-        parsed = BY_THE_WAY.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
-        return parsed.argument if parsed is not None else None
 
     @property
     def by_the_way(self) -> bool:

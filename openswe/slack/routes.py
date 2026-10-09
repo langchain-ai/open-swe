@@ -35,6 +35,7 @@ from openswe.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
+from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
 from openswe.slack.payloads import (
     SlackBlockAction,
     SlackButtonValue,
@@ -565,9 +566,12 @@ async def slack_webhook(
     ):
         return ignored("Message addressed to another user")
 
+    message = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
     by_the_way = (
-        SlackAskRequest.by_the_way_question(text, bot_user_id)
-        if explicit_mention and not (in_code_channel or in_dm_channel or allowed_bot)
+        message.argument
+        if message.action is SlackAction.BY_THE_WAY
+        and explicit_mention
+        and not (in_code_channel or in_dm_channel or allowed_bot)
         else None
     )
     solo_followup = False
@@ -709,21 +713,23 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
-            web = (
-                None
-                if in_dm_channel or allowed_bot is not None
-                else BreakoutCommand.parse(text, bot_user_id, command="web")
-            )
-            if web is not None:
-                background_tasks.add_task(process_slack_web, request, web, repo)
+            if (
+                message.action is SlackAction.BREAKOUT_WEB
+                and not in_dm_channel
+                and allowed_bot is None
+            ):
+                background_tasks.add_task(
+                    process_slack_web, request, BreakoutCommand.from_message(message), repo
+                )
                 return accepted("Slack web question queued")
-            breakout = (
-                None
-                if in_code_channel or in_dm_channel or allowed_bot is not None
-                else BreakoutCommand.parse(text, bot_user_id)
-            )
-            if breakout is not None:
-                background_tasks.add_task(process_slack_breakout, request, breakout, repo)
+            if (
+                message.action is SlackAction.BREAKOUT
+                and not (in_code_channel or in_dm_channel)
+                and allowed_bot is None
+            ):
+                background_tasks.add_task(
+                    process_slack_breakout, request, BreakoutCommand.from_message(message), repo
+                )
                 return accepted("Slack breakout queued")
             background_tasks.add_task(service.process_slack_mention, request, repo)
             return accepted("Slack mention queued")
