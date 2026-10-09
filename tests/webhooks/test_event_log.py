@@ -47,11 +47,16 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
         workspace_id=None,
         repository_id=None,
         pull_request_id=None,
-        payload={"action": "created", "comment": {"body": "private content"}},
+        payload={
+            "action": "created",
+            "repository": {"full_name": "acme/widgets"},
+            "comment": {"body": "private content"},
+        },
     )
     await posthog.record_webhook(event)
     assert requests[0]["properties"]["distinct_id"] == "open-swe:webhook:github"
     assert requests[0]["event"] == "Webhook Received"
+    assert requests[0]["properties"]["repo"] == "acme/widgets"
     assert "private content" not in json.dumps(requests)
     assert requests[0]["properties"]["action"] == "created"
     assert requests[0]["properties"]["environment"] == "staging"

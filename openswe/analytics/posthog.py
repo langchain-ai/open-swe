@@ -39,6 +39,7 @@ async def _capture(
                     "action",
                     "workspace_id",
                     "repository_id",
+                    "repo",
                     "pull_request_id",
                 }
             },
@@ -96,6 +97,8 @@ async def record_usage(
 
 async def record_webhook(event: LoggedEvent) -> None:
     action = event.payload.get("action") if isinstance(event.payload, dict) else None
+    repository = event.payload.get("repository") if isinstance(event.payload, dict) else None
+    repo = repository.get("full_name") if isinstance(repository, dict) else None
     await _capture(
         "Webhook Received",
         {
@@ -107,6 +110,7 @@ async def record_webhook(event: LoggedEvent) -> None:
             "event_type": event.base_event_type,
             "action": action if isinstance(action, str) else "",
             "surface": "webhook",
+            **({"repo": repo} if event.source == "github" and isinstance(repo, str) else {}),
             **{
                 field: str(value) if value else None
                 for field, value in {
@@ -130,7 +134,12 @@ async def record_mcp_tool(tool: str, is_error: bool) -> None:
             email=cfg.user_email,
             event_type="track",
             name="MCP Tool Called",
-            properties={"tool": tool, "surface": "mcp", "is_error": is_error},
+            properties={
+                "tool": tool,
+                "surface": "mcp",
+                "is_error": is_error,
+                "repo": cfg.repo_full_name,
+            },
         )
     except Exception:
         logger.warning("PostHog MCP capture failed", exc_info=True)
