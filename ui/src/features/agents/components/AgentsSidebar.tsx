@@ -86,6 +86,7 @@ import {
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
+import { useSidebarKeyboardNav } from "@/features/agents/lib/useSidebarKeyboardNav"
 import {
   useLegacyLocalThreads,
   useLegacyLocalActivity,
@@ -482,26 +483,25 @@ export function AgentsSidebar({
     item.location === "cloud"
       ? item.thread.resolved === true
       : item.thread.archived === true
-  const toggleArchived = (item: SidebarThreadItem) => {
-    if (item.location === "local") {
+  const setArchived = (
+    { location, id }: Pick<SidebarThreadItem, "location" | "id">,
+    archived: boolean
+  ) => {
+    if (location === "local") {
       void window.openSweDesktop
-        ?.updateLegacyLocalThread({
-          threadId: item.id,
-          archived: !isArchived(item),
-        })
-        .then(() => refreshLocalThreads(item.id))
+        ?.updateLegacyLocalThread({ threadId: id, archived })
+        .then(() => refreshLocalThreads(id))
         .catch((error: unknown) =>
           reportError({ title: "Couldn't archive or restore thread", error })
         )
       return
     }
-    if (!pendingResolves.some((vars) => vars.threadId === item.id)) {
-      resolveThread.mutate({
-        threadId: item.id,
-        resolved: !isArchived(item),
-      })
+    if (!pendingResolves.some((vars) => vars.threadId === id)) {
+      resolveThread.mutate({ threadId: id, resolved: archived })
     }
   }
+  const toggleArchived = (item: SidebarThreadItem) =>
+    setArchived(item, !isArchived(item))
   const togglePin = (item: SidebarThreadItem) => {
     if (item.location === "local") {
       toggleLocalPin(item.id)
@@ -520,6 +520,16 @@ export function AgentsSidebar({
     : activeThreadId
       ? `cloud:${activeThreadId}`
       : undefined
+  const onThreadListKeyDown = useSidebarKeyboardNav({
+    viewport: scrollViewport,
+    activeKey,
+    archiveActive: () => {
+      if (activeLocalSessionId)
+        setArchived({ location: "local", id: activeLocalSessionId }, true)
+      else if (activeThread && !activeThread.resolved)
+        setArchived({ location: "cloud", id: activeThread.id }, true)
+    },
+  })
 
   const rowProps = (
     item: SidebarThreadItem,
@@ -795,6 +805,7 @@ export function AgentsSidebar({
           ref={scrollViewport}
           className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
           onScroll={measureScrollEdges}
+          onKeyDown={onThreadListKeyDown}
         >
           <SidebarNav
             className={isDesktop ? "pb-3" : "pb-4"}

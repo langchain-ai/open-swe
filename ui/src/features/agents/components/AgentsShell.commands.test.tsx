@@ -57,6 +57,7 @@ const stub = vi.hoisted(() => {
     activity: {},
     session: { data: { login: "octocat" } },
     theme: { toggleTheme: fn() },
+    inbox: {} as { active?: object; recents?: object },
   }
 })
 
@@ -94,9 +95,9 @@ vi.mock("@/lib/chatRoutes", () => ({
 
 vi.mock("@/features/agents/lib/queries", async (actual) => ({
   ...((await actual()) as object),
-  useSidebarActiveThread: () => stub.activeThread,
+  useSidebarActiveThread: () => stub.inbox.active ?? stub.activeThread,
   useSidebarPinnedThreads: () => stub.pinned,
-  useSidebarRecents: () => stub.emptyList,
+  useSidebarRecents: () => stub.inbox.recents ?? stub.emptyList,
   useSidebarRepos: () => stub.emptyList,
   useSidebarRepoThreads: () => stub.emptyList,
   useInfiniteThreadsPages: () => stub.pages,
@@ -136,7 +137,10 @@ window.matchMedia = ((query: string) => ({
   removeEventListener: vi.fn(),
 })) as unknown as typeof window.matchMedia
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  stub.inbox = {}
+})
 
 // A registration loop never reaches quiescence, so waiting it out would hang
 // the run rather than fail it. The probe re-renders on every change to the
@@ -247,4 +251,49 @@ it("opens asynchronous workers as real conversations and expands the selected wo
   expect(
     screen.getByRole("link", { name: /Inspect code/ }).getAttribute("href")
   ).toBe("/agents/parent?subagent=sync-tool")
+})
+
+it("walks the sidebar like an inbox and archives the open thread before advancing", () => {
+  const thread = (id: string, createdAt: number) =>
+    ({
+      id,
+      title: `Thread ${id}`,
+      status: "idle",
+      viewed: true,
+      resolved: false,
+      repo: "",
+      repoFullName: "",
+      createdAt,
+      updatedAt: createdAt,
+    }) as AgentThread
+  const threads = [thread("a", 3), thread("b", 2), thread("c", 1)]
+  stub.inbox = {
+    active: threads[1],
+    recents: { ...stub.emptyList, items: threads, hasMore: false },
+  }
+  Element.prototype.scrollIntoView = vi.fn()
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <AppCommandProvider>
+        <AgentsShell user={USER} activeThreadId="b">
+          <div />
+        </AgentsShell>
+      </AppCommandProvider>
+    </QueryClientProvider>
+  )
+  const row = (name: string) =>
+    screen.getByRole("link", { name: new RegExp(`Thread ${name}`) })
+
+  fireEvent.keyDown(window, { key: "j" })
+  expect(document.activeElement).toBe(row("c"))
+
+  fireEvent.keyDown(row("c"), { key: "ArrowUp" })
+  expect(document.activeElement).toBe(row("b"))
+
+  fireEvent.keyDown(window, { key: "e" })
+  expect(stub.resolve.mutate).toHaveBeenCalledWith({
+    threadId: "b",
+    resolved: true,
+  })
+  expect(document.activeElement).toBe(row("c"))
 })

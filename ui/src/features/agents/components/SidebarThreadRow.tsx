@@ -572,16 +572,20 @@ export function SidebarThreadRow({
     archived,
   })
 
+  const linkProps = {
+    onKeyDown: openContextMenuFromKeyboard,
+    className: rowClassName,
+    "data-sidebar-thread": item.key,
+  }
   const review = item.reviewPage
   const link = review ? (
     <Link
       {...reviewPageRoute(review)}
+      {...linkProps}
       onClick={(event) => {
         noteReviewOpenedFromSidebar(review)
         handleNavigate(event)
       }}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
     >
       {rowContent}
     </Link>
@@ -589,9 +593,8 @@ export function SidebarThreadRow({
     <Link
       to={chat.thread}
       params={{ threadId: item.id }}
+      {...linkProps}
       onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
     >
       {rowContent}
     </Link>
@@ -599,9 +602,8 @@ export function SidebarThreadRow({
     <Link
       to="/agents/local/$sessionId"
       params={{ sessionId: item.id }}
+      {...linkProps}
       onClick={handleNavigate}
-      onKeyDown={openContextMenuFromKeyboard}
-      className={rowClassName}
     >
       {rowContent}
     </Link>
