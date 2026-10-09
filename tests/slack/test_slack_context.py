@@ -1183,14 +1183,23 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
 
 
 @pytest.mark.parametrize("first_message", [True, False])
-@pytest.mark.parametrize("quoted,concierge", [(True, False), (False, False), (False, True)])
-async def test_performance_directive_switches_only_when_unquoted(
+@pytest.mark.parametrize(
+    "text,concierge,switches",
+    [
+        ("<@UBOT> /model:perf please continue", False, True),
+        ("<@UBOT> `/model:perf` please continue", False, False),
+        ("<@UBOT> please /model:perf continue", False, False),
+        ("<@UBOT> /model:perf please continue", True, False),
+    ],
+)
+async def test_performance_directive_switches_only_right_after_mention(
     monkeypatch: pytest.MonkeyPatch,
     fake_store,
     registry_db,
     first_message: bool,
-    quoted: bool,
+    text: str,
     concierge: bool,
+    switches: bool,
 ) -> None:
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
@@ -1213,7 +1222,6 @@ async def test_performance_directive_switches_only_when_unquoted(
     monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
     dispatch = AsyncMock(return_value={"run_id": "run-perf"})
     monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
-    directive = "`/model:perf`" if quoted else "/model:perf"
     await slack_webhooks.process_slack_mention(
         SlackRequest(
             channel_id="C123",
@@ -1221,14 +1229,14 @@ async def test_performance_directive_switches_only_when_unquoted(
             event_ts="1700000000.000100" if first_message else "1700000000.000200",
             thread_id="mapped-thread",
             user_id="U123",
-            text=f"<@UBOT> please {directive} continue",
+            text=text,
             bot_user_id="UBOT",
             concierge_mode=concierge,
         ),
         repo=None,
     )
     configurable = dispatch.call_args.args[3]
-    if quoted or concierge:
+    if not switches:
         assert "agent_model_id" not in configurable
         notice.assert_not_awaited()
         feedback.assert_not_awaited()
