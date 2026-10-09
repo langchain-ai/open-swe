@@ -35,7 +35,7 @@ export function UpdatePullRequestBranch({
       while (!cancelled && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, pollEveryMs))
         try {
-          const latest = await api.myPullRequestDetails(pr.repo, pr.number)
+          const latest = await api.pullRequestStatus(pr.repo, pr.number)
           if (latest?.headSha && latest.headSha !== queuedFrom) break
         } catch (error) {
           console.error("Polling the updated branch failed", { error })

@@ -51,7 +51,30 @@ export interface AuditLog {
         after: boolean | number | "[REDACTED]" | null
       }
     > | null
+    expedited_exclusions: ExpeditedExclusions | null
   }
+}
+
+export interface ExpeditedExclusions {
+  pull_request_id: string | null
+  base_sha: string
+  head_sha: string
+  approvals_md_sha256: string
+  requested: {
+    path: string
+    hunks: number[]
+    guideline: string
+    reason: string
+  }[]
+  hunks: {
+    path: string
+    digest: string
+    header: string
+    additions: number
+    deletions: number
+    guideline: string
+    reason: string
+  }[]
 }
 
 export interface AuditLogsPage {
@@ -364,6 +387,8 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
+  /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
+  managed_tools_gateway_id?: string | null
   org_guidelines?: string | null
   default_agent_model?: string | null
   default_agent_reasoning_effort?: string | null
@@ -437,10 +462,36 @@ export interface LangSmithConnectionStatus {
   updated_at?: string | null
 }
 
-export interface NotionCredentialStatus {
-  connected: boolean
-  token_expires_at?: string | null
-  updated_at?: string | null
+export interface ManagedToolsGateway {
+  id: string
+  name: string
+  tool_count: number
+}
+
+export interface ManagedToolsMissingCredential {
+  slug: string
+  display_name: string
+  kind: "oauth" | "secret"
+}
+
+export interface ManagedToolsGatewayStatus {
+  gateway: ManagedToolsGateway
+  workspaces: string[]
+  ready: boolean
+  tool_count?: number | null
+  missing: ManagedToolsMissingCredential[]
+}
+
+/** The card the agent offered in a thread, identified by its tool call. */
+export interface ManagedToolsConnectCard {
+  threadId: string
+  cardId: string
+}
+
+export interface ManagedToolsView {
+  configured: boolean
+  langsmith_connected: boolean
+  gateways: ManagedToolsGatewayStatus[]
 }
 
 export interface AdminUser {
@@ -943,30 +994,6 @@ export interface SubmittedReview {
   state: string
 }
 
-export interface ReviewCommentResult {
-  id: number
-  html_url: string
-}
-
-export interface PrReviewComment {
-  id: number
-  author: string
-  author_avatar_url: string
-  path: string
-  line: number | null
-  side: "LEFT" | "RIGHT"
-  body: string
-  html_url: string
-  created_at: string
-  is_open_swe: boolean
-  // Outdated: the line no longer appears in the current diff, so it can't render inline.
-  is_outdated: boolean
-}
-
-export interface ReviewCommentsPayload {
-  comments: Array<PrReviewComment>
-}
-
 export interface ReviewCounts {
   open: number
   resolved: number
@@ -1006,6 +1033,7 @@ export interface OpenPullRequest {
   repo: string
   number: number
   title: string
+  state: "open" | "closed" | "merged"
   draft: boolean | null
   additions: number | null
   deletions: number | null
@@ -1014,6 +1042,8 @@ export interface OpenPullRequest {
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
+  /** Each reviewer's standing review; null when the reviews could not be read. */
+  reviewers: PullRequestReviewer[] | null
   // Branch protection still wants an approval this PR does not have.
   reviewRequired: boolean
   statusAvailable: boolean
@@ -1028,6 +1058,13 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+}
+
+export interface PullRequestReviewer {
+  login: string
+  avatarUrl: string | null
+  /** A comment never replaces an earlier approval or change request. */
+  state: "approved" | "changes_requested" | "dismissed" | "commented"
 }
 
 export type MergeMethod = "squash" | "merge" | "rebase"
@@ -1728,12 +1765,23 @@ export const api = {
     request<LangSmithConnectionStatus>("/my-credentials/langsmith", {
       method: "DELETE",
     }),
-  getMyNotionStatus: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion"),
-  disconnectNotion: () =>
-    request<NotionCredentialStatus>("/my-credentials/notion", {
-      method: "DELETE",
-    }),
+  listManagedToolsGateways: () =>
+    request<ManagedToolsGateway[]>("/managed-tools/gateways"),
+  getMyManagedTools: () => request<ManagedToolsView>("/my-managed-tools"),
+  /** With a thread's connect card, the thread continues once every service is connected. */
+  connectManagedTool: (
+    gatewayId: string,
+    slug: string,
+    card?: ManagedToolsConnectCard
+  ) =>
+    request<{ connected: boolean; url?: string | null }>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/connect/${encodeURIComponent(slug)}${
+        card
+          ? `?${new URLSearchParams({ thread_id: card.threadId, card: card.cardId })}`
+          : ""
+      }`,
+      { method: "POST" }
+    ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
@@ -1781,16 +1829,17 @@ export const api = {
     request<PullRequestSearchResults>(
       `/pull-requests/search?q=${encodeURIComponent(query)}&offset=${offset}`
     ),
-  myPullRequests: (
+  openPullRequests: (
     repo: string,
     sort: "createdAt" | "updatedAt" = "updatedAt",
     direction: "asc" | "desc" = "desc",
-    page = 1
+    page = 1,
+    scope: "mine" | "review-assigned" | "review-requested" = "mine"
   ) =>
     request<OpenPullRequestsPayload>(
-      `/pull-requests?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=mine`
+      `${scope === "review-assigned" ? "/review-assignments" : "/pull-requests"}?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=${scope}`
     ),
-  myPullRequestDetails: (repo: string, number: number) =>
+  pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
   fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
     pullRequestThread(pr.repo, pr.number, {
@@ -1855,10 +1904,10 @@ export const api = {
     request<{ available: boolean }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
-  requestHumanReview: (pr: OpenPullRequest) =>
+  requestHumanReview: (pr: OpenPullRequest, channel = "") =>
     request<HumanReviewRequestResult>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`,
-      { method: "POST" }
+      { method: "POST", body: JSON.stringify({ channel }) }
     ),
   repoMergeMethods: (repo: string) =>
     request<{ mergeMethods: MergeMethod[] }>(
@@ -1892,6 +1941,32 @@ export const api = {
     request<ReviewAssessmentFeedback>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
       { method: "PUT", body: JSON.stringify(feedback) }
+    ),
+  getPullRequestLabels: (owner: string, repo: string, number: number) =>
+    request<{
+      available: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+      selected: Array<{
+        name: string
+        color: string
+        description: string | null
+      }>
+    }>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`
+    ),
+  changePullRequestLabel: (
+    owner: string,
+    repo: string,
+    number: number,
+    name: string,
+    selected: boolean
+  ) =>
+    request<void>(
+      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/labels`,
+      { method: "PATCH", body: JSON.stringify({ name, selected }) }
     ),
   getPullRequestPreview: (owner: string, repo: string, number: number) =>
     request<PullRequestPreview>(
@@ -1998,21 +2073,6 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
       { method: "POST", body: JSON.stringify(comment) }
     ),
-  listReviewComments: (owner: string, repo: string, number: number) =>
-    request<ReviewCommentsPayload>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`
-    ),
-  updateReviewComment: (
-    owner: string,
-    repo: string,
-    number: number,
-    commentId: number,
-    body: string
-  ) =>
-    request<ReviewCommentResult>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments/${commentId}`,
-      { method: "PATCH", body: JSON.stringify({ body }) }
-    ),
   getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
   startReviewerEval: (body: ReviewerEvalStartRequest) =>
     request<ReviewerEvalStatus>("/admin/evals/reviewer", {
@@ -2041,21 +2101,17 @@ export function loginUrl(redirectTo?: string): string {
  * itself and resolves once the connection is stored.
  */
 export function connectService(
-  provider: "slack" | "notion" | "langsmith",
-  redirectTo?: string,
-  target: "_self" | "_blank" = "_self"
+  provider: "slack" | "langsmith",
+  redirectTo?: string
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
     const query = redirectTo
       ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
       : ""
-    const url = `${API_BASE}/dashboard/api/${provider}/login${query}`
-    if (target === "_blank") {
-      window.open(url, "_blank", "noopener,noreferrer")
-    } else {
-      window.location.assign(url)
-    }
+    window.location.assign(
+      `${API_BASE}/dashboard/api/${provider}/login${query}`
+    )
   }
   return pending
 }

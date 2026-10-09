@@ -157,7 +157,7 @@
             }
             if (block.type === "context") {
               for (const context of block.elements || []) {
-                if (context.type !== "plain_text" || !context.text) continue;
+                if (!["plain_text", "mrkdwn"].includes(context.type) || !context.text) continue;
                 const element = document.createElement("div");
                 element.className = "context";
                 element.textContent = context.text;

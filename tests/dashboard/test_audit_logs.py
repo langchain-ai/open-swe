@@ -7,13 +7,18 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from openswe.analytics import routes as analytics_routes
+from openswe.analytics import segment
 from openswe.api_keys.models import ApiKey
 from openswe.audit_logs import middleware, store
 from openswe.audit_logs.context import current_audit_log
-from openswe.audit_logs.middleware import AuditLogMiddleware
+from openswe.audit_logs.middleware import AuditLogMiddleware, audit_endpoint
 from openswe.audit_logs.models import AuditLog, AuditLogEnrichments, AuditLogsCursor
 from openswe.audit_logs.routes import router
+from openswe.bridge import routes as bridge_routes
+from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, oauth, workspace_settings
+from openswe.database import postgres
 from openswe.threads.principals import PrincipalDep
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import FakeStore
@@ -31,6 +36,7 @@ def app() -> FastAPI:
     settings_router = APIRouter()
 
     @settings_router.put("/settings/{resource_id}", dependencies=[Depends(oauth.require_session)])
+    @audit_endpoint
     async def save(resource_id: str, body: Settings) -> dict[str, bool]:
         await asyncio.sleep(0)
         if body.token == "fail":
@@ -40,7 +46,12 @@ def app() -> FastAPI:
         return {"ok": True}
 
     @application.post("/dashboard/api/machine")
+    @audit_endpoint
     async def machine(principal: PrincipalDep) -> dict[str, bool]:
+        return {"machine": principal.machine}
+
+    @application.post("/dashboard/api/untracked")
+    async def untracked(principal: PrincipalDep) -> dict[str, bool]:
         return {"machine": principal.machine}
 
     application.include_router(settings_router, prefix="/dashboard/api")
@@ -103,6 +114,66 @@ async def test_authenticated_activity_is_isolated_and_secret_free_when_mounted(
             await client.put(f"/prefix/dashboard/api/settings/{resource_id}", json={"token": "x"})
         ).status_code == 401
     assert len(entries) == 3
+
+
+@pytest.mark.parametrize("prefix", ["", "/prefix"])
+async def test_telemetry_keeps_its_effects_without_audit_entries(
+    monkeypatch: pytest.MonkeyPatch, prefix: str
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
+    entries: list[AuditLog] = []
+    page_views: list[dict[str, object]] = []
+    heartbeats: list[tuple[str, str]] = []
+
+    async def append(entry: AuditLog) -> None:
+        entries.append(entry)
+
+    async def record_usage(**kwargs: object) -> None:
+        page_views.append(kwargs)
+
+    async def heartbeat(bridge_id: str, *, owner_id: str) -> bool:
+        heartbeats.append((bridge_id, owner_id))
+        return True
+
+    monkeypatch.setattr(middleware, "append_safely", append)
+    monkeypatch.setattr(segment, "record_usage", record_usage)
+    monkeypatch.setattr(postgres, "configured", lambda: True)
+    monkeypatch.setattr(BridgeStore, "heartbeat", heartbeat)
+    application = app()
+    application.include_router(analytics_routes.router, prefix="/dashboard/api")
+    application.include_router(bridge_routes.router, prefix="/dashboard/api")
+    root = FastAPI()
+    root.mount(prefix or "/", application)
+    bridge_id = str(uuid4())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=root),
+        base_url="http://test",
+        cookies=cookie("alice", str(uuid4())),
+    ) as client:
+        assert (
+            await client.post(
+                f"{prefix}/dashboard/api/analytics/page", json={"page_name": "agents"}
+            )
+        ).status_code == 204
+        assert (
+            await client.post(f"{prefix}/dashboard/api/bridges/{bridge_id}/heartbeat")
+        ).status_code == 204
+        assert (await client.post(f"{prefix}/dashboard/api/untracked")).status_code == 200
+        assert entries == []
+        assert (
+            await client.put(f"{prefix}/dashboard/api/settings/item", json={"token": "x"})
+        ).status_code == 200
+    assert page_views == [
+        {
+            "login": "alice",
+            "email": None,
+            "event_type": "page",
+            "name": "agents",
+            "properties": {"page_name": "agents", "surface": "dashboard"},
+        }
+    ]
+    assert heartbeats == [(bridge_id, "github:alice")]
+    assert [entry.operation_name for entry in entries] == ["save"]
 
 
 @pytest.mark.parametrize("workspace", [None, "preview"])

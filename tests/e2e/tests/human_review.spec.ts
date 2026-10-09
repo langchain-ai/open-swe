@@ -717,11 +717,8 @@ test.describe("Human review in Slack", () => {
     expect(picked.thread_ts).toBe(picked.ts);
     await expect
       .poll(async () => {
-        const queued = await request.get(`${HARNESS}/store/items`, {
-          params: {
-            namespace: `queue.${dm.thread_id}`,
-            key: "pending_messages",
-          },
+        const queued = await request.get(`${HARNESS}/control/queued`, {
+          params: { thread_id: dm.thread_id },
         });
         const state = await request.get(`/threads/${dm.thread_id}/state`);
         return JSON.stringify([await queued.json(), await state.json()]);
@@ -757,6 +754,45 @@ test.describe("Human review in Slack", () => {
       .poll(async () => cardText(await reviewCard(request, posted)))
       .toContain("picked by Open SWE");
     await shootCard(page, "assigned");
+
+    await loginAs(page, BOB);
+    const githubOnly = await seedOpenPullRequest(page, {
+      repo: `${REPO.owner}/${REPO.repo}`,
+      title: "GitHub-only review request",
+      author: ALICE.login,
+    });
+    await request.post(
+      `/fake-gh/repos/${REPO.owner}/${REPO.repo}/pulls/${githubOnly.number}/requested_reviewers`,
+      { data: { reviewers: [BOB.login] } },
+    );
+    await page.goto("/agents/reviews?tab=to-review");
+    await expect(
+      page.getByRole("button", { name: "Greet by name", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "GitHub-only review request",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Show my GitHub review requests" })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "GitHub-only review request",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Back to Open SWE assignments" })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "GitHub-only review request",
+        exact: true,
+      }),
+    ).toHaveCount(0);
 
     // 4. Bob is the only reviewer, so his approval merges it at once.
     await approveOnGitHub(request, seeded.number, BOB.login);
@@ -962,7 +998,8 @@ test.describe("Human review in Slack", () => {
     );
     expect(modal.blocks[0].element.initial_option).toBeUndefined();
 
-    // 5. Submitting a reason withdraws the pick on Slack and GitHub and tells them.
+    // 5. Submitting a reason withdraws the pick on Slack and GitHub. The pick's own
+    //    message trades its buttons for the outcome, and no new DM notifies them.
     await control(request, "/mock/slack/view-submit", {
       view_id: modal.id,
       user: declining.slack,
@@ -974,22 +1011,24 @@ test.describe("Human review in Slack", () => {
     });
     await expect
       .poll(
-        async () =>
-          (await channelMessages(request, dmChannel)).some(
-            (m) =>
-              m.is_bot &&
-              m.text.includes("You declined the review") &&
-              m.text.includes("Away or unavailable"),
-          ),
+        async () => {
+          const settled = (await channelMessages(request, dmChannel)).find(
+            (m) => m.ts === picked.ts,
+          );
+          return (
+            settled !== undefined &&
+            buttons(settled).length === 0 &&
+            cardText(settled).includes("Review declined")
+          );
+        },
         { timeout: 30_000 },
       )
       .toBe(true);
-    // The pick's own message trades its buttons for the outcome.
-    const settled = (await channelMessages(request, dmChannel)).find(
-      (m) => m.ts === picked.ts,
-    );
-    expect(buttons(settled!)).toEqual([]);
-    expect(cardText(settled!)).toContain("Review declined");
+    expect(
+      (await channelMessages(request, dmChannel)).some((m) =>
+        m.text.includes("You declined the review"),
+      ),
+    ).toBe(false);
     await expect
       .poll(async () =>
         (await pull(request, seeded.number)).requested_reviewers.includes(

@@ -1,5 +1,7 @@
 import { useToolCalls } from "@langchain/react"
-import { Check, Loader2, X } from "lucide-react"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
+import { Spinner } from "@langchain/macaw-components/Spinner"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -71,21 +73,28 @@ function ActivityLine({
   steps: number
 }) {
   return (
-    <div className="mt-1 flex min-w-0 items-center gap-1.5 border-t border-border pt-1.5">
+    <div className="mt-space-1 flex min-w-0 items-center gap-1.5 border-t border-default pt-1.5">
       {status === "completed" ? (
-        <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden />
-      ) : status === "error" ? (
-        <X className="h-3 w-3 shrink-0 text-red-400" aria-hidden />
-      ) : (
-        <Loader2
-          className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
+        <CheckIcon
+          size={12}
+          weight="bold"
+          className="shrink-0 text-icon-success"
           aria-hidden
         />
+      ) : status === "error" ? (
+        <XIcon
+          size={12}
+          weight="bold"
+          className="shrink-0 text-icon-error"
+          aria-hidden
+        />
+      ) : (
+        <Spinner size="xxs" className="shrink-0 text-icon-tertiary" />
       )}
-      <span className="truncate text-[10px] text-muted-foreground/70">
+      <span className="truncate text-xxs text-tertiary">
         {humanizeToolName(name)}
       </span>
-      <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70 tabular-nums">
+      <span className="ml-auto shrink-0 text-xxs text-tertiary tabular-nums">
         {steps} {steps === 1 ? "step" : "steps"}
       </span>
     </div>

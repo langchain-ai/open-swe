@@ -1,15 +1,17 @@
-import { cn } from "@/lib/utils"
-import { statusTones } from "../lib/status"
+import { Badge } from "@langchain/macaw-components/Badge"
 
-export function StatusPill({ status }: { status: string }) {
+import { statusColors } from "../lib/status"
+
+export function StatusPill({
+  status,
+  size = "sm",
+}: {
+  status: string
+  size?: "xs" | "sm"
+}) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
-        statusTones[status] ?? "border-border bg-muted text-muted-foreground"
-      )}
-    >
+    <Badge size={size} color={statusColors[status] ?? "secondary"}>
       {status}
-    </span>
+    </Badge>
   )
 }

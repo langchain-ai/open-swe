@@ -5,8 +5,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.profiles import get_valid_access_token
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.comments import PrState
 from openswe.github.http import GitHubClient
@@ -86,21 +86,20 @@ async def api_list_pull_requests(
     sort: Literal["created", "updated"] = "updated",
     direction: Literal["asc", "desc"] = "desc",
     page: int = 1,
-    scope: Literal["mine"] = "mine",
+    scope: Literal["mine", "review-requested"] = "mine",
     session: dict[str, Any] = SESSION_DEP,
 ) -> OpenPullRequests:
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    result = await list_open_pull_requests(
-        session["sub"],
-        token,
-        repo,
-        lightweight=lightweight,
-        sort=sort,
-        direction=direction,
-        page=page,
-    )
+    async with GitHubClient.as_user(session["sub"]) as github:
+        result = await list_open_pull_requests(
+            github,
+            session["sub"],
+            repo,
+            lightweight=lightweight,
+            sort=sort,
+            direction=direction,
+            page=page,
+            scope=scope,
+        )
     urls = await HumanReviewRequest.active_slack_urls(
         [(pr.repo, pr.number) for pr in result.pull_requests]
     )
@@ -115,11 +114,8 @@ async def api_pull_request_details(
 ) -> OpenPullRequest | None:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    async with GitHubClient.connect(token=token) as github:
-        result = await github.repo(owner, repo).pull_request(number).load_open()
+    async with GitHubClient.as_user(session["sub"]) as github:
+        result = await github.repo(owner, repo).pull_request(number).load()
     if result is not None:
         urls = await HumanReviewRequest.active_slack_urls([(result.repo, result.number)])
         result.review_request_url = urls.get((result.repo.lower(), result.number))
@@ -127,6 +123,7 @@ async def api_pull_request_details(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/action")
+@audit_endpoint
 async def api_act_on_pull_request(
     owner: str,
     repo: str,
@@ -134,10 +131,8 @@ async def api_act_on_pull_request(
     body: PullRequestAction,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PullRequestActionResult:
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await act_on_pull_request(owner, repo, number, body, token)
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await act_on_pull_request(github.repo(owner, repo).pull_request(number), body)
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/thread")
@@ -150,6 +145,7 @@ async def api_pull_request_thread_status(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/thread")
+@audit_endpoint
 async def api_start_pull_request_thread(
     owner: str,
     repo: str,
@@ -163,6 +159,7 @@ async def api_start_pull_request_thread(
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/review-threads/resolve")
+@audit_endpoint
 async def api_resolve_review_threads(
     owner: str,
     repo: str,
@@ -171,7 +168,5 @@ async def api_resolve_review_threads(
     session: dict[str, Any] = SESSION_DEP,
 ) -> ResolveReviewThreadsResult:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub token unavailable, re-login required")
-    return await resolve_review_threads(owner, repo, number, body, token)
+    async with GitHubClient.as_user(session["sub"]) as github:
+        return await resolve_review_threads(github.repo(owner, repo).pull_request(number), body)

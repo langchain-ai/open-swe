@@ -1180,3 +1180,70 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
         "Working on it",
         None,
     )
+
+
+@pytest.mark.parametrize("first_message", [True, False])
+@pytest.mark.parametrize(
+    "text,concierge,switches",
+    [
+        ("<@UBOT> /model:perf please continue", False, True),
+        ("<@UBOT> `/model:perf` please continue", False, False),
+        ("<@UBOT> please continue /model:perf", False, True),
+        ("<@UBOT> /model:perf please continue", True, False),
+    ],
+)
+async def test_performance_directive_switches_unless_quoted(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_store,
+    registry_db,
+    first_message: bool,
+    text: str,
+    concierge: bool,
+    switches: bool,
+) -> None:
+    captured: dict[str, object] = {}
+    _setup_slack_mention_fakes(monkeypatch, captured)
+    monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=not first_message))
+    monkeypatch.setattr(webhook_common, "get_thread_model_choice", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        slack_webhooks,
+        "load_thread_settings",
+        AsyncMock(
+            return_value={
+                "routing_models": {
+                    "performance": {"model_id": "openai:gpt-6-astra", "effort": "low"}
+                }
+            }
+        ),
+    )
+    feedback = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_webhooks, "create_langsmith_feedback", feedback)
+    notice = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_utils, "post_slack_ephemeral_message", notice)
+    dispatch = AsyncMock(return_value={"run_id": "run-perf"})
+    monkeypatch.setattr(slack_webhooks, "_dispatch_or_queue_slack_run", dispatch)
+    await slack_webhooks.process_slack_mention(
+        SlackRequest(
+            channel_id="C123",
+            thread_ts="1700000000.000100",
+            event_ts="1700000000.000100" if first_message else "1700000000.000200",
+            thread_id="mapped-thread",
+            user_id="U123",
+            text=text,
+            bot_user_id="UBOT",
+            concierge_mode=concierge,
+        ),
+        repo=None,
+    )
+    configurable = dispatch.call_args.args[3]
+    if not switches:
+        assert "agent_model_id" not in configurable
+        notice.assert_not_awaited()
+        feedback.assert_not_awaited()
+    else:
+        assert feedback.call_args.args == ("run-perf", "performance_model_switch_slack")
+        assert configurable["agent_model_id"] == "openai:gpt-6-astra"
+        assert configurable["model_selection"] == "explicit"
+        assert notice.call_args.args[:2] == ("C123", "U123")
+        assert "openai:gpt-6-astra" in notice.call_args.args[2]
+        assert notice.call_args.kwargs["thread_ts"] == "1700000000.000100"

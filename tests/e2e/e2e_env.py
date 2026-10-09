@@ -70,6 +70,7 @@ _DEFAULTS = {
     # Webhook signing + bot identity.
     "GITHUB_WEBHOOK_SECRET": "test-github-secret",
     "SLACK_SIGNING_SECRET": "test-slack-secret",
+    "RUN_COMPLETE_WEBHOOK_SECRET": "test-run-complete-secret",
     "SLACK_BOT_TOKEN": "xoxb-test-token",
     "SLACK_BOT_USER_ID": BOT_USER_ID,
     "SLACK_BOT_USERNAME": BOT_USERNAME,
@@ -131,9 +132,11 @@ ADMIN_USER = TEST_USERS[0]
 _DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(
     [
         *(user["login"] for user in TEST_USERS),
+        "carol",
         "octocat",
         "thread-tools-e2e",
         "threads-workspace-e2e",
+        "workspace-default-onboarding-e2e",
     ]
 )
 _DEFAULTS["CONFIGURED_ADMINS"] = ADMIN_USER["email"]

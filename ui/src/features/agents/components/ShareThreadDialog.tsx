@@ -1,8 +1,12 @@
-import { Dialog } from "@base-ui/react/dialog"
-import { WarningIcon } from "@phosphor-icons/react"
+import { Button } from "@langchain/macaw-components/Button"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+} from "@langchain/macaw-components/Dialog"
+import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
 import { useState } from "react"
-
-import { Button } from "@/components/ui/button"
 
 export function ShareThreadDialog({
   open,
@@ -19,7 +23,7 @@ export function ShareThreadDialog({
 }) {
   const [acknowledged, setAcknowledged] = useState(false)
   return (
-    <Dialog.Root
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         if (busy) return
@@ -27,66 +31,60 @@ export function ShareThreadDialog({
         onOpenChange(next)
       }}
     >
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/70" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-destructive/50 bg-popover p-6 text-popover-foreground shadow-xl">
-          <div className="flex flex-col gap-4">
-            <Dialog.Title className="flex items-center gap-2 font-semibold text-destructive">
-              <WarningIcon className="size-6 shrink-0" weight="fill" />
-              Expose this entire thread to the workspace?
-            </Dialog.Title>
-            <Dialog.Description className="text-sm">
-              Everyone with workspace access will be able to read everything
-              already in this thread and anything added later: messages, private
-              tool results, attachments, plans, and sandbox files. This may
-              include secrets or sensitive personal information.
-            </Dialog.Description>
-            <p className="text-sm font-semibold">
-              This cannot be undone. Continuing privately creates a new copy; it
-              does not hide this shared thread.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Private-only tools, personal integrations, and private admin
-              capabilities will no longer be available in this thread.
-            </p>
-            {running && (
-              <p role="alert" className="text-sm text-destructive">
-                Stop the active run before sharing this thread.
-              </p>
-            )}
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={acknowledged}
-                onChange={(event) => setAcknowledged(event.target.checked)}
-                disabled={busy}
-                className="mt-1"
-              />
-              I understand that everything in this thread becomes visible to the
-              workspace.
-            </label>
-            <div className="mt-2 flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setAcknowledged(false)
-                  onOpenChange(false)
-                }}
-                disabled={busy}
-              >
-                Keep private
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={onConfirm}
-                disabled={!acknowledged || busy || running}
-              >
-                {busy ? "Sharing..." : "Share entire thread"}
-              </Button>
-            </div>
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+      <DialogContent
+        title="Expose this entire thread to the workspace?"
+        titleIcon={WarningIcon}
+        titleIconIntent="error"
+        showClose={false}
+        className="w-[min(32rem,calc(100vw-2rem))] border border-error"
+      >
+        <DialogDescription className="text-sm text-primary">
+          Everyone with workspace access will be able to read everything already
+          in this thread and anything added later: messages, private tool
+          results, attachments, plans, and sandbox files. This may include
+          secrets or sensitive personal information.
+        </DialogDescription>
+        <p className="text-sm font-semibold text-primary">
+          This cannot be undone. Continuing privately creates a new copy; it
+          does not hide this shared thread.
+        </p>
+        <p className="text-sm text-secondary">
+          Private-only tools, personal integrations, and private admin
+          capabilities will no longer be available in this thread.
+        </p>
+        {running && (
+          <p role="alert" className="text-sm text-error-secondary">
+            Stop the active run before sharing this thread.
+          </p>
+        )}
+        <Checkbox
+          checked={acknowledged}
+          onCheckedChange={(checked) => setAcknowledged(checked === true)}
+          disabled={busy}
+          label="I understand that everything in this thread becomes visible to the workspace."
+          containerClassName="items-start"
+        />
+        <div className="flex justify-end gap-space-2">
+          <Button
+            color="secondary"
+            variant="outlined"
+            onClick={() => {
+              setAcknowledged(false)
+              onOpenChange(false)
+            }}
+            disabled={busy}
+          >
+            Keep private
+          </Button>
+          <Button
+            color="error"
+            onClick={onConfirm}
+            disabled={!acknowledged || busy || running}
+          >
+            {busy ? "Sharing..." : "Share entire thread"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

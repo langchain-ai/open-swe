@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.langsmith_oauth import (
     LANGSMITH_STATE_COOKIE_NAME,
@@ -58,6 +59,7 @@ async def get_my_langsmith_status(session: dict[str, Any] = SESSION_DEP) -> dict
 
 
 @router.delete("/my-credentials/langsmith")
+@audit_endpoint
 async def disconnect_my_langsmith(session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
     await disconnect_langsmith(session["sub"])
     return await langsmith_status(session["sub"])

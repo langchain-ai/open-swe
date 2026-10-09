@@ -1,5 +1,6 @@
 """HTTP API for dashboard threads."""
 
+import json
 import logging
 from time import perf_counter
 from typing import Annotated, Any, Literal
@@ -9,11 +10,13 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
+from openswe.message_queue import QueuedPreview
 from openswe.threads import terminal
 from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
@@ -37,6 +40,7 @@ from openswe.threads.handlers import (
     get_dashboard_thread,
     get_dashboard_thread_pull_request_context,
     get_dashboard_thread_pull_request_status,
+    get_dashboard_thread_queued_messages,
     get_dashboard_thread_state,
     interrupt_transcript_turns,
     rename_dashboard_thread,
@@ -64,8 +68,10 @@ from openswe.threads.proxy import (
     proxy_dashboard_thread_stream_events,
 )
 from openswe.threads.runs import (
+    SessionCreateBody,
     ThreadRenameBody,
     ThreadResolveBody,
+    create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
 from openswe.utils.langsmith import get_langsmith_trace_url
@@ -100,7 +106,47 @@ async def api_list_threads(
     return await list_dashboard_threads(principal.person, email=principal.email, include_all=all)
 
 
+@router.post("/threads", status_code=201)
+async def api_create_session(
+    body: SessionCreateBody,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, str]:
+    thread_id = await create_dashboard_session(body, session["sub"], email=session.get("email"))
+    if body.start:
+        status, content, _ = await proxy_dashboard_thread_commands(
+            thread_id,
+            session["sub"],
+            json.dumps(
+                {
+                    "id": 1,
+                    "method": "run.start",
+                    "params": {"input": {"messages": [{"type": "human", "content": body.prompt}]}},
+                }
+            ).encode(),
+            email=session.get("email"),
+        )
+        try:
+            result: object = json.loads(content)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise HTTPException(
+                502, detail={"thread_id": thread_id, "error": "invalid run response"}
+            ) from exc
+        if (
+            status >= 400
+            or not isinstance(result, dict)
+            or result.get("type") != "success"
+            or not isinstance(result.get("result"), dict)
+            or not result["result"].get("run_id")
+        ):
+            raise HTTPException(
+                status if status >= 400 else 502,
+                detail={"thread_id": thread_id, "error": result},
+            )
+    return {"thread_id": thread_id}
+
+
 @router.post("/threads/uploads", openapi_extra=UPLOAD_REQUEST_BODY)
+@audit_endpoint
 async def api_upload_session(
     request: Request,
     session: dict[str, Any] = SESSION_DEP,
@@ -109,6 +155,7 @@ async def api_upload_session(
 
 
 @router.post("/threads/resolve-all")
+@audit_endpoint
 async def api_resolve_all_threads(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, int]:
@@ -145,6 +192,7 @@ async def api_list_pinned_threads(
 
 
 @router.post("/threads/{thread_id}/pin", status_code=204)
+@audit_endpoint
 async def api_pin_thread(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -154,6 +202,7 @@ async def api_pin_thread(
 
 
 @router.delete("/threads/{thread_id}/pin", status_code=204)
+@audit_endpoint
 async def api_unpin_thread(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -241,6 +290,15 @@ async def api_get_thread_pull_request_status(
         thread_id,
         session["sub"],
         email=session.get("email"),
+    )
+
+
+@router.get("/threads/{thread_id}/queued-messages", response_model=list[QueuedPreview])
+async def api_get_thread_queued_messages(
+    thread_id: str, session: dict[str, Any] = SESSION_DEP
+) -> list[QueuedPreview]:
+    return await get_dashboard_thread_queued_messages(
+        thread_id, session["sub"], email=session.get("email")
     )
 
 
@@ -360,6 +418,7 @@ async def api_get_thread_pr_diff(
 
 
 @router.patch("/threads/{thread_id}")
+@audit_endpoint
 async def api_rename_thread(
     thread_id: str,
     body: ThreadRenameBody,
@@ -374,6 +433,7 @@ async def api_rename_thread(
 
 
 @router.post("/threads/{thread_id}/share-to-workspace")
+@audit_endpoint
 async def api_share_thread_with_workspace(
     thread_id: str,
     session: dict[str, str] = SESSION_DEP,
@@ -382,6 +442,7 @@ async def api_share_thread_with_workspace(
 
 
 @router.post("/threads/{thread_id}/continue-private")
+@audit_endpoint
 async def api_continue_thread_privately(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -390,6 +451,7 @@ async def api_continue_thread_privately(
 
 
 @router.post("/threads/{thread_id}/resolve")
+@audit_endpoint
 async def api_resolve_thread(
     thread_id: str,
     body: ThreadResolveBody,
@@ -425,6 +487,7 @@ async def api_list_thread_runs(
 
 
 @router.post("/threads/{thread_id}/runs")
+@audit_endpoint
 async def api_create_thread_run(
     thread_id: str,
     request: Request,
@@ -441,6 +504,7 @@ async def api_create_thread_run(
 
 
 @router.post("/threads/{thread_id}/runs/{run_id}/cancel")
+@audit_endpoint
 async def api_cancel_thread_run(
     thread_id: str,
     run_id: str,
@@ -462,6 +526,7 @@ async def api_cancel_thread_run(
 
 
 @router.post("/threads/{thread_id}/cancel")
+@audit_endpoint
 async def api_cancel_thread(
     thread_id: str,
     principal: PrincipalDep,
@@ -472,6 +537,7 @@ async def api_cancel_thread(
 
 
 @router.post("/admin/threads/{thread_id}/cancel")
+@audit_endpoint
 async def admin_cancel_thread(
     thread_id: str,
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -480,6 +546,7 @@ async def admin_cancel_thread(
 
 
 @router.delete("/threads/{thread_id}")
+@audit_endpoint
 async def api_delete_thread(
     thread_id: str,
     session: dict[str, Any] = SESSION_DEP,
@@ -527,6 +594,7 @@ async def api_thread_stream_events(
 
 
 @router.post("/threads/{thread_id}/commands")
+@audit_endpoint
 async def api_thread_commands(
     thread_id: str,
     request: Request,
