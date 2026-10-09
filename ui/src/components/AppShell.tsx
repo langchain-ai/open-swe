@@ -1,9 +1,16 @@
-import { Link } from "@tanstack/react-router"
-import { ArrowLeftIcon, CaretRightIcon } from "@phosphor-icons/react"
+import {
+  ArrowLeftIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Link, Navigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import { AppSidebar } from "@/components/AppSidebar"
+import { RequireLogin } from "@/lib/auth-redirect"
+import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 interface AppShellProps {
@@ -26,7 +33,7 @@ export function AppShell({
   children,
 }: AppShellProps) {
   return (
-    <div className="flex h-svh overflow-hidden bg-background text-foreground">
+    <div className="flex h-svh overflow-hidden bg-surface-level-1 text-primary">
       <AppSidebar user={user} />
       <main className="relative flex-1 overflow-y-auto">
         <div
@@ -38,9 +45,9 @@ export function AppShell({
           {backTo && (
             <Link
               to={backTo.to}
-              className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              className="mb-4 inline-flex items-center gap-1.5 text-xs text-secondary hover:text-primary"
             >
-              <ArrowLeftIcon className="size-3.5" />
+              <ArrowLeftIcon size={14} weight="regular" />
               {backTo.label}
             </Link>
           )}
@@ -50,7 +57,7 @@ export function AppShell({
                 {title}
               </h1>
               {description && (
-                <p className="mt-1.5 max-w-2xl text-xs text-muted-foreground">
+                <p className="mt-1.5 max-w-2xl text-xs text-secondary">
                   {description}
                 </p>
               )}
@@ -61,6 +68,34 @@ export function AppShell({
         </div>
       </main>
     </div>
+  )
+}
+
+interface SettingsPageProps extends Omit<AppShellProps, "user" | "children"> {
+  adminOnly?: boolean
+  children: ReactNode | ((user: SessionUser) => ReactNode)
+}
+
+/** An AppShell page that waits for the session and requires sign-in (and admin, when asked). */
+export function SettingsPage({
+  adminOnly,
+  children,
+  ...props
+}: SettingsPageProps) {
+  const session = useSession()
+  if (session.isLoading) {
+    return (
+      <main className="p-6">
+        <Skeleton className="h-40 w-full" />
+      </main>
+    )
+  }
+  if (!session.data) return <RequireLogin />
+  if (adminOnly && !session.data.is_admin) return <Navigate to="/my-settings" />
+  return (
+    <AppShell user={session.data} {...props}>
+      {typeof children === "function" ? children(session.data) : children}
+    </AppShell>
   )
 }
 
@@ -84,9 +119,9 @@ export function SettingsSection({
     <section id={id} className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-medium text-foreground">{title}</h2>
+          <h2 className="text-sm font-medium text-primary">{title}</h2>
           {description && (
-            <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+            <p className="mt-1 max-w-2xl text-xs text-secondary">
               {description}
             </p>
           )}
@@ -94,7 +129,7 @@ export function SettingsSection({
         {action}
       </div>
       {children && (
-        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+        <div className="divide-y divide-default overflow-hidden rounded-xl border border-default bg-surface-level-1">
           {children}
         </div>
       )}
@@ -130,26 +165,24 @@ export function SettingsRow({
           <span
             className={cn(
               "text-sm/none font-medium",
-              comingSoon ? "text-muted-foreground" : "text-foreground"
+              comingSoon ? "text-secondary" : "text-primary"
             )}
           >
             {label}
           </span>
           {(comingSoon || badge) && (
-            <span
-              className={cn(
-                "rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground",
-                !comingSoon && badgeClassName
-              )}
+            <Badge
+              color="secondary"
+              rounded="sm"
+              size="xxs"
+              className={comingSoon ? undefined : badgeClassName}
             >
-              {comingSoon ? "Coming soon" : badge}
-            </span>
+              {comingSoon ? "Coming soon" : (badge ?? "")}
+            </Badge>
           )}
         </span>
         {description && (
-          <span className="text-xs/relaxed text-muted-foreground">
-            {description}
-          </span>
+          <span className="text-xs/relaxed text-secondary">{description}</span>
         )}
       </label>
       <div className={cn("sm:shrink-0", comingSoon && "opacity-50")}>
@@ -175,19 +208,19 @@ export function SettingsNavRow({
     <Link
       to={to}
       params={params}
-      className="flex items-center justify-between gap-8 px-4 py-3.5 transition-colors hover:bg-muted/40"
+      className="flex items-center justify-between gap-8 px-4 py-3.5 transition-colors hover:bg-surface-level-2-hover"
     >
       <div className="flex flex-col gap-1">
-        <span className="text-sm/none font-medium text-foreground">
-          {label}
-        </span>
+        <span className="text-sm/none font-medium text-primary">{label}</span>
         {description && (
-          <span className="text-xs/relaxed text-muted-foreground">
-            {description}
-          </span>
+          <span className="text-xs/relaxed text-secondary">{description}</span>
         )}
       </div>
-      <CaretRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      <CaretRightIcon
+        className="shrink-0 text-icon-secondary"
+        size={14}
+        weight="regular"
+      />
     </Link>
   )
 }

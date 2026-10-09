@@ -1,21 +1,23 @@
+import { PlusIcon, StackRegularIcon } from "@langchain/macaw-components/icons"
 import { Link, useNavigate } from "@tanstack/react-router"
-import {
-  ArrowSquareOutIcon,
-  ClockIcon,
-  LightningIcon,
-  PauseIcon,
-  PlayIcon,
-  PlusIcon,
-  StackIcon,
-  WarningCircleIcon,
-} from "@phosphor-icons/react"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Card } from "@langchain/macaw-components/Card"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
+import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
+import { PauseIcon } from "@phosphor-icons/react/dist/ssr/Pause"
+import { PlayIcon } from "@phosphor-icons/react/dist/ssr/Play"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 
 import type { AgentSchedule } from "@/features/agents/lib/types"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
-import { buttonVariants } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { describeCron } from "@/features/automations/lib/cron"
+import { describeTriggers } from "@/features/automations/lib/triggers"
 import {
   agentMutationKeys,
   useAgentSchedules,
@@ -41,6 +43,11 @@ function formatDate(value?: string | null): string {
 
 export type AutomationsTab = "overview" | "runs"
 
+const TAB_OPTIONS = [
+  { value: "overview", display: "Overview" },
+  { value: "runs", display: "Runs" },
+] as const
+
 export function AutomationsList({
   tab,
   onTabChange,
@@ -60,35 +67,25 @@ export function AutomationsList({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-4xl px-6 py-8 max-md:pt-16">
-        <h1 className="text-base font-medium text-foreground">Automations</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Run Open SWE on a recurring schedule. Each run starts a fresh agent
-          thread. {!canManage && "Workspace admins manage automation setup."}
+        <h1 className="text-base font-medium text-primary">Automations</h1>
+        <p className="mt-1 text-xs text-secondary">
+          Run Open SWE on a schedule or on GitHub, Slack, and Linear events.
+          Each run starts a fresh agent thread.{" "}
+          {!canManage && "Workspace admins manage automation setup."}
         </p>
         {canManage && (
-          <p className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+          <Banner intent="neutral" className="mt-space-3">
             Automations can also be listed and managed through Open SWE. Start a
             new thread, turn on Admin next to the model picker, then ask the
             agent to make the change.
-          </p>
+          </Banner>
         )}
-        <div className="mt-4 flex w-fit rounded-md border border-border bg-card p-0.5">
-          {(["overview", "runs"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => onTabChange(value)}
-              className={cn(
-                "rounded px-3 py-1 text-xs capitalize transition-colors",
-                tab === value
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {value}
-            </button>
-          ))}
-        </div>
+        <GroupedTabs
+          className="mt-space-4"
+          value={tab}
+          onChange={onTabChange}
+          options={TAB_OPTIONS}
+        />
 
         {tab === "runs" ? (
           <div className="mt-6">
@@ -108,15 +105,10 @@ export function AutomationsList({
             </div>
 
             <div className="mt-8 flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-xs font-medium text-secondary">
                 {total} {total === 1 ? "automation" : "automations"}
               </span>
-              {canManage && (
-                <Link to="/agents/automations/new" className={buttonVariants()}>
-                  <PlusIcon className="size-4" />
-                  New Automation
-                </Link>
-              )}
+              {canManage && <NewAutomationButton />}
             </div>
 
             <div className="mt-3">
@@ -126,7 +118,13 @@ export function AutomationsList({
                   <Skeleton className="h-16 w-full rounded-xl" />
                 </div>
               ) : total === 0 ? (
-                <EmptyState canManage={canManage} />
+                <EmptyState
+                  className="rounded-xl border border-dashed border-default bg-surface-level-1"
+                  icon={LightningIcon}
+                  title="No automations yet"
+                  description="Run Open SWE on a schedule or on GitHub, Slack, and Linear events — review code, triage new issues, or investigate an alert."
+                  action={canManage && <NewAutomationButton />}
+                />
               ) : (
                 <div className="space-y-2">
                   {schedules.map((schedule) => (
@@ -148,6 +146,18 @@ export function AutomationsList({
   )
 }
 
+function NewAutomationButton() {
+  return (
+    <Button
+      as={<Link to="/agents/automations/new" />}
+      size="md"
+      leftDecorator={PlusIcon}
+    >
+      New Automation
+    </Button>
+  )
+}
+
 function StatCard({
   label,
   value,
@@ -158,43 +168,17 @@ function StatCard({
   highlight?: boolean
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3">
-      <div className="text-xs text-muted-foreground/70">{label}</div>
+    <Card className="px-space-4 py-space-3">
+      <div className="text-xs text-tertiary">{label}</div>
       <div
         className={cn(
           "mt-1 text-lg font-medium",
-          highlight ? "text-destructive" : "text-foreground"
+          highlight ? "text-error-secondary" : "text-primary"
         )}
       >
         {value}
       </div>
-    </div>
-  )
-}
-
-function EmptyState({ canManage }: { canManage: boolean }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center">
-      <div className="rounded-full bg-accent p-3 text-muted-foreground">
-        <LightningIcon className="size-5" />
-      </div>
-      <h3 className="mt-4 text-sm font-medium text-foreground">
-        No automations yet
-      </h3>
-      <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-        Schedule Open SWE to run on a recurring cadence — review code, triage
-        issues, or keep docs up to date.
-      </p>
-      {canManage && (
-        <Link
-          to="/agents/automations/new"
-          className={cn(buttonVariants(), "mt-4")}
-        >
-          <PlusIcon className="size-4" />
-          New Automation
-        </Link>
-      )}
-    </div>
+    </Card>
   )
 }
 
@@ -243,7 +227,7 @@ function AutomationRow({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-muted-foreground/70">
+    <div className="flex items-center gap-3 rounded-xl border border-default bg-surface-level-1 px-4 py-3 transition-colors hover:bg-surface-level-1-hover">
       <Link
         to="/agents/automations/$scheduleId"
         params={{ scheduleId: schedule.id }}
@@ -252,81 +236,79 @@ function AutomationRow({
         <span
           className={cn(
             "size-2 shrink-0 rounded-full",
-            schedule.enabled ? "bg-success" : "bg-border"
+            schedule.enabled ? "bg-success-strong" : "bg-surface-level-4"
           )}
         />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-medium text-foreground">
+            <span className="truncate text-sm font-medium text-primary">
               {schedule.name}
             </span>
             {schedule.lastError && (
               <WarningCircleIcon
-                className="size-3.5 shrink-0 text-destructive"
+                size={14}
+                weight="regular"
+                className="shrink-0 text-icon-error"
                 aria-label="Last run failed"
               >
                 <title>Last run failed</title>
               </WarningCircleIcon>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground/70">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-tertiary">
             <span className="flex items-center gap-1">
-              <ClockIcon className="size-3.5" />
-              {schedule.trigger === "github_issue_opened"
-                ? "GitHub issue opened"
-                : schedule.schedule
-                  ? describeCron(schedule.schedule)
-                  : "No trigger"}
+              <ClockIcon size={14} weight="regular" />
+              {describeTriggers(schedule)}
             </span>
             {workspaces.length > 1 && (
               <span className="flex items-center gap-1">
-                <StackIcon className="size-3.5" />
+                <StackRegularIcon size={14} />
                 {workspaceName}
               </span>
             )}
-            {schedule.repo && <span>{schedule.repo}</span>}
-            {schedule.slackChannelId && <span>{schedule.slackChannelId}</span>}
             <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
           </div>
         </div>
       </Link>
       {schedule.lastThreadId && (
-        <Link
-          to="/agents/$threadId"
-          params={{ threadId: schedule.lastThreadId }}
-          aria-label="Open latest automation run"
-          className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+        <IconButton
+          asChild
+          icon={ArrowSquareOutIcon}
+          label="Open latest automation run"
+          color="secondary"
+          variant="plain"
+          size="md"
+          className="shrink-0"
         >
-          <ArrowSquareOutIcon className="size-4" />
-        </Link>
+          <Link
+            to="/agents/$threadId"
+            params={{ threadId: schedule.lastThreadId }}
+          />
+        </IconButton>
       )}
       {canManage && (
         <>
-          <button
-            type="button"
+          <Button
+            color="secondary"
+            variant="outlined"
+            leftDecorator={LightningIcon}
             onClick={onTest}
             disabled={isTesting || isToggling}
             aria-label="Test automation"
-            className="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            className="shrink-0"
           >
-            <LightningIcon className="size-3.5" />
             {isTesting ? "Starting…" : "Test"}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <IconButton
+            icon={schedule.enabled ? PauseIcon : PlayIcon}
+            label={schedule.enabled ? "Pause automation" : "Resume automation"}
+            color="secondary"
+            variant="plain"
+            size="md"
             onClick={onToggle}
             disabled={isTesting || isToggling}
-            aria-label={
-              schedule.enabled ? "Pause automation" : "Resume automation"
-            }
-            className="shrink-0 rounded-md p-1.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-          >
-            {schedule.enabled ? (
-              <PauseIcon className="size-4" />
-            ) : (
-              <PlayIcon className="size-4" />
-            )}
-          </button>
+            className="shrink-0"
+          />
         </>
       )}
     </div>

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-wakeup_tool = importlib.import_module("agent.tools.schedule_thread_wakeup")
+wakeup_tool = importlib.import_module("openswe.tools.schedule_thread_wakeup")
 
 # Captured before the autouse stub replaces it, for the one test that needs the real wrapper.
 _real_purge_best_effort = wakeup_tool._purge_expired_wakeups_best_effort
@@ -46,6 +46,7 @@ class _FakeCrons:
         self,
         *,
         metadata: dict[str, Any] | None = None,
+        thread_id: str | None = None,
         limit: int = 10,
         offset: int = 0,
         **_: Any,
@@ -54,8 +55,11 @@ class _FakeCrons:
         items = [
             c
             for c in self._crons
-            if not metadata
-            or all((c.get("metadata") or {}).get(k) == v for k, v in metadata.items())
+            if (thread_id is None or c.get("thread_id") == thread_id)
+            and (
+                not metadata
+                or all((c.get("metadata") or {}).get(k) == v for k, v in metadata.items())
+            )
         ]
         return items[offset : offset + limit]
 
@@ -120,6 +124,25 @@ def _config(**overrides: Any) -> dict[str, Any]:
     return base
 
 
+async def test_cancel_thread_wakeups_removes_every_timer_only_for_that_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timers = [
+        {**_wakeup_cron(f"worker-{index}", None), "thread_id": "worker"} for index in range(3)
+    ]
+    unrelated = [
+        {**_wakeup_cron("host-timer", None), "thread_id": "host"},
+        {"cron_id": "background", "thread_id": "worker", "metadata": {"kind": "background_tasks"}},
+    ]
+    client = _FakeClient([*timers, *unrelated])
+    monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
+    monkeypatch.setattr(wakeup_tool, "_PURGE_PAGE_SIZE", 2)
+
+    await wakeup_tool.cancel_thread_wakeups("worker")
+
+    assert await client.crons.search() == unrelated
+
+
 def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]:
     return {
         "id": message_id,
@@ -131,7 +154,7 @@ def _input_message(message_id: str, *, kind: str, sender: str) -> dict[str, str]
 
 
 async def test_schedule_thread_wakeup_rejects_zero_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     result = await wakeup_tool.schedule_thread_wakeup(0)
     assert result["success"] is False
     assert "positive" in result["error"].lower()
@@ -140,7 +163,7 @@ async def test_schedule_thread_wakeup_rejects_zero_delay(monkeypatch: pytest.Mon
 async def test_schedule_thread_wakeup_rejects_delay_over_24h(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     result = await wakeup_tool.schedule_thread_wakeup(1441)
     assert result["success"] is False
     assert "1440" in result["error"]
@@ -172,7 +195,7 @@ async def test_schedule_thread_wakeup_creates_cron(monkeypatch: pytest.MonkeyPat
             "thread_id": thread_id,
         }
 
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "_create_wakeup_cron", fake_create_wakeup_cron)
 
     result = await wakeup_tool.schedule_thread_wakeup(10, prompt="Check CI status")
@@ -212,7 +235,7 @@ async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyP
             _input_message("user-2", kind="human", sender="slack:U1"),
         ]
     )
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
@@ -237,7 +260,7 @@ async def test_system_wakeup_does_not_reset_wakeup_limit(monkeypatch: pytest.Mon
             wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 10,
         },
     )
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
@@ -258,7 +281,7 @@ async def test_schedule_does_not_create_cron_when_budget_cannot_be_recorded(
         raise RuntimeError("metadata unavailable")
 
     monkeypatch.setattr(client.threads, "update", fail_update)
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     result = await wakeup_tool.schedule_thread_wakeup(5)
@@ -279,7 +302,7 @@ async def test_parallel_schedules_share_one_wakeup_budget(monkeypatch: pytest.Mo
             wakeup_tool._WAKEUP_COUNT_METADATA_KEY: 9,
         },
     )
-    monkeypatch.setattr("agent.run_config.get_config", _config)
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
     monkeypatch.setattr(wakeup_tool, "get_client", lambda url: client)
 
     results = await asyncio.gather(
@@ -311,30 +334,24 @@ async def test_purge_deletes_only_expired_wakeups() -> None:
     assert client.crons.search_calls[0]["metadata"] == {"kind": "thread_wakeup"}
 
 
-async def test_sync_points_at_earliest_pending_wakeup_and_clears_when_none(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    invalidated: list[str] = []
-
-    async def _record(*topics: str) -> None:
-        invalidated.extend(topics)
-
-    monkeypatch.setattr(wakeup_tool, "invalidate_standalone", _record)
+async def test_sync_points_at_earliest_pending_wakeup_and_clears_when_none() -> None:
     padding = timedelta(seconds=wakeup_tool._END_TIME_PADDING_SECONDS)
     now = datetime.now(UTC).replace(microsecond=0)
     soon, later = now + timedelta(minutes=5), now + timedelta(hours=1)
     client = _FakeClient(
         [
-            _wakeup_cron("fired", now - timedelta(minutes=1) + padding),
-            _wakeup_cron("later", later + padding),
-            _wakeup_cron("soon", soon + padding),
+            {**_wakeup_cron(cron_id, at + padding), "thread_id": "thread-1"}
+            for cron_id, at in [
+                ("fired", now - timedelta(minutes=1)),
+                ("later", later),
+                ("soon", soon),
+            ]
         ]
     )
 
     await wakeup_tool.sync_next_wakeup(client, "thread-1")
 
     assert client.threads.metadata["next_wakeup_at_ms"] == int(soon.timestamp() * 1000)
-    assert invalidated == ["thread/thread-1"]
 
     client.crons._crons = []
     await wakeup_tool.sync_next_wakeup(client, "thread-1")

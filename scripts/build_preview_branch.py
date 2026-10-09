@@ -71,7 +71,6 @@ class Settings:
     label: str
     manual_branch: str
     max_prs: int
-    reset_days: int
     reset_hour: int
     reset_zone: ZoneInfo
     url: str
@@ -86,7 +85,6 @@ class Settings:
             label=_env("PREVIEW_LABEL", "preview"),
             manual_branch=_env("PREVIEW_MANUAL_BRANCH", "preview-manual"),
             max_prs=int(_env("PREVIEW_MAX_PRS", "50")),
-            reset_days=int(_env("PREVIEW_RESET_DAYS", "7")),
             reset_hour=int(_env("PREVIEW_RESET_HOUR", "7")),
             reset_zone=ZoneInfo(_env("PREVIEW_RESET_ZONE", "America/New_York")),
             url=_env(
@@ -482,7 +480,7 @@ There is one `{s.manual_branch}` branch for everyone, which is why the recipe me
 rather than replacing it: the push stays a fast-forward, and a rejected push means someone else got
 there first — merge theirs in and push again.
 
-The preview resets to plain `main` every {s.reset_days} days, in the
+The preview resets to plain `main` every Sunday, in the
 {s.reset_hour:02d}:00 {s.reset_zone.key} hour: labels are removed and
 `{s.manual_branch}` is deleted. Re-push the branch to bring it back."""
 
@@ -759,18 +757,18 @@ The preview resets to plain `main` every {s.reset_days} days, in the
     async def reset(self) -> None:
         s = self.settings
         now = datetime.now(s.reset_zone)
-        if now.hour != s.reset_hour:
-            print(f"{now:%H:%M} {s.reset_zone.key} is outside the reset hour.")
+        if now.weekday() != 6 or now.hour != s.reset_hour:
+            print(f"{now:%A %H:%M} {s.reset_zone.key} is outside the Sunday reset hour.")
             return
         today = now.date()
         resets = sorted(
             ref.removeprefix(RESET_REF_PREFIX) for ref in await remote_refs(f"{RESET_REF_PREFIX}*")
         )
-        if resets and (today - date.fromisoformat(resets[-1])).days < s.reset_days:
-            print(f"The {resets[-1]} reset was less than {s.reset_days} days ago.")
+        if resets and date.fromisoformat(resets[-1]) >= today:
+            print(f"The {resets[-1]} reset already covers today.")
             return
 
-        summary(f"## {s.reset_days}-day reset", "")
+        summary("## Sunday reset", "")
         incomplete = False
         try:
             pulls = [pull for pull in await open_pulls(s.repo) if pull.has_label(s.label)]

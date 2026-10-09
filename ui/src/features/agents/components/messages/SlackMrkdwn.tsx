@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { Fragment } from "react"
 import { api } from "@/lib/api"
 import type { ReactNode } from "react"
@@ -6,8 +6,12 @@ import type { ReactNode } from "react"
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"])
+const USER_MENTION = /^@[UW][A-Z0-9]{2,}$/
+const USER_TOKEN = /<@([UW][A-Z0-9]{2,})>/g
+const MARKDOWN_TOKEN =
+  /(```[\s\S]*?```|`[^`\n]*`)|<([^<>\s|]+)(?:\|([^<>\n]*))?>/g
 const LINK_CLASS =
-  "text-foreground/90 underline decoration-foreground/40 break-words [overflow-wrap:anywhere]"
+  "text-primary underline decoration-[color:var(--text-tertiary)] break-words [overflow-wrap:anywhere]"
 
 function decodeSlackText(text: string): string {
   return text.replace(/&(?:amp|lt|gt);/g, (entity) => {
@@ -66,13 +70,50 @@ function closingDelimiter(
   return -1
 }
 
-export function SlackUserMention({ userId }: { userId: string }) {
-  const { data } = useQuery({
+function userNameQuery(userId: string) {
+  return {
     queryKey: ["slackUserName", userId],
     queryFn: () => api.slackUserName(userId),
     staleTime: 60 * 60 * 1000,
+  }
+}
+
+export function SlackUserMention({ userId }: { userId: string }) {
+  const { data } = useQuery(userNameQuery(userId))
+  return <span className="text-primary">@{data?.name || userId}</span>
+}
+
+function slackTokenLabel(target: string, label: string): string | null {
+  if (target.startsWith("@") || target.startsWith("#")) {
+    return target[0] + (label || target.slice(1)).replace(/^[@#]/, "")
+  }
+  if (target.startsWith("!date^")) return label || target
+  if (target.startsWith("!subteam^")) return label || "@subteam"
+  if (!target.startsWith("!")) return null
+  const name = label || target.slice(1)
+  return name.startsWith("@") ? name : `@${name}`
+}
+
+/** Slack tokens in an outbound Markdown reply rewritten as Markdown, with mentions resolved. */
+export function useSlackMarkdown(text: string): string {
+  const ids = [
+    ...new Set(Array.from(text.matchAll(USER_TOKEN), (m) => m[1] ?? "")),
+  ]
+  const names = useQueries({
+    queries: ids.map((id) => userNameQuery(id)),
   })
-  return <span className="text-foreground/90">@{data?.name || userId}</span>
+  return text.replace(
+    MARKDOWN_TOKEN,
+    (match: string, code?: string, target = "", label = "") => {
+      if (code) return match
+      if (!label && USER_MENTION.test(target)) {
+        return `@${names[ids.indexOf(target.slice(1))]?.data?.name || target.slice(1)}`
+      }
+      const tokenLabel = slackTokenLabel(target, label)
+      if (tokenLabel !== null) return tokenLabel
+      return label && safeHref(target) ? `[${label}](${target})` : match
+    }
+  )
 }
 
 function slackTokenNode(token: string, key: string): ReactNode {
@@ -82,38 +123,15 @@ function slackTokenNode(token: string, key: string): ReactNode {
   const target = decodeSlackText(rawTarget)
   const label = decodeSlackText(rawLabel)
 
-  if (!label && /^@[UW][A-Z0-9]{2,}$/.test(target)) {
+  if (!label && USER_MENTION.test(target)) {
     return <SlackUserMention key={key} userId={target.slice(1)} />
   }
 
-  if (target.startsWith("@") || target.startsWith("#")) {
-    const sigil = target[0]
-    const displayLabel = (label || target.slice(1)).replace(/^[@#]/, "")
+  const tokenLabel = slackTokenLabel(target, label)
+  if (tokenLabel !== null) {
     return (
-      <span key={key} className="text-foreground/90">
-        {sigil}
-        {displayLabel}
-      </span>
-    )
-  }
-
-  if (target.startsWith("!date^")) {
-    return <Fragment key={key}>{label || target}</Fragment>
-  }
-
-  if (target.startsWith("!subteam^")) {
-    return (
-      <span key={key} className="text-foreground/90">
-        {label || "@subteam"}
-      </span>
-    )
-  }
-
-  if (target.startsWith("!")) {
-    const displayLabel = label || target.slice(1)
-    return (
-      <span key={key} className="text-foreground/90">
-        {displayLabel.startsWith("@") ? displayLabel : `@${displayLabel}`}
+      <span key={key} className="text-primary">
+        {tokenLabel}
       </span>
     )
   }
@@ -167,7 +185,10 @@ function renderRange(
       if (closing !== -1) {
         flushLiteral(cursor)
         nodes.push(
-          <code key={key} className="rounded bg-background/60 px-1 font-mono">
+          <code
+            key={key}
+            className="rounded-xs bg-surface-level-3 px-space-1 font-mono"
+          >
             {decodeSlackText(text.slice(cursor + 1, closing))}
           </code>
         )

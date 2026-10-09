@@ -1,12 +1,21 @@
 import {
   CaretDownIcon,
   CaretRightIcon,
-  DotsThreeIcon,
-} from "@phosphor-icons/react"
+} from "@langchain/macaw-components/icons"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import type { ReactNode } from "react"
 
-import { Menu, MenuPopup, MenuTrigger } from "@/components/ui/menu"
 import { cn } from "@/lib/utils"
+
+const SECTION_CONTROL =
+  "text-tertiary opacity-0 transition-opacity group-hover/section:opacity-100 hover:text-primary focus-visible:opacity-100"
 
 /**
  * The Pinned / Repositories / Recents header. The caret only shows on hover while
@@ -15,35 +24,42 @@ import { cn } from "@/lib/utils"
  */
 export function SidebarSectionHeader({
   label,
-  collapsed,
+  collapsed = false,
   onToggleCollapsed,
   menu,
   action,
 }: {
   label: string
-  collapsed: boolean
-  onToggleCollapsed: () => void
+  collapsed?: boolean
+  onToggleCollapsed?: () => void
   menu?: ReactNode
   action?: ReactNode
 }) {
   const Caret = collapsed ? CaretRightIcon : CaretDownIcon
+  const Heading = onToggleCollapsed ? "button" : "div"
 
   return (
-    <div className="group/section flex items-center gap-1 pr-1 pl-2">
-      <button
-        type="button"
+    <div className="group/section flex items-center gap-space-1 pr-space-1 pl-space-2">
+      <Heading
+        type={onToggleCollapsed ? "button" : undefined}
         onClick={onToggleCollapsed}
-        aria-expanded={!collapsed}
-        className="flex min-w-0 flex-1 items-center gap-1 py-1 text-left text-[13px] font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+        aria-expanded={onToggleCollapsed ? !collapsed : undefined}
+        className="flex min-w-0 flex-1 items-center gap-space-1 py-space-1 text-left text-xs font-medium text-tertiary transition-colors hover:text-primary"
       >
         <span className="min-w-0 truncate">{label}</span>
         <Caret
+          size={14}
+          weight="regular"
           className={cn(
-            "size-3.5 shrink-0",
-            collapsed ? "block" : "hidden group-hover/section:block"
+            "shrink-0",
+            !onToggleCollapsed
+              ? "hidden"
+              : collapsed
+                ? "block"
+                : "hidden group-hover/section:block"
           )}
         />
-      </button>
+      </Heading>
       <span className="flex shrink-0 items-center gap-0.5">
         {menu}
         {action}
@@ -52,6 +68,7 @@ export function SidebarSectionHeader({
   )
 }
 
+/** Children are Macaw `DropdownMenu*` items. */
 export function SidebarSectionMenu({
   label,
   children,
@@ -60,18 +77,21 @@ export function SidebarSectionMenu({
   children: ReactNode
 }) {
   return (
-    <Menu>
-      <MenuTrigger
-        aria-label={label}
-        title={label}
-        className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground data-popup-open:opacity-100"
-      >
-        <DotsThreeIcon className="size-4" />
-      </MenuTrigger>
-      <MenuPopup align="start" className="w-56" sideOffset={4}>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton
+          icon={DotsThreeIcon}
+          label={label}
+          size="xs"
+          color="secondary"
+          variant="plain"
+          className={cn(SECTION_CONTROL, "data-[state=open]:opacity-100")}
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
         {children}
-      </MenuPopup>
-    </Menu>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -81,18 +101,18 @@ export function SidebarSectionAction({
   onClick,
 }: {
   label: string
-  icon: ReactNode
+  icon: IconComponent
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
+    <IconButton
+      icon={icon}
+      label={label}
+      size="xs"
+      color="secondary"
+      variant="plain"
       onClick={onClick}
-      className="flex size-5 items-center justify-center rounded text-muted-foreground/70 opacity-0 transition-opacity group-hover/section:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground"
-    >
-      {icon}
-    </button>
+      className={SECTION_CONTROL}
+    />
   )
 }

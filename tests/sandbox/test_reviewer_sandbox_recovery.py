@@ -11,11 +11,11 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
-from agent.reviewer import PrepareReviewerRunMiddleware, _ensure_reviewer_sandbox_for_thread
-from agent.run_config import RunConfig
-from agent.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
-from agent.sandboxes.providers.registry import SandboxGoneError
-from agent.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
+from openswe.reviewer import PrepareReviewerRunMiddleware, ensure_reviewer_sandbox_for_thread
+from openswe.run_config import RunConfig
+from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
+from openswe.sandboxes.providers.registry import SandboxGoneError
+from openswe.sandboxes.state import SandboxUnreachableError, set_sandbox_backend
 
 
 @pytest.mark.asyncio
@@ -27,23 +27,23 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-deleted"},
         ),
         patch(
-            "agent.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update_thread,
     ):
         result = await ensure_sandbox_for_thread(
@@ -58,6 +58,7 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
         github_proxy_repositories=None,
         workspace_slug="large",
         owner_login=None,
+        record_stale_boot=False,
     )
     # The stale id is cleared by persisting the replacement, so later runs stop
     # reconnecting to a sandbox that no longer exists.
@@ -80,22 +81,22 @@ async def test_replaces_unreachable_cached_sandbox_when_replacement_allowed() ->
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-cached-dead"},
         ),
         patch(
-            "agent.sandboxes.lifecycle._refresh_github_proxy",
+            "openswe.sandboxes.lifecycle._refresh_github_proxy",
             new_callable=AsyncMock,
             side_effect=SandboxClientError("sandbox is gone"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             return_value=replacement,
         ) as create_replacement,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
     ):
         result = await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
 
@@ -113,22 +114,22 @@ async def test_failed_replacement_still_raises_sandbox_unreachable() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-deleted"},
         ),
         patch(
-            "agent.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             side_effect=RuntimeError("sandbox API outage"),
         ),
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError) as excinfo,
     ):
         await ensure_sandbox_for_thread(thread_id, allow_replacement=True)
@@ -146,21 +147,21 @@ async def test_unreachable_sandbox_still_fails_by_default() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-deleted"},
         ),
         patch(
-            "agent.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
         ) as create_replacement,
-        patch("agent.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch("agent.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError),
     ):
         await ensure_sandbox_for_thread(thread_id)
@@ -174,11 +175,11 @@ async def test_reviewer_opts_into_replacement() -> None:
     sandbox_backend = MagicMock()
 
     with patch(
-        "agent.reviewer.ensure_sandbox_for_thread",
+        "openswe.reviewer.ensure_sandbox_for_thread",
         new_callable=AsyncMock,
         return_value=sandbox_backend,
     ) as ensure:
-        result, github_token = await _ensure_reviewer_sandbox_for_thread(
+        result, github_token = await ensure_reviewer_sandbox_for_thread(
             "thread-reviewer",
             RunConfig.parse({"repo": {"owner": "langchain-ai", "name": "open-swe"}}),
         )
@@ -200,12 +201,12 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
 
     with (
         patch(
-            "agent.reviewer._ensure_reviewer_sandbox_for_thread",
+            "openswe.reviewer.ensure_reviewer_sandbox_for_thread",
             new_callable=AsyncMock,
             side_effect=SandboxUnreachableError("thread-reviewer", "sandbox-deleted", "not found"),
         ),
         patch(
-            "agent.reviewer.post_sandbox_unreachable_notification",
+            "openswe.reviewer.post_sandbox_unreachable_notification",
             new_callable=AsyncMock,
         ) as notify,
         pytest.raises(SandboxUnreachableError),
@@ -230,22 +231,22 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
 
     with (
         patch(
-            "agent.sandboxes.lifecycle.get_sandbox_metadata",
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
             new_callable=AsyncMock,
             return_value={"sandbox_id": "sandbox-deleted"},
         ),
         patch(
-            "agent.sandboxes.lifecycle.create_sandbox",
+            "openswe.sandboxes.lifecycle.create_sandbox",
             new_callable=AsyncMock,
             side_effect=SandboxGoneError("Sandbox 'sandbox-deleted' not found"),
         ),
         patch(
-            "agent.sandboxes.lifecycle._create_sandbox_with_proxy",
+            "openswe.sandboxes.lifecycle._create_sandbox_with_proxy",
             new_callable=AsyncMock,
             side_effect=lambda *_a, **_k: (order.append("init"), replacement)[1],
         ) as create_replacement,
         patch(
-            "agent.sandboxes.lifecycle.client.threads.update",
+            "openswe.sandboxes.lifecycle.client.threads.update",
             new_callable=AsyncMock,
             side_effect=lambda **_: order.append("bind"),
         ) as update_thread,

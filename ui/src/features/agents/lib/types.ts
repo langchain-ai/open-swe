@@ -1,3 +1,5 @@
+import type { TaskEventMetadata } from "./structuredInputMessages"
+
 export type Author = "user" | "agent" | "system" | "tool"
 
 export type ChunkKind =
@@ -42,6 +44,7 @@ export type AgentTriggerKind =
   | "reviewer"
   | "analyzer"
   | "ci_autofix"
+  | "slack_bot"
 
 export interface TodoItem {
   content: string
@@ -60,7 +63,7 @@ export type AcpToolKind =
   | "slack"
   | "linear"
   | "sql"
-  | "service-connection"
+  | "managed-tools"
   /** deepagents `task` tool — spawns a subagent; rendered as a subagent card. */
   | "task"
   | "other"
@@ -214,8 +217,11 @@ export interface Message {
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
+  /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */
+  invocationIds?: Array<string>
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
   timestampIsFallback?: boolean
@@ -232,21 +238,76 @@ export interface LocalRepo {
   gitBranch?: string
 }
 
-export type SlackNotificationMode = "always" | "on_action"
-export type AutomationTrigger = "schedule" | "github_issue_opened"
+export type GitHubTriggerEvent =
+  | "issues.opened"
+  | "pull_request.opened"
+  | "pull_request.closed"
+  | "pull_request.merged"
+
+export type SlackTriggerEvent = "message.posted"
+export type SlackTriggerSenders = "anyone" | "people" | "bots"
+export type LinearTriggerEvent = "issue.created" | "issue.labeled"
+
+/** One way an automation fires; `kind` names the provider, the rest are its filters. */
+export type AutomationTriggerConfig =
+  | { kind: "schedule"; cron: string }
+  | { kind: "github"; repo: string; events: Array<GitHubTriggerEvent> }
+  | {
+      kind: "slack"
+      channel: string
+      events: Array<SlackTriggerEvent>
+      senders?: SlackTriggerSenders
+      /** Case-insensitive regular expression the message text must match. */
+      match?: string | null
+      max_runs_per_hour?: number | null
+    }
+  | {
+      kind: "linear"
+      /** Team key, e.g. ENG. */
+      team: string
+      events: Array<LinearTriggerEvent>
+      labels?: Array<string>
+      project?: string | null
+      max_runs_per_hour?: number | null
+    }
+
+export type AutomationTriggerProvider = AutomationTriggerConfig["kind"]
+
+/** The event providers an automation can run on, each with its events' labels. */
+export const AUTOMATION_EVENT_PROVIDERS = {
+  github: {
+    label: "GitHub",
+    events: {
+      "issues.opened": "Issue opened",
+      "pull_request.opened": "PR opened",
+      "pull_request.closed": "PR closed",
+      "pull_request.merged": "PR merged",
+    } satisfies Record<GitHubTriggerEvent, string>,
+  },
+  slack: {
+    label: "Slack",
+    events: {
+      "message.posted": "Message posted",
+    } satisfies Record<SlackTriggerEvent, string>,
+  },
+  linear: {
+    label: "Linear",
+    events: {
+      "issue.created": "Issue created",
+      "issue.labeled": "Label added",
+    } satisfies Record<LinearTriggerEvent, string>,
+  },
+} as const
 
 export interface AgentSchedule {
   id: string
   name: string
   prompt: string
   schedule: string | null
-  trigger: AutomationTrigger
+  triggers: Array<AutomationTriggerConfig & { id: string }>
   scope: "workspace"
   /** Slug of the workspace every run launches in. */
   workspace: string
-  repo: string | null
-  slackChannelId?: string | null
-  slackNotificationMode: SlackNotificationMode
   adminThread: boolean
   model: string
   effort?: string | null
@@ -270,6 +331,18 @@ export interface QueuedThreadMessage {
   pending?: boolean
   /** False when someone else sent it: only its sender may send it now or cancel it. */
   mine?: boolean
+  /** Held in the thread's queue for the agent's next model call, with no run of its own. */
+  waitsForAgent?: boolean
+  sender?: string | null
+}
+
+/** A message in the thread's queue, as `/threads/{id}/queued-messages` returns it. */
+export interface AgentQueuedMessage {
+  id: string
+  text: string
+  sender: string | null
+  platform: string | null
+  queued_at: string | null
 }
 
 export interface PendingThreadMessage extends Omit<
@@ -431,7 +504,13 @@ export interface AgentSubagentSummary {
   endedAt: number | null
 }
 
+export type TaskMembership =
+  | { role: "coordinator"; taskId: string }
+  | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
+
 export interface AgentThread {
+  taskMembership?: TaskMembership
+  taskWorkers?: Array<AgentThread>
   ownerLogin?: string | null
   visibility?: "public" | "private"
   id: string
@@ -458,6 +537,8 @@ export interface AgentThread {
   origin?: AgentSource | string
   threadCategory?: AgentThreadCategory | string
   triggerKind?: AgentTriggerKind | string
+  /** The allowed Slack bot that started the thread; the dashboard cannot steer it. */
+  triggeringBot?: { key: string; name: string } | null
   automationId?: string | null
   automationName?: string | null
   automationActionPosted?: boolean
@@ -472,12 +553,18 @@ export interface AgentThread {
   createdAt: number
   updatedAt: number
   traceUrl?: string | null
+  /** LangSmith cost of the thread's finished runs so far, in USD. */
+  costUsd?: number | null
+  /** LangSmith cost of each finished run, in USD, by invocation id. */
+  runCosts?: Record<string, number>
   sourceUrl?: string | null
   sourceAppUrl?: string | null
   codeChannelUrl?: string | null
   sandboxId?: string | null
   /** For a thread bridged to someone's machine: which app serves it. */
   sandboxBridgeClient?: "cli" | "desktop" | null
+  /** Whether that machine is serving the thread's checkout right now; null in lists. */
+  sandboxBridgeOnline?: boolean | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

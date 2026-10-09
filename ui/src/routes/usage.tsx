@@ -1,20 +1,25 @@
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
-import {
-  ArrowClockwiseIcon,
-  CaretDownIcon,
-  CheckCircleIcon,
-  ClockCountdownIcon,
-  WarningCircleIcon,
-} from "@phosphor-icons/react"
-import {
-  ArrowDownNarrowWide,
-  ArrowUpNarrowWide,
-  ArrowUpDown,
-  ChevronDown,
-  ChevronRight,
-} from "lucide-react"
 import { Fragment, useState } from "react"
+import { Avatar } from "@langchain/macaw-components/Avatar"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Select } from "@langchain/macaw-components/Select"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { ClockCountdownIcon } from "@phosphor-icons/react/dist/ssr/ClockCountdown"
+import { SortAscendingIcon } from "@phosphor-icons/react/dist/ssr/SortAscending"
+import { SortDescendingIcon } from "@phosphor-icons/react/dist/ssr/SortDescending"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 
 import type {
   AnalyticsMetadata,
@@ -31,18 +36,6 @@ import type {
 import { TablePagination } from "@/components/TablePagination"
 import { CopyDiagnosticsButton } from "@/components/CopyDiagnosticsButton"
 import { AppShell, SettingsSection } from "@/components/AppShell"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { api, ApiError } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -53,6 +46,10 @@ import {
   type MetricAvailability,
 } from "@/lib/usage-diagnostics"
 import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
+
+const HELP_TRIGGER_CLASS =
+  "cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
 
 export const Route = createFileRoute("/usage")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -88,10 +85,9 @@ const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
   "30d": "Last 30 days",
   all: "All time",
 }
-const PERIOD_ITEMS = Object.entries(PERIOD_LABELS).map(([value, label]) => ({
-  value,
-  label,
-}))
+const PERIOD_ITEMS = (
+  Object.entries(PERIOD_LABELS) as Array<[UsageLeaderboardPeriod, string]>
+).map(([value, label]) => ({ value, label }))
 
 function UsagePage() {
   const session = useSession()
@@ -109,7 +105,7 @@ function UsagePage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
+      <main className="p-space-6">
         <Skeleton className="h-64 w-full" />
       </main>
     )
@@ -147,28 +143,15 @@ export function UsageDateRange({
   onPeriodChange: (period: UsageLeaderboardPeriod) => void
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <label htmlFor="usage-date-range" className="text-sm font-medium">
-        Date range
-      </label>
+    <div className="flex flex-wrap items-center gap-space-3">
+      <span className="text-sm font-medium text-primary">Date range</span>
       <Select
-        items={PERIOD_ITEMS}
+        aria-label="Date range"
+        options={PERIOD_ITEMS}
         value={activePeriod}
-        onValueChange={(value) =>
-          onPeriodChange(value as UsageLeaderboardPeriod)
-        }
-      >
-        <SelectTrigger id="usage-date-range" className="w-36">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {PERIOD_ITEMS.map(({ value, label }) => (
-            <SelectItem key={value} value={value}>
-              {label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        onChange={(value) => value && onPeriodChange(value)}
+        triggerClassName="w-36"
+      />
     </div>
   )
 }
@@ -284,9 +267,9 @@ function UsageAnalyticsPeriod({
         title="Agent leaderboard"
         description="Ranked by merged PRs, then agent lines of code and PRs opened."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-space-2">
             <div
-              className="flex rounded-md bg-muted p-0.5"
+              className="flex rounded-md bg-surface-level-2 p-0.5"
               role="group"
               aria-label="Usage scope"
             >
@@ -294,8 +277,9 @@ function UsageAnalyticsPeriod({
                 <Button
                   key={scope}
                   type="button"
-                  size="sm"
-                  variant={usageScope === scope ? "secondary" : "ghost"}
+                  size="xs"
+                  color="secondary"
+                  variant={usageScope === scope ? "outlined" : "plain"}
                   aria-pressed={usageScope === scope}
                   className="capitalize"
                   onClick={() => {
@@ -330,23 +314,29 @@ function UsageAnalyticsPeriod({
             <Skeleton className="h-12 w-full" />
           </div>
         ) : leaderboard.isError ? (
-          <div className="space-y-2 p-4 text-xs" role="alert">
-            <p className="text-destructive">
-              {leaderboard.error instanceof ApiError &&
-              leaderboard.error.status === 503
-                ? "Usage analytics is unavailable on this deployment."
-                : "Could not load usage analytics. Try again."}
-            </p>
-            <button
-              type="button"
-              className="underline"
-              onClick={() => leaderboard.refetch()}
-            >
-              Retry usage analytics
-            </button>
+          <div className="p-space-4" role="alert">
+            <Banner
+              intent="error"
+              title={
+                leaderboard.error instanceof ApiError &&
+                leaderboard.error.status === 503
+                  ? "Usage analytics is unavailable on this deployment."
+                  : "Could not load usage analytics. Try again."
+              }
+              action={
+                <Button
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
+                  onClick={() => void leaderboard.refetch()}
+                >
+                  Retry usage analytics
+                </Button>
+              }
+            />
           </div>
         ) : !leaderboard.data?.total_members ? (
-          <div className="p-6 text-center text-xs text-muted-foreground">
+          <div className="p-6 text-center text-xs text-secondary">
             No Open SWE Agent usage has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -406,13 +396,13 @@ function UsageAnalyticsPeriod({
             <Skeleton className="h-24 w-full" />
           </div>
         ) : leaderboard.isError ? (
-          <p className="p-4 text-xs text-destructive">
+          <p className="p-4 text-xs text-error-secondary">
             Reviewer stats are unavailable. Retry usage analytics above.
           </p>
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
         ) : (
-          <div className="p-6 text-center text-xs text-muted-foreground">
+          <div className="p-6 text-center text-xs text-secondary">
             No reviewer stats have been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
@@ -470,67 +460,68 @@ function AnalyticsCoverage({
         description:
           "Some events could not be processed. Reports may be incomplete.",
         icon: WarningCircleIcon,
-        tone: "text-destructive",
+        tone: "text-icon-error",
       }
     : hasPendingEvents
       ? {
           label: "Analytics are updating",
           description: "New activity is still being processed.",
           icon: ClockCountdownIcon,
-          tone: "text-amber-600 dark:text-amber-400",
+          tone: "text-icon-warning",
         }
       : {
           label: "Analytics are up to date",
           icon: CheckCircleIcon,
-          tone: "text-emerald-600 dark:text-emerald-400",
+          tone: "text-icon-success",
         }
   const StatusIcon = status.icon
 
   return (
     <div role="status" aria-label="Analytics coverage">
-      <details className="group rounded-xl border border-border bg-card text-xs">
-        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+      <details className="group rounded-xl border border-default bg-surface-level-1 text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)] [&::-webkit-details-marker]:hidden">
           <StatusIcon
             aria-hidden="true"
-            className={`size-4 shrink-0 ${status.tone}`}
+            size={16}
+            className={cn("shrink-0", status.tone)}
             weight="fill"
           />
           <span className="min-w-0 flex-1">
-            <span className="block font-medium text-foreground">
+            <span className="block font-medium text-primary">
               {status.label}
             </span>
             {status.description ? (
-              <span className="mt-0.5 block text-muted-foreground">
+              <span className="mt-0.5 block text-secondary">
                 {status.description}
               </span>
             ) : null}
           </span>
           <Button
             type="button"
-            size="sm"
-            variant="outline"
+            size="xs"
+            color="secondary"
+            variant="outlined"
             className="shrink-0"
+            leftDecorator={ArrowClockwiseIcon}
             disabled={refreshing}
             onClick={(event) => {
               event.preventDefault()
               onRefresh()
             }}
           >
-            <ArrowClockwiseIcon
-              aria-hidden="true"
-              className={`size-3.5 ${refreshing ? "animate-spin" : ""}`}
-            />
             {refreshing ? "Refreshing…" : "Refresh now"}
           </Button>
-          <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground group-open:text-foreground">
+          <span className="flex shrink-0 items-center gap-space-1 font-medium text-secondary group-open:text-primary">
             Details
             <CaretDownIcon
               aria-hidden="true"
-              className="size-3.5 transition-transform group-open:rotate-180"
+              size={14}
+              weight="regular"
+              className="transition-transform group-open:rotate-180"
             />
           </span>
         </summary>
-        <div className="space-y-1 border-t border-border px-4 py-3 text-muted-foreground">
+        <div className="space-y-1 border-t border-default px-4 py-3 text-secondary">
           <p>
             Period: {PERIOD_LABELS[period]} · PR report as of{" "}
             {reportServerAsOf ? (
@@ -547,7 +538,7 @@ function AnalyticsCoverage({
             .
           </p>
           {reportRefreshError ? (
-            <p className="text-destructive">
+            <p className="text-error-secondary">
               Last PR report refresh failed (
               {reportRefreshError.status > 0
                 ? `HTTP ${reportRefreshError.status}`
@@ -656,19 +647,25 @@ function PRMergeRateSection({
           <Skeleton className="h-16 w-full" />
         </div>
       ) : failed ? (
-        <div className="space-y-2 p-4 text-xs" role="alert">
-          <p className="text-destructive">
-            {report.error instanceof ApiError && report.error.status === 503
-              ? "PR analytics is unavailable on this deployment."
-              : "Could not load PR outcomes. Try again."}
-          </p>
-          <button
-            type="button"
-            className="underline"
-            onClick={() => report.refetch()}
-          >
-            Retry
-          </button>
+        <div className="p-space-4" role="alert">
+          <Banner
+            intent="error"
+            title={
+              report.error instanceof ApiError && report.error.status === 503
+                ? "PR analytics is unavailable on this deployment."
+                : "Could not load PR outcomes. Try again."
+            }
+            action={
+              <Button
+                size="xs"
+                color="secondary"
+                variant="outlined"
+                onClick={() => void report.refetch()}
+              >
+                Retry
+              </Button>
+            }
+          />
         </div>
       ) : data?.status === "ready" ? (
         <PRMergeRateTable
@@ -677,16 +674,13 @@ function PRMergeRateSection({
           maturityDays={data.maturity_days}
         />
       ) : (
-        <p
-          className="p-6 text-center text-xs text-muted-foreground"
-          role="status"
-        >
+        <p className="p-6 text-center text-xs text-secondary" role="status">
           {emptyMessage}
         </p>
       )}
       {data?.unavailable_thread_ids.length ? (
-        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        <details className="border-t border-default px-4 py-3 text-xs text-secondary">
+          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[color:var(--border-focus)]">
             Unavailable model attribution ({data.unavailable_thread_ids.length})
           </summary>
           <p className="mt-3">
@@ -695,23 +689,24 @@ function PRMergeRateSection({
           </p>
           <ul className="mt-2 space-y-1">
             {data.unavailable_thread_ids.map((threadId) => (
-              <li key={threadId} className="flex items-center gap-2">
+              <li key={threadId} className="flex items-center gap-space-2">
                 <code className="select-all">{threadId}</code>
-                <button
-                  type="button"
-                  className="rounded-sm underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                <Button
+                  size="xs"
+                  color="secondary"
+                  variant="underlined"
                   onClick={() => void navigator.clipboard.writeText(threadId)}
                 >
                   Copy
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
         </details>
       ) : null}
       {data ? (
-        <details className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        <details className="border-t border-default px-4 py-3 text-xs text-secondary">
+          <summary className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[color:var(--border-focus)]">
             How these numbers work
           </summary>
           <div className="mt-3 space-y-3">
@@ -798,7 +793,7 @@ function AvgTimeToPR({
     // A backend that predates the metric has no key for it at all.
     return (
       <span
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className={HELP_TRIGGER_CLASS}
         title="Metric unavailable from this backend"
         aria-label="Time to PR: metric unavailable from this backend"
         tabIndex={0}
@@ -855,29 +850,38 @@ function OutcomeCell({
   const value = (
     <>
       {count}{" "}
-      <span className="text-muted-foreground">
+      <span className="text-secondary">
         ({outcomePercent(group, outcome)}%)
       </span>
     </>
   )
   if (outcome !== "open" || !count) return value
   return (
-    <Tooltip open={open} onOpenChange={setOpen}>
-      <TooltipTrigger
-        closeOnClick={false}
-        onClick={() => setOpen(true)}
-        className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    <Tooltip
+      open={open}
+      onOpenChange={setOpen}
+      title={
+        <div className="text-xs">
+          <div>
+            {group.waiting} open for less than {maturityDays} days
+          </div>
+          <div>
+            {group.mature_pending} open for {maturityDays} days or longer
+          </div>
+        </div>
+      }
+    >
+      <button
+        type="button"
+        // A click pins the breakdown open instead of toggling it shut.
+        onClick={(event) => {
+          event.preventDefault()
+          setOpen(true)
+        }}
+        className={HELP_TRIGGER_CLASS}
       >
         {value}
-      </TooltipTrigger>
-      <TooltipPopup>
-        <div>
-          {group.waiting} open for less than {maturityDays} days
-        </div>
-        <div>
-          {group.mature_pending} open for {maturityDays} days or longer
-        </div>
-      </TooltipPopup>
+      </button>
     </Tooltip>
   )
 }
@@ -973,8 +977,7 @@ function PROutcomeCells({
   return (
     <>
       <td className="px-2 py-3 text-right whitespace-nowrap tabular-nums">
-        {group.cohort_size}{" "}
-        <span className="text-muted-foreground">(100%)</span>
+        {group.cohort_size} <span className="text-secondary">(100%)</span>
       </td>
       {(["merged", "closed_without_merge", "open"] as const).map((outcome) => (
         <Fragment key={outcome}>
@@ -991,12 +994,12 @@ function PROutcomeCells({
                 {rate == null ? "—" : formatPercent(rate)}
               </span>
               {rate != null && (
-                <div className="text-xs text-muted-foreground">
+                <div className="text-xs text-secondary">
                   {group.merged}/{group.mature_denominator} eligible
                 </div>
               )}
               {rate != null && group.mature_denominator < 5 && (
-                <div className="text-xs text-amber-600 dark:text-amber-400">
+                <div className="text-xs text-warning-secondary">
                   Small sample
                 </div>
               )}
@@ -1018,25 +1021,26 @@ function PROutcomeCells({
             key={metric}
             className="px-2 py-3 text-right whitespace-nowrap tabular-nums"
           >
-            <Tooltip>
-              <TooltipTrigger className="cursor-help rounded-sm underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
-              </TooltipTrigger>
-              <TooltipPopup>
-                {supported
+            <Tooltip
+              title={
+                supported
                   ? `${group.distance_sample_size ?? 0}/${group.merged} merged PRs measured`
-                  : "Mean distance unavailable for this group"}
-              </TooltipPopup>
+                  : "Mean distance unavailable for this group"
+              }
+            >
+              <button type="button" className={HELP_TRIGGER_CLASS}>
+                {value == null ? "—" : `${(value / 100).toFixed(1)}%`}
+              </button>
             </Tooltip>
             {supported && group.distance_sample_size !== undefined && (
-              <div className="text-xs text-muted-foreground">
+              <div className="text-xs text-secondary">
                 {group.distance_sample_size}/{group.merged} measured
               </div>
             )}
             {supported &&
               (group.distance_sample_size ?? 0) > 0 &&
               (group.distance_sample_size ?? 0) < 5 && (
-                <div className="text-xs text-amber-600 dark:text-amber-400">
+                <div className="text-xs text-warning-secondary">
                   Small sample
                 </div>
               )}
@@ -1092,11 +1096,11 @@ function PRMergeRateTable({
     <div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1100px] text-xs">
-          <caption className="px-4 py-3 text-left text-muted-foreground">
+          <caption className="px-4 py-3 text-left text-secondary">
             Outcome shares use PRs opened in each row as their base. Expand a
             model to see its reasoning efforts.
           </caption>
-          <thead className="border-b border-border text-muted-foreground">
+          <thead className="border-b border-default text-secondary">
             <tr>
               {prOutcomeColumns(maturityDays).map((column) => (
                 <SortableHeader
@@ -1117,14 +1121,14 @@ function PRMergeRateTable({
                   }}
                   className={
                     column.key === "model"
-                      ? "sticky left-0 z-10 bg-card pl-4 text-left"
+                      ? "sticky left-0 z-10 bg-surface-level-1 pl-4 text-left"
                       : "text-right"
                   }
                 />
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border [&>tr:nth-child(even)]:bg-card [&>tr:nth-child(odd)]:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]">
+          <tbody className="divide-y divide-subtle [&>tr]:bg-surface-level-1">
             {rows.map((cohort) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
               const modelLabel =
@@ -1140,11 +1144,14 @@ function PRMergeRateTable({
                     >
                       <div className="flex items-center gap-2">
                         {hasMultipleEfforts ? (
-                          <button
-                            type="button"
-                            className="-ml-1 size-5.5 shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          <IconButton
+                            size="xxs"
+                            color="secondary"
+                            variant="plain"
+                            className="-ml-1 shrink-0"
+                            icon={isExpanded ? CaretDownIcon : CaretRightIcon}
+                            label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
                             aria-expanded={isExpanded}
-                            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${modelLabel} reasoning efforts`}
                             onClick={() =>
                               setExpanded((current) => {
                                 const next = new Set(current)
@@ -1153,13 +1160,7 @@ function PRMergeRateTable({
                                 return next
                               })
                             }
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="size-3.5" />
-                            ) : (
-                              <ChevronRight className="size-3.5" />
-                            )}
-                          </button>
+                          />
                         ) : (
                           <span
                             aria-hidden="true"
@@ -1168,7 +1169,7 @@ function PRMergeRateTable({
                         )}
                         <div>
                           <div className="font-medium">{modelLabel}</div>
-                          <div className="text-muted-foreground">
+                          <div className="text-secondary">
                             {hasMultipleEfforts
                               ? "All efforts"
                               : formatEffort(cohort.efforts[0]?.effort)}{" "}
@@ -1262,7 +1263,7 @@ function usageColumns(
       } — an aggregate ratio, not a per-thread outcome. One thread can open several PRs and many threads open none, so 1.00 does not mean every thread merged a PR.`,
     },
     { key: "agent_loc", label: "Agent LOC", align: "right" },
-    { key: "feedback_given", label: "# Feedback Given", align: "right" },
+    { key: "prs_reviewed", label: "PRs reviewed", align: "right" },
   ]
 }
 
@@ -1282,9 +1283,9 @@ function SortableHeader<Key extends string>({
   const isActive = sortKey === column.key
   const Icon = isActive
     ? sortDirection === "asc"
-      ? ArrowUpNarrowWide
-      : ArrowDownNarrowWide
-    : ArrowUpDown
+      ? SortAscendingIcon
+      : SortDescendingIcon
+    : ArrowsDownUpIcon
   const ariaSort = isActive
     ? sortDirection === "asc"
       ? "ascending"
@@ -1295,17 +1296,19 @@ function SortableHeader<Key extends string>({
     <button
       type="button"
       onClick={() => onSort(column.key, column.defaultDirection ?? "desc")}
-      className={`flex w-full items-center gap-1 rounded-sm px-2 py-3 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-        column.align === "right" ? "justify-end" : "justify-start"
-      } ${isActive ? "text-foreground" : ""} ${
-        column.tooltip
-          ? "cursor-help underline decoration-dotted underline-offset-2"
-          : ""
-      }`}
+      className={cn(
+        "flex w-full items-center gap-space-1 rounded-sm px-space-2 py-space-3 hover:bg-surface-level-2-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]",
+        column.align === "right" ? "justify-end" : "justify-start",
+        isActive && "text-primary",
+        column.tooltip &&
+          "cursor-help underline decoration-dotted underline-offset-2"
+      )}
     >
       {column.label}
       <Icon
-        className={`size-3 shrink-0 ${isActive ? "" : "text-muted-foreground/50"}`}
+        size={12}
+        weight="regular"
+        className={cn("shrink-0", !isActive && "text-icon-tertiary")}
         aria-hidden
       />
     </button>
@@ -1318,9 +1321,8 @@ function SortableHeader<Key extends string>({
       className={`${className} p-0 font-normal`}
     >
       {column.tooltip ? (
-        <Tooltip>
-          <TooltipTrigger render={button} />
-          <TooltipPopup className="max-w-xs">{column.tooltip}</TooltipPopup>
+        <Tooltip title={column.tooltip} tooltipClassName="max-w-xs">
+          {button}
         </Tooltip>
       ) : (
         button
@@ -1371,7 +1373,7 @@ function UsageTable({
           {isUpdating ? (
             <caption className="sr-only">Updating leaderboard</caption>
           ) : null}
-          <thead className="border-b border-border text-xs text-muted-foreground">
+          <thead className="border-b border-default text-xs text-secondary">
             <tr>
               {usageColumns(scope, period).map((column, index, columns) => (
                 <SortableHeader
@@ -1380,27 +1382,27 @@ function UsageTable({
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={onSort}
-                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-card" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "w-14 pr-0 pl-4" : index === columns.length - 1 ? "pr-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-10 bg-surface-level-1" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
           </thead>
           <tbody
-            className={`divide-y divide-border ${isUpdating ? "opacity-50" : ""}`}
+            className={cn("divide-y divide-subtle", isUpdating && "opacity-50")}
           >
             {rows.map((row) => (
               <tr
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
-                className="bg-card odd:bg-[color-mix(in_oklab,var(--foreground)_3%,var(--card))]"
+                className="bg-surface-level-1"
               >
-                <td className="px-4 py-3 text-muted-foreground">{row.rank}</td>
+                <td className="px-4 py-3 text-secondary">{row.rank}</td>
                 <td className="sticky left-0 z-10 bg-inherit px-2 py-3">
                   <UserCell
                     row={row}
                     isCurrentUser={row.rank === currentUserRank}
                   />
                 </td>
-                <td className="max-w-48 px-2 py-3 text-muted-foreground">
+                <td className="max-w-48 px-2 py-3 text-secondary">
                   <div className="truncate">
                     {safeModelLabel(row.favorite_model) || "Unavailable"}
                   </div>
@@ -1448,8 +1450,8 @@ function UsageTable({
                 >
                   {formatNumber(row.agent_loc)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">
-                  {formatNumber(row.feedback_given)}
+                <td className="px-2 py-3 text-right tabular-nums">
+                  {formatNumber(row.prs_reviewed ?? 0)}
                 </td>
               </tr>
             ))}
@@ -1506,18 +1508,19 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
     <div className="space-y-4 p-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (
-          <div key={card.label} className="rounded-md border border-border p-3">
-            <div className="text-xs text-muted-foreground">{card.label}</div>
+          <div
+            key={card.label}
+            className="rounded-md border border-default p-3"
+          >
+            <div className="text-xs text-secondary">{card.label}</div>
             <div className="mt-1 text-lg font-medium tabular-nums">
               {formatNumber(card.value)}
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              {card.helper}
-            </div>
+            <div className="mt-1 text-xs text-secondary">{card.helper}</div>
           </div>
         ))}
       </div>
-      <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+      <div className="grid gap-4 border-t border-default pt-4 sm:grid-cols-2">
         <CounterList title="Top categories" rows={stats.top_categories} />
         <CounterList title="Severity mix" rows={severityRows(stats)} />
       </div>
@@ -1545,7 +1548,7 @@ function CounterList({
 }) {
   return (
     <div>
-      <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
+      <h3 className="text-xs font-medium text-secondary">{title}</h3>
       {rows.length ? (
         <ul className="mt-2 space-y-2 text-xs">
           {rows.map((row) => (
@@ -1553,15 +1556,15 @@ function CounterList({
               key={row.name}
               className="flex items-center justify-between gap-3"
             >
-              <span className="truncate text-foreground">{row.name}</span>
-              <span className="text-muted-foreground tabular-nums">
+              <span className="truncate text-primary">{row.name}</span>
+              <span className="text-secondary tabular-nums">
                 {formatNumber(row.count)}
               </span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-xs text-muted-foreground">No data yet.</p>
+        <p className="mt-2 text-xs text-secondary">No data yet.</p>
       )}
     </div>
   )
@@ -1571,10 +1574,9 @@ function UserCell({
   row,
   isCurrentUser,
 }: {
-  row: UsageLeaderboardRow
+  row: Pick<UsageLeaderboardRow, "user">
   isCurrentUser: boolean
 }) {
-  const initials = initialsFor(row.user.name)
   const detail = row.user.github_login
   const profileUrl = githubProfileUrl(row.user.github_login)
   const name = profileUrl ? (
@@ -1582,22 +1584,20 @@ function UserCell({
       href={profileUrl}
       target="_blank"
       rel="noreferrer"
-      className="truncate font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="truncate font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--border-focus)]"
     >
       {row.user.name}
     </a>
   ) : (
-    <span className="truncate font-medium text-foreground">
-      {row.user.name}
-    </span>
+    <span className="truncate font-medium text-primary">{row.user.name}</span>
   )
   const avatar = (
-    <Avatar>
-      {row.user.avatar_url && (
-        <AvatarImage src={row.user.avatar_url} alt={row.user.name} />
-      )}
-      <AvatarFallback>{initials}</AvatarFallback>
-    </Avatar>
+    <Avatar
+      size="sm"
+      shape="circle"
+      label={row.user.name}
+      imageUrl={row.user.avatar_url ?? undefined}
+    />
   )
   return (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -1617,29 +1617,14 @@ function UserCell({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           {name}
-          {row.is_top_feedback_contributor && (
-            <Tooltip>
-              <TooltipTrigger
-                aria-label="Top feedback contributor"
-                className="shrink-0 cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                <span aria-hidden="true">🏆</span>
-              </TooltipTrigger>
-              <TooltipPopup>
-                Most feedback given in the selected date range.
-              </TooltipPopup>
-            </Tooltip>
-          )}
           {isCurrentUser ? (
-            <Badge variant="secondary" aria-label="You">
+            <Badge color="secondary" size="xxs" aria-label="You">
               You
             </Badge>
           ) : null}
         </div>
         {detail && detail !== row.user.name ? (
-          <span className="truncate text-xs text-muted-foreground">
-            {detail}
-          </span>
+          <span className="truncate text-xs text-secondary">{detail}</span>
         ) : null}
       </div>
     </div>
@@ -1649,15 +1634,6 @@ function UserCell({
 function githubProfileUrl(login: string | null): string | null {
   if (!login) return null
   return `https://github.com/${encodeURIComponent(login)}`
-}
-
-function initialsFor(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return "?"
-  const first = parts[0] ?? "?"
-  const second = parts[1]
-  if (!second) return first.slice(0, 2).toUpperCase()
-  return `${first[0] ?? ""}${second[0] ?? ""}`.toUpperCase()
 }
 
 function formatNumber(value: number): string {
@@ -1695,14 +1671,14 @@ function UsageCost({ row }: { row: UsageLeaderboardRow }) {
   return (
     <div className="flex flex-col items-end gap-0.5">
       <span>{unavailable ? "—" : formatCurrency(row.total_cost_usd)}</span>
-      <Tooltip>
-        <TooltipTrigger
+      <Tooltip title={explanation} tooltipClassName="max-w-xs">
+        <button
+          type="button"
           aria-label={`Cost ${label.toLowerCase()}`}
-          className="cursor-help rounded-sm text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className={cn(HELP_TRIGGER_CLASS, "text-xxs text-secondary")}
         >
           {label}
-        </TooltipTrigger>
-        <TooltipPopup className="max-w-xs">{explanation}</TooltipPopup>
+        </button>
       </Tooltip>
     </div>
   )

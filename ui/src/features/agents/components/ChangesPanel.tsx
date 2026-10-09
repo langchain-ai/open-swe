@@ -1,21 +1,27 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { useMemo, useState } from "react"
+import { Button } from "@langchain/macaw-components/Button"
 import {
-  ChevronDownIcon,
-  GitPullRequestIcon,
-  RefreshCwIcon,
-} from "lucide-react"
-import { GitBranchIcon } from "@phosphor-icons/react"
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { DiffScopeKind } from "@/features/agents/lib/diffPanelStore"
 import type { PanelFile } from "@/features/agents/components/DiffFilesView"
 import { DiffFilesView } from "@/features/agents/components/DiffFilesView"
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 
 export type ChangesStatus = "ready" | "missing" | "error"
 
 interface ChangesPanelProps {
+  onComment?: (content: string) => Promise<void>
   files: Array<PanelFile>
   status?: ChangesStatus
   isLoading: boolean
@@ -70,54 +76,59 @@ function ScopeSwitcher(props: {
   const label = SCOPE_LABELS[props.scope]
 
   const branchItem = (
-    <MenuItem
+    <DropdownMenuItem
       className={
         props.branchScopeAvailable
           ? undefined
-          : "data-disabled:pointer-events-auto"
+          : "data-[disabled]:pointer-events-auto"
       }
       disabled={!props.branchScopeAvailable}
-      onClick={() => props.onScopeChange("branch")}
+      onSelect={() => props.onScopeChange("branch")}
     >
       {SCOPE_LABELS.branch}
-    </MenuItem>
+    </DropdownMenuItem>
   )
 
   return (
-    <Menu open={open} onOpenChange={setOpen}>
-      <MenuTrigger
-        className="flex h-6 min-w-0 shrink cursor-pointer items-center gap-1 rounded-md px-1.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        className="flex h-6 min-w-0 shrink cursor-pointer items-center gap-space-1 rounded-md px-1.5 text-sm font-medium text-primary transition-colors hover:bg-surface-level-1-hover"
         aria-label={`Diff scope: ${label}`}
       >
         <span className="min-w-0 truncate">{label}</span>
-        <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
-      </MenuTrigger>
-      <MenuPopup
+        <CaretDownIcon
+          size={14}
+          weight="regular"
+          className="shrink-0 text-icon-secondary"
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
         align="start"
         side="bottom"
         sideOffset={6}
         className="min-w-52"
       >
-        <MenuItem onClick={() => props.onScopeChange("working-tree")}>
+        <DropdownMenuItem onSelect={() => props.onScopeChange("working-tree")}>
           {SCOPE_LABELS["working-tree"]}
-        </MenuItem>
+        </DropdownMenuItem>
         {props.branchScopeAvailable ? (
           branchItem
         ) : (
-          <Tooltip>
-            <TooltipTrigger render={branchItem} />
-            <TooltipPopup side="right">
-              This thread has no branch to compare against its base yet.
-            </TooltipPopup>
+          <Tooltip
+            title="This thread has no branch to compare against its base yet."
+            side="right"
+          >
+            {branchItem}
           </Tooltip>
         )}
-      </MenuPopup>
-    </Menu>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
 export function ChangesPanel({
   files,
+  onComment,
   status,
   isLoading,
   isFetching,
@@ -137,33 +148,31 @@ export function ChangesPanel({
   const actions = useMemo(
     () => (
       <>
-        <button
-          type="button"
-          aria-label="Refresh changes"
-          title="Refresh changes"
+        <IconButton
+          icon={ArrowClockwiseIcon}
+          label="Refresh changes"
+          size="sm"
+          color="secondary"
+          variant="plain"
           onClick={onRefresh}
           disabled={isFetching}
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-        >
-          <RefreshCwIcon
-            className={isFetching ? "size-3.5 animate-spin" : "size-3.5"}
-          />
-        </button>
+          iconClassName={isFetching ? "animate-spin" : undefined}
+        />
         {extraActions}
         {pr && (
-          <a
-            href={pr.url}
-            target="_blank"
-            rel="noreferrer"
+          <Button
+            as={<a href={pr.url} target="_blank" rel="noreferrer" />}
             aria-label="View PR"
             title="View PR"
-            className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-foreground transition-colors hover:bg-accent @max-[680px]:w-7 @max-[680px]:justify-center @max-[680px]:px-0"
+            color="secondary"
+            variant="outlined"
+            leftDecorator={GitPullRequestIcon}
+            className="@max-[680px]:w-6 @max-[680px]:px-0"
           >
-            <GitPullRequestIcon className="size-3.5 shrink-0" />
             <span className="whitespace-nowrap @max-[680px]:hidden">
               View PR
             </span>
-          </a>
+          </Button>
         )}
       </>
     ),
@@ -173,13 +182,14 @@ export function ChangesPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {truncated && (
-        <div className="shrink-0 border-b border-border bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+        <div className="shrink-0 border-b border-default bg-warning px-3 py-2 text-xs text-warning-secondary">
           Only the first {files.length} changed file
           {files.length === 1 ? " is" : "s are"} shown.
         </div>
       )}
       <DiffFilesView
         files={files}
+        onComment={onComment}
         revealFilePath={revealFilePath}
         fullScreen={fullScreen}
         emptyLabel={emptyLabel}
@@ -194,20 +204,20 @@ export function ChangesPanel({
             {branch && (
               <>
                 <span
-                  className="min-w-0 truncate text-xs text-muted-foreground @max-[520px]:hidden"
+                  className="min-w-0 truncate text-xs text-secondary @max-[520px]:hidden"
                   title={branch}
                 >
                   {branch}
                 </span>
-                <Tooltip>
-                  <TooltipTrigger
-                    aria-label={`Branch: ${branch}`}
-                    className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent @max-[520px]:flex"
-                  >
-                    <GitBranchIcon className="size-4 shrink-0" />
-                  </TooltipTrigger>
-                  <TooltipPopup>{branch}</TooltipPopup>
-                </Tooltip>
+                <IconButton
+                  icon={GitBranchIcon}
+                  label={`Branch: ${branch}`}
+                  tooltipProps={{ title: branch }}
+                  size="sm"
+                  color="secondary"
+                  variant="plain"
+                  className="hidden @max-[520px]:inline-flex"
+                />
               </>
             )}
           </div>

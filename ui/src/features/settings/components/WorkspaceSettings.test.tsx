@@ -11,6 +11,7 @@ import {
   within,
 } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import {
   api,
@@ -20,7 +21,7 @@ import {
   type WorkspaceSettingsView,
 } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
-import { INVALIDATION_TOPICS } from "@/lib/invalidations/topics"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
@@ -147,7 +148,8 @@ function renderPage(canEdit = true, onDeleted = vi.fn(), slug = "oss") {
         canEdit={canEdit}
         onDeleted={onDeleted}
       />
-    </QueryClientProvider>
+    </QueryClientProvider>,
+    { wrapper: TooltipProvider }
   )
 }
 
@@ -156,7 +158,7 @@ async function invalidateWorkspaces() {
   await act(async () => {
     await clients.at(-1)?.invalidateQueries({
       predicate: (query) =>
-        query.meta?.invalidatedBy?.includes(INVALIDATION_TOPICS.workspaces) ??
+        query.meta?.invalidatedBy?.includes(invalidationTopic("workspaces")) ??
         false,
     })
     await vi.advanceTimersByTimeAsync(1)
@@ -231,11 +233,9 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage(true, onDeleted)
 
     fireEvent.click(await screen.findByRole("button", { name: "Delete OSS" }))
-    expect(screen.getByRole("alertdialog").textContent).toContain(
-      "cannot be undone"
-    )
+    expect(screen.getByRole("dialog").textContent).toContain("cannot be undone")
     fireEvent.click(
-      within(screen.getByRole("alertdialog")).getByRole("button", {
+      within(screen.getByRole("dialog")).getByRole("button", {
         name: "Cancel",
       })
     )
@@ -270,13 +270,13 @@ describe("WorkspaceSettingsPanel", () => {
       )
     ).toBe(true)
     expect(
-      within(screen.getByRole("alertdialog"))
+      within(screen.getByRole("dialog"))
         .getByRole("button", { name: "Cancel" })
         .hasAttribute("disabled")
     ).toBe(true)
     finish()
     await waitFor(() => expect(onDeleted).toHaveBeenCalledOnce())
-    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(screen.queryByRole("dialog")).toBeNull()
   })
 
   it("does not offer deletion without admin access", async () => {

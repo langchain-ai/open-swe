@@ -5,10 +5,12 @@ import type {
 } from "@/features/agents/lib/stream/connection"
 import type {
   QueuedTurn,
+  StaleWorkspace,
   SubagentToolCall,
   TranscriptToolCallState,
 } from "@/features/agents/lib/transcript/reducer"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
+import type { ContextUsage } from "@/features/agents/lib/contextUsage"
 
 /** The human message and run configuration a new run starts from. */
 export interface ThreadRunInput {
@@ -46,8 +48,8 @@ interface ThreadSourceShared {
   isOffloading: boolean
   routed: RoutedModel | null
   connection: StreamConnection
-  /** Context tokens the last model call reported, when the source knows them. */
-  contextTokens: number | null
+  /** Context size and model the last model call reported, when the source knows them. */
+  contextUsage: ContextUsage | null
   /**
    * Start a run. A rejection means the run could not be started; resolution
    * says nothing about the run finishing (the SDK stream resolves only when it
@@ -90,6 +92,8 @@ export interface TranscriptThreadSource extends ThreadSourceShared {
   subagentMessages: (namespace: ReadonlyArray<string>) => Array<Message>
   /** The `task` call that spawned a subagent, or null when there is none. */
   subagentTask: (toolCallId: string) => TranscriptToolCallState | null
+  /** The newest turn's sandbox booted from an out-of-date workspace image. */
+  workspaceStale: StaleWorkspace | null
 }
 
 export type ThreadSource = StreamThreadSource | TranscriptThreadSource

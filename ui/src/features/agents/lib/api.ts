@@ -2,11 +2,11 @@ import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
   AgentPullRequestStatusResponse,
+  AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
   Message,
-  SlackNotificationMode,
-  AutomationTrigger,
+  AutomationTriggerConfig,
   WorkflowPushApprovalsResponse,
 } from "./types"
 import type { WorkspaceFileIndex, WorkspacePath } from "./workspaceFiles"
@@ -21,7 +21,7 @@ import {
 } from "@/lib/dashboard-fetch"
 import { withRequestTiming } from "@/lib/perf/fetchTiming"
 
-export type { AgentSchedule, AgentThread, Message, SlackNotificationMode }
+export type { AgentSchedule, AgentThread, Message }
 
 export class AgentsApiError extends DashboardRequestError {
   constructor(status: number, message: string, requestId?: string) {
@@ -32,12 +32,9 @@ export class AgentsApiError extends DashboardRequestError {
 
 export interface ScheduleCreateRequest {
   prompt: string
-  schedule?: string | null
-  trigger?: AutomationTrigger
+  /** Every trigger, any of which fires the automation; replaces them all on update. */
+  triggers?: Array<AutomationTriggerConfig>
   name?: string | null
-  repo?: string | null
-  slack_channel_id?: string | null
-  slack_notification_mode?: SlackNotificationMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
@@ -47,12 +44,9 @@ export interface ScheduleCreateRequest {
 
 export interface ScheduleUpdateRequest {
   prompt?: string | null
-  schedule?: string | null
-  trigger?: AutomationTrigger
+  /** Every trigger, any of which fires the automation; replaces them all on update. */
+  triggers?: Array<AutomationTriggerConfig>
   name?: string | null
-  repo?: string | null
-  slack_channel_id?: string | null
-  slack_notification_mode?: SlackNotificationMode
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
@@ -112,10 +106,11 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
-export type ThreadScope = "all" | "interactive" | "automation"
+export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
 export interface ThreadsPageParams {
+  hierarchy?: boolean
   limit?: number
   offset?: number
   all?: boolean
@@ -126,8 +121,11 @@ export interface ThreadsPageParams {
   q?: string
   scope?: ThreadScope
   automationId?: string
+  /** An allowed Slack bot's `team_id:bot_id`, with `scope: "bot"`. */
+  bot?: string
   repo?: string
   ownerless?: boolean
+  owned?: boolean
   sortBy?: ThreadSortBy
 }
 
@@ -232,6 +230,8 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
 
 function buildThreadsPageQuery(params: ThreadsPageParams): string {
   const search = new URLSearchParams()
+  if (params.hierarchy != null)
+    search.set("hierarchy", String(params.hierarchy))
   if (params.limit != null) search.set("limit", String(params.limit))
   if (params.offset != null) search.set("offset", String(params.offset))
   if (params.all != null) search.set("all", String(params.all))
@@ -242,9 +242,11 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.q) search.set("q", params.q)
   if (params.scope) search.set("scope", params.scope)
   if (params.automationId) search.set("automation_id", params.automationId)
+  if (params.bot) search.set("bot", params.bot)
   if (params.repo) search.set("repo", params.repo)
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
+  if (params.owned) search.set("owned", "true")
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -253,6 +255,7 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
 function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
+  owned?: boolean
 }): string {
   const search = new URLSearchParams()
   if (params.includeResolved != null)
@@ -260,6 +263,7 @@ function buildReposQuery(params: {
   if (params.includeAutomations != null) {
     search.set("include_automations", String(params.includeAutomations))
   }
+  if (params.owned) search.set("owned", "true")
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -309,6 +313,7 @@ export const agentsApi = {
     params: {
       includeResolved?: boolean
       includeAutomations?: boolean
+      owned?: boolean
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(
@@ -387,6 +392,10 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
+    ),
+  getThreadQueuedMessages: (threadId: string) =>
+    agentsRequest<Array<AgentQueuedMessage>>(
+      `/threads/${encodeURIComponent(threadId)}/queued-messages`
     ),
   getThreadPullRequestContext: (
     threadId: string,

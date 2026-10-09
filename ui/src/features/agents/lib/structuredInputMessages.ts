@@ -1,3 +1,8 @@
+import { taskEventMetadata } from "./taskEventMetadata"
+import type { TaskEventMetadata } from "./taskEventMetadata"
+
+export type { TaskEventMetadata } from "./taskEventMetadata"
+
 export type StructuredSenderKind = "person" | "system"
 
 /** Senders that steer the model and say nothing a reader of the thread needs. */
@@ -26,6 +31,7 @@ export type ParsedStructuredInput =
       sender: string
       senderKind: StructuredSenderKind
       surface?: string
+      taskEvent?: TaskEventMetadata
     }
   | { type: "legacy"; content: string }
 
@@ -99,8 +105,9 @@ function parseAttributes(source: string): Record<string, string> | null {
   return source.slice(cursor).trim() ? null : attributes
 }
 
-// A real envelope carries the context's data fields — `<timestamp>`, `<comment_id>`,
-// nested dicts and lists — as elements beside its text. Consume them so their text
+// A real envelope carries structured data as elements beside its text: one tag of
+// `field: value` lines, such as `<issue>` or `<replying_to>`; messages stored earlier
+// nest a tag per field. Consume them so their text
 // never reaches the transcript, and refuse anything that is not a balanced element
 // so unrecognized markup still falls back to legacy rendering.
 function consumeDataElements(source: string): boolean {
@@ -243,12 +250,14 @@ export function parseStructuredInput(
     const attributes = parseAttributes(messageMatch[1] ?? "")
     const split = splitContent(messageMatch[2] ?? "")
     if (attributes?.sender && split && consumeDataElements(split.remainder)) {
+      const taskEvent = taskEventMetadata(attributes)
       return {
         type: "message",
         content: decodeXmlText(split.content),
         sender: attributes.sender,
         senderKind: senderKind(attributes, entities),
         surface: attributes.surface,
+        ...(taskEvent ? { taskEvent } : {}),
       }
     }
   }

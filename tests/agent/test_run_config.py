@@ -1,4 +1,4 @@
-from agent.run_config import RunConfig
+from openswe.run_config import RunConfig
 
 
 def test_parse_drops_only_the_malformed_field():

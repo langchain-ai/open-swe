@@ -1,20 +1,26 @@
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  MultiFileDiff,
-  Virtualizer,
-  WorkerPoolContextProvider,
-} from "@pierre/diffs/react"
+import { Virtualizer, WorkerPoolContextProvider } from "@pierre/diffs/react"
 import {
   FileTree,
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import { CaretDownIcon } from "@phosphor-icons/react"
+import { Button } from "@langchain/macaw-components/Button"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import type { FileContents } from "@pierre/diffs/react"
+import { useDiffLineSelection } from "@/features/agents/utils/diffSelection"
+import {
+  selectionExcerpts,
+  serializeExcerpts,
+} from "@/features/agents/utils/codeExcerpt"
+import { DiffSelectionPopover } from "@/features/agents/components/DiffSelectionPopover"
+import { reportError } from "@/lib/errorReporting"
 import type { GitStatus, GitStatusEntry } from "@pierre/trees"
 
 import type { ThreadPrDiffFile } from "@/features/agents/lib/api"
 import { DiffWrapToggle } from "@/features/agents/components/DiffWrapToggle"
+import { ScopedFileDiff } from "@/features/agents/components/ScopedFileDiff"
 import {
   DIFF_VIRTUALIZER_CONFIG,
   DIFF_VIRTUAL_METRICS,
@@ -78,10 +84,9 @@ export function toPanelFiles(
   }))
 }
 
-// Neutral filename foreground from the pierre Shiki themes (pierre-light /
-// pierre-dark sidebar foreground). The tree tints filename text by git status,
-// so feeding this keeps names neutral grey/white instead of accent-blue.
-const TREE_FILE_FG = "light-dark(#525252, #a3a3a3)"
+// The tree tints filename text by git status; feeding a neutral foreground
+// keeps names grey instead of accent-blue.
+const TREE_FILE_FG = "var(--text-secondary)"
 
 // Selected rows must read as high-contrast (white in dark, near-black in light)
 // while the rest stay neutral. The built-in git-status content color outranks
@@ -101,32 +106,31 @@ export const TREE_UNSAFE_CSS = `
 
 export function treeThemeStyle(): React.CSSProperties {
   return {
-    "--trees-theme-sidebar-bg": "var(--card)",
-    "--trees-theme-sidebar-fg": "var(--foreground)",
-    "--trees-theme-sidebar-border": "var(--border)",
-    "--trees-theme-sidebar-header-fg": "var(--muted-foreground)",
-    "--trees-theme-list-hover-bg":
-      "color-mix(in oklab, var(--primary) 10%, transparent)",
-    "--trees-theme-list-active-selection-bg":
-      "color-mix(in oklab, var(--primary) 22%, transparent)",
-    "--trees-theme-list-active-selection-fg": "var(--foreground)",
+    "--trees-theme-sidebar-bg": "var(--bg-surface-level-1)",
+    "--trees-theme-sidebar-fg": "var(--text-primary)",
+    "--trees-theme-sidebar-border": "var(--border-default)",
+    "--trees-theme-sidebar-header-fg": "var(--text-secondary)",
+    "--trees-theme-list-hover-bg": "var(--bg-surface-level-1-hover)",
+    "--trees-theme-list-active-selection-bg": "var(--bg-selected)",
+    "--trees-theme-list-active-selection-fg": "var(--text-primary)",
     "--trees-selected-focused-border-color-override": "transparent",
-    "--trees-theme-input-bg": "var(--card)",
-    "--trees-theme-input-fg": "var(--foreground)",
-    "--trees-theme-input-border": "var(--border)",
-    "--trees-theme-focus-ring": "var(--primary)",
-    "--trees-theme-scrollbar-thumb": "var(--border)",
+    "--trees-theme-input-bg": "var(--bg-surface-level-1)",
+    "--trees-theme-input-fg": "var(--text-primary)",
+    "--trees-theme-input-border": "var(--border-default)",
+    "--trees-theme-focus-ring": "var(--border-focus)",
+    "--trees-theme-scrollbar-thumb": "var(--border-default)",
     "--trees-theme-git-added-fg": TREE_FILE_FG,
     "--trees-theme-git-modified-fg": TREE_FILE_FG,
     "--trees-theme-git-deleted-fg": TREE_FILE_FG,
     "--trees-theme-git-renamed-fg": TREE_FILE_FG,
     "--trees-theme-git-untracked-fg": TREE_FILE_FG,
-    "--trees-theme-git-ignored-fg": "var(--muted-foreground)",
+    "--trees-theme-git-ignored-fg": "var(--text-tertiary)",
   } as React.CSSProperties
 }
 
 interface DiffFilesViewProps {
   files: Array<PanelFile>
+  onComment?: (content: string) => Promise<void>
   /** Path to select and scroll to, set when a transcript row is clicked. */
   revealFilePath?: string | null
   /** Full-screen panels have room for the file tree alongside the diff. */
@@ -155,6 +159,7 @@ export function DiffFilesView({
   hideHeader,
   leading,
   actions,
+  onComment,
 }: DiffFilesViewProps) {
   const isMobile = useIsMobile()
   const [selectedTreePath, setSelectedTreePath] = useState<string | null>(null)
@@ -200,13 +205,13 @@ export function DiffFilesView({
   return (
     <>
       {!hideHeader && (
-        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-border px-3 py-1">
+        <div className="@container flex min-h-9 flex-nowrap items-center gap-1 overflow-hidden border-b border-default px-3 py-1">
           <div className="min-w-0 flex-1">{leading}</div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <DiffWrapToggle />
             {actions}
             {files.length > 0 && (
-              <span className="flex shrink-0 items-center gap-2 text-[11px] whitespace-nowrap text-muted-foreground/70">
+              <span className="flex shrink-0 items-center gap-2 text-[11px] whitespace-nowrap text-tertiary">
                 <span
                   className="@max-[620px]:hidden"
                   title={
@@ -216,10 +221,12 @@ export function DiffFilesView({
                   {truncated ? "first " : ""}
                   {files.length} file{files.length === 1 ? "" : "s"}
                 </span>
-                <span className="text-success-foreground">
+                <span className="text-success-secondary">
                   +{totals.additions}
                 </span>
-                <span className="text-destructive">-{totals.deletions}</span>
+                <span className="text-error-secondary">
+                  -{totals.deletions}
+                </span>
               </span>
             )}
           </div>
@@ -241,6 +248,7 @@ export function DiffFilesView({
                 <FileDiffSection
                   key={file.filePath}
                   file={file}
+                  onComment={onComment}
                   sectionRef={(node) => {
                     sectionRefs.current[file.filePath] = node
                   }}
@@ -249,13 +257,13 @@ export function DiffFilesView({
             </Virtualizer>
           </WorkerPoolContextProvider>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-muted-foreground/70">
+          <div className="min-h-0 flex-1 overflow-y-auto p-6 text-center text-xs text-tertiary">
             {emptyLabel}
           </div>
         )}
 
         {fullScreen && !isMobile && files.length > 0 && (
-          <div className="w-72 shrink-0 border-l border-border bg-card">
+          <div className="w-72 shrink-0 border-l border-default bg-surface-level-1">
             <FileTreeExplorer
               files={files}
               selectedTreePath={selectedTreePath}
@@ -272,12 +280,49 @@ const FileDiffSection = memo(
   function FileDiffSection({
     file,
     sectionRef,
+    onComment,
   }: {
     file: PanelFile
+    onComment?: (content: string) => Promise<void>
     sectionRef: (node: HTMLDivElement | null) => void
   }) {
     const [open, setOpen] = useState(true)
     const diffOptions = useDiffOptions()
+    const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const lineSelection = useDiffLineSelection({ enabled: Boolean(onComment) })
+    const draft = lineSelection.committed?.range ?? null
+    const [comment, setComment] = useState("")
+    const [sending, setSending] = useState(false)
+    const [selectedFile, setSelectedFile] = useState(file)
+    if (
+      selectedFile.originalContent !== file.originalContent ||
+      selectedFile.modifiedContent !== file.modifiedContent
+    ) {
+      setSelectedFile(file)
+      lineSelection.close()
+    }
+    const options = useMemo(
+      () => ({ ...diffOptions, ...lineSelection.diffOptions }),
+      [diffOptions, lineSelection.diffOptions]
+    )
+    const submitComment = async () => {
+      if (!draft || !onComment || !comment.trim() || sending) return
+      setSending(true)
+      try {
+        await onComment(
+          serializeExcerpts(
+            comment,
+            selectionExcerpts(file.filePath, file, draft)
+          )
+        )
+        lineSelection.close()
+        setComment("")
+      } catch (error) {
+        reportError({ title: "Couldn't send the diff comment", error })
+      } finally {
+        setSending(false)
+      }
+    }
     const oldFile = useMemo<FileContents>(
       () => ({
         name: file.treePath,
@@ -308,61 +353,129 @@ const FileDiffSection = memo(
     const fileName = file.treePath.slice(lastSlash + 1)
 
     return (
-      <div ref={sectionRef} className="overflow-hidden border-b border-border">
+      <div ref={sectionRef} className="overflow-hidden border-b border-default">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 bg-card px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
+          className="flex w-full items-center gap-2 bg-surface-level-1 px-3 py-2 text-left text-xs transition-colors hover:bg-surface-level-1-hover"
         >
           <CaretDownIcon
+            weight="regular"
             className={cn(
-              "size-3 shrink-0 text-muted-foreground transition-transform",
+              "size-3 shrink-0 text-icon-secondary transition-transform",
               !open && "-rotate-90"
             )}
           />
           <span className="min-w-0 truncate" title={file.treePath}>
-            {directory && (
-              <span className="text-muted-foreground">{directory}</span>
-            )}
-            <span className="font-medium text-foreground">{fileName}</span>
+            {directory && <span className="text-secondary">{directory}</span>}
+            <span className="font-medium text-primary">{fileName}</span>
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-2">
-            <span className="text-success-foreground">+{file.additions}</span>
-            <span className="text-destructive">-{file.deletions}</span>
+            <span className="text-success-secondary">+{file.additions}</span>
+            <span className="text-error-secondary">-{file.deletions}</span>
           </span>
         </button>
         {open &&
           (file.unrenderable ? (
             file.patch ? (
-              <pre className="overflow-x-auto bg-background p-4 font-mono text-xs leading-5 text-foreground">
+              <pre className="overflow-x-auto bg-surface-level-1 p-4 font-mono text-xs leading-5 text-primary">
                 <code>{file.patch}</code>
               </pre>
             ) : (
-              <div className="bg-background p-4 text-center text-xs text-muted-foreground/70">
+              <div className="bg-surface-level-1 p-4 text-center text-xs text-tertiary">
                 Binary file — diff not available.
               </div>
             )
           ) : (
             <div
-              className="overflow-hidden bg-background"
+              {...lineSelection.wrapperProps}
+              className="overflow-hidden bg-surface-level-1"
               style={
                 {
-                  "--panel-diff-bg": "var(--background)",
+                  "--panel-diff-bg": "var(--bg-surface-level-1)",
                 } as React.CSSProperties
               }
             >
-              <MultiFileDiff
+              <ScopedFileDiff
                 oldFile={oldFile}
                 newFile={newFile}
-                options={diffOptions}
+                options={options}
+                selectedLines={lineSelection.selectedLines}
                 metrics={DIFF_VIRTUAL_METRICS}
               />
             </div>
           ))}
+        {onComment && (
+          <DiffSelectionPopover
+            selection={lineSelection}
+            initialFocus={textareaRef}
+            className="w-80 p-2"
+          >
+            <form
+              className="flex flex-col gap-space-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void submitComment()
+              }}
+            >
+              {draft && (
+                <div className="truncate text-xs text-secondary">
+                  {file.treePath} ·{" "}
+                  {draft.start === draft.end
+                    ? `line ${draft.start}`
+                    : `lines ${Math.min(draft.start, draft.end)}–${Math.max(draft.start, draft.end)}`}
+                </div>
+              )}
+              <Textarea
+                ref={textareaRef}
+                size="md"
+                aria-label="Comment on selected code"
+                placeholder="Ask Open SWE about these lines…"
+                value={comment}
+                onChange={setComment}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault()
+                    void submitComment()
+                  }
+                }}
+                disabled={sending}
+                autoResize
+                maxHeight={192}
+                inputClassName="min-h-16"
+              />
+              <div className="flex justify-end gap-space-2">
+                <Button
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
+                  disabled={sending}
+                  onClick={() => {
+                    lineSelection.close()
+                    setComment("")
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="xs"
+                  disabled={sending || !comment.trim()}
+                >
+                  {sending ? "Sending…" : "Send to Open SWE"}
+                </Button>
+              </div>
+            </form>
+          </DiffSelectionPopover>
+        )}
       </div>
     )
   },
-  (prev, next) => prev.file === next.file
+  (prev, next) => prev.file === next.file && prev.onComment === next.onComment
 )
 
 function FileTreeExplorer({

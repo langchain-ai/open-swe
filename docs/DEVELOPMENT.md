@@ -130,13 +130,13 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 
 Before reporting readiness, verify `/ok` on localhost, open the dashboard in a browser, and check tunnel forwarding and the OAuth callback redirect. A healthy `/ok` does not mean the UI is ready: `make dev` needs a dashboard build or a running Vite server to serve it.
 
-**Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Admin** pages appear. Set **Admin → Global defaults → Default Repository**, then start a task from the composer.
+**Dashboard.** Open `http://localhost:2024`, click **Sign in with GitHub**, and you should land logged in. With your login in `CONFIGURED_ADMINS`, the **Administration** pages appear. Set **Admin → Defaults → Default repository**, then start a task from the composer.
 
 **Slack.** With the tunnel running and the Request URL verified, invite your bot to a channel and mention it: `@open_swe_you what's in the repo?`. It replies in a thread; ngrok's inspector at `http://localhost:4040` shows the event arriving.
 
 **GitHub.** With the tunnel running and the App's webhook pointed at it, comment `@openswe what files are in this repo?` on an issue in a repository where the App is installed. Within a few seconds you should see a 👀 reaction, a run in your LangSmith project, and a reply comment. GitHub-triggered runs act as the commenting user, so that account has to have signed in to your local dashboard once. The App's **Advanced** tab lists every delivery and its response, and ngrok's inspector at `http://localhost:4040` shows what arrived.
 
-With only the seeded `default` workspace, Slack and GitHub runs land there by default. Create additional workspaces from the **Workspaces** page to exercise routing locally: the same order applies as in a deployment (thread, `workspace:<slug>` tag on the opening message — `env:<slug>` remains an alias, owning repository, bound Slack channel, user default, then `default`); see [How a run picks its workspace](INSTALLATION.md#7-verify-it-works) in the installation guide.
+With only the seeded `default` workspace, Slack and GitHub runs land there by default. Create additional workspaces from the **Workspaces** page to exercise routing locally: the same order applies as in a deployment (thread, `/workspace:<slug>` on the opening message — `workspace:<slug>` and `env:<slug>` still work, owning repository, bound Slack channel, user default, then `default`); see [How a run picks its workspace](INSTALLATION.md#7-verify-it-works) in the installation guide.
 
 **Incidents.** Follow [Incidents setup](INSTALLATION.md#incidents) to enroll Slack channels. Set `SLACK_APP_ID`; anyone in a channel can pause or complete its incident, and asking the agent requires a connected Open SWE account. Incident turns run on the main `agent` graph and are dispatched straight from the Slack webhook, so `make dev` or `make dev-ui` is all that is needed.
 
@@ -144,7 +144,7 @@ Record the worktree, process IDs, fixed tunnel domain, and state location in ign
 
 ## Backend API documentation
 
-[`swagger.json`](../swagger.json) is the generated OpenAPI 3.1 schema for the custom FastAPI backend (`agent.webapp:app`). Import it into an OpenAPI 3.1-compatible viewer. After local setup, `make run` serves interactive documentation at `http://localhost:8000/docs` and the live schema at `/openapi.json`; this server does not include the LangGraph runtime or support creating runs.
+[`swagger.json`](../swagger.json) is the generated OpenAPI 3.1 schema for the custom FastAPI backend (`openswe.webapp:app`). Import it into an OpenAPI 3.1-compatible viewer. After local setup, `make run` serves interactive documentation at `http://localhost:8000/docs` and the live schema at `/openapi.json`; this server does not include the LangGraph runtime or support creating runs.
 
 Regenerate the checked-in schema with `make swagger` after changing backend routes or models. The checked-in file can lag the running backend; use its live schema when inspecting deployed routes. Some request/response schemas and authentication requirements are not yet documented. LangGraph runtime endpoints such as `/runs`, `/threads`, and `/assistants` are not included.
 
@@ -220,7 +220,7 @@ Before publishing a changed tree, the run typechecks the dashboard. On failure i
 
 The label stays on through pushes: each push to a labeled PR rebuilds the preview with its new head.
 
-To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every seven days, a scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
+To remove a PR, remove its label and trigger or await another run; the current deployment remains until its replacement deploys, and changes in `main` or `preview-manual` remain. Every Sunday, the first scheduled run between 07:00 and 07:59 `America/New_York` resets preview to `main`, removes labels, and deletes `preview-manual`.
 
 ## Desktop app (experimental)
 
@@ -281,7 +281,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 
 - `redirect_uri is not associated with this application`: the App must list `http://localhost:2024/dashboard/api/auth/callback` (or the `:3000` one when you open Vite directly). Add it in the App's settings.
 - Login redirects but the session does not stick: keep local URLs on `http://` so the cookie is `SameSite=Lax`.
-- `DASHBOARD_BASE_URL not configured` on Sign in with Slack or Notion: the backend has neither a dashboard build nor `DASHBOARD_DEV_SERVER_URL`, so it does not know where the dashboard is. Run `make build-dashboard` or use `make dev-ui`.
+- `DASHBOARD_BASE_URL not configured` on Sign in with Slack or LangSmith: the backend has neither a dashboard build nor `DASHBOARD_DEV_SERVER_URL`, so it does not know where the dashboard is. Run `make build-dashboard` or use `make dev-ui`.
 - Admin pages 403: add your GitHub login or email to `CONFIGURED_ADMINS`.
 
 ### Dashboard shows the LangGraph JSON instead of the UI, or 404s at `/`

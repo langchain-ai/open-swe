@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent.tools.read_user_settings import read_user_settings
-from agent.utils import thread_participants as participants
+from openswe.tools.read_user_settings import read_user_settings
+from openswe.utils import thread_participants as participants
 
 
 @pytest.fixture(autouse=True)
@@ -15,7 +15,7 @@ def collaborative_scope(
 ) -> None:
     grant_tool_access(private=True, owner=True)
     monkeypatch.setattr(
-        import_module("agent.tools.read_user_settings"),
+        import_module("openswe.tools.read_user_settings"),
         "private_credential_login",
         AsyncMock(return_value=None),
     )
@@ -25,16 +25,16 @@ def collaborative_scope(
 async def test_read_user_settings_returns_redacted_participant_settings() -> None:
     with (
         patch(
-            "agent.tools.read_user_settings.get_config",
+            "openswe.tools.read_user_settings.get_config",
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
         patch(
-            "agent.tools.read_user_settings.resolve_thread_participant_logins",
+            "openswe.tools.read_user_settings.resolve_thread_participant_logins",
             new_callable=AsyncMock,
-            return_value=({"octocat"}, 1, None),
+            return_value=({"octocat"}, 1),
         ),
         patch(
-            "agent.tools.read_user_settings.get_profile",
+            "openswe.tools.read_user_settings.get_profile",
             new_callable=AsyncMock,
             return_value={
                 "default_model": "openai:gpt-6.1-sol",
@@ -46,14 +46,9 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
             },
         ),
         patch(
-            "agent.tools.read_user_settings.get_user_instructions",
+            "openswe.tools.read_user_settings.get_user_instructions",
             new_callable=AsyncMock,
             return_value={"instructions": "Be concise."},
-        ),
-        patch(
-            "agent.tools.read_user_settings.get_notion_status",
-            new_callable=AsyncMock,
-            return_value={"notion": {"connected": True}},
         ),
     ):
         result = await read_user_settings()
@@ -68,9 +63,6 @@ async def test_read_user_settings_returns_redacted_participant_settings() -> Non
                     "reasoning_effort": "high",
                 },
                 "instructions": "Be concise.",
-                "connections": {
-                    "notion": {"connected": True},
-                },
             }
         ],
         "unresolved_participant_count": 1,
@@ -88,15 +80,15 @@ async def test_read_user_settings_fails_before_settings_reads() -> None:
     profile = AsyncMock()
     with (
         patch(
-            "agent.tools.read_user_settings.get_config",
+            "openswe.tools.read_user_settings.get_config",
             return_value={"configurable": {"thread_id": "thread-1"}},
         ),
         patch(
-            "agent.tools.read_user_settings.resolve_thread_participant_logins",
+            "openswe.tools.read_user_settings.resolve_thread_participant_logins",
             new_callable=AsyncMock,
-            return_value=(None, 0, "Could not verify the active thread"),
+            side_effect=ValueError("Could not verify the active thread"),
         ),
-        patch("agent.tools.read_user_settings.get_profile", profile),
+        patch("openswe.tools.read_user_settings.get_profile", profile),
     ):
         result = await read_user_settings()
 
@@ -157,10 +149,9 @@ async def test_dashboard_participants_are_read_from_trusted_metadata() -> None:
         patch.object(participants, "get_client", return_value=Client()),
         patch.object(participants.User, "for_login", side_effect=for_login),
     ):
-        logins, unresolved, error = await participants.resolve_thread_participant_logins(
+        logins, unresolved = await participants.resolve_thread_participant_logins(
             {"configurable": {"thread_id": "thread-1", "source": "dashboard"}}
         )
 
-    assert error is None
     assert unresolved == 0
     assert logins == {"owner", "teammate"}

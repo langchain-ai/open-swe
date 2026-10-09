@@ -1,31 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { IoLogoSlack } from "react-icons/io5"
-import { SiNotion } from "react-icons/si"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Button } from "@langchain/macaw-components/Button"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
-import type {
-  LangSmithConnectionStatus,
-  NotionCredentialStatus,
-  SessionUser,
-} from "@/lib/api"
+import type { LangSmithConnectionStatus, SessionUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { api, connectLangSmith, connectService } from "@/lib/api"
+import { api, connectService } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { cn } from "@/lib/utils"
 
 function StatusPill({ connected }: { connected: boolean }) {
   return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[10px] font-medium",
-        connected
-          ? "bg-primary/10 text-primary"
-          : "bg-muted text-muted-foreground"
-      )}
-    >
+    <Badge color={connected ? "primary" : "secondary"} size="xs">
       {connected ? "Connected" : "Not connected"}
-    </span>
+    </Badge>
   )
 }
 
@@ -56,16 +44,17 @@ function SlackRow({ user }: { user: SessionUser }) {
           : "Sign in with Slack so Open SWE resolves your GitHub account when you tag it — the verified email also resolves Linear mentions."
       }
       control={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-space-2">
           <StatusPill connected={connected} />
           {user.slack_oauth_enabled ? (
             <Button
-              size="sm"
-              variant={connected ? "outline" : "default"}
+              size="xs"
+              color={connected ? "secondary" : "primary"}
+              variant={connected ? "outlined" : "normal"}
+              leftDecorator={SlackLogoIcon}
               onClick={connect}
               disabled={connecting}
             >
-              <IoLogoSlack className="size-4" />
               {connecting
                 ? "Redirecting…"
                 : connected
@@ -73,72 +62,9 @@ function SlackRow({ user }: { user: SessionUser }) {
                   : "Connect"}
             </Button>
           ) : (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-xxs text-secondary">
               Sign in with Slack unavailable
             </span>
-          )}
-        </div>
-      }
-    />
-  )
-}
-
-function NotionRow() {
-  const qc = useQueryClient()
-  const creds = useQuery({
-    queryKey: ["myNotion"],
-    queryFn: api.getMyNotionStatus,
-  })
-  const [connecting, setConnecting] = useState(false)
-
-  const disconnect = useMutation({
-    meta: { errorTitle: "Couldn't disconnect Notion" },
-    mutationFn: () => api.disconnectNotion(),
-    onMutate: async () => ({
-      undo: await optimisticUpdate<NotionCredentialStatus>(
-        qc,
-        ["myNotion"],
-        (current) => ({ ...current, connected: false })
-      ),
-    }),
-    onError: (_e, _v, ctx) => ctx?.undo(),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["myNotion"] }),
-  })
-
-  const connected = !!creds.data?.connected
-  const connect = () => {
-    setConnecting(true)
-    void qc.invalidateQueries({ queryKey: ["myNotion"] })
-    void connectService("notion")?.finally(() => {
-      setConnecting(false)
-      void qc.invalidateQueries({ queryKey: ["myNotion"] })
-    })
-  }
-
-  return (
-    <SettingsRow
-      label="Notion"
-      description="Let agent runs use Notion MCP tools with your workspace permissions. OAuth tokens are encrypted at rest and scoped to your account."
-      control={
-        <div className="flex items-center gap-2">
-          <StatusPill connected={connected} />
-          {connected ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => disconnect.mutate()}
-            >
-              Disconnect
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              onClick={connect}
-              disabled={connecting || creds.isLoading}
-            >
-              <SiNotion className="size-4" />
-              {connecting ? "Redirecting…" : "Connect"}
-            </Button>
           )}
         </div>
       }
@@ -157,18 +83,23 @@ export function useLangSmithConnection() {
 }
 
 export function ConnectLangSmithButton({
-  size = "sm",
+  size = "xs",
 }: {
-  size?: "sm" | "default"
+  size?: "xs" | "sm"
 }) {
+  const qc = useQueryClient()
   const status = useLangSmithConnection()
   const [connecting, setConnecting] = useState(false)
   return (
     <Button
       size={size}
+      color="primary"
       onClick={() => {
         setConnecting(true)
-        connectLangSmith(window.location.href)
+        void connectService("langsmith", window.location.href)?.finally(() => {
+          setConnecting(false)
+          void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
+        })
       }}
       disabled={connecting || status.isLoading}
     >
@@ -191,8 +122,10 @@ function LangSmithRow() {
       ),
     }),
     onError: (_e, _v, ctx) => ctx?.undo(),
-    onSettled: () =>
-      qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: LANGSMITH_CONNECTION_KEY })
+      void qc.invalidateQueries({ queryKey: ["myManagedTools"] })
+    },
   })
   if (!status.data?.available) return null
   const connected = status.data.connected
@@ -205,12 +138,13 @@ function LangSmithRow() {
           : "Sign in with LangSmith so Open SWE can call LangSmith as you in your private threads."
       }
       control={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-space-2">
           <StatusPill connected={connected} />
           {connected ? (
             <Button
-              variant="outline"
-              size="sm"
+              color="secondary"
+              variant="outlined"
+              size="xs"
               onClick={() => disconnect.mutate()}
               disabled={disconnect.isPending}
             >
@@ -227,12 +161,8 @@ function LangSmithRow() {
 
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
-    <SettingsSection
-      title="Personal connections"
-      description="Accounts and credentials Open SWE can use on your behalf. Workspace MCP tools configured by an admin are shared with everyone."
-    >
+    <SettingsSection title="Accounts">
       <SlackRow user={user} />
-      <NotionRow />
       <LangSmithRow />
     </SettingsSection>
   )

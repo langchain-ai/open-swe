@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import {
   Bridge,
   BridgeHttpApi,
+  type BridgeHandler,
   type BridgeSender,
 } from "open-swe-bridge-client";
 
@@ -23,6 +24,8 @@ interface LocalBridgesOptions {
   remember: (threadId: string, bridgeId: string) => void;
   /** The environment commands start from: the user's login shell's. */
   env: () => Record<string, string | undefined>;
+  /** Requests the app answers itself rather than running in the checkout. */
+  handlers: (threadId: string) => Record<string, BridgeHandler>;
   log: (message: string, error?: unknown) => void;
 }
 
@@ -70,6 +73,7 @@ class LocalBridges {
       log: (message) =>
         this.options.log(`Local bridge for ${threadId}: ${message}`),
       env: this.options.env(),
+      handlers: this.options.handlers(threadId),
     });
     this.options.remember(threadId, bridge.session.bridgeId);
     this.bridges.set(threadId, bridge);

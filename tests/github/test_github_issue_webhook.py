@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from agent.github import routes as github_routes
-from agent.github import webhook as github_webhooks
-from agent.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
-from agent.slack.client import GitHubPrRef
-from agent.slack.payloads import SlackChannelContext
-from agent.users import User
-from agent.webhooks import common as webhook_common
+from openswe.github import routes as github_routes
+from openswe.github import webhook as github_webhooks
+from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from openswe.slack.client import GitHubPrRef
+from openswe.slack.payloads import SlackChannelContext
+from openswe.users import User
+from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
-request_pr_review_module = importlib.import_module("agent.slack.tools.request_pr_review")
+request_pr_review_module = importlib.import_module("openswe.slack.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
 _TEST_SLACK_SECRET = "test-slack-secret"
@@ -100,7 +100,8 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
 ) -> None:
     called: dict[str, object] = {}
 
-    async def fake_launch(payload: dict[str, object], delivery_id: str) -> None:
+    async def fake_launch(event_type: str, payload: dict[str, object], delivery_id: str) -> None:
+        called["event_type"] = event_type
         called["payload"] = payload
         called["delivery_id"] = delivery_id
 
@@ -110,7 +111,7 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
         called["gate_calls"] = int(called.get("gate_calls", 0)) + 1
         return {"status": "ignored", "reason": "Sender is not authorized"}
 
-    monkeypatch.setattr(github_routes, "_launch_issue_automations", fake_launch)
+    monkeypatch.setattr(github_routes, "_launch_automations", fake_launch)
     monkeypatch.setattr(webhook_common, "enforce_public_repo_org_gate", reject_external_author)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
@@ -129,6 +130,7 @@ async def test_github_webhook_launches_issue_automation_for_external_author(
         "status": "ignored",
         "reason": f"Issue does not mention {webhook_common.describe_open_swe_tags()}",
     }
+    assert called["event_type"] == "issues"
     assert called["delivery_id"] == "delivery-1"
     assert called.get("gate_calls", 0) == 0
 
@@ -411,6 +413,26 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
     assert "&lt;/body_&gt;" in message_content
 
 
+def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
+    monkeypatch.setattr(
+        webhook_common,
+        "get_github_app_installation_token_with_expiry",
+        AsyncMock(return_value=("app-token", None)),
+    )
+    monkeypatch.setattr(
+        webhook_common, "fetch_github_pr_metadata", AsyncMock(return_value={"draft": True})
+    )
+    ref = GitHubPrRef(
+        owner="langchain-ai",
+        repo="open-swe",
+        number=1244,
+        url="https://github.com/langchain-ai/open-swe/pull/1244",
+    )
+    result = asyncio.run(github_webhooks.trigger_pr_review_from_ref(ref, source="slack"))
+    assert result["success"] is False
+    assert ref.url in result["error"]
+
+
 def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     captured: dict[str, object] = {}
     auto_review_checked = False
@@ -513,8 +535,8 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         "metadata": {"title": "Review: #1244"},
     }
     assert captured["metadata_token"] == "app-token"
-    assert "<base_sha>base-sha</base_sha>" in prompt
-    assert "<head_sha>head-sha</head_sha>" in prompt
+    assert "\nbase_sha: base-sha\n" in prompt
+    assert "\nhead_sha: head-sha\n" in prompt
     assert config["source"] == "slack"
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
@@ -641,8 +663,9 @@ def test_process_github_issue_followup_keeps_the_threads_workspace(monkeypatch) 
     captured: dict[str, object] = {}
 
     class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
+        async def create(self, *args, **kwargs) -> dict[str, str]:
             captured["configurable"] = kwargs["config"]["configurable"]
+            return {"run_id": "run-1"}
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()
@@ -722,8 +745,9 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
     captured: dict[str, object] = {}
 
     class _FakeRunsClient:
-        async def create(self, *args, **kwargs) -> None:
+        async def create(self, *args, **kwargs) -> dict[str, str]:
             captured["run_created"] = True
+            return {"run_id": "run-1"}
 
     class _FakeLangGraphClient:
         runs = _FakeRunsClient()

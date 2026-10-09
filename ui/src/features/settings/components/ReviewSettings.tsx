@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
+import { Button } from "@langchain/macaw-components/Button"
+import { Switch } from "@langchain/macaw-components/Switch"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+
 import { SettingsSection } from "@/components/AppShell"
-import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
 import {
   useScopedSettings,
   type SettingsScope,
@@ -37,11 +38,13 @@ export function ReviewSettings({
   const guidelinesDirty = trimmedGuidelines !== savedGuidelines
 
   const toggle = (
-    field: "review_draft_prs" | "pr_summaries" | "review_trace_links"
+    field: "review_draft_prs" | "pr_summaries" | "review_trace_links",
+    label: string
   ) => (
     <Switch
+      aria-label={label}
       checked={!!settings.data?.[field]}
-      onCheckedChange={(v) => settings.save({ [field]: v })}
+      onChange={(v) => settings.save({ [field]: v })}
       disabled={!editable}
     />
   )
@@ -56,9 +59,9 @@ export function ReviewSettings({
             : "Instructions injected into every review, in every workspace that does not set its own. Repository-specific style prompts take precedence when they conflict."
         }
       >
-        <div className="flex flex-col gap-2 p-4">
+        <div className="flex flex-col gap-space-2 p-space-4">
           {scoped && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               {guidelinesInherited
                 ? "Inherited from the instance."
                 : "Overridden for this workspace."}
@@ -66,16 +69,18 @@ export function ReviewSettings({
           )}
           <Textarea
             aria-label="Review guidelines"
-            className="min-h-[200px] w-full font-mono text-xs"
+            size="md"
+            inputClassName="min-h-[200px] font-mono text-xs"
             value={guidelinesDraft}
-            onChange={(e) => setGuidelinesDraft(e.target.value)}
+            onChange={setGuidelinesDraft}
             placeholder="e.g. Always flag missing input validation on new API endpoints. Prefer structured logging over print statements."
             disabled={!editable}
           />
           {canEdit && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-space-2">
               <Button
-                size="sm"
+                size="xs"
+                color="primary"
                 disabled={!editable || !guidelinesDirty}
                 onClick={() =>
                   settings.save({ org_guidelines: trimmedGuidelines || null })
@@ -85,8 +90,9 @@ export function ReviewSettings({
               </Button>
               {scoped && !guidelinesInherited && (
                 <Button
-                  size="sm"
-                  variant="ghost"
+                  size="xs"
+                  color="secondary"
+                  variant="plain"
                   disabled={!editable}
                   onClick={() => settings.reset("org_guidelines")}
                 >
@@ -94,9 +100,7 @@ export function ReviewSettings({
                 </Button>
               )}
               {guidelinesDirty && (
-                <span className="text-xs text-muted-foreground">
-                  Unsaved changes
-                </span>
+                <span className="text-xs text-secondary">Unsaved changes</span>
               )}
             </div>
           )}
@@ -104,33 +108,33 @@ export function ReviewSettings({
       </SettingsSection>
 
       <SettingsSection title="Review configuration">
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-default">
           <TierRow
             settings={settings}
             fields={["review_draft_prs"]}
             label="Review Draft PRs"
-            description="Whether Open SWE Review runs on draft PRs. Each user can override it in Profile Settings."
-            control={toggle("review_draft_prs")}
+            description="Whether Open SWE Review runs on draft PRs. Each user can override it in their Git settings."
+            control={toggle("review_draft_prs", "Review Draft PRs")}
           />
           <TierRow
             settings={settings}
             fields={["pr_summaries"]}
             label="PR Summaries"
             description="Generate descriptions on pull requests"
-            control={toggle("pr_summaries")}
+            control={toggle("pr_summaries", "PR Summaries")}
           />
           <TierRow
             settings={settings}
             fields={["review_trace_links"]}
             label="Reviewer trace links"
             description="Link each review comment to the reviewer's own LangSmith run. Only members of your LangSmith workspace can open it."
-            control={toggle("review_trace_links")}
+            control={toggle("review_trace_links", "Reviewer trace links")}
           />
         </div>
       </SettingsSection>
 
       {!canEdit && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-secondary">
           These settings are read-only. Ask a workspace admin to change them.
         </p>
       )}

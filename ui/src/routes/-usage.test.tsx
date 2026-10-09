@@ -21,7 +21,7 @@ import {
   type UsageLeaderboardPayload,
   type UsageLeaderboardRow,
 } from "@/lib/api"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { makeQueryClient } from "@/lib/query"
 
 import { UsageAnalytics, UsageDateRange } from "./usage"
@@ -392,8 +392,7 @@ it.each([
 
     const openCount = within(row).getByRole("button", { name: "3 (43%)" })
     if (interaction === "hover") {
-      fireEvent.mouseEnter(openCount)
-      fireEvent.mouseMove(openCount)
+      fireEvent.pointerMove(openCount, { pointerType: "mouse" })
     } else if (interaction === "focus") {
       act(() => openCount.focus())
     } else {
@@ -1201,11 +1200,15 @@ it("links the user name and avatar to their GitHub profile only when a login exi
   expect(linked.getAttribute("target")).toBe("_blank")
   expect(linked.getAttribute("rel")).toBe("noreferrer")
   expect(screen.queryByRole("link", { name: "Anonymous Reader" })).toBeNull()
-  const avatarLink = screen.getByText("CR").closest("a")
+  const avatarLink = linked
+    .closest("td")!
+    .querySelector('a[aria-hidden="true"]')
   expect(avatarLink?.getAttribute("href")).toBe("https://github.com/reader")
   expect(avatarLink?.getAttribute("target")).toBe("_blank")
   expect(avatarLink?.getAttribute("rel")).toBe("noreferrer")
-  expect(screen.getByText("AR").closest("a")).toBeNull()
+  expect(
+    screen.getByText("Anonymous Reader").closest("td")!.querySelector("a")
+  ).toBeNull()
   client.clear()
 })
 
@@ -1226,51 +1229,6 @@ const costRow: UsageLeaderboardRow = {
   invocations_with_partial_cost: 0,
   avg_invocation_seconds: 90,
 }
-
-it("explains the feedback trophy on focus", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
-  vi.mocked(api.usageLeaderboard).mockResolvedValue({
-    ...emptyUsage,
-    total_members: 1,
-    rows: [
-      { ...costRow, feedback_given: 3, is_top_feedback_contributor: true },
-    ],
-  })
-  const client = mountReport()
-  const trigger = await screen.findByRole("button", {
-    name: "Top feedback contributor",
-  })
-  act(() => trigger.focus())
-  expect(
-    await screen.findByText("Most feedback given in the selected date range.")
-  ).toBeTruthy()
-  client.clear()
-})
-
-it.each([true, false, undefined])(
-  "shows the feedback trophy only for a global leader (%s)",
-  async (isTopContributor) => {
-    vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
-    vi.mocked(api.usageLeaderboard).mockResolvedValue({
-      ...emptyUsage,
-      total_members: 20,
-      rows: [
-        {
-          ...costRow,
-          feedback_given: 3,
-          is_top_feedback_contributor: isTopContributor,
-        },
-      ],
-    })
-    const client = mountReport()
-    await screen.findByText("Cost Reader")
-    const trophy = screen.queryByRole("button", {
-      name: "Top feedback contributor",
-    })
-    expect(Boolean(trophy)).toBe(Boolean(isTopContributor))
-    client.clear()
-  }
-)
 
 it.each([
   [5, 2, "2.5"],
@@ -1746,19 +1704,19 @@ it("copies diagnostics from the keyboard and reports a denied clipboard", async 
   client.clear()
 })
 
-it("renders feedback counts and resets pagination when sorting feedback in either direction", async () => {
+it("renders agent LOC and resets pagination when sorting LOC in either direction", async () => {
   vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
   vi.mocked(api.usageLeaderboard).mockImplementation(
     async (_period, _limit, cursor) => ({
       ...emptyUsage,
       total_members: 11,
       next_cursor: cursor ? null : "next-page",
-      rows: [{ ...costRow, feedback_given: 1234 }],
+      rows: [{ ...costRow, agent_loc: 1234 }],
     })
   )
   const client = mountReport()
   const header = await screen.findByRole("columnheader", {
-    name: "# Feedback Given",
+    name: "Agent LOC",
   })
   const table = header.closest("table")!
   expect(within(table).getByText("1,234")).toBeTruthy()
@@ -1770,7 +1728,7 @@ it("renders feedback counts and resets pagination when sorting feedback in eithe
       "30d",
       10,
       undefined,
-      "feedback_given",
+      "agent_loc",
       "desc"
     )
   )
@@ -1782,7 +1740,7 @@ it("renders feedback counts and resets pagination when sorting feedback in eithe
       "30d",
       10,
       undefined,
-      "feedback_given",
+      "agent_loc",
       "asc"
     )
   )
