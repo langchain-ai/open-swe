@@ -126,6 +126,15 @@ function AgentsLayout() {
       user={session.data}
       activeThreadId={activeThreadId ?? activeReviewThreadId}
       activeLocalSessionId={activeLocalSessionId}
+      activeReview={
+        reviewMatch
+          ? {
+              owner: reviewMatch.params.owner,
+              repo: reviewMatch.params.repo,
+              number: reviewNumber,
+            }
+          : undefined
+      }
     >
       {awaitingRuntimeChoice ? (
         <main className="flex min-w-0 flex-1 items-center justify-center p-6">

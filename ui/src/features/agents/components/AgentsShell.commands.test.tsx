@@ -58,6 +58,18 @@ const stub = vi.hoisted(() => {
     session: { data: { login: "octocat" } },
     theme: { toggleTheme: fn() },
     inbox: {} as { active?: object; recents?: object },
+    noReviews: { data: undefined },
+    reviews: {
+      data: {
+        pages: [
+          {
+            pullRequests: [
+              { repo: "langchain-ai/open-swe", number: 7, title: "Review me" },
+            ],
+          },
+        ],
+      },
+    },
   }
 })
 
@@ -108,6 +120,11 @@ vi.mock("@/features/agents/lib/queries", async (actual) => ({
   useResolveAgentThread: () => ({ ...stub.resolve }),
   useDeleteAgentThread: () => stub.remove,
   useRenameAgentThread: () => stub.rename,
+}))
+
+vi.mock("@/features/reviews/lib/useOpenPullRequests", () => ({
+  useOpenPullRequests: () =>
+    stub.inbox.recents ? stub.reviews : stub.noReviews,
 }))
 
 vi.mock("@/features/agents/lib/prChecks", () => ({
@@ -253,7 +270,7 @@ it("opens asynchronous workers as real conversations and expands the selected wo
   ).toBe("/agents/parent?subagent=sync-tool")
 })
 
-it("walks the sidebar like an inbox and archives the open thread before advancing", () => {
+it("walks threads and review requests like an inbox, archiving before advancing", () => {
   const thread = (id: string, createdAt: number) =>
     ({
       id,
@@ -296,4 +313,9 @@ it("walks the sidebar like an inbox and archives the open thread before advancin
     resolved: true,
   })
   expect(document.activeElement).toBe(row("c"))
+
+  fireEvent.keyDown(row("a"), { key: "ArrowUp" })
+  expect(document.activeElement).toBe(
+    screen.getByRole("link", { name: /Review me/ })
+  )
 })

@@ -216,7 +216,7 @@ function SidebarRowTitle({
   )
 }
 
-function sidebarRowClassName({
+export function sidebarRowClassName({
   compact,
   active,
   paddingLeft,

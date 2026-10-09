@@ -35,7 +35,7 @@ import type {
   PullRequestSnapshot,
   SidebarRepo,
 } from "@/features/agents/lib/api"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread, ReviewPageRef } from "@/features/agents/lib/types"
 import type {
   SidebarRepoGroup,
   SidebarThreadItem,
@@ -45,6 +45,10 @@ import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
 import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  reviewRequestKey,
+  SidebarReviewRequests,
+} from "@/features/agents/components/SidebarReviewRequests"
 import {
   SidebarSectionAction,
   SidebarSectionHeader,
@@ -120,6 +124,7 @@ interface AgentsSidebarProps {
   user: SessionUser
   activeThreadId?: string
   activeLocalSessionId?: string
+  activeReview?: ReviewPageRef
   layout: SidebarLayout
 }
 
@@ -191,6 +196,7 @@ export function AgentsSidebar({
   user,
   activeThreadId,
   activeLocalSessionId,
+  activeReview,
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
@@ -520,9 +526,13 @@ export function AgentsSidebar({
     : activeThreadId
       ? `cloud:${activeThreadId}`
       : undefined
+  const activeKeys = [
+    ...(activeKey ? [activeKey] : []),
+    ...(activeReview ? [reviewRequestKey(activeReview)] : []),
+  ]
   const onThreadListKeyDown = useSidebarKeyboardNav({
     viewport: scrollViewport,
-    activeKey,
+    activeKeys,
     archiveActive: () => {
       if (activeLocalSessionId)
         setArchived({ location: "local", id: activeLocalSessionId }, true)
@@ -811,6 +821,16 @@ export function AgentsSidebar({
             className={isDesktop ? "pb-3" : "pb-4"}
             onNavigate={layout.closeOnMobile}
           />
+          {user && (
+            <SidebarReviewRequests
+              login={user.login}
+              activeKeys={activeKeys}
+              collapsed={sectionCollapsed("reviews")}
+              compact={prefs.compact}
+              onToggleCollapsed={() => toggleSectionCollapsed("reviews")}
+              onNavigate={layout.closeOnMobile}
+            />
+          )}
           {sourcesLoading && allItems.length === 0 && (
             <ThreadListSkeleton compact={prefs.compact} />
           )}
@@ -1336,11 +1356,13 @@ export function AgentsShell({
   user,
   activeThreadId,
   activeLocalSessionId,
+  activeReview,
   children,
 }: {
   user: SessionUser
   activeThreadId?: string
   activeLocalSessionId?: string
+  activeReview?: ReviewPageRef
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
@@ -1434,6 +1456,7 @@ export function AgentsShell({
             user={user}
             activeThreadId={activeThreadId}
             activeLocalSessionId={activeLocalSessionId}
+            activeReview={activeReview}
             layout={layout}
           />
           <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
