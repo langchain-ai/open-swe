@@ -16,6 +16,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { DeleteThreadDialog } from "@/features/agents/components/DeleteThreadDialog"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { ThreadVisibilityMenu } from "@/features/agents/components/ThreadVisibilityMenu"
+import { SandboxEnvironmentDialog } from "@/features/agents/components/SandboxEnvironmentDialog"
 import { ShareThreadDialog } from "@/features/agents/components/ShareThreadDialog"
 import type { AgentThread } from "@/features/agents/lib/types"
 import {
@@ -118,6 +119,12 @@ export function AgentThreadHeader({
     thread?.ownerLogin &&
     thread.ownerLogin.toLowerCase() === session.data?.login.toLowerCase() &&
     thread.sandboxBridgeClient !== "desktop"
+  )
+  const [environmentOpen, setEnvironmentOpen] = useState(false)
+  const canConfigureEnvironment = Boolean(
+    thread?.sandboxId &&
+    !thread.sandboxBridgeClient &&
+    thread.ownerLogin?.toLowerCase() === session.data?.login.toLowerCase()
   )
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -232,6 +239,9 @@ export function AgentThreadHeader({
           resolveThread.mutate({ threadId: thread.id, resolved: !archived })
         }
       }}
+      onConfigureEnvironment={
+        canConfigureEnvironment ? () => setEnvironmentOpen(true) : undefined
+      }
       onDelete={() => setDeleteOpen(true)}
     />
   )
@@ -362,6 +372,13 @@ export function AgentThreadHeader({
               onSuccess: () => setShareOpen(false),
             })
           }
+        />
+      )}
+      {thread && (
+        <SandboxEnvironmentDialog
+          threadId={thread.id}
+          open={environmentOpen}
+          onOpenChange={setEnvironmentOpen}
         />
       )}
       <DeleteThreadDialog

@@ -1475,6 +1475,25 @@ function pullRequestThread(
   )
 }
 
+export function configureSandboxEnvironment(
+  threadId: string,
+  name: string,
+  value: string,
+  acknowledged: boolean
+): Promise<void> {
+  return request<void>(
+    `/threads/${encodeURIComponent(threadId)}/sandbox/environment`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        value,
+        acknowledge_shared_access: acknowledged,
+      }),
+    }
+  )
+}
+
 export const api = {
   recordPageView: (page_name: string) =>
     request<void>("/analytics/page", {

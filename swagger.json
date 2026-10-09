@@ -5621,6 +5621,32 @@
         "title": "RolloutAccepted",
         "type": "object"
       },
+      "SandboxEnvironmentBody": {
+        "properties": {
+          "acknowledge_shared_access": {
+            "title": "Acknowledge Shared Access",
+            "type": "boolean"
+          },
+          "name": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "format": "password",
+            "title": "Value",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "acknowledge_shared_access"
+        ],
+        "title": "SandboxEnvironmentBody",
+        "type": "object"
+      },
       "ScheduleCreateBody": {
         "properties": {
           "admin_thread": {
@@ -19115,6 +19141,58 @@
         "summary": "Api Cancel Thread Run",
         "tags": [
           "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/sandbox/environment": {
+      "post": {
+        "operationId": "configure_sandbox_environment_dashboard_api_threads__thread_id__sandbox_environment_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxEnvironmentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Configure Sandbox Environment",
+        "tags": [
+          "dashboard",
+          "threads",
           "threads"
         ]
       }

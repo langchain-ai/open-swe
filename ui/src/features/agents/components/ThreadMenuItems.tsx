@@ -25,6 +25,7 @@ export function ThreadMenuItems({
   onTogglePin,
   onToggleArchived,
   onDelete,
+  onConfigureEnvironment,
 }: {
   thread: AgentThread | null
   localThread?: DesktopLegacyLocalThread
@@ -34,6 +35,7 @@ export function ThreadMenuItems({
   onTogglePin: () => void
   onToggleArchived: () => void
   onDelete: () => void
+  onConfigureEnvironment?: () => void
 }) {
   const threadId = thread?.id ?? localThread?.id
   return (
@@ -94,6 +96,14 @@ export function ThreadMenuItems({
         >
           <CopyIcon className="size-3.5" />
           Copy sandbox ID
+        </Menu.Item>
+      )}
+      {onConfigureEnvironment && (
+        <Menu.Item
+          onClick={onConfigureEnvironment}
+          className={menuItemClassName}
+        >
+          Configure sandbox environment
         </Menu.Item>
       )}
       {threadId && (
