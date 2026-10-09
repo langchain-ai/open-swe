@@ -9,7 +9,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopLegacyLocalThread } from "@/desktop"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentPullRequest, AgentThread } from "@/features/agents/lib/types"
 import { ThreadMenuItems } from "./ThreadMenuItems"
 
 const thread: AgentThread = {
@@ -52,7 +52,66 @@ afterEach(() => {
   }
 })
 
-describe("Copy thread ID", () => {
+function renderMenu(props: {
+  thread: AgentThread | null
+  localThread?: DesktopLegacyLocalThread
+}) {
+  render(
+    <DropdownMenu>
+      <DropdownMenuTrigger>Thread actions</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <ThreadMenuItems
+          {...props}
+          pinned={false}
+          archived={false}
+          isDeleting={false}
+          onTogglePin={vi.fn()}
+          onToggleArchived={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+  fireEvent.keyDown(screen.getByRole("button", { name: "Thread actions" }), {
+    key: "Enter",
+  })
+}
+
+describe("Thread menu", () => {
+  it("links the primary and PR repositories without duplicates", async () => {
+    const pr: AgentPullRequest = {
+      repoFullName: thread.repoFullName,
+      number: 1,
+      title: "Change",
+      state: "open",
+      headRef: "feature",
+      baseRef: "main",
+      url: "https://github.com/langchain-ai/open-swe/pull/1",
+      author: null,
+      authorAvatarUrl: null,
+      createdAt: null,
+      diffStats: { files: 1, additions: 1, deletions: 0 },
+    }
+    renderMenu({
+      thread: {
+        ...thread,
+        pullRequests: [pr, { ...pr, repoFullName: "langchain-ai/docs" }, pr],
+      },
+    })
+    const primary = await screen.findAllByRole("menuitem", {
+      name: thread.repoFullName,
+    })
+    expect(primary).toHaveLength(1)
+    expect(primary[0]?.getAttribute("href")).toBe(
+      `https://github.com/${thread.repoFullName}`
+    )
+    expect(
+      screen
+        .getByRole("menuitem", { name: "langchain-ai/docs" })
+        .getAttribute("href")
+    ).toBe("https://github.com/langchain-ai/docs")
+  })
+
   it.each([
     {
       name: "a cloud thread with a sandbox",
@@ -78,26 +137,7 @@ describe("Copy thread ID", () => {
       value: { writeText },
     })
 
-    render(
-      <DropdownMenu>
-        <DropdownMenuTrigger>Thread actions</DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <ThreadMenuItems
-            {...props}
-            pinned={false}
-            archived={false}
-            isDeleting={false}
-            onTogglePin={vi.fn()}
-            onToggleArchived={vi.fn()}
-            onDelete={vi.fn()}
-          />
-        </DropdownMenuContent>
-      </DropdownMenu>
-    )
-
-    fireEvent.keyDown(screen.getByRole("button", { name: "Thread actions" }), {
-      key: "Enter",
-    })
+    renderMenu(props)
     fireEvent.click(
       await screen.findByRole("menuitem", { name: "Copy thread ID" })
     )
