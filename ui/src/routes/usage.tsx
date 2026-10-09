@@ -2,7 +2,6 @@ import {
   CaretDownIcon,
   CaretRightIcon,
 } from "@langchain/macaw-components/icons"
-import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Text } from "@langchain/macaw-components/Text"
 import { Card } from "@langchain/macaw-components/Card"
 import { createFileRoute } from "@tanstack/react-router"
@@ -1573,7 +1572,9 @@ function CounterList({
           ))}
         </ul>
       ) : (
-        <EmptyState size="sm" title="No data yet" className="mt-space-2" />
+        <Text as="p" variant="sm" color="secondary" className="mt-space-2">
+          No data yet
+        </Text>
       )}
     </div>
   )
