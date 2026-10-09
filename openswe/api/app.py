@@ -209,7 +209,7 @@ def create_app() -> FastAPI:
         Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
     )
     if AGENT_MCP is not None:
-        app.router.routes.extend(AGENT_MCP.well_known)
+        app.router.routes.extend(AGENT_MCP.root_routes)
         app.mount(agent_mcp_server.PREFIX, AGENT_MCP.app)
     mount_dashboard_ui(app)
     return app

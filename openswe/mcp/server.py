@@ -21,13 +21,15 @@ from fastmcp.server.providers import Provider
 from fastmcp.tools import Tool, ToolResult
 from fastmcp.utilities.components import FastMCPComponent
 from pydantic import JsonValue
-from starlette.routing import BaseRoute
+from starlette.routing import BaseRoute, Route
 
 from mcp.types import TextContent
 from openswe.config import ENV
 from openswe.dashboard.dev_login import dev_login_enabled
+from openswe.dashboard.oauth import AUTH_PATH, GITHUB_CALLBACK_PATH, MCP_SIGN_IN_CALLBACK_PATH
 from openswe.mcp.caller import ToolCaller
 from openswe.mcp.token_store import SealedStore
+from openswe.utils.dashboard_links import dashboard_api_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +85,14 @@ class _CallerProvider(Provider):
 
 
 class Mount(NamedTuple):
-    """The app to mount at ``PREFIX``, and the discovery routes RFC 8414 puts at the root."""
+    """The app to mount at ``PREFIX``, and the routes served from the root.
+
+    The root routes are RFC 8414 discovery and the sign-in endpoints, which live
+    under the dashboard's auth path so GitHub returns to the App's one callback.
+    """
 
     app: StarletteWithLifespan
-    well_known: list[BaseRoute]
+    root_routes: list[BaseRoute]
 
 
 def _auth() -> AuthProvider | None:
@@ -96,7 +102,9 @@ def _auth() -> AuthProvider | None:
         return GitHubProvider(
             client_id=client_id,
             client_secret=client_secret,
-            base_url=ENV.LANGGRAPH_URL.get().rstrip("/") + PREFIX,
+            base_url=dashboard_api_base_url() + AUTH_PATH,
+            resource_base_url=ENV.LANGGRAPH_URL.get().rstrip("/") + PREFIX,
+            redirect_path=GITHUB_CALLBACK_PATH.removeprefix(AUTH_PATH),
             client_storage=SealedStore(),
             cache_ttl_seconds=_GITHUB_CACHE_SECONDS,
         )
@@ -115,4 +123,21 @@ def build_mount() -> Mount | None:
     # not list as an empty catalog.
     server.provider_error_strategy = "raise"
     app = server.http_app(path=_MCP_PATH, json_response=True, stateless_http=True)
-    return Mount(app=app, well_known=list(auth.get_well_known_routes(mcp_path=_MCP_PATH)))
+    return Mount(
+        app=app,
+        root_routes=[*auth.get_well_known_routes(mcp_path=_MCP_PATH), *_sign_in_routes(auth)],
+    )
+
+
+def _sign_in_routes(auth: AuthProvider) -> list[BaseRoute]:
+    callback = GITHUB_CALLBACK_PATH.removeprefix(AUTH_PATH)
+    return [
+        Route(
+            MCP_SIGN_IN_CALLBACK_PATH if route.path == callback else AUTH_PATH + route.path,
+            route.endpoint,
+            methods=route.methods,
+            name=route.name,
+        )
+        for route in auth.get_routes(mcp_path=_MCP_PATH)
+        if isinstance(route, Route) and not route.path.startswith("/.well-known/")
+    ]

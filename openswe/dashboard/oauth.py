@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 COOKIE_NAME = "osw_session"
 SESSION_COOKIE = APIKeyCookie(name=COOKIE_NAME, scheme_name="DashboardSession", auto_error=False)
 STATE_COOKIE_NAME = "osw_oauth_state"
+AUTH_PATH = "/dashboard/api/auth"
+GITHUB_CALLBACK_PATH = f"{AUTH_PATH}/callback"
+MCP_SIGN_IN_CALLBACK_PATH = f"{AUTH_PATH}/mcp/callback"
 _DESKTOP_APP_ORIGIN = "open-swe://app"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 STATE_TTL_SECONDS = 600
@@ -296,6 +299,15 @@ def issue_state(
         payload["handoff_challenge"] = handoff_challenge
         payload["handoff_port"] = handoff_port
     return jwt.encode(payload, _secret(), algorithm=JWT_ALG)
+
+
+def is_dashboard_state(state: str) -> bool:
+    """Whether ``state`` is shaped like one ``issue_state`` minted, valid or not."""
+    try:
+        jwt.get_unverified_header(state)
+    except jwt.DecodeError:
+        return False
+    return True
 
 
 def decode_state(state: str) -> dict[str, Any]:
