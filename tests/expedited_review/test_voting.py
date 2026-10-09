@@ -67,7 +67,7 @@ async def _fake_github(
     if path.endswith(("/files", "/reviews")):
         return _json(request, [])
     if re.search(r"/pulls/\d+$", path):
-        return _json(request, {"state": "open", "head": {"sha": "def456"}})
+        return _json(request, {"state": "open", "head": {"sha": "def456"}, "draft": True})
     return _json(request, {"message": "Not Found"}, 404)
 
 
@@ -203,9 +203,15 @@ async def test_the_author_cannot_approve_their_own_pull_request(
     assert harness.agent_prompts == []
 
 
-async def test_a_draft_waits_for_its_author_to_mark_it_ready(
-    harness: _Harness, open_approval: OpenApproval
+@pytest.mark.parametrize("draft", [True, False])
+async def test_expedited_review_waits_for_author_confirmation(
+    harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, draft: bool
 ) -> None:
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
+        AsyncMock(return_value={"head": {"sha": "def456"}, "draft": draft}),
+    )
     approval = await open_approval(awaiting_ready=True)
 
     early = await _click(approval, "U_GRACE")
@@ -214,10 +220,10 @@ async def test_a_draft_waits_for_its_author_to_mark_it_ready(
     await _click(approval, "U_GRACE")
 
     stored = await _stored(approval)
-    assert "mark this draft ready" in early.message
+    assert "confirm expedited review" in early.message
     assert "Only the pull request's author" in stranger.message
     assert "Marked ready" in ready.message
-    assert harness.marked_ready == ["token-ada"]
+    assert harness.marked_ready == (["token-ada"] if draft else [])
     assert not stored.awaiting_ready
     assert stored.approvers == ["grace"]
 
@@ -333,7 +339,7 @@ async def test_author_only_prompt_delivery_failure_is_reported(
 
     problem = await lifecycle.prompt_author_ready(await _stored(approval))
 
-    assert problem is not None and "mark it ready on GitHub" in problem
+    assert problem is not None and "could not deliver" in problem
     assert (await _stored(approval)).awaiting_ready
 
 

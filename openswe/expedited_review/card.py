@@ -179,7 +179,7 @@ def _send_controls(approval: HumanReviewRequest, choices: list[ChannelChoice]) -
 
 def _ready_button(approval: HumanReviewRequest) -> ButtonElement:
     return button(
-        "Mark ready for review",
+        "Confirm expedited review",
         action_id="open_swe_option_select_ready",
         value=_button_value("ready", approval),
         style="primary",
@@ -196,13 +196,13 @@ def readiness_prompt(
 ) -> tuple[str, list[Block]]:
     """The full author-only draft card."""
     pr = approval.pull_request
-    text = f"Review {pr.url} carefully yourself before clicking Mark ready for review."
+    text = f"Review {pr.url} carefully yourself before confirming expedited review."
     return text, [
         *_header(approval, title, author),
         divider(),
         *_voting_diff(approval, files, diff_image_id),
         section(
-            f"*Draft.* Review <{pr.url}|the pull request> carefully yourself before clicking *Mark ready for review* to request an approval in the thread."
+            f"Review <{pr.url}|the pull request> carefully yourself before clicking *Confirm expedited review*. This marks a draft ready if needed and lets someone else approve and merge it."
         ),
         actions(_ready_button(approval), _dismiss_button(approval)),
     ]
@@ -228,7 +228,7 @@ def _voting_diff(
 def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoice]) -> list[Block]:
     if approval.awaiting_ready:
         return [
-            section(f"*Draft.* Waiting for {author} to mark it ready for review."),
+            section(f"Waiting for {author} to confirm expedited review."),
             actions(_dismiss_button(approval)),
         ]
     return [

@@ -33,7 +33,6 @@ from openswe.human_review.lifecycle import (
     remove_superseded_cards,
     reopen,
     retire,
-    transition,
 )
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import summary_line
@@ -245,10 +244,6 @@ async def expedite_pr_approval(
         == {(e["path"], e["digest"]) for e in exclusions}
     ):
         _audit_pull_request(active.pull_request_id)
-        if active.awaiting_ready and not payload.draft:
-            updated = await transition(active.id, expected=("open",), awaiting_ready=False)
-            if updated is not None:
-                active = updated
         if not active.awaiting_ready:
             await refresh_card(active)
             await broadcast_configured(active)
@@ -263,7 +258,7 @@ async def expedite_pr_approval(
             "slack_channel_id": active.slack_channel_id,
             "next": readiness_warning
             or (
-                "The full draft card is in the author's DM; no thread card is posted until ready."
+                "The full card is in the author's DM; no thread card is posted until they confirm."
                 if active.awaiting_ready
                 else _next_step(
                     reused=True,
@@ -303,7 +298,7 @@ async def expedite_pr_approval(
         excluded_hunks=exclusions,
         tldr=summary_line(inline_summary),
         slack_channel_choices=broadcast_choice,
-        awaiting_ready=payload.draft,
+        awaiting_ready=True,
         slack_channel_id=channel_id,
         slack_thread_ts=thread_ts,
         run_config=dispatch_run_config(cfg, thread_id, None),
@@ -322,8 +317,9 @@ async def expedite_pr_approval(
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "slack_channel_id": channel_id,
-            "next": "The full draft card was sent only to the author by DM. The thread card "
-            "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
+            "next": "The full card was sent only to the author by DM. Ask them to review the PR "
+            "carefully before confirming expedited review. The thread card will be posted "
+            "only after confirmation. Keep a /baby-sit watch on the PR.",
         }
     try:
         message_ts = await post_card(approval, title=payload.title, files=files)

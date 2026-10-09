@@ -73,7 +73,7 @@ async def handle_vote(
     authored = approval.is_author(voter.user.id, voter.github_login)
 
     if approval.awaiting_ready:
-        return Outcome("The author has to mark this draft ready for review first.")
+        return Outcome("The author has to confirm expedited review first.")
     if authored:
         return Outcome("You authored this pull request; someone else has to approve it.")
     if approval.participant(voter.user.id) is not None:
@@ -151,10 +151,12 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
     pr = approval.pull_request
     try:
         async with GitHubClient.as_user(voter.github_login) as github:
-            await act_on_pull_request(
-                github.repo(pr.owner, pr.repo).pull_request(pr.number),
-                MarkReadyAction(action="mark-ready"),
-            )
+            pull = github.repo(pr.owner, pr.repo).pull_request(pr.number)
+            payload = await or_none(pull.pull())
+            if payload is None:
+                return Outcome("Could not read the pull request; try confirming again.")
+            if payload.get("draft"):
+                await act_on_pull_request(pull, MarkReadyAction(action="mark-ready"))
     except GitHubSignInRequired:
         return Outcome(
             f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot mark the "
