@@ -4,6 +4,8 @@ import Editor, { type Monaco } from "@monaco-editor/react"
 import { useIsHydrated } from "@/lib/hydration"
 import { useResolvedTheme } from "@/lib/theme"
 
+const FILL = "h-full min-h-0 flex-1"
+
 function defineThemes(monaco: Monaco) {
   const transparent = { "editor.background": "#00000000" }
   monaco.editor.defineTheme("app-dark", {
@@ -44,7 +46,7 @@ export function TextEditor({
   if (!mounted) {
     return (
       <Textarea
-        className="h-full"
+        className={FILL}
         inputClassName="h-full font-mono text-xs"
         resize="none"
         size="md"
@@ -57,26 +59,28 @@ export function TextEditor({
   }
 
   return (
-    <Editor
-      height="100%"
-      language={language}
-      value={value}
-      onChange={(next) => onChange((next ?? "").replace(/\r\n/g, "\n"))}
-      beforeMount={defineThemes}
-      theme={`app-${theme}`}
-      options={{
-        ariaLabel,
-        placeholder,
-        readOnly: disabled,
-        automaticLayout: true,
-        minimap: { enabled: false },
-        wordWrap: "on",
-        fontSize: 13,
-        tabSize: 2,
-        scrollBeyondLastLine: false,
-        padding: { top: 16, bottom: 16 },
-        renderLineHighlight: "none",
-      }}
-    />
+    <div className={FILL}>
+      <Editor
+        height="100%"
+        language={language}
+        value={value}
+        onChange={(next) => onChange((next ?? "").replace(/\r\n/g, "\n"))}
+        beforeMount={defineThemes}
+        theme={`app-${theme}`}
+        options={{
+          ariaLabel,
+          placeholder,
+          readOnly: disabled,
+          automaticLayout: true,
+          minimap: { enabled: false },
+          wordWrap: "on",
+          fontSize: 13,
+          tabSize: 2,
+          scrollBeyondLastLine: false,
+          padding: { top: 16, bottom: 16 },
+          renderLineHighlight: "none",
+        }}
+      />
+    </div>
   )
 }
