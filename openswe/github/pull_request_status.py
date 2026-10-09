@@ -573,6 +573,32 @@ class PullRequestClient:
             "PUT", f"repos/{self.repo.full_name}/pulls/{self.number}/merge", json=payload
         )
 
+    async def enable_auto_merge(self, *, sha: str, method: str) -> None:
+        """Queue the current head with GitHub's native branch-protection enforcement."""
+        pull = await self.pull()
+        head = pull.get("head")
+        if not isinstance(head, dict) or head.get("sha") != sha:
+            raise ValueError("The pull request head changed. Refresh before enabling auto-merge.")
+        if pull.get("draft") or pull.get("state") != "open" or pull.get("mergeable") is False:
+            raise ValueError("This pull request cannot be auto-merged.")
+        node_id = pull.get("node_id")
+        if not isinstance(node_id, str):
+            raise ValueError("GitHub did not return the pull request ID.")
+        data = await self.repo.github.graphql(
+            """
+            mutation($input: EnablePullRequestAutoMergeInput!) {
+              enablePullRequestAutoMerge(input: $input) {
+                pullRequest { autoMergeRequest { enabledAt } }
+              }
+            }
+            """,
+            {"input": {"pullRequestId": node_id, "mergeMethod": method.upper()}},
+        )
+        result = data.get("enablePullRequestAutoMerge")
+        queued = result.get("pullRequest") if isinstance(result, dict) else None
+        if not isinstance(queued, dict) or not queued.get("autoMergeRequest"):
+            raise ValueError("GitHub did not confirm auto-merge.")
+
     async def mergeable_pull(self) -> dict[str, Any] | None:
         """Read the pull request, waiting for GitHub to decide whether it merges.
 

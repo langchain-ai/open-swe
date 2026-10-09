@@ -4183,6 +4183,11 @@
             "title": "Action",
             "type": "string"
           },
+          "auto_merge": {
+            "default": false,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "done": {
             "title": "Done",
             "type": "boolean"

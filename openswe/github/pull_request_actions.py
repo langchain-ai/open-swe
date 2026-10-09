@@ -32,6 +32,7 @@ mutation MarkPullRequestReady($pullRequestId: ID!) {
 class PullRequestActionResult(BaseModel):
     action: PullRequestActionName
     done: bool
+    auto_merge: bool = False
 
 
 def _graphql_error_message(payload: dict[str, object]) -> str | None:
@@ -387,5 +388,19 @@ async def act_on_pull_request(
             },
             exc_info=exc.__cause__ is not None,
         )
+        if isinstance(action, MergeAction) and exc.status_code in {405, 409}:
+            try:
+                status = await pull.load()
+                if (
+                    status is None
+                    or status.review_required
+                    or not (status.ci == "pending" or status.missing_checks)
+                ):
+                    raise exc
+                await pull.enable_auto_merge(sha=action.sha, method=action.merge_method)
+            except (httpx2.HTTPError, ValueError) as auto_error:
+                logger.warning("Could not enable auto-merge", exc_info=True)
+                raise HTTPException(502, str(auto_error)) from auto_error
+            return PullRequestActionResult(action=action.action, done=True, auto_merge=True)
         raise
     return PullRequestActionResult(action=action.action, done=True)

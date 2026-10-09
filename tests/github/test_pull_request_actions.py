@@ -30,7 +30,7 @@ def github(monkeypatch):
     return _install
 
 
-@pytest.mark.parametrize("status,merged", [(200, True), (200, False), (409, False), (403, False)])
+@pytest.mark.parametrize("status,merged", [(200, True), (200, False), (403, False)])
 async def test_merge_requires_github_confirmation(github, status, merged):
     request = github(
         AsyncMock(return_value=response({"merged": merged, "message": "Head changed"}, status))
@@ -51,6 +51,40 @@ async def test_merge_requires_github_confirmation(github, status, merged):
         "json": {"sha": "a" * 40, "merge_method": "squash"},
         "max_retries": 0,
     }
+
+
+@pytest.mark.parametrize("status", [405, 409])
+async def test_blocked_merge_queues_auto_merge_without_claiming_merged(github, monkeypatch, status):
+    github(AsyncMock(return_value=response({"message": "Required checks pending"}, status)))
+    queued = AsyncMock()
+    monkeypatch.setattr(
+        PullRequestClient,
+        "load",
+        AsyncMock(return_value=MagicMock(review_required=False, ci="pending", missing_checks=[])),
+    )
+    monkeypatch.setattr(PullRequestClient, "enable_auto_merge", queued)
+    result = await actions.act_on_pull_request(
+        _pull(1), actions.MergeAction(action="merge", sha="a" * 40, merge_method="merge")
+    )
+    assert result.auto_merge is True
+    queued.assert_awaited_once_with(sha="a" * 40, method="merge")
+
+
+async def test_auto_merge_refuses_a_stale_head(monkeypatch):
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
+        AsyncMock(
+            return_value={
+                "head": {"sha": "b" * 40},
+                "node_id": "PR_1",
+                "state": "open",
+                "draft": False,
+            }
+        ),
+    )
+    with pytest.raises(ValueError, match="head changed"):
+        await _pull(1).enable_auto_merge(sha="a" * 40, method="squash")
 
 
 async def test_squash_merge_sends_the_description_and_commits(github):

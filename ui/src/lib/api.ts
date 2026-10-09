@@ -1083,6 +1083,7 @@ export type PullRequestActionRequest =
 export interface PullRequestActionResult {
   action: PullRequestActionName
   done: boolean
+  auto_merge?: boolean
 }
 
 export type PullRequestThreadIntent =
