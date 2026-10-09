@@ -6,7 +6,7 @@ import {
   PushPinRegularIcon,
   StackRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
@@ -37,7 +37,7 @@ import type {
   PullRequestSnapshot,
   SidebarRepo,
 } from "@/features/agents/lib/api"
-import type { AgentThread } from "@/features/agents/lib/types"
+import type { AgentThread, ReviewPageRef } from "@/features/agents/lib/types"
 import type {
   SidebarRepoGroup,
   SidebarThreadItem,
@@ -47,6 +47,10 @@ import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
 import { SidebarThreadRow } from "@/features/agents/components/SidebarThreadRow"
+import {
+  reviewRequestKey,
+  SidebarReviewRequests,
+} from "@/features/agents/components/SidebarReviewRequests"
 import {
   SidebarSectionAction,
   SidebarSectionHeader,
@@ -88,6 +92,7 @@ import {
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
+import { useSidebarKeyboardNav } from "@/features/agents/lib/useSidebarKeyboardNav"
 import {
   useLegacyLocalThreads,
   useLegacyLocalActivity,
@@ -113,6 +118,7 @@ import {
   useRegisterAppCommands,
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
+import { sectionOf } from "@/lib/appLocation"
 import { cn } from "@/lib/utils"
 import { useChatRoutes } from "@/lib/chatRoutes"
 import { reportError } from "@/lib/errorReporting"
@@ -122,6 +128,7 @@ interface AgentsSidebarProps {
   user: SessionUser
   activeThreadId?: string
   activeLocalSessionId?: string
+  activeReview?: ReviewPageRef
   layout: SidebarLayout
 }
 
@@ -193,6 +200,7 @@ export function AgentsSidebar({
   user,
   activeThreadId,
   activeLocalSessionId,
+  activeReview,
   layout,
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
@@ -486,26 +494,25 @@ export function AgentsSidebar({
     item.location === "cloud"
       ? item.thread.resolved === true
       : item.thread.archived === true
-  const toggleArchived = (item: SidebarThreadItem) => {
-    if (item.location === "local") {
+  const setArchived = (
+    { location, id }: Pick<SidebarThreadItem, "location" | "id">,
+    archived: boolean
+  ) => {
+    if (location === "local") {
       void window.openSweDesktop
-        ?.updateLegacyLocalThread({
-          threadId: item.id,
-          archived: !isArchived(item),
-        })
-        .then(() => refreshLocalThreads(item.id))
+        ?.updateLegacyLocalThread({ threadId: id, archived })
+        .then(() => refreshLocalThreads(id))
         .catch((error: unknown) =>
           reportError({ title: "Couldn't archive or restore thread", error })
         )
       return
     }
-    if (!pendingResolves.some((vars) => vars.threadId === item.id)) {
-      resolveThread.mutate({
-        threadId: item.id,
-        resolved: !isArchived(item),
-      })
+    if (!pendingResolves.some((vars) => vars.threadId === id)) {
+      resolveThread.mutate({ threadId: id, resolved: archived })
     }
   }
+  const toggleArchived = (item: SidebarThreadItem) =>
+    setArchived(item, !isArchived(item))
   const togglePin = (item: SidebarThreadItem) => {
     if (item.location === "local") {
       toggleLocalPin(item.id)
@@ -524,6 +531,24 @@ export function AgentsSidebar({
     : activeThreadId
       ? `cloud:${activeThreadId}`
       : undefined
+  const onInbox = useRouterState({
+    select: (state) => sectionOf(state.location.pathname) === "/agents/inbox",
+  })
+  const activeKeys = [
+    ...(activeKey ? [activeKey] : []),
+    ...(activeReview ? [reviewRequestKey(activeReview)] : []),
+  ]
+  const onThreadListKeyDown = useSidebarKeyboardNav({
+    viewport: scrollViewport,
+    activeKeys,
+    enabled: !onInbox,
+    archiveActive: () => {
+      if (activeLocalSessionId)
+        setArchived({ location: "local", id: activeLocalSessionId }, true)
+      else if (activeThread && !activeThread.resolved)
+        setArchived({ location: "cloud", id: activeThread.id }, true)
+    },
+  })
 
   const rowProps = (
     item: SidebarThreadItem,
@@ -808,11 +833,22 @@ export function AgentsSidebar({
           ref={scrollViewport}
           className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
           onScroll={measureScrollEdges}
+          onKeyDown={onThreadListKeyDown}
         >
           <SidebarNav
             className={isDesktop ? "pb-3" : "pb-4"}
             onNavigate={layout.closeOnMobile}
           />
+          {user && (
+            <SidebarReviewRequests
+              login={user.login}
+              activeKeys={activeKeys}
+              collapsed={sectionCollapsed("reviews")}
+              compact={prefs.compact}
+              onToggleCollapsed={() => toggleSectionCollapsed("reviews")}
+              onNavigate={layout.closeOnMobile}
+            />
+          )}
           {sourcesLoading && allItems.length === 0 && (
             <ThreadListSkeleton compact={prefs.compact} />
           )}
@@ -1338,11 +1374,13 @@ export function AgentsShell({
   user,
   activeThreadId,
   activeLocalSessionId,
+  activeReview,
   children,
 }: {
   user: SessionUser
   activeThreadId?: string
   activeLocalSessionId?: string
+  activeReview?: ReviewPageRef
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
@@ -1436,6 +1474,7 @@ export function AgentsShell({
             user={user}
             activeThreadId={activeThreadId}
             activeLocalSessionId={activeLocalSessionId}
+            activeReview={activeReview}
             layout={layout}
           />
           <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
