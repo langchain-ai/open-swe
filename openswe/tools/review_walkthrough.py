@@ -26,7 +26,13 @@ from openswe.tools.approve_pull_request import approve_pull_request
 from openswe.tools.mark_pull_request_ready import mark_pull_request_ready
 from openswe.tools.plan_walkthrough import PLANNING_ERRORS
 from openswe.tools.record_author_feedback import record_author_feedback
-from openswe.walkthrough.plan import FileRanges
+from openswe.walkthrough.plan import (
+    MAX_EXPLANATION_CHARS,
+    MAX_TITLE_CHARS,
+    FileRanges,
+    LineRef,
+    claim,
+)
 
 _ONE_PER_TURN = (
     "you already put something on screen this turn; end your turn and wait for the reader"
@@ -124,6 +130,45 @@ async def show_chunk(number: int | None = None) -> dict[str, Any]:
     if not state.reader.remaining(chunk.lines):
         return {"success": False, "error": "the reader already approved or skipped that chunk"}
     return await state.post(state.reader.show(chunk))
+
+
+@_one_at_a_time
+async def show_lines(title: str, show: list[FileRanges], explanation: str) -> dict[str, Any]:
+    """Implement the `show_lines` tool."""
+    try:
+        state = await _State.load()
+        left = set(state.reader.remaining(state.reader.unseen))
+        candidates = [
+            line
+            for change in state.ctx.workspace.changes
+            for line in change.lines
+            if LineRef.of(line) in left
+        ]
+        lines = claim(show, candidates)
+        code = await state.ctx.workspace.checkout.render(lines, state.ctx.workspace.changes)
+    except (GuideUnavailableError, *PLANNING_ERRORS) as exc:
+        return {"success": False, "error": str(exc)}
+    if state.shown_this_turn():
+        return {"success": False, "error": _ONE_PER_TURN}
+    trimmed = " ".join(title.split())[:MAX_TITLE_CHARS] or "Requested lines"
+    return await state.post(
+        state.reader.custom(trimmed, explanation.strip()[:MAX_EXPLANATION_CHARS], lines, code)
+    )
+
+
+@_one_at_a_time
+async def order_chunks(chunks: list[int]) -> dict[str, Any]:
+    """Implement the `order_chunks` tool."""
+    try:
+        state = await _State.load()
+    except GuideUnavailableError as exc:
+        return {"success": False, "error": str(exc)}
+    picked = [state.reader.chunk(n) for n in chunks]
+    if any(chunk is None for chunk in picked) or len(set(chunks)) != len(chunks):
+        return {"success": False, "error": "chunks must be distinct numbers from the status"}
+    state.walk.order = [chunk.id for chunk in picked if chunk is not None]
+    await state.save()
+    return state.report()
 
 
 @_one_at_a_time
@@ -271,6 +316,8 @@ def walkthrough_tools(mode: GuideMode) -> list[Callable[..., Awaitable[Any]]]:
     )
     return [
         show_chunk,
+        show_lines,
+        order_chunks,
         show_other,
         skip_changes,
         plan_chunk,

@@ -19,11 +19,12 @@ from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
 from openswe.walkthrough.render import fenced
 
 OTHER = "other"
+CUSTOM = "custom"
 _MAX_LEFT_FILES = 200
 
 
 class OnScreen(BaseModel):
-    # The plan chunk's id, or ``OTHER``.
+    # The plan chunk's id, ``OTHER``, or ``CUSTOM`` for a cut made for this reader.
     chunk_id: str
     title: str
     # Exactly the lines the message offers to approve.
@@ -53,6 +54,8 @@ class Walk(BaseModel):
     other_skipped: bool = False
     # Fingerprints of Other's textless files the reader approved.
     other_files_seen: list[str] = []
+    # Chunk ids the reader asked to see next, ahead of the plan's order.
+    order: list[str] = []
     # The run that last put something on screen: one per turn, then the reader.
     shown_by_run: str = ""
 
@@ -158,6 +161,8 @@ class WalkStatus(BaseModel):
     on_screen: str | None
     chunks: list[ReaderChunk]
     next: int | None
+    # Chunk numbers the reader asked to see next, in order.
+    asked: list[int] = []
     other_lines: int
     other_state: str
     unplanned: str
@@ -187,10 +192,21 @@ class Reader:
         return self.plan.chunks[number - 1] if 1 <= number <= len(self.plan.chunks) else None
 
     def next_chunk(self) -> PlanChunk | None:
+        """The first chunk the reader asked for that is still left, else the plan's next."""
         current = self.walk.on_screen.chunk_id if self.walk.on_screen else None
+        asked = [c for chunk_id in self.walk.order if (c := self.plan.chunk(chunk_id))]
         return next(
-            (c for c in self.plan.chunks if c.id != current and self.remaining(c.lines)),
+            (c for c in [*asked, *self.plan.chunks] if c.id != current and self.remaining(c.lines)),
             None,
+        )
+
+    def custom(self, title: str, explanation: str, lines: list[LineRef], code: str) -> OnScreen:
+        """A chunk cut for this reader alone, outside the plan."""
+        return OnScreen(
+            chunk_id=CUSTOM,
+            title=title,
+            lines=self.remaining(lines),
+            message_text=f"*{title}*\n{explanation}\n\n{code}".strip(),
         )
 
     @property
@@ -288,6 +304,13 @@ class Reader:
             on_screen=current.title if current else None,
             chunks=chunks,
             next=self.plan.number_of(upcoming.id) if upcoming else None,
+            asked=[
+                number
+                for chunk_id in self.walk.order
+                if (chunk := self.plan.chunk(chunk_id))
+                and self.remaining(chunk.lines)
+                and (number := self.plan.number_of(chunk_id))
+            ],
             other_lines=len(self.remaining(self.plan.other)),
             other_state=other_state,
             unplanned=f"{len(open_lines)} lines" if open_lines else "nothing",

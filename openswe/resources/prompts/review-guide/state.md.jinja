@@ -14,6 +14,9 @@ Where the reader stands:
 
 - On screen: {{ ("“" ~ status.on_screen ~ "”") if status.on_screen else "nothing" }}
 - Next: {{ ("chunk " ~ status.next) if status.next else "no planned chunk is left" }}
+{% if status.asked %}
+- Their order, ahead of the plan's: {{ status.asked | join(", ") }}
+{% endif %}
 - Chunks: {{ "" if status.chunks else "none planned yet" }}
 {% for chunk in status.chunks %}
   {{ chunk.number }}. “{{ chunk.title }}”, {{ chunk.state }}{% if chunk.lines %}: {{ chunk.lines | join("; ") }}{% endif %}
