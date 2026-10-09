@@ -56,7 +56,6 @@ from openswe.review.reviews import (
     get_review_diff,
     get_review_file_contents,
     get_review_summaries,
-    list_review_comments,
     list_reviews,
     proxy_pr_image,
     trigger_re_review,
@@ -75,8 +74,8 @@ from openswe.review.styles import (
     ReviewStylePromptUpdate,
     normalize_repo_full_name,
 )
-from openswe.review.walkthrough import Walkthrough
 from openswe.threads.handlers import mark_review_session_viewed
+from openswe.walkthrough.record import Walkthrough
 
 router = APIRouter(tags=["review"])
 
@@ -379,17 +378,6 @@ async def api_dismiss_walkthrough(
     return WalkthroughDismissed(dismissed=await Walkthrough.dismiss(owner, repo, pr_number))
 
 
-@router.get("/reviews/{owner}/{repo}/{pr_number}/comments")
-async def api_list_review_comments(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await list_review_comments(owner, repo, pr_number)
-
-
 @router.post("/reviews/{owner}/{repo}/{pr_number}/comments")
 @audit_endpoint
 async def api_post_review_comment(
@@ -507,32 +495,6 @@ async def api_discard_pending_review(
             repository.pull_request(pr_number), login=session["sub"]
         )
     return PendingReviewDiscarded(discarded=discarded)
-
-
-class ReviewCommentUpdate(BaseModel):
-    body: str
-
-
-@router.patch("/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}")
-@audit_endpoint
-async def api_update_review_comment(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    comment_id: int,
-    comment: ReviewCommentUpdate,
-    session: dict[str, Any] = SESSION_DEP,
-) -> PostedReviewComment:
-    body = comment.body.strip()
-    if not body:
-        raise HTTPException(422, "comment body is required")
-    async with _as_viewer(session, owner, repo) as repository:
-        return await PostedReviewComment.edit(
-            repository.pull_request(pr_number),
-            comment_id,
-            viewer_login=session["sub"],
-            body=body,
-        )
 
 
 # --- PR chat (main agent) ---------------------------------------------------

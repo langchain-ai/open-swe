@@ -90,9 +90,10 @@ async def api_create_api_key(
     body: ApiKeyCreate,
     admin: dict[str, Any] = ADMIN_KEY_DEP,
 ) -> MintedApiKey:
-    creator_id = session_user_id(admin)
-    if creator_id is None or await User.get(creator_id) is None:
+    creator = await User.for_session(session_user_id(admin), admin["sub"])
+    if creator is None:
         raise HTTPException(403, "API key creation requires an admin signed in as a real user")
+    creator_id = creator.id
     workspace_id = await WORKSPACES.id_for_slug(body.workspace)
     if workspace_id is None:
         raise HTTPException(404, "workspace not found")

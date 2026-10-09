@@ -66,7 +66,16 @@ export function useSidebarLayout() {
     if (window.matchMedia("(max-width: 767px)").matches) setCollapsedState(true)
   }, [])
 
-  return { width, collapsed, setWidth, setCollapsed, toggle, closeOnMobile }
+  return {
+    width,
+    collapsed,
+    setWidth,
+    setCollapsed,
+    /** For a page that wants the room while it is open; the stored preference is untouched. */
+    setCollapsedForPage: setCollapsedState,
+    toggle,
+    closeOnMobile,
+  }
 }
 
 export type SidebarLayout = ReturnType<typeof useSidebarLayout>

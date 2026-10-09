@@ -100,7 +100,16 @@ function AssessmentCard({
                 ? "Would approve"
                 : "Needs human review"}
           </span>
-          <span className="text-xs text-secondary">
+          <span
+            className="text-xs text-secondary"
+            title={
+              assessment.approved
+                ? "Open SWE approved this pull request on GitHub."
+                : assessment.dry_run
+                  ? "Auto-approval is in dry run for this repository: Open SWE scores the risk but never approves on GitHub."
+                  : "Open SWE only advises here; it doesn't approve on GitHub."
+            }
+          >
             {assessment.approved
               ? "Automatic approval"
               : assessment.dry_run

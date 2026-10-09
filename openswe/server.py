@@ -7,7 +7,7 @@ middleware stack. All per-thread state lives in the sandbox + thread metadata;
 the agent itself is stateless.
 """
 
-# ruff: noqa: E402
+# ruff: noqa: E402, PLC2701
 import hashlib
 import logging
 import warnings
@@ -47,6 +47,9 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddl
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
+from langchain_quickjs import CodeInterpreterMiddleware
+from langchain_quickjs._ptc import is_valid_ptc_tool_name
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -258,6 +261,8 @@ from openswe.tools import (
     trigger_automation,
     update_automation,
     web_search,
+    write_database_rows,
+    write_store_item,
 )
 from openswe.tools.access import permitted, resolve_access
 from openswe.tools.admin_gate import (
@@ -266,6 +271,7 @@ from openswe.tools.admin_gate import (
 )
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
+from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
@@ -333,10 +339,15 @@ DEEP_AGENT_EXCLUDED_TOOLS = frozenset({"grep"})
 STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
-# A review walkthrough's prepare run reads the diff and queues chunks; it changes nothing.
-GUIDE_PREFETCH_EXCLUDED_TOOLS = frozenset({"delete", "edit_file", "task", "write_file"})
 # Each posts to the reader and ends the walkthrough's turn as surely as a final reply.
-GUIDE_REPLY_TOOLS = frozenset({"show_chunk", "show_queued", "show_other", "end_walkthrough"})
+GUIDE_REPLY_TOOLS = frozenset(
+    {
+        "walkthrough_show_chunk",
+        "walkthrough_show_lines",
+        "walkthrough_show_other",
+        "walkthrough_end",
+    }
+)
 # A `/oswe` request has a channel but no Slack thread, so only the tools that act
 # on one are out of reach. Everything else, writes included, stays available.
 SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
@@ -751,6 +762,56 @@ async def _mcp_tools_for(
         if managed_gateway:
             sources.append(managed_mcp_source(credential_login, managed_gateway))
     return await load_mcp_tools(*sources)
+
+
+async def _mcp_code_mode(
+    thread_id: str,
+    tools: Sequence[BaseTool],
+    *,
+    local_run: bool,
+    additional_tools: Sequence[str | BaseTool] = (),
+) -> tuple[CodeInterpreterMiddleware | None, Sequence[BaseTool]]:
+    if local_run or not (tools or additional_tools):
+        return None, tools
+    import langgraph_sdk
+
+    thread = await langgraph_sdk.get_client().threads.get(thread_id)
+    launcher_login = thread_metadata(thread).get("owner_login")
+    profile = await _cached_profile(launcher_login) if isinstance(launcher_login, str) else None
+    if not profile or profile.get("experimental_mcp_ptc") is not True:
+        return None, tools
+    ptc_tools: list[str | BaseTool] = [tool for tool in tools if is_valid_ptc_tool_name(tool.name)]
+    ptc_tools.extend(
+        tool
+        for tool in additional_tools
+        if (tool if isinstance(tool, str) else tool.name)
+        not in (DEEP_AGENT_TOOL_NAMES - {"read_file", "write_file"})
+        | {"background_execute", "slack_reply", "slack_no_reply_needed", "cli_result"}
+        and is_valid_ptc_tool_name(tool if isinstance(tool, str) else tool.name)
+    )
+    if not ptc_tools:
+        return None, tools
+    ordinary_tools = [tool for tool in tools if not is_valid_ptc_tool_name(tool.name)]
+    return CodeInterpreterMiddleware(ptc=ptc_tools, subagents=False, mode="turn"), ordinary_tools
+
+
+def _integration_middleware(
+    mcp_tools: Sequence[BaseTool],
+    reserved_names: set[str],
+    *,
+    model_visible: bool = True,
+) -> DynamicToolMiddleware | None:
+    candidate = DynamicToolMiddleware(
+        {"MCPs": mcp_tools},
+        reserved_names=reserved_names,
+        model_visible=model_visible,
+    )
+    return candidate if candidate.has_groups else None
+
+
+async def _phase_result(thread_id: str | None, name: str, loader: Any) -> Any:
+    async with aphase(thread_id, name):
+        return await loader()
 
 
 async def _cached_profile(profile_login: str | None):
@@ -1378,7 +1439,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     guide = await ReviewGuideSession.get(thread_id)
     if guide is not None and guide.closed:
         guide = None
-    guide_prefetch = guide is not None and cfg.review_guide_prefetch
     profile_login = await resolve_github_login(as_json_object(config))
     credential_login = None
     credential_scope_known = False
@@ -1777,8 +1837,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
         read_only_sql,
         read_store_item,
+        *(
+            (write_store_item, write_database_rows)
+            if ENV.OPENSWE_ENV.optional() in {"preview", "staging"}
+            else ()
+        ),
         manage_feature_flags,
         manage_review_approval_mode,
+        manage_review_repos,
     ]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
@@ -1821,9 +1887,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             if _registered_tool_name(tool) not in INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         ]
     if guide is not None:
-        walkthrough = walkthrough_tools(guide.mode, prefetch=guide_prefetch)
-        # A prepare run works ahead of the reader in the background, so nothing it holds posts.
-        static_tools = walkthrough if guide_prefetch else [*static_tools, *walkthrough]
+        static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
     static_tools = apply_tool_descriptions(
         static_tools,
         {
@@ -1849,8 +1913,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if slack_ask_mode
         else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
         if incident_automatic
-        else DEEP_AGENT_EXCLUDED_TOOLS | GUIDE_PREFETCH_EXCLUDED_TOOLS
-        if guide_prefetch
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
     sandbox_only_tools = (
@@ -1871,12 +1933,38 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # Nothing is owed on a run the model cannot answer through: an automatic
     # incident sweep, for one, has the reply tool taken away on purpose.
     reply_tool_offered = _registered_tool_name(slack_reply) in reserved_tool_names - excluded_tools
-    integration_tools = DynamicToolMiddleware(
-        {"MCPs": mcp_tools},
-        reserved_names={*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
+    mcp_ptc, ordinary_mcp_tools = await _mcp_code_mode(
+        thread_id,
+        [tool for tool in mcp_tools if tool.name not in excluded_tools],
+        local_run=local_run,
+        additional_tools=[
+            *[
+                _registered_tool_name(tool)
+                for tool in main_tools
+                if _registered_tool_name(tool) not in excluded_tools
+            ],
+            *[
+                name
+                for name in ("read_file", "write_file")
+                if name not in excluded_tools and name not in client_tool_names
+            ],
+        ],
+    )
+    integration_reserved_names = {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names}
+    full_dynamic_tools = _integration_middleware(
+        mcp_tools,
+        integration_reserved_names,
         model_visible=not prefer_tools_in_sandbox,
     )
-    dynamic_tool_middleware = integration_tools if integration_tools.has_groups else None
+    dynamic_tool_middleware = (
+        _integration_middleware(
+            ordinary_mcp_tools,
+            integration_reserved_names,
+            model_visible=not prefer_tools_in_sandbox,
+        )
+        if mcp_ptc is not None
+        else full_dynamic_tools
+    )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
@@ -2019,7 +2107,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         and _registered_tool_name(tool) not in sandbox_only_tools
                     ],
                     workspace_skills=workspace_skills,
-                    dynamic_tools=dynamic_tool_middleware,
+                    dynamic_tools=full_dynamic_tools,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                     incident_middleware=IncidentMiddleware(incident_session)
                     if incident_session is not None
@@ -2029,6 +2117,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         check_message_queue_before_model.name,
                         deliver_event_matches_before_model.name,
                         model_selection.name,
+                        *([mcp_ptc.name] if mcp_ptc is not None else []),
                     ),
                 ),
             ],
@@ -2118,21 +2207,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                         if stop_summary_mode
                         else [check_message_queue_before_model, deliver_event_matches_before_model]
                     ),
-                    *(
-                        []
-                        if guide_prefetch
-                        else [
-                            RequireUserReplyMiddleware(
-                                _registered_tool_name(slack_reply),
-                                _registered_tool_name(slack_no_reply_needed),
-                                initial_surface=(
-                                    _initial_reply_surface(cfg)
-                                    if reply_tool_offered
-                                    else WEB_REPLY_SURFACE
-                                ),
-                                replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
-                            )
-                        ]
+                    RequireUserReplyMiddleware(
+                        _registered_tool_name(slack_reply),
+                        _registered_tool_name(slack_no_reply_needed),
+                        initial_surface=(
+                            _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
+                        ),
+                        replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
                     ),
                     *(
                         [RequireCliResultMiddleware(_registered_tool_name(cli_result))]
@@ -2145,6 +2226,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                     fallback_middleware,
                     *([image_fallback] if image_fallback else []),
                     *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
+                    *([mcp_ptc] if mcp_ptc is not None else []),
                     SanitizeFireworksMessagesMiddleware(),
                     SanitizeOpenAIResponsesMiddleware(),
                     SanitizeThinkingBlocksMiddleware(),
@@ -2158,7 +2240,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ).with_config(bindable_config(config))
     if tool_surface is not None:
         tool_surface.graph = graph
-        tool_surface.dynamic = dynamic_tool_middleware
+        tool_surface.dynamic = full_dynamic_tools
         tool_surface.excluded = (
             STOP_SUMMARY_EXCLUDED_TOOLS
             if stop_summary_mode

@@ -2,9 +2,9 @@
 
 from typing import Any
 
-from openswe.review.walkthrough import Walkthrough
 from openswe.review_guide.context import GuideContext, GuideUnavailableError
 from openswe.tools.record_human_input import MAX_SUMMARY_CHARS
+from openswe.walkthrough.record import Walkthrough
 
 
 async def record_author_feedback(summary: str) -> dict[str, Any]:

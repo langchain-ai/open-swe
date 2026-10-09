@@ -35,7 +35,6 @@ from openswe.input_messages import (
     visible_dynamic_context_hashes,
 )
 from openswe.prompts import prompt
-from openswe.review_guide.advance import cancel_prefetch
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
@@ -43,6 +42,7 @@ from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
+from openswe.slack.parsed_message import ParsedSlackMessage
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
 from openswe.slack.thinking import (
@@ -55,11 +55,6 @@ from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User, persist_display_name
 from openswe.utils.json_types import as_json_object
 from openswe.utils.langsmith import create_langsmith_feedback, get_langsmith_trace_url
-from openswe.utils.message_commands import (
-    PERFORMANCE_COMMAND,
-    find_message_command,
-    remove_message_command,
-)
 from openswe.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
@@ -68,7 +63,7 @@ from openswe.utils.thread_participants import slack_participant_ids
 from openswe.utils.thread_settings import load_thread_settings
 from openswe.webhooks import common
 from openswe.workspaces.routing import resolve_workspace, workspace_for_repo
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, parse_workspace_tag
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 _CODE_CHANNEL_CONTEXT = prompt("runs/slack-code-channel")
 # Slack opens a new code channel by quoting its origin message on the requester's behalf.
@@ -975,40 +970,39 @@ async def _process_slack_mention_impl(
         ]
         if not message_update:
             source_messages = context_messages
+    parsed = ParsedSlackMessage.parse(text, bot_user_id, common.SLACK_BOT_USERNAME)
+    performance_command = (
+        parsed.performance_model
+        and not message_update
+        and allowed_bot is None
+        and not concierge_mode
+    )
+    is_first_mention = not await common.thread_exists(thread_id)
+    # A `/workspace:<name>` command on the message that opens a thread is one
+    # input to which workspace its sandbox boots from — resolved below, once the
+    # triggering user's GitHub login is known. Only the opening message can pick
+    # it: the sandbox is created once, so honoring a later one would change the
+    # prompt but not the image. It is stripped only when it names a real
+    # workspace, so a typo stays visible in the transcript instead of vanishing.
+    tagged_slug: str | None = None
+    if is_first_mention and parsed.workspace:
+        if await WORKSPACES.get(parsed.workspace) is not None:
+            tagged_slug = parsed.workspace
+        else:
+            common.logger.info(
+                "Slack thread tagged an unknown workspace",
+                extra={"slack_thread_id": thread_id, "tagged_workspace": parsed.workspace},
+            )
     clean_text = (
         slack_utils.replace_bot_mention_with_username(
-            text, bot_user_id, common.SLACK_BOT_USERNAME
+            parsed.without(
+                performance_model=performance_command, workspace=tagged_slug is not None
+            ),
+            bot_user_id,
+            common.SLACK_BOT_USERNAME,
         ).strip()
         or "(no text in mention)"
     )
-    performance_command = (
-        find_message_command(PERFORMANCE_COMMAND, clean_text)
-        if not message_update and allowed_bot is None and not concierge_mode
-        else None
-    )
-    if performance_command:
-        clean_text = (
-            remove_message_command(clean_text, performance_command) or "(no text in mention)"
-        )
-    is_first_mention = not await common.thread_exists(thread_id)
-    # A `workspace:<name>` (or legacy `env:<name>`) tag on the message that opens
-    # a thread is one input to which workspace its sandbox boots from — resolved
-    # below, once the triggering user's GitHub login is known. Only the opening
-    # message can pick it: the sandbox is created once, so honoring a later tag
-    # would change the prompt but not the image. The tag is stripped only when it
-    # names a real workspace, so a typo stays visible in the transcript instead
-    # of vanishing.
-    tagged_slug: str | None = None
-    if is_first_mention:
-        parsed_slug, text_without_tag = parse_workspace_tag(clean_text)
-        if parsed_slug and await WORKSPACES.get(parsed_slug) is not None:
-            tagged_slug = parsed_slug
-            clean_text = text_without_tag or "(no text in mention)"
-        elif parsed_slug:
-            common.logger.info(
-                "Slack thread tagged an unknown workspace",
-                extra={"slack_thread_id": thread_id, "tagged_workspace": parsed_slug},
-            )
     # Auto-resolve cross-posted Slack message links in context
     resolved_links_section, image_urls_from_links = await common.resolve_slack_links_in_context(
         source_messages, user_names_by_id
@@ -1245,8 +1239,7 @@ async def _process_slack_mention_impl(
         "slack_kickoff_eligible": False,
     }
     if review_guide:
-        # The thread keeps the last run's configurable, which may be a prepare run's.
-        configurable["review_guide_prefetch"] = False
+        # The thread keeps the last run's configurable, which may be a click's.
         configurable["review_guide_approve_ts"] = ""
     if mapped_login:
         configurable["github_login"] = mapped_login
@@ -1329,9 +1322,6 @@ async def _process_slack_mention_impl(
     # A person writing in a closed guide wants it back.
     if guide is not None and guide.closed:
         await guide.set_closed(False)
-    # The reader spoke: stop preparing ahead so the guide hears them now, not after.
-    if guide is not None:
-        await cancel_prefetch(langgraph_client, thread_id)
     # An edit corrects a request the agent already has, so it belongs in the
     # thread's message queue rather than in a run of its own. Nothing drains that
     # queue while the thread is idle; an edit made after the agent finished waits
@@ -1365,7 +1355,7 @@ async def _process_slack_mention_impl(
             and not request.kitchen_channel,
             code_channel=code_channel,
             message_update=message_update,
-            explicit_request=request.explicit_request or performance_command is not None,
+            explicit_request=request.explicit_request or performance_command,
         )
     )
     visible_context_hashes, dispatched_timestamps = await _dispatched_slack_context(

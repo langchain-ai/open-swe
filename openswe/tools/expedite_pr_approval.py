@@ -25,16 +25,7 @@ from openswe.github.http import GitHubClient, or_none
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.github.token import resolve_github_token
-from openswe.human_review.lifecycle import (
-    broadcast_configured,
-    post_card,
-    prompt_author_ready,
-    refresh_card,
-    remove_superseded_cards,
-    reopen,
-    retire,
-    transition,
-)
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import summary_line
 from openswe.review.approvals import APPROVALS_PATH, fetch_approvals_md
@@ -156,7 +147,7 @@ async def expedite_pr_approval(
             return {"success": True, "cancelled": False}
         if approval.thread_id and approval.thread_id != thread_id:
             return _failure("This expedited review belongs to another agent thread")
-        await retire(approval, "cancelled", "cancelled by the agent")
+        await ReviewCard(approval).retire("cancelled", "cancelled by the agent")
         return {"success": True, "cancelled": True}
 
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
@@ -246,13 +237,16 @@ async def expedite_pr_approval(
     ):
         _audit_pull_request(active.pull_request_id)
         if active.awaiting_ready and not payload.draft:
-            updated = await transition(active.id, expected=("open",), awaiting_ready=False)
+            updated = await HumanReviewRequest.transition(
+                active.id, expected=("open",), awaiting_ready=False
+            )
             if updated is not None:
                 active = updated
+        card = ReviewCard(active)
         if not active.awaiting_ready:
-            await refresh_card(active)
-            await broadcast_configured(active)
-        readiness_warning = await prompt_author_ready(active)
+            await card.refresh()
+            await card.broadcast_configured()
+        readiness_warning = await card.prompt_author_ready()
         return {
             "success": True,
             "readiness_warning": readiness_warning,
@@ -260,6 +254,7 @@ async def expedite_pr_approval(
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "approvers": active.approvers,
+            "completion_reply_required": active.awaiting_ready,
             "slack_channel_id": active.slack_channel_id,
             "next": readiness_warning
             or (
@@ -273,7 +268,7 @@ async def expedite_pr_approval(
             ),
         }
     if active is not None:
-        await retire(active, "superseded", "Replaced by a card for the newer diff.")
+        await ReviewCard(active).retire("superseded", "Replaced by a card for the newer diff.")
 
     pull_request = await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)
     pull_request.title = payload.title
@@ -291,7 +286,7 @@ async def expedite_pr_approval(
     # One open request per PR, so the displaced one closes before this row is written;
     # it is reopened below if the expedited card cannot be posted.
     if displaced is not None and (
-        await retire(displaced, "superseded", "replaced by an expedited review") is None
+        await ReviewCard(displaced).retire("superseded", "replaced by an expedited review") is None
     ):
         return _failure("The pull request's review request changed meanwhile. Try again.")
     approval = await HumanReviewRequest(
@@ -309,39 +304,40 @@ async def expedite_pr_approval(
         run_config=dispatch_run_config(cfg, thread_id, None),
     ).save()
     if approval.awaiting_ready:
-        readiness_warning = await prompt_author_ready(approval)
+        readiness_warning = await ReviewCard(approval).prompt_author_ready()
         if readiness_warning:
             await _discard(approval)
             if displaced is not None:
-                await reopen(displaced)
+                await ReviewCard(displaced).reopen()
             return _failure(readiness_warning)
-        await remove_superseded_cards(approval)
+        await ReviewCard(approval).remove_superseded()
         return {
             "success": True,
             "approval_id": str(approval.id),
             "pr_url": pr_ref.url,
             "head_sha": head_sha,
             "slack_channel_id": channel_id,
+            "completion_reply_required": True,
             "next": "The full draft card was sent only to the author by DM. The thread card "
             "will be posted once they mark it ready. Keep a /baby-sit watch on the PR.",
         }
     try:
-        message_ts = await post_card(approval, title=payload.title, files=files)
+        message_ts = await ReviewCard(approval).post_expedited(title=payload.title, files=files)
     except SlackRequestError as exc:
         await _discard(approval)
         if displaced is not None:
-            await reopen(displaced)
+            await ReviewCard(displaced).reopen()
         return _failure(f"Could not post the approval card in Slack: {exc.code}")
     except BaseException:
         await _discard(approval)
         if displaced is not None:
-            await reopen(displaced)
+            await ReviewCard(displaced).reopen()
         raise
     approval.slack_message_ts = message_ts
-    approval = await approval.save()
-    await broadcast_configured(approval)
-    await remove_superseded_cards(approval)
-    readiness_warning = await prompt_author_ready(approval)
+    card = ReviewCard(await approval.save())
+    await card.broadcast_configured()
+    await card.remove_superseded()
+    readiness_warning = await card.prompt_author_ready()
     return {
         "success": True,
         "readiness_warning": readiness_warning,

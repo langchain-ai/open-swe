@@ -309,26 +309,42 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/control/walkthrough")
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
-    """Store a one-step walkthrough for a fake pull request's current head, as a scout would."""
-    from openswe.review.walkthrough import FileLines, StepDraft, Walkthrough
+    """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
+    from openswe.github.pull_requests import PullRequest
+    from openswe.walkthrough.diff import parse
+    from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+    from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
     pull = _seeded_pull(body)
-    await Walkthrough.replace(
-        pull["owner"],
-        pull["repo"],
-        pull["number"],
+    changes = parse(
+        "\n".join(
+            f"diff --git a/{file['filename']} b/{file['filename']}\n"
+            f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
+            for file in pull["files"]
+        )
+    )
+    plan = Plan(
         head_sha=pull["head_sha"],
-        merge_base_sha=fakes.base_sha(pull),
-        scout_thread_id="",
-        steps=[
-            StepDraft(
-                title=str(body.get("title") or "Seeded step"),
-                files=[FileLines(path=file["filename"]) for file in pull["files"]],
+        chunks=[
+            PlanChunk(
+                title=str(body.get("title") or "Seeded chunk"),
+                lines=[LineRef.of(line) for change in changes for line in change.lines],
             )
         ],
-        human_input_summary=str(body.get("human_input") or ""),
     )
+    pull_request = await PullRequest(
+        owner=pull["owner"], repo=pull["repo"], number=pull["number"]
+    ).ensure()
+    await Walkthrough.dismiss(pull["owner"], pull["repo"], pull["number"])
+    await Walkthrough.install(
+        pull_request.id,
+        plan,
+        merge_base_sha=fakes.base_sha(pull),
+        changes=changes,
+        replacing=None,
+    )
+    await Walkthrough.set_human_input(pull_request.id, str(body.get("human_input") or ""))
     return JSONResponse({"ok": True})
 
 
@@ -1254,6 +1270,13 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
     if "vnd.github.diff" in request.headers.get("Accept", ""):
         return Response(fakes.pull_diff(pr), media_type="text/plain")
     return JSONResponse(_gh_pr_json(pr))
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/commits")
+async def gh_list_pull_commits(owner: str, repo: str, number: int) -> JSONResponse:
+    if fakes.find_pull(number, owner, repo) is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse([])
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
