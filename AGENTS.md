@@ -22,6 +22,7 @@ Before making any change, first till the soil: refactor the surrounding code so 
 - Keep comments minimal and only explain non-obvious reasons.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions. Typed and slash commands are optional shortcuts, never the only way.
 - User-initiated UI mutations are optimistic: update immediately, roll back on failure, show an error toast. Skip this only when an immediate update would be unsafe or misleading. Slack Block Kit counts: update the clicked message before slow GitHub or Slack calls.
+- Read `openswe/database/schema.py` for the current database tables, columns, constraints, and indexes. This generated reference is not imported by the application and does not capture triggers or functions. After changing migrations, run `POSTGRES_URI=<local database URI> make schema` and commit the snapshot; CI checks it against a fresh database migrated to all heads.
 - Create database migrations with `make migration m="Short description"`.
 - Structured logging: static message, values in `extra`. Avoid standard `LogRecord` field names in `extra`.
 - Prefer exposing UI write operations as authorized agent tools. Destructive or sensitive actions may stay human-only. Prefer existing sandbox CLIs, such as the authenticated `gh`, over new tools.
