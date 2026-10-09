@@ -1,7 +1,7 @@
 """The shape of ``configurable`` — the per-run contract every graph reads.
 
-``configurable`` rides in the ``RunnableConfig`` of every agent, reviewer, and
-analyzer run. It is assembled by webhooks, the dashboard, and cron launchers,
+``configurable`` rides in the ``RunnableConfig`` of every agent and reviewer
+run. It is assembled by webhooks, the dashboard, and cron launchers,
 merged and re-written at several hops, and then read in ~40 modules.
 
 The same three rules that govern :mod:`openswe.source_context` apply here, for the
@@ -177,15 +177,6 @@ class RunConfig(BaseModel):
     chat_model_id: str | None = None
     chat_effort: str | None = None
     chat_github_token: str | None = None
-
-    # Review-style analyzer
-    analyzer_mode: str | None = None
-    review_style_full_name: str | None = None
-    review_style_github_token: str | None = None
-    review_style_top_reviewers: list[str] | None = None
-    review_style_samples_text: str | None = None
-    review_style_reviews_sampled: Int | None = None
-    review_style_prs_sampled: Int | None = None
 
     # Eval harness
     eval: bool | None = None

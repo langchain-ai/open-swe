@@ -119,8 +119,8 @@ Coding sandboxes normally get a token for the whole GitHub App installation, not
 workspace's preferred repositories. Threads started by a GitHub event or an issue automation on
 a **public** repository record that repository in their metadata when created, server-side and
 never from run configuration, and receive a token narrowed to that repository, including on every
-proxy refresh. Unknown repository visibility also causes repository-scoped access. Reviewer,
-analyzer, and review-scout sandboxes explicitly scope their tokens to the repository being
+proxy refresh. Unknown repository visibility also causes repository-scoped access. Reviewer
+and review-scout sandboxes explicitly scope their tokens to the repository being
 examined. Coding threads that members start from Slack, the dashboard, or Linear normally get
 the installation-wide token, as do workspace image builds.
 
@@ -173,7 +173,7 @@ internal MCP connections, guidelines, and prompts, provided the public repositor
 by a workspace that has none of them. GitHub access is not partitioned: every sandbox token covers
 the whole installation, so the token is not what isolates a workspace. Threads started by GitHub
 events or automations on public repositories, where outsiders' content is most likely, get a token
-for that repository only; the reviewer, analyzer, and review scout keep their own single-repository
+for that repository only; the reviewer and review scout keep their own single-repository
 tokens. A member-started thread can reach every installation repository, including ones the member
 cannot access on GitHub themselves. Unassigned repositories are
 routed by an explicit instance policy rather than silently defaulting, so a locked-down install can

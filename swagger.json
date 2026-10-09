@@ -5242,39 +5242,6 @@
       },
       "ReviewStyle": {
         "properties": {
-          "analysis_run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysis Run Id"
-          },
-          "analysis_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysis Summary"
-          },
-          "analysis_thread_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysis Thread Id"
-          },
           "approval_mode": {
             "anyOf": [
               {
@@ -5290,17 +5257,6 @@
               }
             ],
             "title": "Approval Mode"
-          },
-          "continual_cron_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Continual Cron Id"
           },
           "created_at": {
             "default": "",
@@ -5323,17 +5279,6 @@
             ],
             "title": "Custom Prompt"
           },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
           "full_name": {
             "title": "Full Name",
             "type": "string"
@@ -5347,34 +5292,6 @@
             "default": "",
             "title": "Owner",
             "type": "string"
-          },
-          "prs_sampled": {
-            "default": 0,
-            "title": "Prs Sampled",
-            "type": "integer"
-          },
-          "reviews_sampled": {
-            "default": 0,
-            "title": "Reviews Sampled",
-            "type": "integer"
-          },
-          "status": {
-            "default": "idle",
-            "enum": [
-              "idle",
-              "running",
-              "completed",
-              "failed"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "top_reviewers": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Top Reviewers",
-            "type": "array"
           },
           "updated_at": {
             "default": "",
@@ -13562,54 +13479,6 @@
         ]
       }
     },
-    "/dashboard/api/review-styles/{full_name}/analyze": {
-      "post": {
-        "operationId": "api_analyze_review_style_dashboard_api_review_styles__full_name__analyze_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "full_name",
-            "required": true,
-            "schema": {
-              "title": "Full Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewStyle"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Analyze Review Style",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
     "/dashboard/api/review-styles/{full_name}/approvals-file": {
       "get": {
         "operationId": "api_get_review_style_approvals_file_dashboard_api_review_styles__full_name__approvals_file_get",
@@ -13652,54 +13521,6 @@
           }
         ],
         "summary": "Api Get Review Style Approvals File",
-        "tags": [
-          "dashboard",
-          "review"
-        ]
-      }
-    },
-    "/dashboard/api/review-styles/{full_name}/cancel": {
-      "post": {
-        "operationId": "api_cancel_review_style_dashboard_api_review_styles__full_name__cancel_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "full_name",
-            "required": true,
-            "schema": {
-              "title": "Full Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewStyle"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Cancel Review Style",
         "tags": [
           "dashboard",
           "review"
