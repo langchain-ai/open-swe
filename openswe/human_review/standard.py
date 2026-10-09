@@ -1188,6 +1188,7 @@ async def _wake_picker(
         text,
         title=f"Pick a reviewer for {pr.repo}#{pr.number}",
         before_dispatch=record_thread,
+        unlisted=True,
     )
     return True
 
