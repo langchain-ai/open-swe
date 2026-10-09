@@ -17,4 +17,5 @@ dependencies = [
 ]
 
 [tool.mda]
-python-version = "3.14"
+# bsdiff4, from langchain-quickjs, ships no 3.14 wheels and the build image has no compiler.
+python-version = "3.13"
