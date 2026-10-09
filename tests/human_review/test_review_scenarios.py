@@ -135,7 +135,7 @@ async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover
         with scenario.step("Half an hour later, Erin approves the UI on GitHub unasked"):
             await scenario.wait(minutes=30)
             await scenario.reviews_on_github(erin)
-            scenario.expect(edited(dana), released(dana, cause="approved"))
+            scenario.expect(edited(dana), released(dana, cause="code_owners_approved"))
 
         with scenario.step("Every area is approved, so nothing else happens"):
             await scenario.wait(days=1)

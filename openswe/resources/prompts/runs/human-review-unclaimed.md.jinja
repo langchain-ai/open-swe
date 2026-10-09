@@ -1,13 +1,16 @@
-{% if trigger and trigger.kind == "approved" %}@{{ trigger.logins | join(", @") }} approved {{ pr_url }}. Nobody who approved owns these code owner areas. Code owners only guide who reviews, so an area needs its own reviewer only when the repository's reviewer instructions below say so. For each area they require, call `assign_human_reviewer` now; if they require none, do nothing:
+{% if trigger and trigger.kind == "approved" %}@{{ trigger.logins | join(", @") }} approved {{ pr_url }}. Decide from the repository's reviewer instructions below whether anyone else still has to review it, and if so call `assign_human_reviewer` for each of them now. If the instructions require nobody else, do nothing.
+{% if suggestions %}
+Code owner areas nobody who approved or was asked owns:
 {% for suggestion in suggestions %}
-- {{ suggestion.area.handles | join(" ") }} ({{ suggestion.area.files | length }} changed file{{ "s" if suggestion.area.files | length != 1 }}): {% if suggestion.pick %}Open SWE suggests @{{ suggestion.pick.login }}: {{ suggestion.pick.reason }}{% else %}pick one of its owners yourself.{% endif %}
+- {{ suggestion.area.handles | join(" ") }} ({{ suggestion.area.files | length }} changed file{{ "s" if suggestion.area.files | length != 1 }}){% if suggestion.pick %}: Open SWE suggests @{{ suggestion.pick.login }}: {{ suggestion.pick.reason }}{% endif %}
 {% endfor %}
+{% endif %}
 
-For each required area, take its suggestion unless this Slack thread points to a better choice. For one without a suggestion, or when `assign_human_reviewer` refuses someone, follow these steps for that area's owners:
-{% else %}{% if trigger and trigger.kind == "declined" %}@{{ trigger.logins | join(", @") }} declined the review of {{ pr_url }}{% if trigger.reason %} ({{ trigger.reason }}){% endif %}. Pick another reviewer for it.{% elif trigger and trigger.kind == "expired" %}@{{ trigger.logins | join(", @") }} did not accept the review of {{ pr_url }} within {{ minutes }} minutes, so Open SWE released them. Pick another reviewer for it.{% elif asked %}Someone asked for a reviewer to be picked for {{ pr_url }}. Pick one reviewer for it.{% elif posted %}{{ pr_url }} was posted for review in its Slack review channel and has sat green without an approval for {{ minutes }} minutes. Pick one reviewer for it.{% else %}Nobody has signed up to review {{ pr_url }} in the {{ minutes }} minutes since its review was requested in Slack. Pick one reviewer for it.{% endif %}
+When you do need someone, prefer Open SWE's suggestion for their area unless this conversation points to a better choice. Otherwise follow these steps:
+{% else %}{% if trigger and trigger.kind == "declined" %}@{{ trigger.logins | join(", @") }} declined the review of {{ pr_url }}{% if trigger.reason %} ({{ trigger.reason }}){% endif %}. Pick another reviewer for it.{% elif trigger and trigger.kind == "expired" %}@{{ trigger.logins | join(", @") }} did not accept the review of {{ pr_url }} within {{ minutes }} minutes, so Open SWE released them. Pick another reviewer for it.{% elif asked %}Someone asked for a reviewer to be picked for {{ pr_url }}. Pick a reviewer for it.{% elif posted %}{{ pr_url }} was posted for review in its Slack review channel and has sat green without an approval for {{ minutes }} minutes. Pick a reviewer for it.{% else %}Nobody has signed up to review {{ pr_url }} in the {{ minutes }} minutes since its review was requested in Slack. Pick a reviewer for it.{% endif %}{% if instructions %} Pick more than one only when the repository's reviewer instructions below require it.{% endif %}
 
 {% for suggestion in suggestions if suggestion.pick %}
-Open SWE suggests @{{ suggestion.pick.login }}: {{ suggestion.pick.reason }} Unless this Slack thread points to a better choice, call `assign_human_reviewer` with the pull request URL, their GitHub login, and that reason. If it refuses them, pick someone yourself:
+Open SWE suggests @{{ suggestion.pick.login }}: {{ suggestion.pick.reason }} Unless this conversation points to a better choice, call `assign_human_reviewer` with the pull request URL, their GitHub login, and that reason. If it refuses them, pick someone yourself:
 
 {% endfor %}
 Code owners guide who reviews, starting with the owners of most of the changed files. One approval is enough unless the repository's reviewer instructions ask for more.
@@ -22,7 +25,7 @@ The repository's maintainers say how to pick its reviewers in `.open-swe/REVIEWE
 {% endif %}
 1. Read the repository's CODEOWNERS (`.github/CODEOWNERS`, `CODEOWNERS`, or `docs/CODEOWNERS`) for the files the pull request changes.
 2. Look at who has recently reviewed or changed those files: `gh api` for recent merged pull requests touching them and their reviewers, and `git log` on the files.
-3. Choose one person with write access who is not the author (@{{ author }}) and is likely to know this code. Prefer a code owner who has reviewed nearby changes recently; skip bots and teams.
-4. Call `assign_human_reviewer` with the pull request URL, their GitHub login, and one short sentence on why them. It shows them on the review card, requests their review on GitHub, and messages them directly.
+3. Choose people with write access who are not the author (@{{ author }}) and are likely to know this code. Prefer code owners who have reviewed nearby changes recently; skip bots and teams.
+4. Call `assign_human_reviewer` with the pull request URL, each person's GitHub login, and one short sentence on why them. It shows them on the review card, requests their review on GitHub, and messages them directly.
 
-If `assign_human_reviewer` refuses someone, pick the next best candidate, unless it says the pull request needs no reviewer: then stop. If people in the Slack thread asked to stop reviewer requests for this pull request altogether, call `dismiss_human_review_request` instead of picking. Do not post anything else in Slack and do not change the pull request.
+If `assign_human_reviewer` refuses someone, pick the next best candidate, unless it says the pull request needs no reviewer: then stop. If people asked to stop reviewer requests for this pull request altogether, call `dismiss_human_review_request` instead of picking. Do not post about this in Slack and do not change the pull request.

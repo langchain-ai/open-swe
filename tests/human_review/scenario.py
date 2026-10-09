@@ -20,6 +20,7 @@ from uuid import UUID
 from langchain_core.tools import StructuredTool
 from pydantic import JsonValue
 
+from openswe import dispatch
 from openswe.dashboard import workspace_settings
 from openswe.human_review import standard
 from openswe.human_review.events import ReviewDecisionCause
@@ -246,6 +247,7 @@ class ReviewScenario(Scenario):
         return [
             *super().fakes(),
             (routing.resolve_workspace, returning(_Workspace("acme"))),
+            (dispatch.dispatch_agent_run, self._run_agent),
             (
                 workspace_settings.get_workspace_settings,
                 returning(_WorkspaceSettings(self.assignment_minutes)),
@@ -370,6 +372,14 @@ class ReviewScenario(Scenario):
 
     async def _woken(self, thread_id: str, prompt: str) -> None:
         await self.agent.woken(self, thread_id, prompt)
+
+    async def _run_agent(
+        self, thread_id: str, content: object, configurable: object, **_: object
+    ) -> None:
+        """A run queued on an agent thread, answered by the scenario's agent."""
+        if not isinstance(content, str):
+            raise AssertionError(f"unexpected run input for {thread_id}: {content!r}")
+        await self.agent.woken(self, thread_id, content)
 
     async def _save(self, request: HumanReviewRequest) -> HumanReviewRequest:
         if self._github is None or self._directory is None:

@@ -78,7 +78,6 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
-from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
@@ -112,7 +111,7 @@ SNOOZE_DURATIONS = {
     "2 days": timedelta(days=2),
 }
 _AUTO_ASSIGN_ASKED = "auto_assign_asked"
-_REMAINING_OWNERS_ASKED = "remaining_owners_asked"
+_MORE_REVIEWERS_ASKED = "more_reviewers_asked"
 
 
 class ReviewChannelUnknownError(Exception):
@@ -948,16 +947,20 @@ async def _settle_posted(
 ) -> None:
     """React once the pull request is approved; until then, time how long it has sat green."""
     approvers = sorted(login for login, state in states.items() if state == "APPROVED")
-    coverage = await _instructed_coverage(request, approvers) if approvers else None
-    if approvers and coverage is None:
+    if approvers and await ReviewerInstructions.load(request) is None:
         await ReviewCard(request).mark_approved()
         await ReviewPicks(request).release(
             ", ".join(f"@{login}" for login in approvers) + " approved it", cause="approved"
         )
         return
-    if coverage is not None:
-        request = await _release_covered(request, approvers, coverage)
-        await _pick_remaining_owners(request, approvers)
+    if approvers:
+        request = await _ask_for_more_reviewers(request, approvers)
+        approved = {login.lower() for login in approvers}
+        if not any(
+            p.github_login.lower() not in approved for p in request.reviewers + request.picks
+        ):
+            await ReviewCard(request).mark_approved()
+            return
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
             return
@@ -1051,9 +1054,8 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
         await _settle_posted(request, pull, snapshot, states)
         return True
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
-        if (coverage := await _instructed_coverage(request, approvers)) is not None:
-            request = await _release_covered(request, approvers, coverage)
-            await _pick_remaining_owners(request, approvers)
+        if await ReviewerInstructions.load(request) is not None:
+            request = await _ask_for_more_reviewers(request, approvers)
         else:
             picked = len(request.reviewers) + len(request.picks)
             request = await ReviewPicks(request).release(
@@ -1204,56 +1206,39 @@ async def _auto_assign(
     return AutoAssignResult("woken" if woken else "failed")
 
 
-async def _instructed_coverage(
+async def _ask_for_more_reviewers(
     request: HumanReviewRequest, approvers: list[str]
-) -> Coverage | None:
-    """The code owner areas ``approvers`` leave uncovered, for the agent to weigh against the
-    repository's reviewer instructions; ``None`` when one approval is enough.
-
-    Code owners only guide who reviews: without instructions no area needs its own review.
-    """
-    coverage = await Coverage.load(request)
-    if coverage is None or not coverage.uncovered(approvers):
-        return None
-    if await ReviewerInstructions.load(request) is None:
-        return None
-    return coverage
-
-
-async def _release_covered(
-    request: HumanReviewRequest, approvers: list[str], coverage: Coverage
 ) -> HumanReviewRequest:
-    """Release Open SWE's picks whose code owner areas all have an approval, wherever it came from."""
+    """Release picks whose code owner areas an approval covers, then ask the implementer, once
+    per set of approvers, to add anyone the repository's reviewer instructions still require.
+
+    Code owners only guide who reviews; what an approval leaves wanting is the instructions' call.
+    """
     names = ", ".join(f"@{login}" for login in approvers)
-    return await ReviewPicks(request).release(
-        f"{names} approved the code you were asked to review",
-        cause="code_owners_approved",
-        covered=lambda login: coverage.satisfied(login, approvers),
-    )
-
-
-async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[str]) -> None:
-    """After an approval, have the thread's agent pick one reviewer per code owner area left, at once."""
-    if not approvers or _REMAINING_OWNERS_ASKED in request.run_config:
-        return
     coverage = await Coverage.load(request)
-    if coverage is None:
-        return
-    assigned = [p.github_login for p in request.reviewers + request.picks]
-    if not (open_areas := coverage.uncovered([*approvers, *assigned])):
-        return
+    if coverage is not None:
+        request = await ReviewPicks(request).release(
+            f"{names} approved the code you were asked to review",
+            cause="code_owners_approved",
+            covered=lambda login: coverage.satisfied(login, approvers),
+        )
+    asked = sorted(login.lower() for login in approvers)
+    if request.run_config.get(_MORE_REVIEWERS_ASKED) == asked:
+        return request
     if await _auto_assign_hold(request, "unclaimed"):
-        return
+        return request
     async with HumanReviewRequest.locked(request.id) as (_, row):
-        if row is None or row.state != "open" or _REMAINING_OWNERS_ASKED in row.run_config:
-            return
-        row.run_config = {**row.run_config, _REMAINING_OWNERS_ASKED: True}
+        if row is None or row.state != "open" or row.run_config.get(_MORE_REVIEWERS_ASKED) == asked:
+            return request
+        row.run_config = {**row.run_config, _MORE_REVIEWERS_ASKED: asked}
+    assigned = [p.github_login for p in request.reviewers + request.picks]
+    open_areas = coverage.uncovered([*approvers, *assigned]) if coverage is not None else []
     suggestions: list[Suggestion] = []
     for area in open_areas:
         choice = await choose_reviewer(request, area=area)
         suggestions.append(Suggestion(choice if isinstance(choice, Pick) else None, area))
     logger.info(
-        "Asking for reviewers for the code owners an approval left",
+        "Asking the implementer whether an approval leaves reviewers to add",
         extra={
             "request_id": str(request.id),
             "approvers": approvers,
@@ -1267,8 +1252,9 @@ async def _pick_remaining_owners(request: HumanReviewRequest, approvers: list[st
                 row.run_config = {
                     key: value
                     for key, value in row.run_config.items()
-                    if key != _REMAINING_OWNERS_ASKED
+                    if key != _MORE_REVIEWERS_ASKED
                 }
+    return request
 
 
 async def _wake_picker(
@@ -1291,24 +1277,9 @@ async def _wake_picker(
         trigger=trigger,
         suggestions=suggestions,
     )
-    requester = request.requested_by
-    thread_ts = request.slack_thread_ts or request.slack_message_ts
-    if requester is not None and requester.slack_user_id and request.slack_channel_id and thread_ts:
-        try:
-            await wake_thread_owner(
-                request.slack_channel_id, thread_ts, requester.slack_user_id, text
-            )
-        except Exception:
-            logger.warning(
-                "Could not wake the Slack thread's agent to pick a reviewer; retrying",
-                extra={"request_id": str(request.id), "slack_channel": request.slack_channel_id},
-                exc_info=True,
-            )
-            await _schedule(request, "unclaimed", _DEADLINE_RETRY)
-            return False
-        return True
     if request.thread_id:
         return await ReviewCard(request).notify_agent(text)
+    requester = request.requested_by
     login = requester.login_for("github") if requester is not None else ""
     if not login:
         logger.info(
@@ -1328,7 +1299,7 @@ async def _wake_picker(
         pr.number,
         login,
         text,
-        title=f"Pick a reviewer for {pr.repo}#{pr.number}",
+        title=f"{pr.repo}#{pr.number}",
         before_dispatch=record_thread,
     )
     return True
