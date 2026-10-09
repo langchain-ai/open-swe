@@ -161,6 +161,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
             "display_name": "Open SWE",
             "always_online": true
         },
+        "unfurl_domains": ["<your-url>"],
         "slash_commands": [
             {
                 "command": "/oswe",
@@ -184,6 +185,8 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "channels:read",
                 "channels:join",
                 "chat:write",
+                "links:read",
+                "links:write",
                 "files:read",
                 "files:write",
                 "groups:history",
@@ -204,6 +207,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
             "request_url": "https://<your-url>/webhooks/slack",
             "bot_events": [
                 "app_mention",
+                "link_shared",
                 "channel_created",
                 "channel_rename",
                 "channel_archive",
@@ -243,6 +247,21 @@ Both Slack URLs must point at the Open SWE deployment, and Block Kit buttons onl
 `files:read` lets Open SWE download non-image files attached to a message (archives, logs, CSVs) and stage them in the thread's sandbox, where the agent reads them by path. Existing installations must add the scope in **OAuth & Permissions** and reinstall the app before attachments reach the agent; without it, uploads stay invisible and only the message text is used.
 
 Slack verifies the events Request URL the first time it can reach it; if the backend is not up yet when you create the app, use **Retry** under **Event Subscriptions** after step 7.
+
+### Dashboard link previews
+
+Custom previews use Slack's signed `link_shared` events and `chat.unfurl`, not Open Graph scraping of authenticated pages. Supported routes on `DASHBOARD_BASE_URL` are `/agents/<thread-id>` (also `/plan`), `/agents/reviews/<owner>/<repo>/<number>`, and `/<owner>/<repo>/pull/<number>`. The latter starts a review only when opened by a signed-in browser; unfurling it does not start a review. GitHub URLs and other dashboard pages are ignored, and the Open button preserves the shared URL.
+
+For **existing Slack apps**, an administrator must:
+
+1. Under **App Manifest** set `features.unfurl_domains` to the dashboard hostname (no scheme or path): for this deployment, `["openswe.langchain.dev"]`. Alternatively register it in **App unfurl domains** under **Event Subscriptions**. Never register `github.com`. With a separate frontend hostname, register the frontend, not the webhook backend or local webhook tunnel. The Admin page's copied manifest uses the browser's dashboard hostname; replace it for desktop/local development if necessary.
+2. Add bot scopes **`links:read`** and **`links:write`** under **OAuth & Permissions**, and subscribe to **`link_shared`** under **Event Subscriptions → Subscribe to bot events**. Keep the verified Events Request URL `<URL>/webhooks/slack` and Interactivity URL `<URL>/webhooks/slack/interactivity`.
+3. **Reinstall/re-authorize the app to the workspace** so the bot token actually has the new scopes. Update `SLACK_BOT_TOKEN` if Slack issues a replacement and restart the backend. Domain or event changes alone do not grant scopes. Invite the bot into the destination channel/DM as appropriate.
+4. After deploying the handler and verifying the Request URL, share a new supported dashboard URL in Slack. Check for a signed `link_shared` delivery and successful `chat.unfurl`; a working dashboard or copied manifest does not establish readiness. `missing_scope`, `no_permission`, domain-registration errors, and delivery failures require fixing Slack configuration. No live Slack setup is verified by local synthetic previews.
+
+Channels (including private channels) and group DMs receive only a generic title, sign-in/access notice, and Open button: the sharer's access does not establish everybody else's access. Slack Connect and unverified destinations receive no custom preview. Message-composer previews are skipped because their destination is unknown. Rich details are limited to a freshly verified one-to-one bot DM whose recipient matches the sharer, with a linked identity in the bot's workspace and a currently authorized Open SWE login. Private-thread ownership/admin rules and review-chat ownership still apply; PR/reviewer details require the recipient's repository access. Personal GitHub credentials are never loaded for shared destinations. Missing/denied access, expired credentials, and unavailable metadata fall back to the same generic card without revealing whether a resource exists. Concierge DMs record the preview text in their conversation context.
+
+PR cards show only live title, author, draft/open/closed/merged state, review decision, and GitHub's head-commit check rollup when returned reliably. A rollup is not an assertion that every required check passed or that the PR is mergeable. Previews are point-in-time, not subscriptions to status changes.
 
 ## 6. Set the environment variables
 

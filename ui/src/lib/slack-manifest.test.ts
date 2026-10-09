@@ -119,6 +119,23 @@ describe("slackAppManifest", () => {
     ])
   })
 
+  it("registers the dashboard domain independently of the webhook backend", () => {
+    const manifest = slackAppManifest(false, {
+      backendUrl: "https://webhooks.example.com/",
+      dashboardUrl: "https://openswe.example.com/",
+    })
+    expect(manifest.features.unfurl_domains).toEqual(["openswe.example.com"])
+    expect(manifest.oauth_config.scopes.bot).toEqual(
+      expect.arrayContaining(["links:read", "links:write"])
+    )
+    expect(manifest.settings.event_subscriptions.bot_events).toContain(
+      "link_shared"
+    )
+    expect(manifest.settings.event_subscriptions.request_url).toBe(
+      "https://webhooks.example.com/webhooks/slack"
+    )
+  })
+
   it("reports whether any placeholder survives the given config", () => {
     expect(slackManifestPlaceholdersRemain()).toBe(true)
     expect(slackManifestPlaceholdersRemain({ backendUrl: "  " })).toBe(true)

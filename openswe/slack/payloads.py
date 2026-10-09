@@ -88,6 +88,10 @@ class SlackMessage(SlackPayload):
         return self.model_dump(mode="json", exclude_none=True)
 
 
+class SlackSharedLink(SlackPayload):
+    url: str
+
+
 class SlackEvent(SlackPayload):
     """The ``event`` of an Events API callback, across every event type Open SWE subscribes to."""
 
@@ -101,6 +105,8 @@ class SlackEvent(SlackPayload):
     event_ts: str = ""
     action_ts: str = ""
     thread_ts: str = ""
+    message_ts: str = ""
+    links: list[SlackSharedLink] = Field(default_factory=list)
     user: str | SlackRef = ""
     user_id: str = ""
     text: str | None = None

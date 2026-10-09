@@ -65,6 +65,7 @@ from openswe.slack.thread_feedback import (
     handle_slack_feedback_interaction,
     is_slack_feedback_payload,
 )
+from openswe.slack.unfurls import unfurl_dashboard_links
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
@@ -345,6 +346,10 @@ async def slack_webhook(
     raw_event = payload.get("event")
     if not isinstance(raw_event, dict):
         return ignored("Invalid Slack event")
+
+    if event.type == "link_shared":
+        background_tasks.add_task(unfurl_dashboard_links, envelope)
+        return accepted("Dashboard unfurl queued")
 
     await SlackPullRequestLink.record(envelope)
 

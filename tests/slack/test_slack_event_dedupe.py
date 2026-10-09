@@ -1,5 +1,7 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -10,8 +12,205 @@ from starlette.requests import Request
 from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
 from openswe.slack import routes as slack_routes
-from openswe.slack.payloads import SlackChannelContext
+from openswe.slack import unfurls
+from openswe.slack.channels import SlackChannel
+from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
+from openswe.users import User, UserIdentity
 from openswe.webhooks import common as webhook_common
+
+
+@pytest.mark.parametrize(
+    "destination",
+    [
+        "channel",
+        "mpim",
+        "owner_dm",
+        "other_dm",
+        "mismatched_dm",
+        "external",
+        "unknown",
+        "wrong_team",
+    ],
+)
+async def test_dashboard_unfurls_authorize_destination_and_private_thread(
+    monkeypatch: pytest.MonkeyPatch, destination: str
+) -> None:
+    thread_id = "e97598dc-1c56-4c4e-b2ff-c402b6b99b23"
+    url = f"https://openswe.example.com/agents/{thread_id}"
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    monkeypatch.delenv("SLACK_APP_ID", raising=False)
+    channel = SlackChannel(
+        id="D1",
+        payload={
+            "is_im": destination.endswith("dm"),
+            "is_mpim": destination == "mpim",
+            "is_ext_shared": destination == "external",
+            "is_pending_ext_shared": False,
+            "user": "U1" if destination != "mismatched_dm" else "U2",
+        },
+    )
+    monkeypatch.setattr(
+        unfurls.SlackChannel,
+        "load",
+        AsyncMock(return_value=None if destination == "unknown" else channel),
+    )
+    user = User(
+        identities=[
+            UserIdentity(provider="slack", external_id="U1", team_id="T1"),
+            UserIdentity(provider="github", external_id="1", login="alice"),
+        ]
+    )
+    identity_lookup = AsyncMock(return_value=user)
+    monkeypatch.setattr(unfurls.User, "for_identity", identity_lookup)
+    monkeypatch.setattr(unfurls, "is_authorized_github_login", AsyncMock(return_value=True))
+    monkeypatch.setattr(unfurls, "note_for_concierge", AsyncMock())
+    read = AsyncMock(
+        return_value={
+            "status": "busy",
+            "metadata": {
+                "source": "dashboard",
+                "visibility": "private",
+                "owner_login": "bob" if destination == "other_dm" else "alice",
+                "title": "Secret <@U2> rollout",
+            },
+        }
+    )
+    monkeypatch.setattr(
+        unfurls, "langgraph_client", lambda: SimpleNamespace(threads=SimpleNamespace(get=read))
+    )
+    send = AsyncMock()
+    client = SimpleNamespace(chat_unfurl=send)
+
+    @asynccontextmanager
+    async def bot():
+        yield client
+
+    monkeypatch.setattr(unfurls.SlackClient, "bot", bot)
+    monkeypatch.setattr(unfurls, "slack_identity", AsyncMock(return_value={"team_id": "T1"}))
+    envelope = SlackEventEnvelope.model_validate(
+        {
+            "type": "event_callback",
+            "event_id": "EvUnfurl",
+            "team_id": "T2" if destination == "wrong_team" else "T1",
+            "event": {
+                "type": "link_shared",
+                "channel": "D1",
+                "user": "U1",
+                "message_ts": "123.45",
+                "links": [
+                    {"url": url},
+                    {"url": "https://github.com/langchain-ai/open-swe/pull/123"},
+                    {"url": "https://openswe.example.com.evil.test/agents/" + thread_id},
+                    {"url": "https://openswe.example.com/agents/instructions"},
+                ],
+            },
+        }
+    )
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(envelope.model_dump(mode="json"), tasks))["status"] == "accepted"
+    assert len(tasks.tasks) == 1
+    await unfurls.unfurl_dashboard_links(envelope)
+    await unfurls.unfurl_dashboard_links(envelope)
+    if destination in {"external", "unknown", "wrong_team"}:
+        send.assert_not_awaited()
+        read.assert_not_awaited()
+        return
+    send.assert_awaited_once()
+    cards = send.await_args.kwargs["unfurls"]
+    assert list(cards) == [url]
+    assert cards[url]["blocks"][-1]["elements"][0]["url"] == url
+    if destination == "owner_dm":
+        assert "Secret" in cards[url]["fallback"]
+        assert "Running" in cards[url]["fallback"]
+        assert cards[url]["blocks"][0]["text"]["type"] == "plain_text"
+    else:
+        assert "Secret" not in str(cards)
+    if destination in {"channel", "mpim", "mismatched_dm"}:
+        identity_lookup.assert_not_awaited()
+        read.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        "agents/reviews/langchain-ai/open-swe/123",
+        "langchain-ai/open-swe/pull/123",
+        "agents/e97598dc-1c56-4c4e-b2ff-c402b6b99b23",
+    ],
+)
+async def test_dashboard_pr_unfurl_denied_access_never_fetches_details(
+    monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    from fastapi import HTTPException
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    link = unfurls.dashboard_link(f"https://openswe.example.com/{route}")
+    assert link is not None
+    monkeypatch.setattr(
+        unfurls, "require_repo_access_for_user", AsyncMock(side_effect=HTTPException(404))
+    )
+    read = AsyncMock(
+        return_value={
+            "metadata": {
+                "source": "review_chat",
+                "github_login": "alice",
+                "repo_owner": "langchain-ai",
+                "repo_name": "open-swe",
+                "pr_number": 123,
+                "title": "Restricted review",
+            }
+        }
+    )
+    monkeypatch.setattr(
+        unfurls, "langgraph_client", lambda: SimpleNamespace(threads=SimpleNamespace(get=read))
+    )
+    fetch = AsyncMock()
+    monkeypatch.setattr(unfurls, "github_request", fetch)
+    with pytest.raises(HTTPException):
+        await unfurls._details(
+            link, User(identities=[UserIdentity(provider="github", external_id="1", login="alice")])
+        )
+    fetch.assert_not_awaited()
+
+
+@pytest.mark.parametrize("rollup", [None, {"state": "PENDING"}])
+async def test_dashboard_pr_preview_uses_live_status_without_inventing_checks(
+    monkeypatch: pytest.MonkeyPatch, rollup: dict[str, str] | None
+) -> None:
+    import httpx2
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
+    link = unfurls.dashboard_link(
+        "https://openswe.example.com/agents/reviews/langchain-ai/open-swe/123"
+    )
+    assert link is not None
+    monkeypatch.setattr(unfurls, "require_repo_access_for_user", AsyncMock(return_value="token"))
+    response = httpx2.Response(
+        200,
+        request=httpx2.Request("POST", "https://api.github.com/graphql"),
+        json={
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "title": "Fix <@U2> notifications",
+                        "state": "OPEN",
+                        "isDraft": True,
+                        "author": {"login": "alice"},
+                        "reviewDecision": "REVIEW_REQUIRED",
+                        "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]},
+                    }
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(unfurls, "github_request", AsyncMock(return_value=response))
+    card = await unfurls._details(
+        link, User(identities=[UserIdentity(provider="github", external_id="1", login="alice")])
+    )
+    assert card["blocks"][0]["text"]["type"] == "plain_text"
+    assert "Draft · Author: alice · Review: review required" in card["fallback"]
+    assert ("Check rollup: pending" in card["fallback"]) is (rollup is not None)
+    assert "success" not in card["fallback"].lower()
 
 
 class _ConflictError(Exception):
