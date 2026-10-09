@@ -9329,20 +9329,27 @@
         "parameters": [
           {
             "in": "query",
-            "name": "code",
-            "required": true,
-            "schema": {
-              "title": "Code",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
             "name": "state",
             "required": true,
             "schema": {
               "title": "State",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
             }
           }
         ],
