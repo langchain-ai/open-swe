@@ -4,7 +4,7 @@ Pass only the fields the user asked to change in `settings`; omitted fields stay
 
 Supported profile fields:
 - `default_model`, `reasoning_effort`: the main-agent model and effort.
-- `default_subagent_model`, `subagent_reasoning_effort`: subagent overrides; set both to null to inherit the main model.
+- `default_subagent_model`, `subagent_reasoning_effort`: overrides for a different subagent model; forks using the main model reuse its effort. Set both to null to inherit the main model.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `auto_fix_ci`, `recent_thread_context_enabled`: boolean preferences.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Open SWE user record. Browser-local Feature Flags tab visibility cannot be changed here.

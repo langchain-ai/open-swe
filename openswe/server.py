@@ -47,6 +47,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddl
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -634,16 +635,21 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "record_incident_report",
         "search_incidents",
         "start_thread",
+        "task",
     }
 
 
 class _SubagentToolGuard(AgentMiddleware):
+    def __init__(self, sandbox_only_tools: frozenset[str] = frozenset()) -> None:
+        self._sandbox_only_tools = sandbox_only_tools
+
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        if _is_subagent_excluded_tool(request.tool_call["name"]):
+        name = request.tool_call["name"]
+        if name in self._sandbox_only_tools or _is_subagent_excluded_tool(name):
             return ToolMessage(
                 content=prompt("tools/subagent-unavailable"),
                 tool_call_id=request.tool_call["id"],
@@ -653,7 +659,7 @@ class _SubagentToolGuard(AgentMiddleware):
 
 def _general_purpose_subagent(
     model: BaseChatModel,
-    tools: Sequence[Any],
+    tools: Sequence[BaseTool | Callable[..., object] | dict[str, object]],
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
     offloading: ConversationOffloadingMiddleware | None = None,
@@ -661,6 +667,7 @@ def _general_purpose_subagent(
     incident_middleware: AgentMiddleware | None = None,
     guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
     inherited_middleware_exclusions: Sequence[str] = (),
+    sandbox_only_tools: frozenset[str] = frozenset(),
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -676,7 +683,7 @@ def _general_purpose_subagent(
             [
                 _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
-                _SubagentToolGuard(),
+                _SubagentToolGuard(sandbox_only_tools),
                 TranscriptMiddleware(),
                 *([incident_middleware] if incident_middleware else []),
                 *([workspace_skills] if workspace_skills else []),
@@ -1989,10 +1996,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         routing_mode=model_routing_mode,
         requested_model_factory=requested_model_factory,
     )
-    subagent_model = _make_model_or_defer(
-        subagent_model_id,
-        use_gateway=use_gateway,
-        **subagent_model_kwargs,
+    subagent_model = (
+        main_model
+        if subagent_model_id == model_id
+        else _make_model_or_defer(
+            subagent_model_id,
+            use_gateway=use_gateway,
+            **subagent_model_kwargs,
+        )
     )
     title_model = _make_model_or_defer(
         title_model_id,
@@ -2012,12 +2023,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             subagents=[
                 _general_purpose_subagent(
                     subagent_model,
-                    tools=[
-                        tool
-                        for tool in static_tools
-                        if tool is not save_user_settings
-                        and _registered_tool_name(tool) not in sandbox_only_tools
-                    ],
+                    tools=main_tools,
+                    sandbox_only_tools=sandbox_only_tools,
                     workspace_skills=workspace_skills,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),

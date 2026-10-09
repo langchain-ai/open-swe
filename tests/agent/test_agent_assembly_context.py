@@ -538,7 +538,18 @@ async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() 
 
 
 @pytest.mark.asyncio
-async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
+@pytest.mark.parametrize("prefer_tools_in_sandbox", [False, True])
+async def test_general_purpose_subagent_cannot_use_slack_tools(
+    monkeypatch: pytest.MonkeyPatch, prefer_tools_in_sandbox: bool
+) -> None:
+    from openswe.prompt import prompt
+    from openswe.tools.sandbox_preference import SANDBOX_ONLY_TOOLS
+
+    monkeypatch.setattr("openswe.server.tools_endpoint_configured", lambda: True)
+    monkeypatch.setattr(
+        "openswe.server.OsweThread.prefers_tools_in_sandbox",
+        AsyncMock(return_value=prefer_tools_in_sandbox),
+    )
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -585,27 +596,30 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "submit_review_assessment_feedback",
     }
     assert parent_only_names <= parent_names
-    assert subagent_names == parent_names - {"save_user_settings"}
-
-    from unittest.mock import AsyncMock, MagicMock
+    assert subagent_names == parent_names
+    assert gp["tools"] == parent_tools
 
     from langchain.agents.middleware.types import ToolCallRequest
-    from langchain_core.messages import ToolMessage
 
     guard = next(item for item in gp["middleware"] if item.name == "_SubagentToolGuard")
     handler = AsyncMock(return_value=ToolMessage(content="executed", tool_call_id="allowed"))
-    for name in parent_only_names | {
-        "read_only_sql",
-        "read_incident",
-        "search_incidents",
-        "record_incident_report",
-    }:
+    for name in (
+        parent_only_names
+        | (SANDBOX_ONLY_TOOLS if prefer_tools_in_sandbox else set())
+        | {
+            "read_only_sql",
+            "read_incident",
+            "search_incidents",
+            "record_incident_report",
+            "task",
+        }
+    ):
         request = MagicMock(spec=ToolCallRequest)
         request.tool_call = {"name": name, "args": {}, "id": name, "type": "tool_call"}
         result = await guard.awrap_tool_call(request, handler)
         assert isinstance(result, ToolMessage)
         assert result.tool_call_id == name
-        assert "inside a subagent" in result.content
+        assert result.content == prompt("tools/subagent-unavailable")
     handler.assert_not_awaited()
     request.tool_call = {"name": "execute", "args": {}, "id": "allowed", "type": "tool_call"}
     assert (await guard.awrap_tool_call(request, handler)).content == "executed"

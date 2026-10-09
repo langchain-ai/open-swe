@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from deepagents import create_deep_agent
+from deepagents.backends.state import StateBackend
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -13,6 +14,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph.state import RunnableConfig
 from langgraph.store.memory import InMemoryStore
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
@@ -47,6 +49,7 @@ class _Providers:
     """Answers every provider call offline and records the request it would have sent."""
 
     failing: type[BaseChatModel] | None = None
+    delegate: bool = False
     sent: list[_Sent] = field(default_factory=list)
 
     async def answer(
@@ -66,10 +69,22 @@ class _Providers:
         loaded = any(isinstance(message, ToolMessage) for message in messages)
         if loaded and self.failing is not None and isinstance(model, self.failing):
             raise TimeoutError("provider unavailable")
-        reply = (
-            AIMessage("Done.")
-            if loaded
-            else AIMessage(
+        if self.delegate and len(self.sent) == 1:
+            reply = AIMessage(
+                "",
+                tool_calls=[
+                    {
+                        "id": "task-call",
+                        "name": "task",
+                        "args": {
+                            "description": "Find the plan in the docs.",
+                            "subagent_type": "general-purpose",
+                        },
+                    }
+                ],
+            )
+        elif not self.delegate and not loaded:
+            reply = AIMessage(
                 "",
                 tool_calls=[
                     {
@@ -79,7 +94,8 @@ class _Providers:
                     }
                 ],
             )
-        )
+        else:
+            reply = AIMessage("Done.")
         return ChatResult(generations=[ChatGeneration(message=reply)])
 
 
@@ -89,8 +105,9 @@ async def _run(
     thread_settings: dict[str, object],
     workspace_settings: WorkspaceSettings | None = None,
     model_route: str | None = None,
+    config: RunnableConfig | None = None,
 ) -> None:
-    config = _base_config()
+    config = config or _base_config()
     with patch("openswe.server._mcp_tools_for", AsyncMock(return_value=[_DOCS_SEARCH])):
         kwargs = await _capture_create_deep_agent_kwargs(
             config,
@@ -188,3 +205,41 @@ async def test_a_fallback_attempt_receives_loaded_tools_in_the_fallback_models_f
     in_tools, added = _openai_offer(providers.sent[-1].payload)
     assert added == ["docs-search"]
     assert "docs-search" not in in_tools
+
+
+@pytest.mark.parametrize("model_id", [_GPT, _OPUS])
+async def test_fork_reuses_parent_tools_and_request_parameters(model_id: str) -> None:
+    providers = _Providers(delegate=True)
+    config = _base_config()
+    config["configurable"]["source"] = "dashboard"
+
+    with patch("openswe.server.skills_backend", return_value=StateBackend()):
+        await _run(
+            providers,
+            config=config,
+            thread_settings={
+                "model_id": model_id,
+                "effort": "medium",
+                "subagent_model_id": model_id,
+                "subagent_effort": "low",
+            },
+        )
+
+    assert [sent.model_id for sent in providers.sent] == [model_id] * 3
+    parent, fork = (sent.payload for sent in providers.sent[:2])
+    assert parent["tools"] == fork["tools"]
+    if model_id == _GPT:
+        names, _ = _openai_offer(fork)
+        assert "task" in names
+        assert "save_user_settings" in names
+        assert fork["input"][: len(parent["input"])] == parent["input"]
+        for key in ("model", "reasoning", "max_output_tokens", "prompt_cache_key"):
+            assert parent.get(key) == fork.get(key)
+        assert fork["reasoning"]["effort"] == "medium"
+    else:
+        tools = fork["tools"]
+        assert isinstance(tools, list)
+        assert any(tool["name"] == "task" for tool in tools)
+        assert parent["system"] == fork["system"]
+        for key in ("model", "thinking", "output_config", "max_tokens"):
+            assert parent.get(key) == fork.get(key)
