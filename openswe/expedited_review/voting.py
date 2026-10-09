@@ -24,14 +24,7 @@ from openswe.github.http import (
 )
 from openswe.github.pull_request_actions import MarkReadyAction, act_on_pull_request
 from openswe.human_review.clicks import answer_click
-from openswe.human_review.lifecycle import (
-    broadcast_card,
-    copy_card,
-    dismiss_request,
-    notify_agent,
-    refresh_card,
-    refresh_card_in_thread,
-)
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import (
     Outcome,
     Participant,
@@ -97,9 +90,8 @@ async def handle_vote(
     if current is None:
         return Outcome("This expedited review vanished.")
     problem = await _submit_review(current, voter.user.id) if added else None
-    await refresh_card_in_thread(current)
-    if first_approval and not await notify_agent(
-        current,
+    await ReviewCard(current).refresh_in_thread()
+    if first_approval and not await ReviewCard(current).notify_agent(
         prompt(
             "runs/expedited-review-approved",
             pr_url=current.pull_request.url,
@@ -170,7 +162,7 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
     current = await HumanReviewRequest.get(approval.id)
     if current is None:
         return Outcome(marked, dm_card_success=True)
-    await refresh_card(current)
+    await ReviewCard(current).refresh()
     return Outcome(marked, dm_card_success=True)
 
 
@@ -183,7 +175,7 @@ async def request_broadcast(approval: HumanReviewRequest) -> Outcome:
     choices = approval.slack_channel_choices
     if len(choices) == 1 and choices[0]["id"] != approval.slack_channel_id:
         return await request_copy(approval, choices[0]["id"], None, configured=True)
-    if not await broadcast_card(approval):
+    if not await ReviewCard(approval).broadcast():
         return Outcome("Open SWE could not send this expedited review to the channel.")
     return Outcome("Sent to the channel.")
 
@@ -211,7 +203,7 @@ async def request_copy(
             "Open SWE only sends expedited reviews to public channels that are not shared "
             "outside the workspace."
         )
-    if (problem := await copy_card(approval, channel)) is not None:
+    if (problem := await ReviewCard(approval).copy_to(channel)) is not None:
         return Outcome(
             f"Open SWE could not send this expedited review to <#{channel.id}>. {problem}"
         )
@@ -242,7 +234,7 @@ async def process_vote(
             )
         match decision:
             case "dismiss":
-                return await dismiss_request(approval, slack_user_id)
+                return await ReviewCard(approval).dismiss(slack_user_id)
             case "broadcast":
                 return await request_broadcast(approval)
             case "send":

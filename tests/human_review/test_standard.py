@@ -1,5 +1,4 @@
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -13,7 +12,7 @@ from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
-from openswe.human_review.lifecycle import _render_standard, _unrequest_github_review
+from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.human_review.standard import (
     SUMMARY_MAX_CHARS,
@@ -52,7 +51,7 @@ async def test_concurrent_picks_add_at_most_one_reviewer(decision: str | None) -
     with (
         patch.object(HumanReviewRequest, "locked", locked),
         patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
-        patch("openswe.human_review.standard.refresh_card", AsyncMock()),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
     ):
         results = await asyncio.gather(
             *(
@@ -88,7 +87,7 @@ async def test_decline_only_withdraws_the_users_pending_pick() -> None:
             "openswe.human_review.lifecycle.Repository.resolve_default_branch",
             AsyncMock(return_value=""),
         ),
-        patch("openswe.human_review.lifecycle.refresh_card", AsyncMock()),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
         patch("openswe.human_review.standard.start_auto_assign", AsyncMock()) as rotate,
     ):
         await decline(request, User(), "Away or unavailable")
@@ -154,24 +153,41 @@ async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
 
 
 @pytest.mark.parametrize("status", [200, 503])
-async def test_reviewer_removal_sends_delete_body_without_aborting(status: int) -> None:
+async def test_reviewer_removal_sends_delete_body_without_aborting(
+    status: int, github_app: AsyncMock
+) -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
-    received: list[httpx2.Request] = []
+    grace = User(identities=[UserIdentity(provider="github", external_id="grace", login="grace")])
+    pick = HumanReviewParticipant(user_id=grace.id, decision="picked")
+    pick.user = grace
+    request.participants.append(pick)
+    received: list[tuple[str, str, object]] = []
 
-    def respond(outgoing: httpx2.Request) -> httpx2.Response:
-        received.append(outgoing)
-        return httpx2.Response(status, json={})
+    async def respond(_client: object, method: str, url: str, **kwargs: object) -> httpx2.Response:
+        received.append((method, url, kwargs.get("json")))
+        return httpx2.Response(status, json={}, request=httpx2.Request(method, url))
 
-    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
-        pull = GitHubClient(http).repo("lc", "repo").pull_request(7)
-        with patch("openswe.github.http.asyncio.sleep", AsyncMock()):
-            await _unrequest_github_review(request, pull, "grace")
-    assert received
-    assert received[0].method == "DELETE"
-    assert received[0].url.path == "/repos/lc/repo/pulls/7/requested_reviewers"
-    assert json.loads(received[0].content) == {"reviewers": ["grace"]}
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch("openswe.github.http.github_request", respond),
+    ):
+        dropped = await ReviewPicks(request).drop({grace.id}, "Withdrawn.", cause="declined")
+    assert dropped == [pick]
+    assert received == [
+        (
+            "DELETE",
+            "https://api.github.com/repos/lc/repo/pulls/7/requested_reviewers",
+            {"reviewers": ["grace"]},
+        )
+    ]
 
 
 def _snapshot(**overrides: object) -> PullRequestSnapshot:
@@ -316,7 +332,7 @@ async def test_merged_card_names_only_actual_approvers(
     with patch(
         "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
     ):
-        text, blocks = await _render_standard(request, "merged")
+        text, blocks = await ReviewCard(request).render("merged")
     payload = block_payload(blocks)
     assert payload is not None
     rendered = str(payload)
@@ -353,21 +369,19 @@ def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
     ],
 )
 async def test_approved_card_collapses_without_closing_the_request(
-    states: dict[str, str], collapsed: bool
+    states: dict[str, str], collapsed: bool, github_app: AsyncMock
 ) -> None:
-    from openswe.github.pull_requests import PullRequest
-    from openswe.human_review.lifecycle import _render_standard
-    from openswe.human_review.requests import HumanReviewRequest
-
     pr = PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada")
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
     request.requested_by = None
     with (
-        patch("openswe.human_review.lifecycle._review_states", AsyncMock(return_value=states)),
+        patch(
+            "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+        ),
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
-        text, blocks = await _render_standard(request, None)
+        text, blocks = await ReviewCard(request).render(None)
     assert ("Review request: approved" in text) is collapsed
     assert (len(blocks) == 1) is collapsed
     assert "<@U_ada>" in str(block_payload(blocks))

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from openswe.human_review import card
 from openswe.human_review.clicks import answer_click
-from openswe.human_review.lifecycle import dismiss_request
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.pick_messages import PickMessage
 from openswe.human_review.requests import HumanReviewRequest
@@ -169,7 +169,7 @@ async def _process(
 
     async def handle(request: HumanReviewRequest) -> Outcome:
         if action == "dismiss":
-            outcome = await dismiss_request(request, slack_user_id)
+            outcome = await ReviewCard(request).dismiss(slack_user_id)
         else:
             user = await User.for_person({"id": f"slack:{slack_user_id}"})
             if action == "decline":

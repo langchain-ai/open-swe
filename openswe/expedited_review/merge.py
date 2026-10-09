@@ -20,7 +20,7 @@ from openswe.expedited_review.readiness import Readiness
 from openswe.expedited_review.reviews import submit_approval
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
 from openswe.github.pull_request_status import PullRequestClient
-from openswe.human_review.lifecycle import mark_merged, retire
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.merging import MergeResult, merge_pull_request
 from openswe.human_review.requests import HumanReviewRequest
 
@@ -83,10 +83,10 @@ async def _merge_approved(
         return MergeResult("error", "GitHub was unavailable while checking the pull request.")
     snapshot = readiness.snapshot
     if snapshot.merged:
-        await mark_merged(approval)
+        await ReviewCard(approval).mark_merged()
         return MergeResult("merged", f"{pr.url} is already merged.")
     if snapshot.state != "open":
-        await retire(approval, "cancelled", "the pull request was closed")
+        await ReviewCard(approval).retire("cancelled", "the pull request was closed")
         return MergeResult("closed", "The pull request is closed; the expedited review ended.")
 
     files = await ChangedFile.of_pull(pull)
@@ -95,8 +95,7 @@ async def _merge_approved(
     if not fingerprint_matches(files, approval.diff_fingerprint):
         verdict = assess_eligibility(files)
         if isinstance(verdict, Ineligible):
-            await retire(
-                approval,
+            await ReviewCard(approval).retire(
                 "superseded",
                 "A later commit grew the diff past expedited review; votes were discarded.",
             )
@@ -168,5 +167,5 @@ async def _merge_approved(
             row, snapshot.head_sha, snapshot.allowed_merge_methods, pull
         )
     if result.status == "merged":
-        await mark_merged(approval)
+        await ReviewCard(approval).mark_merged()
     return result

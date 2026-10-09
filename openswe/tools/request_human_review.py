@@ -11,7 +11,7 @@ from langgraph.config import get_config
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard import repo_access
 from openswe.github.token import resolve_github_token
-from openswe.human_review.lifecycle import dismiss_by
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import (
     Origin,
@@ -112,7 +112,7 @@ async def dismiss_human_review_request(pr_url: str, reason: str = "") -> dict[st
         return _failure("No executable agent thread is available")
     if refusal := await _repository_refusal(pr_ref, thread_id):
         return _failure(refusal)
-    if not await dismiss_by(request, "Open SWE", reason):
+    if not await ReviewCard(request).dismiss_by("Open SWE", reason):
         return _failure("This review request is already closed.")
     return {
         "success": True,
