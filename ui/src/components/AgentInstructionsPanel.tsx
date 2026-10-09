@@ -5,7 +5,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
 import { AddRepositoryField } from "@/components/AddRepositoryField"
-import { InstructionsEditor } from "@/components/InstructionsEditor"
+import { EditorScreen } from "@/components/EditorScreen"
+import { TextEditor } from "@/components/TextEditor"
 import {
   api,
   isGithubReauthError,
@@ -106,10 +107,6 @@ export function AgentInstructionsPanel() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["agentInstructions"] }),
   })
 
-  if (instructions.isLoading) {
-    return <Skeleton className="h-40" />
-  }
-
   const configured = new Set((instructions.data ?? []).map((s) => s.full_name))
   const suggestedRepos = (repos.data?.repositories ?? []).filter(
     (r) => !configured.has(r.full_name)
@@ -133,95 +130,22 @@ export function AgentInstructionsPanel() {
     (error !== null && /github token|re-login required/i.test(error))
 
   return (
-    <div className="flex flex-col gap-space-5 p-space-4">
-      {githubReauth && (
-        <Banner intent="error">
-          <span className="text-xs text-error-secondary">
-            Your GitHub connection expired.{" "}
-            <a
-              href={loginUrl()}
-              className="font-medium underline underline-offset-2"
-            >
-              Sign in with GitHub again
-            </a>{" "}
-            to list installed repos.
-          </span>
-        </Banner>
-      )}
-      <section className="space-y-4">
-        <AddRepositoryField
-          id="add-instruction-repo"
-          value={addRepo}
-          onChange={setAddRepo}
-          suggestions={suggestedRepos}
-          canAdd={canAdd && !create.isPending}
-          onAdd={handleAdd}
-        />
-
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-primary">Repositories</p>
-          {(instructions.data ?? []).length === 0 ? (
-            <p className="text-xs text-secondary">No repositories yet.</p>
-          ) : (
-            <ul className="flex flex-wrap gap-2">
-              {(instructions.data ?? []).map((s) => (
-                <li key={s.full_name}>
-                  <button
-                    type="button"
-                    aria-pressed={selected === s.full_name}
-                    className={cn(
-                      "inline-flex max-w-full items-center gap-space-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-surface-level-1-hover",
-                      selected === s.full_name
-                        ? "border-brand bg-selected font-medium"
-                        : "border-default"
-                    )}
-                    onClick={() => setSelected(s.full_name)}
-                  >
-                    <span className="truncate">{s.full_name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+    <EditorScreen
+      title="Repository instructions"
+      description="Per-repository instructions added to the agent's system prompt for runs in that repository."
+      actions={
+        <>
+          {error && (
+            <span className="text-xs text-error-secondary">{error}</span>
           )}
-        </div>
-      </section>
-
-      <div className="border-t border-default" />
-
-      <section className="space-y-3">
-        {!selected || !active ? (
-          <p className="text-xs text-secondary">
-            Select a repository above to view or edit its custom agent
-            instructions.
-          </p>
-        ) : (
-          <>
-            <p className="text-sm font-medium text-primary">
-              {active.full_name}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                color="primary"
-                size="xs"
-                disabled={!dirty || save.isPending}
-                onClick={() =>
-                  save.mutate({
-                    full_name: active.full_name,
-                    value: draft,
-                  })
-                }
-              >
-                Save instructions
-              </Button>
+          {active && (
+            <>
               {dirty && (
-                <span className="self-center text-xs text-secondary">
-                  Unsaved changes
-                </span>
+                <span className="text-xs text-secondary">Unsaved changes</span>
               )}
               <Button
                 color="error"
                 size="xs"
-                className="ml-auto"
                 onClick={() => {
                   if (
                     !window.confirm(
@@ -235,16 +159,84 @@ export function AgentInstructionsPanel() {
               >
                 Remove
               </Button>
-            </div>
-            <InstructionsEditor
-              value={draft}
-              onChange={setDraft}
-              placeholder="Write custom instructions for the coding agent on this repository (markdown)."
-            />
-          </>
-        )}
-        {error && <p className="text-xs text-error-secondary">{error}</p>}
-      </section>
-    </div>
+              <Button
+                color="primary"
+                size="xs"
+                disabled={!dirty || save.isPending}
+                onClick={() =>
+                  save.mutate({ full_name: active.full_name, value: draft })
+                }
+              >
+                Save instructions
+              </Button>
+            </>
+          )}
+        </>
+      }
+      sidebar={
+        <>
+          <AddRepositoryField
+            id="add-instruction-repo"
+            value={addRepo}
+            onChange={setAddRepo}
+            suggestions={suggestedRepos}
+            canAdd={canAdd && !create.isPending}
+            onAdd={handleAdd}
+          />
+          {instructions.isLoading ? (
+            <Skeleton className="h-24" />
+          ) : (instructions.data ?? []).length === 0 ? (
+            <p className="text-xs text-secondary">No repositories yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {(instructions.data ?? []).map((s) => (
+                <li key={s.full_name}>
+                  <button
+                    type="button"
+                    aria-pressed={selected === s.full_name}
+                    className={cn(
+                      "w-full truncate rounded-md px-2.5 py-2 text-left text-xs transition-colors",
+                      selected === s.full_name
+                        ? "bg-selected font-medium"
+                        : "hover:bg-surface-level-1-hover"
+                    )}
+                    onClick={() => setSelected(s.full_name)}
+                  >
+                    {s.full_name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      }
+    >
+      {githubReauth && (
+        <Banner intent="error" className="m-4">
+          <span className="text-xs text-error-secondary">
+            Your GitHub connection expired.{" "}
+            <a
+              href={loginUrl()}
+              className="font-medium underline underline-offset-2"
+            >
+              Sign in with GitHub again
+            </a>{" "}
+            to list installed repos.
+          </span>
+        </Banner>
+      )}
+      {active ? (
+        <TextEditor
+          value={draft}
+          onChange={setDraft}
+          ariaLabel={`Instructions for ${active.full_name}`}
+          placeholder="Write custom instructions for the coding agent on this repository (markdown)."
+        />
+      ) : (
+        <p className="m-auto p-6 text-xs text-secondary">
+          Select a repository to view or edit its custom agent instructions.
+        </p>
+      )}
+    </EditorScreen>
   )
 }

@@ -40,7 +40,7 @@ export function AddRepositoryField({
               onAdd()
             }
           }}
-          className="sm:flex-1"
+          className="min-w-0 sm:flex-1"
         />
         <Button
           color="primary"
