@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
+from openswe.agent_cost import RUN_COST_KEY_PREFIX
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
@@ -107,8 +108,8 @@ def thread_is_private(metadata: Mapping[str, Any]) -> bool:
 
 
 def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
-    """A `/oswe` question thread: readable and promptable, but kept out of thread lists."""
-    return metadata.get("unlisted") is True
+    """Threads that remain accessible directly but stay out of thread lists."""
+    return metadata.get("unlisted") is True or metadata.get("review_chat") is True
 
 
 def thread_is_readable(
@@ -412,6 +413,16 @@ async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bo
         return False
 
 
+def _run_costs(metadata: Mapping[str, Any]) -> dict[str, float]:
+    return {
+        key.removeprefix(RUN_COST_KEY_PREFIX): float(cost)
+        for key, cost in metadata.items()
+        if key.startswith(RUN_COST_KEY_PREFIX)
+        and isinstance(cost, (int, float))
+        and not isinstance(cost, bool)
+    }
+
+
 async def _thread_summary(
     thread: ThreadLike,
     *,
@@ -458,6 +469,7 @@ async def _thread_summary(
         else None
     )
 
+    run_costs = _run_costs(metadata)
     summary: dict[str, Any] = {
         "id": thread_id,
         "title": title,
@@ -509,6 +521,8 @@ async def _thread_summary(
         "createdAt": int(created_at) if isinstance(created_at, (int, float)) else _now_ms(),
         "updatedAt": int(updated_at) if isinstance(updated_at, (int, float)) else _now_ms(),
         "traceUrl": trace_url,
+        "costUsd": sum(run_costs.values()) if run_costs else None,
+        "runCosts": run_costs,
         "sourceUrl": thread_source_url(metadata),
         "sourceAppUrl": thread_source_app_url(metadata),
         "codeChannelUrl": _code_channel_url(metadata),

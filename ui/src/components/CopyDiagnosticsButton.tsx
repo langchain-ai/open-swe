@@ -1,7 +1,6 @@
-import { CopyIcon } from "@phosphor-icons/react"
+import { Button } from "@langchain/macaw-components/Button"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { useState } from "react"
-
-import { Button } from "@/components/ui/button"
 
 export function CopyDiagnosticsButton({
   getDiagnostics,
@@ -23,14 +22,14 @@ export function CopyDiagnosticsButton({
   }
 
   return (
-    <div className="flex items-center gap-2 pt-1">
+    <div className="flex items-center gap-space-2 pt-space-1">
       <Button
-        type="button"
-        size="sm"
-        variant="outline"
+        color="secondary"
+        variant="outlined"
+        size="xs"
+        leftDecorator={CopyIcon}
         onClick={() => void copy()}
       >
-        <CopyIcon aria-hidden="true" className="size-3.5" />
         Copy diagnostics
       </Button>
       <span aria-live="polite" role="status">

@@ -10,6 +10,7 @@ import type {
   TranscriptToolCallState,
 } from "@/features/agents/lib/transcript/reducer"
 import type { ImageChunk, Message } from "@/features/agents/lib/types"
+import type { ContextUsage } from "@/features/agents/lib/contextUsage"
 
 /** The human message and run configuration a new run starts from. */
 export interface ThreadRunInput {
@@ -47,8 +48,8 @@ interface ThreadSourceShared {
   isOffloading: boolean
   routed: RoutedModel | null
   connection: StreamConnection
-  /** Context tokens the last model call reported, when the source knows them. */
-  contextTokens: number | null
+  /** Context size and model the last model call reported, when the source knows them. */
+  contextUsage: ContextUsage | null
   /**
    * Start a run. A rejection means the run could not be started; resolution
    * says nothing about the run finishing (the SDK stream resolves only when it

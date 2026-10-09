@@ -12,7 +12,9 @@ from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
@@ -25,6 +27,7 @@ from openswe.input_messages import (
 )
 from openswe.invocation import resolve_invocation_id
 from openswe.message_authorship import concierge_author
+from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
@@ -36,12 +39,11 @@ from openswe.threads.handlers import (
     cancel_dashboard_thread,
     get_dashboard_thread,
     resolve_dashboard_thread,
-    send_dashboard_message,
 )
 from openswe.threads.listing import list_dashboard_threads_page
 from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
-from openswe.threads.runs import ThreadMessageBody, start_dashboard_thread
+from openswe.threads.runs import start_dashboard_thread
 from openswe.threads.summary import thread_is_owner
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
@@ -568,14 +570,16 @@ async def _thread_cost(thread_id: str, run: Any) -> dict[str, Any]:
     }
 
 
-async def _queued_message_count(client: Any, thread_id: str) -> int:
+async def _queued_message_count(thread_id: str) -> int:
     try:
-        item = await client.store.get_item(("queue", thread_id), "pending_messages")
+        return len(await QueuedMessage.for_thread(thread_id))
     except Exception:
+        logger.warning(
+            "Could not count queued messages",
+            exc_info=True,
+            extra={"thread": {"thread_id": thread_id}},
+        )
         return 0
-    value = _value(item, "value")
-    messages = value.get("messages") if isinstance(value, Mapping) else None
-    return len(messages) if isinstance(messages, list) else 0
 
 
 def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) -> dict[str, Any]:
@@ -776,7 +780,7 @@ async def get_thread(
             plan_content_task = tasks.create_task(get_plan_content(thread_id))
             plan_comments_task = tasks.create_task(list_plan_comments(thread_id))
             approvals_task = tasks.create_task(get_workflow_push_approvals(thread_id))
-            queued_count_task = tasks.create_task(_queued_message_count(client, thread_id))
+            queued_count_task = tasks.create_task(_queued_message_count(thread_id))
             # Fetched separately from `runs_task` (bounded to the recent-history
             # window): a pending run enqueued long ago can fall outside that
             # window while a busy thread accumulates newer completed runs.
@@ -790,8 +794,8 @@ async def get_thread(
         plan_comments = plan_comments_task.result()
         approvals = approvals_task.result()
         queued_count = queued_count_task.result()
-        # `queued_count` only sees the legacy in-run injection queue (Slack
-        # context, the `send_dashboard_message` tool). A composer follow-up
+        # `queued_count` only sees the in-run injection queue (Slack context,
+        # steered follow-ups). A composer follow-up
         # enqueued via the server-backed queue adapter is a genuine
         # LangGraph run instead — count it too.
         queued_count += len(pending_runs_task.result())
@@ -877,20 +881,6 @@ async def _send_message(
     effort: str | None,
 ) -> dict[str, Any]:
     author = await concierge_author(actor.login, actor.email) if actor.concierge else None
-    body = ThreadMessageBody(
-        content=message,
-        model_id=model_id,
-        effort=effort,
-    )
-    try:
-        queued_summary = await send_dashboard_message(
-            thread_id, actor.login, body, email=actor.email, author=author
-        )
-        return {"success": True, "mode": "queued", "thread": _list_item(queued_summary)}
-    except HTTPException as exc:
-        if exc.status_code != 409:
-            raise
-
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
@@ -910,21 +900,31 @@ async def _send_message(
         author=author,
     )
     try:
-        payload = json.loads(content) if content else None
-    except json.JSONDecodeError:
-        payload = None
+        reply = _CommandReply.model_validate_json(content or b"{}")
+    except ValidationError:
+        reply = _CommandReply()
     if status_code not in {200, 202, 204}:
-        detail = payload.get("detail") if isinstance(payload, Mapping) else None
-        return _failure(
-            detail if isinstance(detail, str) else "Could not start thread run",
-            status_code=status_code,
-        )
-    run_id = payload.get("run_id") if isinstance(payload, Mapping) else None
-    return {
-        "success": True,
-        "mode": "started",
-        "run_id": run_id if isinstance(run_id, str) else None,
-    }
+        return _failure(reply.detail or "Could not start thread run", status_code=status_code)
+    result = reply.result
+    mode = "steered" if result.steered else "queued" if result.queued else "started"
+    return {"success": True, "mode": mode, "run_id": result.run_id}
+
+
+class _CommandResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: str | None = None
+    queued: bool = False
+    steered: bool = False
+
+
+class _CommandReply(BaseModel):
+    """The commands proxy's reply to ``run.start``: a start, a steer, or a queued follow-up."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    result: _CommandResult = Field(default_factory=_CommandResult)
+    detail: str | None = None
 
 
 def _required(value: str | None, name: str, action: str) -> dict[str, Any] | None:
@@ -975,6 +975,7 @@ def _unexpected_action_arguments(
     return sorted(provided - allowed)
 
 
+@audit_tool()
 async def manage_thread(
     thread_id: str,
     action: ThreadAction,
@@ -1111,6 +1112,7 @@ async def manage_thread(
         return _failure("Thread action failed")
 
 
+@audit_tool()
 async def start_thread(
     title: str,
     instructions: str,

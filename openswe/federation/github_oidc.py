@@ -94,13 +94,14 @@ def _verify(token: str, expected_audience: str) -> GitHubActionsClaims:
     return GitHubActionsClaims.model_validate(claims)
 
 
-async def verify(token: str) -> GitHubActionsClaims:
+async def verify(token: str, expected_audience: str | None = None) -> GitHubActionsClaims:
     """The workflow behind ``token``, or raise.
 
-    Runs in a thread because fetching and caching GitHub's keys is synchronous
-    I/O inside PyJWT.
+    Pass ``expected_audience`` when the token was minted for a listener other
+    than the dashboard. Runs in a thread because fetching and caching GitHub's
+    keys is synchronous I/O inside PyJWT.
     """
-    expected = audience()
+    expected = audience() if expected_audience is None else expected_audience.strip()
     if not expected:
         raise InvalidFederatedToken(
             "federated tokens need an audience: set GITHUB_OIDC_AUDIENCE or DASHBOARD_BASE_URL"

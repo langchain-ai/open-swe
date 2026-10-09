@@ -1,11 +1,12 @@
+import { Button } from "@langchain/macaw-components/Button"
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import { Input } from "@langchain/macaw-components/Input"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Text } from "@langchain/macaw-components/Text"
 import { useEffect, useState } from "react"
 
 import type { Skill } from "@/lib/api"
 import { InstructionsEditor } from "@/components/InstructionsEditor"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   useCreateAgentSkill,
   useDeleteAgentSkill,
@@ -17,6 +18,12 @@ import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 const EMPTY_DRAFT = { description: "", instructions: "" }
+
+type Scope = "personal" | "organization"
+const SCOPES = [
+  { value: "personal", display: "Personal" },
+  { value: "organization", display: "Organization" },
+] as const
 
 export function SkillsPage() {
   const session = useSession()
@@ -105,35 +112,26 @@ export function SkillsPage() {
   return (
     <main className="min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="font-heading text-base font-medium text-[var(--ui-text)]">
+        <h1 className="font-heading text-base font-medium text-primary">
           Skills
         </h1>
-        <p className="mt-1 text-xs text-[var(--ui-text-muted)]">
+        <p className="mt-1 text-xs text-secondary">
           Reusable instructions Open SWE loads when a task matches their
           description.
         </p>
 
-        <div className="mt-4 flex gap-1">
-          <Button
-            size="sm"
-            variant={organization ? "ghost" : "default"}
-            onClick={() => selectScope(false)}
-          >
-            Personal
-          </Button>
-          <Button
-            size="sm"
-            variant={organization ? "default" : "ghost"}
-            onClick={() => selectScope(true)}
-          >
-            Organization
-          </Button>
-        </div>
+        <GroupedTabs<Scope>
+          size="xs"
+          className="mt-4 w-fit"
+          value={organization ? "organization" : "personal"}
+          onChange={(scope) => selectScope(scope === "organization")}
+          options={SCOPES}
+        />
 
         <div className="mt-6 grid gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
           <section>
             {canEdit && (
-              <Button size="sm" className="w-full" onClick={clear}>
+              <Button size="xs" className="w-full" onClick={clear}>
                 New skill
               </Button>
             )}
@@ -146,70 +144,65 @@ export function SkillsPage() {
                   className={cn(
                     "w-full rounded-md px-2.5 py-2 text-left transition-colors",
                     selectedName === skill.name
-                      ? "bg-[var(--ui-sidebar-hover)]"
-                      : "hover:bg-[var(--ui-sidebar-hover)]"
+                      ? "bg-selected"
+                      : "hover:bg-surface-level-1-hover"
                   )}
                 >
-                  <span className="block truncate text-xs font-medium text-[var(--ui-text)]">
+                  <span className="block truncate text-xs font-medium text-primary">
                     {skill.name}
                   </span>
-                  <span className="mt-0.5 block truncate text-[10px] text-[var(--ui-text-muted)]">
+                  <span className="mt-0.5 block truncate text-[10px] text-secondary">
                     {skill.description}
                   </span>
                 </button>
               ))}
               {skills.data?.length === 0 && (
-                <p className="px-2.5 py-4 text-xs text-[var(--ui-text-muted)]">
+                <p className="px-2.5 py-4 text-xs text-secondary">
                   No skills yet.
                 </p>
               )}
             </div>
           </section>
 
-          <section className="space-y-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-4">
+          <section className="space-y-4 rounded-lg border border-default bg-surface-level-2 p-4">
             {!canEdit && !selected ? (
-              <p className="text-xs text-[var(--ui-text-muted)]">
+              <p className="text-xs text-secondary">
                 Select an organization skill to view it.
               </p>
             ) : (
               <>
                 {creating ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="skill-name">Name</Label>
-                    <Input
-                      id="skill-name"
-                      value={newName}
-                      onChange={(event) => setNewName(event.target.value)}
-                      placeholder="address-review-feedback"
-                    />
-                    <p className="text-[10px] text-[var(--ui-text-muted)]">
-                      Lowercase letters, numbers, and single hyphens.
-                    </p>
-                  </div>
+                  <Input
+                    id="skill-name"
+                    label="Name"
+                    size="md"
+                    value={newName}
+                    onChange={setNewName}
+                    placeholder="address-review-feedback"
+                    hintText="Lowercase letters, numbers, and single hyphens."
+                  />
                 ) : (
-                  <p className="text-sm font-medium text-[var(--ui-text)]">
+                  <p className="text-sm font-medium text-primary">
                     {selectedName}
                   </p>
                 )}
 
-                <div className="space-y-2">
-                  <Label htmlFor="skill-description">Description</Label>
-                  <Input
-                    id="skill-description"
-                    value={draft.description}
-                    onChange={(event) =>
-                      setDraft((value) => ({
-                        ...value,
-                        description: event.target.value,
-                      }))
-                    }
-                    disabled={!canEdit}
-                    placeholder="What this skill does and when Open SWE should use it"
-                  />
-                </div>
+                <Input
+                  id="skill-description"
+                  label="Description"
+                  size="md"
+                  value={draft.description}
+                  onChange={(description) =>
+                    setDraft((value) => ({ ...value, description }))
+                  }
+                  disabled={!canEdit}
+                  placeholder="What this skill does and when Open SWE should use it"
+                />
 
                 <div className="space-y-2">
-                  <Label>Instructions</Label>
+                  <Text variant="sm" weight="medium">
+                    Instructions
+                  </Text>
                   <InstructionsEditor
                     value={draft.instructions}
                     onChange={(instructions) =>
@@ -223,7 +216,7 @@ export function SkillsPage() {
                 {canEdit && (
                   <div className="flex items-center gap-2">
                     <Button
-                      size="sm"
+                      size="xs"
                       disabled={
                         !draft.description.trim() ||
                         (creating
@@ -235,14 +228,14 @@ export function SkillsPage() {
                       {creating ? "Create skill" : "Save skill"}
                     </Button>
                     {dirty && (
-                      <span className="text-xs text-[var(--ui-text-muted)]">
+                      <span className="text-xs text-secondary">
                         Unsaved changes
                       </span>
                     )}
                     {!creating && (
                       <Button
-                        size="sm"
-                        variant="destructive"
+                        size="xs"
+                        color="error"
                         className="ml-auto"
                         disabled={remove.isPending}
                         onClick={onDelete}
@@ -253,7 +246,7 @@ export function SkillsPage() {
                   </div>
                 )}
                 {error && (
-                  <p className="text-xs text-[var(--ui-danger)]">{error}</p>
+                  <p className="text-xs text-error-secondary">{error}</p>
                 )}
               </>
             )}

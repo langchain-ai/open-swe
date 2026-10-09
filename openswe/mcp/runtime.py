@@ -179,7 +179,7 @@ def _wrap_tool(
                 raise ToolException("MCP is disabled or disconnected")
             if record.url != url or record.transport != transport:
                 raise ToolException("MCP connection changed; start a new run")
-            if definition.name not in record.allowed_tools:
+            if not record.allows_tool(definition.name):
                 raise ToolException("This tool is no longer allowed by the MCP connection settings")
 
             async def forward_arguments(
@@ -263,7 +263,7 @@ async def _load_tools(
                 record.name, record.url, record.transport, definition, source.namespace, sources
             )
             for definition in definitions
-            if definition.name in record.allowed_tools
+            if record.allows_tool(definition.name)
         ]
         return tools, outcome
     except Exception:
@@ -288,7 +288,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
         (source, record)
         for _, (source, record) in sorted(resolved.items())
         if record.enabled
-        and record.allowed_tools
+        and record.offers_tools
         and (connection_name is None or record.name == connection_name)
     ]
     groups = await asyncio.gather(

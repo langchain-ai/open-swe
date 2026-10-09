@@ -1,0 +1,13 @@
+- Chunks: {{ "" if plan.chunks else "none yet" }}
+{% for chunk in plan.chunks %}
+  {{ chunk.number }}. “{{ chunk.title }}”: {{ chunk.lines | join("; ") }}
+{% endfor %}
+- Other: {{ plan.other_lines }} lines
+- Unplanned: {{ plan.unplanned }}
+
+```
+{{ (plan.unplanned_lines | join("\n")) or "nothing" }}
+{% if plan.more_files_unplanned %}
+… and {{ plan.more_files_unplanned }} more files
+{% endif %}
+```

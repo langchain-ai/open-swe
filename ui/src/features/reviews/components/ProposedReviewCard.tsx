@@ -1,25 +1,21 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Button } from "@langchain/macaw-components/Button"
+import { Card } from "@langchain/macaw-components/Card"
+import { Text } from "@langchain/macaw-components/Text"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { useMutation } from "@tanstack/react-query"
 
 import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { reviewConversationQueryKey } from "@/features/reviews/components/ReviewConversation"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
+import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
+import { useRefreshPullRequest } from "@/features/reviews/page/queries"
+import { plural } from "@/features/reviews/page/text"
 import { api } from "@/lib/api"
-import { cn } from "@/lib/utils"
 
-const EVENTS: ReadonlyArray<[ReviewEvent, string]> = [
-  ["COMMENT", "Comment"],
-  ["APPROVE", "Approve"],
-  ["REQUEST_CHANGES", "Request changes"],
+const EVENTS: ReadonlyArray<ReviewEvent> = [
+  "COMMENT",
+  "APPROVE",
+  "REQUEST_CHANGES",
 ]
 
 const EVENT_LABEL: Record<ReviewEvent, string> = {
@@ -40,128 +36,132 @@ export function ProposedReviewCard({
   number: number
   id: string
 }) {
-  const queryClient = useQueryClient()
+  const refresh = useRefreshPullRequest({ owner, repo, number })
   const drafts = useChatDrafts()
   const draft = drafts?.reviews.find((item) => item.proposal.id === id)
   const pending = usePendingReview(owner, repo, number)
   const pendingCount = pending.comments.length
+  // GitHub refuses an author's approval or change request on their own PR.
+  const isAuthor = useIsPullRequestAuthor(owner, repo, number)
+  const events = isAuthor
+    ? EVENTS.filter((value) => value === "COMMENT")
+    : EVENTS
   const submit = useMutation({
     mutationFn: async () => {
       if (!draft) throw new Error("The draft is no longer available")
       return api.submitPullRequestReview(owner, repo, number, {
-        event: draft.event,
+        event: isAuthor ? "COMMENT" : draft.event,
         body: draft.body.trim(),
       })
     },
     onSuccess: (result) => {
       drafts?.settle(id, { state: "posted", url: result.html_url })
-      void queryClient.invalidateQueries({
-        queryKey: ["review", owner, repo, number],
-      })
+      refresh.reviewed()
       void pending.invalidate()
-      void queryClient.invalidateQueries({
-        queryKey: reviewConversationQueryKey(owner, repo, number),
-      })
     },
     meta: { errorTitle: "Couldn't submit the review" },
   })
   if (!drafts || !draft) return null
 
-  const { outcome, body, event } = draft
+  const { outcome, body } = draft
+  const event: ReviewEvent = isAuthor ? "COMMENT" : draft.event
   const needsBody = event !== "APPROVE" && pendingCount === 0
   return (
-    <Card size="sm" className="w-full shrink-0" data-testid="proposed-review">
-      <CardHeader>
-        <CardTitle>
-          {outcome?.state === "posted"
-            ? `Review submitted: ${EVENT_LABEL[event]}`
-            : outcome?.state === "discarded"
-              ? "Review discarded"
-              : "Draft review"}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
+    <Card
+      className="flex w-full shrink-0 flex-col gap-space-3 p-space-3 text-xs"
+      data-testid="proposed-review"
+    >
+      <Text variant="sm" weight="medium">
+        {outcome?.state === "posted"
+          ? `Review submitted: ${EVENT_LABEL[event]}`
+          : outcome?.state === "discarded"
+            ? "Review discarded"
+            : "Draft review"}
+      </Text>
+      <div className="flex flex-col gap-space-2">
         {!outcome && pendingCount > 0 && (
-          <p className="text-muted-foreground">
-            Includes your {pendingCount} pending comment
-            {pendingCount === 1 ? "" : "s"}.
+          <p className="text-secondary">
+            Includes your {plural(pendingCount, "pending comment")}.
           </p>
         )}
         {!outcome && (
           <div
             role="radiogroup"
             aria-label="Review verdict"
-            className="flex gap-1"
+            className="flex gap-space-1"
           >
-            {EVENTS.map(([value, label]) => (
+            {events.map((value) => (
               <Button
                 key={value}
-                size="sm"
+                size="xs"
                 role="radio"
                 aria-checked={event === value}
-                variant={event === value ? "secondary" : "ghost"}
-                className={cn(
-                  event === value &&
-                    value === "REQUEST_CHANGES" &&
-                    "text-destructive"
-                )}
+                color={
+                  event === value && value === "REQUEST_CHANGES"
+                    ? "error"
+                    : "secondary"
+                }
+                variant={event === value ? "outlined" : "plain"}
                 disabled={submit.isPending}
                 onClick={() => drafts.edit(id, { event: value })}
               >
-                {label}
+                {EVENT_LABEL[value]}
               </Button>
             ))}
           </div>
         )}
         {outcome ? (
           body && (
-            <p className="line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+            <p className="line-clamp-3 whitespace-pre-wrap text-secondary">
               {body}
             </p>
           )
         ) : (
           <Textarea
+            size="md"
             aria-label="Review body"
             value={body}
             placeholder={needsBody ? "Required" : "Optional"}
-            onChange={(e) => drafts.edit(id, { body: e.target.value })}
+            onChange={(next) => drafts.edit(id, { body: next })}
             rows={4}
             disabled={submit.isPending}
           />
         )}
-      </CardContent>
-      <CardFooter className="justify-end gap-2">
-        {outcome?.state === "posted" ? (
+      </div>
+      {outcome?.state === "posted" ? (
+        <div className="flex justify-end">
           <Button
-            size="sm"
-            variant="outline"
-            render={
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            as={
               <a href={outcome.url} target="_blank" rel="noopener noreferrer" />
             }
           >
             View on GitHub
           </Button>
-        ) : outcome ? null : (
-          <>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={submit.isPending}
-              onClick={() => drafts.settle(id, { state: "discarded" })}
-            >
-              Discard
-            </Button>
-            <Button
-              size="sm"
-              variant={event === "REQUEST_CHANGES" ? "destructive" : "default"}
-              disabled={submit.isPending || (needsBody && !body.trim())}
-              onClick={() => submit.mutate()}
-            >
-              {submit.isPending ? "Submitting…" : "Submit as you"}
-            </Button>
-          </>
-        )}
-      </CardFooter>
+        </div>
+      ) : outcome ? null : (
+        <div className="flex justify-end gap-space-2">
+          <Button
+            size="xs"
+            color="secondary"
+            variant="plain"
+            disabled={submit.isPending}
+            onClick={() => drafts.settle(id, { state: "discarded" })}
+          >
+            Discard
+          </Button>
+          <Button
+            size="xs"
+            color={event === "REQUEST_CHANGES" ? "error" : "primary"}
+            disabled={submit.isPending || (needsBody && !body.trim())}
+            onClick={() => submit.mutate()}
+          >
+            {submit.isPending ? "Submitting…" : "Submit as you"}
+          </Button>
+        </div>
+      )}
     </Card>
   )
 }
