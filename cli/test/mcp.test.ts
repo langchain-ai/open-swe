@@ -66,6 +66,36 @@ async function connect(respond: (url: URL) => Response): Promise<{
   return { client, queries, bodies, encodings }
 }
 
+describe("create_session", () => {
+  test("starts by default and supports creating an idle session", async () => {
+    const { client, bodies } = await connect((url) =>
+      url.pathname === "/dashboard/api/threads"
+        ? Response.json({ thread_id: "new-thread" }, { status: 201 })
+        : new Response("not found", { status: 404 })
+    )
+    for (const start of [undefined, false]) {
+      const result = await client.callTool({
+        name: "create_session",
+        arguments: {
+          prompt: "Fix login",
+          repo: "acme/web",
+          workspace: "dev",
+          ...(start === undefined ? {} : { start }),
+        },
+      })
+      expect(result.isError).toBeFalsy()
+      expect(result.structuredContent).toMatchObject({
+        thread_id: "new-thread",
+        url: expect.stringMatching(/\/agents\/new-thread$/),
+      })
+    }
+    expect(bodies.map((body) => JSON.parse(body))).toEqual([
+      { prompt: "Fix login", repo: "acme/web", workspace: "dev", start: true },
+      { prompt: "Fix login", repo: "acme/web", workspace: "dev", start: false },
+    ])
+  })
+})
+
 describe("list_threads", () => {
   test("defaults to the sidebar's view and projects each thread", async () => {
     const { client, queries } = await connect(() =>
