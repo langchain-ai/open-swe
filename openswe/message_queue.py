@@ -9,12 +9,14 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Self
 
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import BigInteger, Identity, delete, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,7 @@ class QueuedMessage(Base):
                     .returning(cls.seq)
                 )
             ).all()
+            await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
         if dropped:
             logger.warning(
                 "Dropped the oldest queued messages over the cap",
@@ -89,8 +92,82 @@ class QueuedMessage(Base):
             await session.execute(
                 delete(cls).where(cls.seq.in_([message.seq for message in messages]))
             )
+            for thread_id in {message.thread_id for message in messages}:
+                await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
 
     @classmethod
     async def clear(cls, thread_id: str) -> None:
         async with postgres.session() as session:
             await session.execute(delete(cls).where(cls.thread_id == thread_id))
+            await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
+
+    async def preview(self) -> QueuedPreview:
+        """What a person sees of this message while it waits for the agent."""
+        from openswe.incidents.report import context_message
+
+        content = self.content
+        if isinstance(content, str):
+            payload = _QueuedPayload(text=content)
+        elif isinstance(content, list):
+            payload = _QueuedPayload(blocks=content)
+        else:
+            payload = _QueuedPayload.model_validate(content)
+        sender = payload.sender
+        return QueuedPreview(
+            id=self.queue_id or f"queued-{self.seq}",
+            text=context_message(payload.preview_text()),
+            sender=await sender.login() if sender else None,
+            platform=sender.platform if sender else None,
+            queued_at=self.queued_at,
+        )
+
+
+class _QueuedSender(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str | None = None
+    github_login: str | None = None
+    platform: str | None = None
+
+    async def login(self) -> str | None:
+        """The sender's GitHub login; a Slack member nobody linked stays anonymous."""
+        from openswe.users import User
+
+        if self.github_login:
+            return self.github_login
+        platform, _, slack_user_id = (self.id or "").partition(":")
+        return await User.login_for_slack(slack_user_id) if platform == "slack" else None
+
+
+class _QueuedBlock(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    type: str = ""
+    text: str | None = None
+
+
+class _QueuedPayload(BaseModel):
+    """The writers' payload shapes: a dashboard or Slack follow-up, or bare content blocks."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    text: str | None = None
+    content: list[_QueuedBlock] | str | None = None
+    blocks: list[_QueuedBlock] = Field(default_factory=list)
+    sender: _QueuedSender | None = None
+
+    def preview_text(self) -> str:
+        if self.text:
+            return self.text
+        if isinstance(self.content, str):
+            return self.content
+        blocks = self.content or self.blocks
+        return "\n".join(block.text for block in blocks if block.type == "text" and block.text)
+
+
+class QueuedPreview(BaseModel):
+    id: str
+    text: str
+    sender: str | None
+    platform: str | None
+    queued_at: datetime | None
