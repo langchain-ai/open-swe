@@ -3,6 +3,7 @@
 from tests.human_review.scenario import (
     LONDON,
     NEW_YORK,
+    FollowsInstructions,
     ReviewScenario,
     TakesSuggestions,
     dm_to,
@@ -95,10 +96,11 @@ async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover
 ) -> None:
     """A volunteer and GitHub approvals cancel only the picks they cover.
 
-    Ada's pull request touches two code owner areas, the API and the UI. Open SWE picks Bob for
+    Ada's pull request touches two code owner areas, the API and the UI, and the repository's
+    reviewer instructions ask for a UI owner's approval on UI changes. Open SWE picks Bob for
     the API. Carol, who also owns the API, signs up herself, so Bob's pick is cancelled and his
-    DM says why. Carol's approval covers the API, so Open SWE picks Dana for the UI, which
-    nobody covers yet. Erin, another UI owner, approves straight on GitHub without being asked:
+    DM says why. Carol's approval covers the API, so the agent picks Dana for the UI, as the
+    instructions ask. Erin, another UI owner, approves straight on GitHub without being asked:
     Dana's pick is no longer needed, and her DM is edited rather than deleted.
     """
     ada = scenario.person("ada", NEW_YORK)
@@ -108,6 +110,7 @@ async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover
     erin = scenario.person("erin", NEW_YORK)
     scenario.owns("/api/", bob, carol)
     scenario.owns("/ui/", dana, erin)
+    scenario.reviewer_instructions("UI changes also need an approval from a UI code owner.")
     scenario.pull_request(author=ada, files=["api/server.py", "api/routes.py", "ui/page.tsx"])
 
     async with scenario.from_(ada.at("Mon 10:00")):
@@ -125,7 +128,7 @@ async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover
                 requested_on_github(carol),
             )
 
-        with scenario.step("Carol approves on GitHub; the UI still has no reviewer"):
+        with scenario.step("Carol approves on GitHub; the instructions want a UI reviewer too"):
             await scenario.reviews_on_github(carol)
             scenario.expect(picked(dana), requested_on_github(dana), dm_to(dana, "reviewer_pick"))
 
@@ -137,3 +140,57 @@ async def test_a_volunteer_and_github_approvals_cancel_only_the_picks_they_cover
         with scenario.step("Every area is approved, so nothing else happens"):
             await scenario.wait(days=1)
             scenario.expect()
+
+
+async def test_the_repositorys_reviewer_instructions_decide_who_is_picked(
+    scenario: ReviewScenario,
+) -> None:
+    """The repository's reviewer instructions decide who is picked.
+
+    Bob and Carol both own the API, and Open SWE would suggest Bob. The repository's
+    `.open-swe/REVIEWERS.md` asks for Carol on API changes. The review thread's agent gets
+    Open SWE's suggestion and those instructions, and picks Carol.
+    """
+    ada = scenario.person("ada", NEW_YORK)
+    bob = scenario.person("bob", NEW_YORK)
+    carol = scenario.person("carol", NEW_YORK)
+    scenario.owns("/api/", bob, carol)
+    scenario.reviewer_instructions("API changes need a review from @carol, who owns rate limits.")
+    scenario.pull_request(author=ada, files=["api/server.py"])
+    scenario.agent = FollowsInstructions()
+
+    async with scenario.from_(ada.at("Mon 10:00")):
+        with scenario.step("Ada asks for a review, and nobody signs up within two hours"):
+            await scenario.request_review()
+            await scenario.wait(hours=2)
+            scenario.expect(
+                picked(carol), requested_on_github(carol), dm_to(carol, "reviewer_pick")
+            )
+
+
+async def test_one_approval_is_enough_without_reviewer_instructions(
+    scenario: ReviewScenario,
+) -> None:
+    """One approval is enough without reviewer instructions.
+
+    Ada's pull request touches the API and the UI. Code owners only guide who reviews, so
+    once Bob approves the API, Open SWE does not look for a UI reviewer as well.
+    """
+    ada = scenario.person("ada", NEW_YORK)
+    bob = scenario.person("bob", NEW_YORK)
+    dana = scenario.person("dana", NEW_YORK)
+    scenario.owns("/api/", bob)
+    scenario.owns("/ui/", dana)
+    scenario.pull_request(author=ada, files=["api/server.py", "api/routes.py", "ui/page.tsx"])
+
+    async with scenario.from_(ada.at("Mon 10:00")):
+        with scenario.step("Ada asks for a review, and nobody signs up within two hours"):
+            await scenario.request_review()
+            await scenario.wait(hours=2)
+            scenario.expect(picked(bob), requested_on_github(bob), dm_to(bob, "reviewer_pick"))
+
+        with scenario.step("Bob accepts and approves; nobody is asked to review the UI"):
+            await scenario.clicks(bob, "accept")
+            await scenario.reviews_on_github(bob)
+            await scenario.wait(days=1)
+            scenario.expect(joined(bob, cause="accepted_pick"), edited(bob))

@@ -24,7 +24,7 @@ from openswe.dashboard import workspace_settings
 from openswe.human_review import standard
 from openswe.human_review.events import ReviewDecisionCause
 from openswe.human_review.notices import NoticeKind
-from openswe.human_review.picking import Coverage
+from openswe.human_review.picking import REVIEWER_INSTRUCTIONS_PATH, Coverage
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.client import parse_github_pr_url
 from openswe.tools.request_human_review import assign_human_reviewer
@@ -53,6 +53,7 @@ TOKYO = "Asia/Tokyo"
 _REVIEWS = "CREVIEWS"
 _SIGN_UP = "open_swe_option_select_review"
 _PICK_NOTICES = frozenset({"reviewer_pick", "review_snooze_ended"})
+_INSTRUCTIONS = re.compile(r"<reviewer-instructions>(.*?)</reviewer-instructions>", re.DOTALL)
 _SUGGESTION = re.compile(r"Open SWE suggests @([A-Za-z0-9-]+): (.+?)(?: Unless|$)", re.MULTILINE)
 
 type Habit = Literal["ignore", "accept", "decline", "approve", "accept_then_approve"]
@@ -132,6 +133,30 @@ class TakesSuggestions:
 
 
 @dataclass(frozen=True)
+class FollowsInstructions:
+    """Assigns the first person the repository's reviewer instructions name, as a model would
+    read them; without instructions it takes Open SWE's suggestions."""
+
+    async def woken(self, scenario: ReviewScenario, thread_id: str, prompt: str) -> None:
+        instructions = _INSTRUCTIONS.search(prompt)
+        named = re.search(r"@([A-Za-z0-9-]+)", instructions.group(1)) if instructions else None
+        if named is None:
+            await TakesSuggestions().woken(scenario, thread_id, prompt)
+            return
+        result = await scenario.use_tool(
+            thread_id,
+            assign_human_reviewer,
+            pr_url=scenario.pr_url,
+            github_login=named.group(1),
+            reason="The repository's reviewer instructions name them.",
+        )
+        outcome = str(result.get("next") if result.get("success") else result.get("error"))
+        scenario.record(
+            "agent", f"assign_human_reviewer @{named.group(1)} → {outcome}", source=AGENT
+        )
+
+
+@dataclass(frozen=True)
 class _HabitRule:
     action: Habit
     after: timedelta
@@ -157,6 +182,7 @@ class ReviewScenario(Scenario):
         self.habits: dict[str, _HabitRule] = {}
         self.author: Person | None = None
         self.files: list[str] = []
+        self.repo_files: dict[str, str] = {}
         self.agent: Agent = TakesSuggestions()
         self.request: HumanReviewRequest | None = None
         self.coverage = Coverage(())
@@ -179,6 +205,10 @@ class ReviewScenario(Scenario):
         """What ``person`` does ``after`` Open SWE picks them, as time passes."""
         self.habits[person.login] = _HabitRule(action, after)
 
+    def reviewer_instructions(self, text: str) -> None:
+        """The repository's ``.open-swe/REVIEWERS.md`` on its base branch."""
+        self.repo_files[REVIEWER_INSTRUCTIONS_PATH] = text
+
     def pull_request(self, *, author: Person, files: list[str]) -> None:
         self.author = author
         self.files = files
@@ -197,6 +227,7 @@ class ReviewScenario(Scenario):
             self.files,
             self.codeowners,
             author_user_id=self._directory[self.author.login].id,
+            repo_files=self.repo_files,
         )
         self._slack = Slack(self, channels={"reviews": _REVIEWS}, describe_update=_card_reviewers)
         self._slack.wake = self._woken

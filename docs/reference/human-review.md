@@ -93,6 +93,12 @@ This affects reviewer assignment, not the two-hour auto-merge deadline.
   review history of the changed files. It calls `assign_human_reviewer`, which adds the
   person to the card, tags them in the card's thread, and DMs them. In concierge mode
   the DM is recorded in their concierge conversation.
+- CODEOWNERS only guides who is picked: one approval is enough, whichever code owner
+  areas it covers.
+- `.open-swe/REVIEWERS.md`, read from the base branch, tells the picking agent how this
+  repository wants reviewers chosen, for example which areas need their own approval.
+  When it exists, the agent makes every pick, and after an approval it adds reviewers
+  for the areas left only if the file asks for that.
 
 ## Merging
 

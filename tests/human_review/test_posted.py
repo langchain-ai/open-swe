@@ -9,6 +9,7 @@ from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_requests import PullRequest
 from openswe.human_review import lifecycle, posted, standard
 from openswe.human_review.lifecycle import ReviewCard
+from openswe.human_review.picking import ReviewerInstructions
 from openswe.human_review.posted import linked_pull_request
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.users import User, UserPreferences
@@ -104,28 +105,10 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
     monkeypatch.setattr(
         ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename="app.py")])
     )
-    await settle_with_reactions(set())
-    stored = await HumanReviewRequest.get(request.id)
-    assert stored is not None and stored.approved_at is None
-    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @grace")))
+    monkeypatch.setattr(ReviewerInstructions, "load", AsyncMock(return_value=None))
     await settle_with_reactions(set())
     stored = await HumanReviewRequest.get(request.id)
     assert stored is not None and stored.approved_at is not None
-
-    async def unreadable(*_: object, strict: bool = False) -> None:
-        if strict:
-            raise standard.RepoFileUnreadableError("unreadable")
-
-    monkeypatch.setattr(CodeOwners, "fetch", unreadable)
-    await settle_with_reactions(set())
-    stored = await HumanReviewRequest.get(request.id)
-    assert stored is not None and stored.approved_at is None
-    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=None))
-    await settle_with_reactions(set())
-    stored = await HumanReviewRequest.get(request.id)
-    assert stored is not None and stored.approved_at is not None
-    monkeypatch.setattr(CodeOwners, "fetch", AsyncMock(return_value=CodeOwners.parse("* @ada")))
-    await settle_with_reactions(set())
 
     preferences = UserPreferences()
 

@@ -38,6 +38,7 @@ from openswe.github.repositories import Repository
 from openswe.human_review import card as standard_card
 from openswe.human_review.events import ReviewDecisionCause
 from openswe.human_review.people import Outcome
+from openswe.human_review.picking import WorkHours
 from openswe.human_review.requests import (
     ChannelChoice,
     HumanReviewParticipant,
@@ -825,15 +826,16 @@ class ReviewPicks:
             )
 
     async def _tell_withdrawn(self, participant: HumanReviewParticipant, text: str) -> None:
-        """Say on a pending pick's DM why it ended, which does not notify; otherwise DM ``text``."""
+        """Say on their pick DM why it ended, which does not notify; DM ``text`` when that is not
+        enough."""
         request = self.request
         slack_user_id = participant.user.slack_user_id
         if not slack_user_id:
             return
         origin = request.notice_origin("reviewer_released")
-        # Someone who accepted may be partway through the review, so they get a notification.
-        message = participant.pick_message if participant.decision != "review" else None
-        if message is not None and await message.show(text):
+        message = participant.pick_message
+        edited = message is not None and await message.show(text)
+        if message is not None and edited:
             if origin is not None:
                 await origin.save_for(message.channel_id, message.ts, f"{message.text}\n{text}")
                 await note_for_thread_owner(
@@ -850,6 +852,12 @@ class ReviewPicks:
                 message.channel_id,
                 prompt("slack/concierge-dm-edited", text=message.text, status=text),
             )
+        # Someone who accepted may be partway through the review, so they get a notification,
+        # but only in their work hours; the edit already says it.
+        if edited and (
+            participant.decision != "review"
+            or not (await WorkHours.for_user(participant.user)).on_shift(datetime.now(UTC))
+        ):
             return
         await send_dm(
             slack_user_id,

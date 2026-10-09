@@ -44,6 +44,9 @@ _COUNTEREXAMPLE = (
 )
 
 
+_EVERY_AREA = "Every code owner area needs an approval from one of its own owners."
+
+
 @dataclass(frozen=True)
 class Team:
     """One generated scenario and the week it plays."""
@@ -58,6 +61,7 @@ class Team:
     wait_hours: int
     volunteer: str | None
     approver: tuple[str, int] | None
+    every_area_reviewed: bool = False
 
     @property
     def author(self) -> str:
@@ -78,6 +82,8 @@ class Team:
             scenario.owns(f"/area{area}/", *(people[o] for o in owners))
         for login, action, hours in self.habits:
             scenario.habit(people[login], action, after=_hours(hours))
+        if self.every_area_reviewed:
+            scenario.reviewer_instructions(_EVERY_AREA)
         scenario.pull_request(author=people[self.author], files=self.files)
         return scenario
 
@@ -126,6 +132,8 @@ class Team:
             for login, action, hours in self.habits
             if action != "ignore"
         ]
+        if self.every_area_reviewed:
+            lines.append(f"    scenario.reviewer_instructions({_EVERY_AREA!r})")
         lines += [
             f"    scenario.pull_request(author={self.author}, files={self.files!r})",
             "",
@@ -181,6 +189,7 @@ def teams(draw: st.DrawFn) -> Team:
         wait_hours=draw(st.integers(0, 4)),
         volunteer=draw(st.none() | st.sampled_from(others)),
         approver=draw(st.none() | st.tuples(st.sampled_from(others), st.integers(1, 30))),
+        every_area_reviewed=draw(st.booleans()),
     )
 
 

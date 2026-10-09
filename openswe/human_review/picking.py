@@ -267,6 +267,40 @@ class Coverage:
         return await cls.build(codeowners, [changed.filename for changed in files])
 
 
+REVIEWER_INSTRUCTIONS_PATH = ".open-swe/REVIEWERS.md"
+_REVIEWER_INSTRUCTIONS_MAX_CHARS = 10_000
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewerInstructions:
+    """A repository's ``.open-swe/REVIEWERS.md``: how its maintainers want reviewers picked.
+
+    Read from the pull request's base branch, so a pull request cannot rewrite how its own
+    reviewers are chosen.
+    """
+
+    text: str
+
+    @classmethod
+    async def load(cls, request: HumanReviewRequest) -> Self | None:
+        """``None`` when the file is absent, empty, too large, or unreadable."""
+        pr = request.pull_request
+        try:
+            async with GitHubClient.as_app(pr.owner, pr.repo) as github:
+                text = await github.repo(pr.owner, pr.repo).read_file(
+                    REVIEWER_INSTRUCTIONS_PATH,
+                    pr.base_ref or None,
+                    max_chars=_REVIEWER_INSTRUCTIONS_MAX_CHARS,
+                )
+        except GitHubAppUnavailable:
+            logger.warning(
+                "No GitHub App token to read reviewer instructions",
+                extra={"request_id": str(request.id)},
+            )
+            return None
+        return cls(text) if text else None
+
+
 async def _touched(repo: RepoClient, ref: str | None, files: list[ChangedFile]) -> Counter[str]:
     since = (datetime.now(UTC) - HISTORY_WINDOW).isoformat()
     busiest = sorted(files, key=lambda f: (-f.changed_lines, f.filename))[:HISTORY_MAX_FILES]

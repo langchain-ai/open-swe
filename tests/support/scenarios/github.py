@@ -43,6 +43,7 @@ class GitHub:
     author_user_id: UUID | None = None
     reviews: dict[str, ReviewState] = field(default_factory=dict)
     requested: set[str] = field(default_factory=set)
+    repo_files: dict[str, str] = field(default_factory=dict)
     _row: PullRequest | None = None
 
     @property
@@ -101,6 +102,10 @@ class GitHub:
                     label=GITHUB_REVIEW_REQUEST,
                 )
             return httpx2.Response(201, json={}, request=request)
+        if path.startswith("contents/") and method == "GET":
+            if (content := self.repo_files.get(path.removeprefix("contents/"))) is None:
+                return httpx2.Response(404, json={"message": "Not Found"}, request=request)
+            return httpx2.Response(200, text=content, request=request)
         if path == f"pulls/{self.number}":
             return httpx2.Response(200, json=self.pull, request=request)
         if path.startswith("collaborators/") and path.endswith("/permission"):

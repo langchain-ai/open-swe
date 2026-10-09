@@ -26,14 +26,12 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
     Readiness,
     latest_review_states,
     review_authors,
 )
-from openswe.github.codeowners import CodeOwners
 from openswe.github.http import (
     GitHubAppUnavailable,
     GitHubClient,
@@ -51,7 +49,15 @@ from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.notices import NoticeKind
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
-from openswe.human_review.picking import Area, Coverage, Pick, Wait, WorkHours, choose_reviewer
+from openswe.human_review.picking import (
+    Area,
+    Coverage,
+    Pick,
+    ReviewerInstructions,
+    Wait,
+    WorkHours,
+    choose_reviewer,
+)
 from openswe.human_review.requests import (
     HumanReviewParticipant,
     HumanReviewRequest,
@@ -940,38 +946,18 @@ async def _settle_posted(
     snapshot: PullRequestSnapshot,
     states: dict[str, str],
 ) -> None:
-    """React once the pull request's owners approve; until then, time how long it has sat green."""
-    approvers = {login for login, state in states.items() if state == "APPROVED"}
-    approved = bool(approvers)
-    if approved:
-        pr = request.pull_request
-        try:
-            codeowners = await CodeOwners.fetch(pull.repo, pr.base_ref or None, strict=True)
-        except RepoFileUnreadableError:
-            logger.warning(
-                "Cannot confirm codeowner approvals",
-                extra={"request_id": str(request.id)},
-                exc_info=True,
-            )
-            approved = False
-            codeowners = None
-        if codeowners is not None:
-            files = await ChangedFile.of_pull(pull)
-            approved = (
-                files is not None
-                and len(files) < MAX_FILES
-                and await codeowners.approved_by([file.filename for file in files], approvers)
-            )
-    if approved:
+    """React once the pull request is approved; until then, time how long it has sat green."""
+    approvers = sorted(login for login, state in states.items() if state == "APPROVED")
+    coverage = await _instructed_coverage(request, approvers) if approvers else None
+    if approvers and coverage is None:
         await ReviewCard(request).mark_approved()
         await ReviewPicks(request).release(
-            ", ".join(f"@{login}" for login in sorted(approvers)) + " approved it",
-            cause="approved",
+            ", ".join(f"@{login}" for login in approvers) + " approved it", cause="approved"
         )
         return
-    if approvers and (coverage := await Coverage.load(request)) is not None:
-        request = await _release_covered(request, sorted(approvers), coverage)
-    await _pick_remaining_owners(request, sorted(approvers))
+    if coverage is not None:
+        request = await _release_covered(request, approvers, coverage)
+        await _pick_remaining_owners(request, approvers)
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
             return
@@ -1065,8 +1051,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
         await _settle_posted(request, pull, snapshot, states)
         return True
     if approvers := [login for login, state in states.items() if state == "APPROVED"]:
-        coverage = await Coverage.load(request)
-        if coverage is not None and coverage.uncovered(approvers):
+        if (coverage := await _instructed_coverage(request, approvers)) is not None:
             request = await _release_covered(request, approvers, coverage)
             await _pick_remaining_owners(request, approvers)
         else:
@@ -1195,7 +1180,8 @@ async def _auto_assign(
         if await _schedule(request, "unclaimed", choice.until - datetime.now(UTC)):
             return AutoAssignResult("waiting", choice.login, choice.until)
         return AutoAssignResult("failed")
-    if trigger is not None:
+    # A repository's own selection instructions only reach the agent, so it makes every pick.
+    if trigger is not None or await ReviewerInstructions.load(request) is not None:
         woken = await _wake_picker(
             request, asked=asked, trigger=trigger, suggestions=[Suggestion(choice)]
         )
@@ -1216,6 +1202,22 @@ async def _auto_assign(
         )
     woken = await _wake_picker(request, asked=asked, trigger=None, suggestions=[])
     return AutoAssignResult("woken" if woken else "failed")
+
+
+async def _instructed_coverage(
+    request: HumanReviewRequest, approvers: list[str]
+) -> Coverage | None:
+    """The code owner areas ``approvers`` leave uncovered, for the agent to weigh against the
+    repository's reviewer instructions; ``None`` when one approval is enough.
+
+    Code owners only guide who reviews: without instructions no area needs its own review.
+    """
+    coverage = await Coverage.load(request)
+    if coverage is None or not coverage.uncovered(approvers):
+        return None
+    if await ReviewerInstructions.load(request) is None:
+        return None
+    return coverage
 
 
 async def _release_covered(
@@ -1277,9 +1279,11 @@ async def _wake_picker(
     suggestions: list[Suggestion],
 ) -> bool:
     pr = request.pull_request
+    instructions = await ReviewerInstructions.load(request)
     text = prompt(
         "runs/human-review-unclaimed",
         pr_url=pr.url,
+        instructions=instructions.text if instructions is not None else "",
         minutes=await _assignment_minutes(request),
         author=pr.author,
         posted=not request.has_card,
