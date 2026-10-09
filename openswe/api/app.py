@@ -60,6 +60,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.users.import_records import import_user_records
     from openswe.users.import_store import import_user_mappings
     from openswe.utils.model import validate_local_dev_llm_config
+    from openswe.webhooks import thread_inactivity
 
     pin_single_event_loop()
     validate_github_login_allowlist()
@@ -144,12 +145,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # stops is hearing about changes made elsewhere.
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
+    await thread_inactivity.start()
     try:
         async with REMOTE_RUNTIME.lifespan():
             yield
     finally:
         blob_import.cancel()
         await HUB.stop()
+        await thread_inactivity.stop()
         await bridge_listener.stop()
         await transcript_listener.stop()
         await LISTENER.stop()
