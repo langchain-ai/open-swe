@@ -34,6 +34,8 @@ TYPECHECK_SCRIPT = (
 TYPECHECK_OUTPUT_LIMIT = 20_000
 FAILED_REF = "refs/preview-failed"
 PUBLISHED_REF = "refs/preview-published"
+INPUTS_REF = "refs/preview-inputs/latest"
+TYPECHECK_DIAGNOSTIC = re.compile(r"(?m)^([^\n(]+?)(?:\(\d+,\d+\):|:\d+:\d+\s+-)\s*error TS\d+:")
 MERGED_LINE = re.compile(r"merged:((?: \d+)*)")
 LEFT_OUT_LINE = re.compile(r"#(\d+): (.+)")
 AGENT_INTERRUPT_GRACE_SECONDS = 60
@@ -139,6 +141,49 @@ class Comment(BaseModel):
 
 PULL_PAGES = TypeAdapter(list[list[Pull]])
 COMMENT_PAGES = TypeAdapter(list[list[Comment]])
+
+
+@dataclass(frozen=True)
+class BuildInputs:
+    main_sha: str
+    pulls: tuple[Pull, ...]
+    manual_sha: str | None
+
+    @property
+    def fingerprint(self) -> str:
+        pulls = "".join(
+            f"{pull.number}\0{pull.head.sha}\0"
+            for pull in sorted(self.pulls, key=lambda pull: pull.number)
+        )
+        return hashlib.sha256(
+            f"{self.main_sha}\0{pulls}manual\0{self.manual_sha or 'absent'}".encode()
+        ).hexdigest()
+
+    @classmethod
+    async def load(cls, settings: Settings) -> Self:
+        pulls = tuple(
+            pull for pull in await open_pulls(settings.repo) if pull.has_label(settings.label)
+        )
+        exists = await remote_branch_exists(settings.manual_branch)
+        if exists is None:
+            raise PreviewError(f"could not look up {settings.manual_branch}")
+        manual_sha = None
+        if exists:
+            ref = "refs/preview-manual"
+            fetched = await git(
+                "fetch",
+                "--no-tags",
+                "--force",
+                "origin",
+                f"refs/heads/{settings.manual_branch}:{ref}",
+                check=False,
+            )
+            if fetched.code != 0:
+                raise manual_branch_failed(
+                    settings.manual_branch, f"could not fetch the branch: {fetched.first_line}"
+                )
+            manual_sha = await rev_parse(ref)
+        return cls(await rev_parse("origin/main"), pulls, manual_sha)
 
 
 @dataclass(frozen=True)
@@ -262,6 +307,7 @@ class RerereCache:
 @dataclass(frozen=True)
 class Merged:
     note: str | None = None
+    paths: tuple[str, ...] = ()
 
     def suffix(self) -> str:
         return f" — {self.note}" if self.note else ""
@@ -288,6 +334,13 @@ async def merge(sha: str, message: str) -> MergeOutcome:
         return Merged()
     unmerged = (await git("diff", "--name-only", "--diff-filter=U", "-z")).stdout
     conflicts = tuple(path for path in unmerged.split("\0") if path)
+    resolved = (await git("ls-files", "--resolve-undo", "-z")).stdout
+    paths = tuple(
+        sorted(
+            set(conflicts)
+            | {entry.split("\t", 1)[1] for entry in resolved.split("\0") if "\t" in entry}
+        )
+    )
     merging = (await git("rev-parse", "-q", "--verify", "MERGE_HEAD", check=False)).code == 0
     if (
         merging
@@ -295,10 +348,10 @@ async def merge(sha: str, message: str) -> MergeOutcome:
         and (await git("commit", "-q", "--no-edit", check=False)).code == 0
     ):
         await discard_uncommitted()
-        return Merged(RERERE_NOTE)
+        return Merged(RERERE_NOTE, paths)
     if conflicts:
         await restore_head(before)
-        return Conflicted(conflicts)
+        return Conflicted(paths)
     unrelated = (await git("merge-base", "HEAD", sha, check=False)).code != 0
     await git("merge", "--abort", check=False)
     if unrelated:
@@ -452,12 +505,26 @@ def listed_paths(paths: tuple[str, ...]) -> str:
     return "".join(f"\n  - `{path}`" for path in paths[:CONFLICT_LIMIT])
 
 
+def manual_branch_failed(branch: str, reason: str) -> PreviewError:
+    """Report a manual branch the preview cannot include; the build must stop without it."""
+    summary(
+        "## Preview build failed — nothing published",
+        "",
+        f"`{branch}` — {reason}",
+        "",
+        f"Repair `{branch}` and rerun the build. The preview cannot be deployed without it.",
+    )
+    return PreviewError(f"{branch}: {reason}; nothing was published")
+
+
 @dataclass
 class Preview:
     settings: Settings
     included: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     conflicted: bool = False
+    conflict_paths: set[str] = field(default_factory=set)
+    inputs: BuildInputs | None = None
 
     def manual_instructions(self, number: str = "<pr>") -> str:
         s = self.settings
@@ -546,42 +613,25 @@ The preview resets to plain `main` every Sunday, in the
 
     async def merge_manual_branch(self) -> None:
         branch = self.settings.manual_branch
-        exists = await remote_branch_exists(branch)
-        if exists is None:
-            raise PreviewError(f"could not look up {branch}")
-        if not exists:
+        assert self.inputs is not None
+        sha = self.inputs.manual_sha
+        if sha is None:
             return
-        ref = "refs/preview-manual"
-        fetched = await git(
-            "fetch", "--no-tags", "--force", "origin", f"refs/heads/{branch}:{ref}", check=False
-        )
-        if fetched.code != 0:
-            reason = f"could not fetch the branch: {fetched.first_line}"
-        else:
-            sha = await rev_parse(ref)
-            match await merge(sha, f"preview: merge branch {branch}"):
-                case Merged() as merged:
-                    self.included.append(f"`{branch}` — `{sha[:7]}`{merged.suffix()}")
-                    return
-                case Conflicted(paths=paths):
-                    reason = f"merge conflict with `main` — rebuild the branch{listed_paths(paths)}"
-                case Unmergeable(reason=reason):
-                    pass
-        summary(
-            "## Preview build failed — nothing published",
-            "",
-            f"`{branch}` — {reason}",
-            "",
-            f"Repair `{branch}` and rerun the build. The preview cannot be deployed without it.",
-        )
-        raise PreviewError(f"{branch}: {reason}; nothing was published")
+        match await merge(sha, f"preview: merge branch {branch}"):
+            case Merged() as merged:
+                self.conflict_paths.update(merged.paths)
+                self.included.append(f"`{branch}` — `{sha[:7]}`{merged.suffix()}")
+                return
+            case Conflicted(paths=paths):
+                reason = f"merge conflict with `main` — rebuild the branch{listed_paths(paths)}"
+            case Unmergeable(reason=reason):
+                pass
+        raise manual_branch_failed(branch, reason)
 
     async def merge_pulls(self, defer_conflicts: bool) -> list[Pending]:
         s = self.settings
-        pulls = sorted(
-            (pull for pull in await open_pulls(s.repo) if pull.has_label(s.label)),
-            key=lambda pull: pull.number,
-        )[: s.max_prs]
+        assert self.inputs is not None
+        pulls = sorted(self.inputs.pulls, key=lambda pull: pull.number)[: s.max_prs]
         pending: list[Pending] = []
         for pull in pulls:
             # Only someone with write access can push a branch into this repository, so
@@ -607,10 +657,14 @@ The preview resets to plain `main` every Sunday, in the
                 continue
             match await merge(sha, pull.merge_message):
                 case Merged() as merged:
+                    self.conflict_paths.update(merged.paths)
                     self.included.append(f"{pull.link} — `{sha[:7]}`{merged.suffix()}")
                 case Conflicted(paths=paths) if defer_conflicts:
+                    self.conflict_paths.update(paths)
                     pending.append(Pending(pull, sha, paths))
                 case Conflicted() | Unmergeable() as failed:
+                    if isinstance(failed, Conflicted):
+                        self.conflict_paths.update(failed.paths)
                     await self.skip_pull(pull, sha, failed)
         return pending
 
@@ -620,14 +674,19 @@ The preview resets to plain `main` every Sunday, in the
         for item in pending:
             match await merge(item.sha, item.pull.merge_message):
                 case Merged() as merged:
+                    self.conflict_paths.update(merged.paths)
                     self.included.append(f"{item.pull.link} — `{item.sha[:7]}`{merged.suffix()}")
                 case Conflicted(paths=paths):
+                    self.conflict_paths.update(paths)
                     remaining.append(Pending(item.pull, item.sha, paths))
                 case Unmergeable() as failed:
                     await self.skip_pull(item.pull, item.sha, failed)
         if not remaining:
             return
+        before = await rev_parse("HEAD")
         report = await resolve_with_agent(prompt, remaining, self.settings.agent_timeout_seconds)
+        if report is not None:
+            await self.consolidate_fixup(before)
         for item in remaining:
             number = item.pull.number
             if report is not None and number in report.merged:
@@ -635,6 +694,24 @@ The preview resets to plain `main` every Sunday, in the
             else:
                 note = report.reasons.get(number) if report is not None else None
                 await self.skip_pull(item.pull, item.sha, Conflicted(item.conflicts, note))
+
+    async def consolidate_fixup(self, before: str) -> None:
+        """Name only the agent's trailing non-merge commits as a replayable fix-up."""
+        history = (await git("rev-list", "--first-parent", "--parents", f"{before}..HEAD")).stdout
+        boundary = before
+        trailing = False
+        for line in history.splitlines():
+            commit, *parents = line.split()
+            if len(parents) > 1:
+                boundary = commit
+                break
+            trailing = True
+        if trailing:
+            if await rev_parse("HEAD^{tree}") == await rev_parse(f"{boundary}^{{tree}}"):
+                await restore_head(boundary)
+            else:
+                await git("reset", "-q", "--soft", boundary)
+                await git("commit", "-q", "-m", FIXUP_MESSAGE)
 
     def write_summary(self, base_sha: str) -> None:
         skipped = list(dict.fromkeys(self.skipped))
@@ -685,27 +762,42 @@ The preview resets to plain `main` every Sunday, in the
     async def assemble(self, prompt: str | None) -> None:
         """Merge everything onto main; ``skipped`` accumulates, since a skipped PR loses its label."""
         self.included.clear()
+        self.conflict_paths.clear()
         await restore_head("origin/main")
         await self.merge_manual_branch()
         pending = await self.merge_pulls(defer_conflicts=prompt is not None)
         if prompt is not None and pending:
             await self.merge_pending(prompt, pending)
 
-    async def verify(self, prompt: str | None, rerere: RerereCache) -> str | None:
-        """Typecheck errors left in the tree about to publish, after a reassembly without
-        the rerere cache and an oswe fix-up have each had a go; None when it is clean."""
+    async def verify(
+        self, prompt: str | None, rerere: RerereCache, published: str | None = None
+    ) -> str | None:
+        """Repair typecheck failures, discarding rerere only for remaining conflict errors."""
         if not self.settings.force and await remote_refs(FAILED_REF):
             await git("fetch", "--no-tags", "--force", "origin", f"{FAILED_REF}:{FAILED_REF}")
             if await rev_parse(f"{FAILED_REF}^{{tree}}") == await rev_parse("HEAD^{tree}"):
                 return "Unchanged since an earlier run failed typecheck on this exact tree; see that run."
         errors = await typecheck()
-        if errors and prompt is not None and rerere.restored_tree is not None:
-            warn("the preview tree fails typecheck; reassembling it without the rerere cache")
-            rerere.discard()
-            await self.assemble(prompt)
-            errors = await typecheck()
         assembled = await rev_parse("HEAD")
-        if errors and prompt is not None:
+        attempted_fix = False
+        if errors and rerere.restored_tree is not None:
+            if published is not None:
+                await self.reuse_fixup()
+                errors = await typecheck()
+            if errors and prompt is not None:
+                await fix_with_agent(
+                    FIX_PROMPT_PATH.read_text(), errors, self.settings.agent_timeout_seconds
+                )
+                attempted_fix = True
+                errors = await typecheck()
+            if errors and prompt is not None and self.errors_touch_conflicts(errors):
+                warn("conflict paths still fail typecheck; reassembling without the rerere cache")
+                rerere.discard()
+                await self.assemble(prompt)
+                errors = await typecheck()
+                assembled = await rev_parse("HEAD")
+                attempted_fix = False
+        if errors and prompt is not None and not attempted_fix:
             await fix_with_agent(
                 FIX_PROMPT_PATH.read_text(), errors, self.settings.agent_timeout_seconds
             )
@@ -718,12 +810,40 @@ The preview resets to plain `main` every Sunday, in the
                 warn(f"could not record the failed preview tree: {marked.first_line}")
         return errors
 
+    def errors_touch_conflicts(self, errors: str) -> bool:
+        paths = (
+            match.group(1).strip().removeprefix("./")
+            for match in TYPECHECK_DIAGNOSTIC.finditer(errors)
+        )
+        return any(
+            conflict == path or conflict.endswith(f"/{path}")
+            for path in paths
+            for conflict in self.conflict_paths
+        )
+
+    async def inputs_unchanged(self) -> bool:
+        assert self.inputs is not None
+        if self.settings.force or os.environ.get("GITHUB_EVENT_NAME") != "schedule":
+            return False
+        if not await remote_refs(INPUTS_REF):
+            return False
+        await git("fetch", "--no-tags", "--force", "origin", f"{INPUTS_REF}:{INPUTS_REF}")
+        saved = (await git("log", "-1", "--format=%s", INPUTS_REF)).stdout.strip()
+        return saved == self.inputs.fingerprint
+
+    async def save_inputs(self) -> None:
+        assert self.inputs is not None
+        tree = await rev_parse("HEAD^{tree}")
+        commit = (await git("commit-tree", tree, "-m", self.inputs.fingerprint)).stdout.strip()
+        await git("push", "--force", "origin", f"{commit}:{INPUTS_REF}")
+
     async def publish(self, published: str | None) -> None:
         branch = self.settings.branch
         assembled = await rev_parse("HEAD^{tree}")
         if assembled == published and not self.settings.force:
             summary("", f"Preview tree unchanged (`{assembled[:7]}`) — nothing published.")
             set_output("changed", "false")
+            await self.save_inputs()
             return
         if assembled == published:
             summary(
@@ -732,6 +852,7 @@ The preview resets to plain `main` every Sunday, in the
             )
             await git("commit", "--allow-empty", "-m", FORCE_MESSAGE)
         await git("push", "--force", "origin", f"HEAD:refs/heads/{branch}")
+        await self.save_inputs()
         set_output("changed", "true")
         set_output("sha", await rev_parse("HEAD"))
 
@@ -741,6 +862,11 @@ The preview resets to plain `main` every Sunday, in the
         await git("config", "rerere.enabled", "true")
         await git("config", "rerere.autoUpdate", "true")
         await fetch_main()
+        self.inputs = await BuildInputs.load(self.settings)
+        if await self.inputs_unchanged():
+            summary("inputs unchanged")
+            set_output("changed", "false")
+            return
         await git("checkout", "-B", self.settings.branch, "origin/main")
         base_sha = await rev_parse("HEAD")
         prompt = PROMPT_PATH.read_text() if shutil.which("oswe") else None
@@ -752,7 +878,7 @@ The preview resets to plain `main` every Sunday, in the
             await self.reuse_fixup()
         errors = None
         if self.settings.force or await rev_parse("HEAD^{tree}") != published:
-            errors = await self.verify(prompt, rerere)
+            errors = await self.verify(prompt, rerere, published)
         await rerere.save()
         self.write_summary(base_sha)
         if errors:

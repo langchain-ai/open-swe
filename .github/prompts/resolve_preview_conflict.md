@@ -1,4 +1,4 @@
-This checkout is the preview deployment being assembled: `main` plus every labelled pull request that merged cleanly. The pull requests listed below (`#<number> <head sha> <title>`) conflicted with it. Get them into the preview on top of `HEAD`, with the result behaving the way every side intended. Whatever is committed on `HEAD` when you finish is what deploys.
+This checkout is the preview deployment being assembled: `main` plus every labelled pull request that merged cleanly. The pull requests listed below (`#<number> <head sha> <title>`) conflicted with it. Merge them on top of `HEAD`, resolving only their conflicts so every side behaves as intended. Leave unrelated typecheck and lint fixes to the separate fix-up step after these merges.
 
 Finish with `cli_result`. A script parses `stdout`, so it must follow this format exactly:
 
