@@ -13,7 +13,8 @@ from typing import Final, NamedTuple, override
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.auth import AuthProvider
+from fastmcp.server.auth.providers.github import GitHubProvider, GitHubTokenVerifier
 from fastmcp.server.dependencies import get_access_token
 from fastmcp.server.http import StarletteWithLifespan
 from fastmcp.server.providers import Provider
@@ -24,6 +25,7 @@ from starlette.routing import BaseRoute
 
 from mcp.types import TextContent
 from openswe.config import ENV
+from openswe.dashboard.dev_login import dev_login_enabled
 from openswe.mcp.caller import ToolCaller
 from openswe.mcp.token_store import SealedStore
 
@@ -87,18 +89,27 @@ class Mount(NamedTuple):
     well_known: list[BaseRoute]
 
 
-def build_mount() -> Mount | None:
+def _auth() -> AuthProvider | None:
     client_id = ENV.GITHUB_APP_CLIENT_ID.optional()
     client_secret = ENV.GITHUB_APP_CLIENT_SECRET.optional()
-    if not client_id or not client_secret or not ENV.TOKEN_ENCRYPTION_KEY.optional():
+    if client_id and client_secret and ENV.TOKEN_ENCRYPTION_KEY.optional():
+        return GitHubProvider(
+            client_id=client_id,
+            client_secret=client_secret,
+            base_url=ENV.LANGGRAPH_URL.get().rstrip("/") + PREFIX,
+            client_storage=SealedStore(),
+            cache_ttl_seconds=_GITHUB_CACHE_SECONDS,
+        )
+    if dev_login_enabled():
+        # Local dev has no GitHub App: callers send their own GitHub token, e.g. `gh auth token`.
+        return GitHubTokenVerifier(cache_ttl_seconds=_GITHUB_CACHE_SECONDS)
+    return None
+
+
+def build_mount() -> Mount | None:
+    auth = _auth()
+    if auth is None:
         return None
-    auth = GitHubProvider(
-        client_id=client_id,
-        client_secret=client_secret,
-        base_url=ENV.LANGGRAPH_URL.get().rstrip("/") + PREFIX,
-        client_storage=SealedStore(),
-        cache_ttl_seconds=_GITHUB_CACHE_SECONDS,
-    )
     server = FastMCP(_SERVER_NAME, providers=[_CallerProvider()], auth=auth)
     app = server.http_app(path=_MCP_PATH, json_response=True, stateless_http=True)
     return Mount(app=app, well_known=list(auth.get_well_known_routes(mcp_path=_MCP_PATH)))
