@@ -80,7 +80,7 @@ UPLOAD_REQUEST_BODY: dict[str, object] = {
         "required": True,
         "description": (
             "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. "
-            "Authorized by the upload code the upload_session MCP tool returned, as a bearer token."
+            "Authorized by the upload code in the upload_url the upload_session MCP tool returned."
         ),
         "content": {"application/x-ndjson": {"schema": {"type": "string"}}},
     }
@@ -262,13 +262,12 @@ def _upload_note(target: _Target) -> list[HumanMessage]:
 
 
 class SessionReservation(BaseModel):
-    """A thread waiting for its transcript, and the one-time code ``oswe upload`` fills it with."""
+    """A thread waiting for its transcript, and the one-time URL the transcript is posted to."""
 
     thread_id: str
     url: str | None
-    upload_code: str
+    upload_url: str
     expires_in_seconds: int
-    command: str
 
 
 async def reserve_session_upload(
@@ -325,13 +324,11 @@ async def reserve_session_upload(
     code = issue_upload_ticket(
         login=login, email=email, user_id=str(user.id) if user else None, thread_id=thread_id
     )
-    backend = dashboard_api_base_url()
     return SessionReservation(
         thread_id=thread_id,
         url=dashboard_thread_url(thread_id),
-        upload_code=code,
+        upload_url=f"{dashboard_api_base_url()}/dashboard/api/threads/uploads/{code}",
         expires_in_seconds=UPLOAD_TICKET_TTL_SECONDS,
-        command=f"oswe upload --backend {backend} {code} <transcript_path>",
     )
 
 

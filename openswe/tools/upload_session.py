@@ -1,4 +1,4 @@
-"""Reserve the Open SWE thread a local coding session continues in, for ``oswe upload`` to fill."""
+"""Reserve the Open SWE thread a local coding session continues in, and the URL its transcript is posted to."""
 
 from typing import Literal
 

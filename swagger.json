@@ -17882,9 +17882,20 @@
         ]
       }
     },
-    "/dashboard/api/threads/uploads": {
+    "/dashboard/api/threads/uploads/{code}": {
       "post": {
-        "operationId": "api_upload_session_dashboard_api_threads_uploads_post",
+        "operationId": "api_upload_session_dashboard_api_threads_uploads__code__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/x-ndjson": {
@@ -17893,7 +17904,7 @@
               }
             }
           },
-          "description": "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. Authorized by the upload code the upload_session MCP tool returned, as a bearer token.",
+          "description": "The session transcript as JSONL, verbatim, optionally with Content-Encoding: gzip. Authorized by the upload code in the upload_url the upload_session MCP tool returned.",
           "required": true
         },
         "responses": {
@@ -17902,12 +17913,22 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Upload Session Dashboard Api Threads Uploads Post",
+                  "title": "Response Api Upload Session Dashboard Api Threads Uploads  Code  Post",
                   "type": "object"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Api Upload Session",
