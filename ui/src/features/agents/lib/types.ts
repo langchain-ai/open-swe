@@ -504,6 +504,13 @@ export interface AgentSubagentSummary {
   endedAt: number | null
 }
 
+export interface ThreadParticipant {
+  id: string
+  displayName: string
+  githubLogin: string | null
+  avatarUrl: string
+}
+
 export type TaskMembership =
   | { role: "coordinator"; taskId: string }
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }

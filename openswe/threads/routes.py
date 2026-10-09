@@ -58,6 +58,7 @@ from openswe.threads.listing import (
     unpin_dashboard_thread,
 )
 from openswe.threads.machine_reads import machine_thread, machine_threads
+from openswe.threads.participants import ThreadParticipant, get_thread_participants
 from openswe.threads.principals import PrincipalDep
 from openswe.threads.proxy import (
     proxy_dashboard_thread_commands,
@@ -318,6 +319,14 @@ async def api_get_thread_pull_request_context(
         scope=scope,
         email=session.get("email"),
     )
+
+
+@router.get("/threads/{thread_id}/participants")
+async def api_get_thread_participants(
+    thread_id: str,
+    session: dict[str, str] = SESSION_DEP,
+) -> list[ThreadParticipant]:
+    return await get_thread_participants(thread_id, session["sub"], email=session.get("email"))
 
 
 @router.get("/threads/{thread_id}")

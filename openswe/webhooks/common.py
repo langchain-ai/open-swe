@@ -527,6 +527,7 @@ async def upsert_agent_thread_metadata(
     source_context: SourceContext | None = None,
     workspace: str | None = None,
     slack_participant_user_ids: Collection[str] = (),
+    slack_display_user_ids: Collection[str] = (),
     visibility: str = "public",
     owner_login: str = "",
     owner_type: str = "user",
@@ -621,6 +622,18 @@ async def upsert_agent_thread_metadata(
             existing_meta, login=sender_login, email=user_email, people=people
         )
     )
+    if slack_display_user_ids:
+        stored_slack_ids = existing_meta.get("participant_slack_ids")
+        metadata["participant_slack_ids"] = sorted(
+            {
+                *(
+                    value
+                    for value in (stored_slack_ids if isinstance(stored_slack_ids, list) else [])
+                    if isinstance(value, str) and value
+                ),
+                *slack_display_user_ids,
+            }
+        )
     # The context that opened the thread identifies it; later messages arrive
     # through the same surface and must not repoint it.
     if not existing_context.is_empty:

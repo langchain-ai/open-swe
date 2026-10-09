@@ -6,7 +6,12 @@ import pytest
 from sqlalchemy import func, select, update
 
 from openswe.database import postgres
+from openswe.slack.client import get_slack_user_info
+from openswe.slack.users import SlackUser
+from openswe.threads.participants import participant_summaries
 from openswe.users import UnauthorizedUser, User, UserPreferences, UserPreferencesPatch
+from openswe.users.avatars import avatar_for_login
+from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -60,6 +65,77 @@ async def test_user_search_filters_before_pagination_without_duplicate_identitie
         users, total = await User.page(offset=0, limit=10, search=search)
         assert total == 1
         assert [user.id for user in users] == [expected.id]
+
+
+async def test_participants_deduplicate_linked_identities_and_keep_cached_slack_photo(
+    slack_api,
+) -> None:
+    user = await User.sign_in(
+        "github", "1001", login="OctoCat", avatar_url="https://github.com/octocat.png"
+    )
+    await user.link("slack", "U0123", email="octocat@example.com")
+    slack_api.respond(
+        {
+            "ok": True,
+            "user": {
+                "id": "U0123",
+                "profile": {
+                    "display_name": "Octo Cat",
+                    "image_72": "https://slack.test/octocat.png",
+                },
+            },
+        }
+    )
+    assert await avatar_for_login("octocat") == "https://slack.test/octocat.png"
+    async with postgres.session() as session:
+        stored = await session.get(SlackUser, "U0123")
+        assert stored is not None and stored.fetched_at is not None
+        stored.fetched_at = stored.fetched_at.replace(year=2000)
+    slack_api.respond({"ok": False, "error": "missing_scope"})
+    people = await participant_summaries(
+        {
+            "participant_logins": {"octocat": True},
+            "participant_emails": {"octocat@example.com": True},
+            "owner_login": "OctoCat",
+            "participant_slack_ids": ["U0123"],
+        }
+    )
+    assert len(people) == 1
+    assert people[0].id == str(user.id)
+    assert people[0].displayName == "Octo Cat"
+    assert people[0].avatarUrl == "https://slack.test/octocat.png"
+    async with postgres.session() as session:
+        session.add(
+            SlackUser(
+                id="U_UNLINKED",
+                payload={
+                    "profile": {
+                        "display_name": "Unlinked participant",
+                        "image_72": "https://slack.test/unlinked.png",
+                    }
+                },
+            )
+        )
+    unlinked = await participant_summaries({"participant_slack_ids": ["U_UNLINKED"]})
+    assert len(unlinked) == 1
+    assert unlinked[0].id == "slack:U_UNLINKED"
+    assert unlinked[0].displayName == "Unlinked participant"
+    assert unlinked[0].avatarUrl == "https://slack.test/unlinked.png"
+
+
+async def test_identity_lookup_uses_current_email_and_fails_closed(
+    slack_api: SlackAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.slack import client
+
+    async with postgres.session() as session:
+        session.add(SlackUser(id="U0123", payload={"profile": {"email": "old@example.com"}}))
+    slack_api.respond({"ok": True, "user": {"profile": {"email": "new@example.com"}}})
+    assert await get_slack_user_info("U0123") == {"profile": {"email": "new@example.com"}}
+    slack_api.respond({"ok": False, "error": "user_not_found"})
+    assert await get_slack_user_info("U0123") is None
+    monkeypatch.setattr(client, "SLACK_BOT_TOKEN", "")
+    assert await get_slack_user_info("U0123") is None
 
 
 async def test_linking_slack_reaches_the_same_person_from_either_side() -> None:

@@ -4,10 +4,19 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from openswe.dashboard.deps import ADMIN_DEP
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.users.avatars import avatar_for_login
 from openswe.users.models import User
 
 router = APIRouter(tags=["users"])
+
+
+@router.get("/users/{login}/avatar")
+async def user_avatar(
+    login: str,
+    _session: dict[str, str] = SESSION_DEP,
+) -> dict[str, str]:
+    return {"avatar_url": await avatar_for_login(login)}
 
 
 @router.get("/admin/users")

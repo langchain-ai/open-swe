@@ -110,7 +110,12 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     assert asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="private", owner_login="Alice", title="Thread"
+            "thread-id",
+            source="slack",
+            visibility="private",
+            owner_login="Alice",
+            title="Thread",
+            slack_display_user_ids=["U_ALICE"],
         )
     )
     assert created["visibility"] == "private"
@@ -118,12 +123,19 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
 
     asyncio.run(
         webhook_common.upsert_agent_thread_metadata(
-            "thread-id", source="slack", visibility="public", owner_login="bob", title="Thread"
+            "thread-id",
+            source="slack",
+            visibility="public",
+            owner_login="bob",
+            title="Thread",
+            slack_display_user_ids=["U_BOB"],
         )
     )
     metadata = cast(dict, threads.thread)["metadata"]
     assert metadata["visibility"] == "private"
     assert metadata["owner_login"] == "Alice"
+    assert metadata["participant_slack_ids"] == ["U_ALICE", "U_BOB"]
+    assert not metadata.get("participant_logins")
 
 
 @pytest.mark.asyncio

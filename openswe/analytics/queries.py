@@ -580,8 +580,14 @@ WITH runs AS (
                 'name', display_name,
                 'github_login', CASE WHEN :admin OR is_current THEN NULLIF(github_login, '') END,
                 'email', CASE WHEN is_current THEN NULLIF(email, '') END,
-                'avatar_url', CASE WHEN NULLIF(github_login, '') IS NOT NULL
-                    THEN 'https://github.com/' || github_login || '.png?size=80' END),
+                'avatar_url', (SELECT COALESCE(
+                    NULLIF(s.payload->'profile'->>'image_72', ''),
+                    NULLIF(s.payload->'profile'->>'image_48', ''))
+                    FROM user_identity g
+                    JOIN user_identity i ON i.user_id = g.user_id AND i.provider = 'slack'
+                    JOIN slack_user s ON s.id = i.external_id
+                    WHERE g.provider = 'github' AND lower(g.login) = lower(ordered.github_login)
+                    ORDER BY i.last_seen_at DESC LIMIT 1)),
             'favorite_model', favorite_model,
             'favorite_model_effort', favorite_model_effort,
             'avg_invocation_seconds', avg_invocation_seconds,

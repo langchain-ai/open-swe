@@ -6574,6 +6574,40 @@
         "title": "ThreadFeedbackResponse",
         "type": "object"
       },
+      "ThreadParticipant": {
+        "properties": {
+          "avatarUrl": {
+            "default": "",
+            "title": "Avatarurl",
+            "type": "string"
+          },
+          "displayName": {
+            "title": "Displayname",
+            "type": "string"
+          },
+          "githubLogin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Githublogin"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "displayName"
+        ],
+        "title": "ThreadParticipant",
+        "type": "object"
+      },
       "ThreadRenameBody": {
         "properties": {
           "title": {
@@ -18921,6 +18955,58 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/participants": {
+      "get": {
+        "operationId": "api_get_thread_participants_dashboard_api_threads__thread_id__participants_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ThreadParticipant"
+                  },
+                  "title": "Response Api Get Thread Participants Dashboard Api Threads  Thread Id  Participants Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Participants",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/pin": {
       "delete": {
         "operationId": "api_unpin_thread_dashboard_api_threads__thread_id__pin_delete",
@@ -20153,6 +20239,58 @@
         "tags": [
           "dashboard",
           "ui-invalidations"
+        ]
+      }
+    },
+    "/dashboard/api/users/{login}/avatar": {
+      "get": {
+        "operationId": "user_avatar_dashboard_api_users__login__avatar_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "login",
+            "required": true,
+            "schema": {
+              "title": "Login",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response User Avatar Dashboard Api Users  Login  Avatar Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "User Avatar",
+        "tags": [
+          "dashboard",
+          "users"
         ]
       }
     },

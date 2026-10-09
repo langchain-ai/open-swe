@@ -5,6 +5,7 @@ import type {
   AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
+  ThreadParticipant,
   Message,
   AutomationTriggerConfig,
   WorkflowPushApprovalsResponse,
@@ -318,6 +319,10 @@ export const agentsApi = {
   ) =>
     agentsRequest<Array<SidebarRepo>>(
       `/threads/repos${buildReposQuery(params)}`
+    ),
+  threadParticipants: (threadId: string) =>
+    agentsRequest<Array<ThreadParticipant>>(
+      `/threads/${encodeURIComponent(threadId)}/participants`
     ),
   listPinnedThreads: () => agentsRequest<Array<AgentThread>>("/threads/pinned"),
   listThreadsPage: (params: ThreadsPageParams = {}) =>

@@ -48,6 +48,7 @@ from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.database import postgres
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
 from openswe.users import User
+from openswe.users.avatars import avatar_for_login
 from openswe.utils.build_info import build_info
 from openswe.utils.dashboard_links import dashboard_api_base_url
 
@@ -258,7 +259,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
     return {
         "login": session["sub"],
         "email": session.get("email") or (user.email or None if user else None),
-        "avatar_url": session.get("avatar_url"),
+        "avatar_url": await avatar_for_login(session["sub"]) or None,
         "user_id": str(user.id) if user else session.get("user_id"),
         "slack_user_id": (user.slack_user_id or None) if user else None,
         "is_admin": session_is_admin(session),

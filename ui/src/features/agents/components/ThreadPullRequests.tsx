@@ -1,4 +1,3 @@
-import { Avatar } from "@langchain/macaw-components/Avatar"
 import { Button } from "@langchain/macaw-components/Button"
 import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import {
@@ -22,6 +21,7 @@ import type {
   AgentPullRequestHealth,
   ThreadFixScope,
 } from "@/features/agents/lib/types"
+import { UserAvatar } from "@/components/UserAvatar"
 import { SplitButton } from "@/components/SplitButton"
 import { cn } from "@/lib/utils"
 
@@ -341,11 +341,7 @@ export function PullRequestHoverCard({
         <span className="truncate">{pullRequest.headRef}</span>
       </div>
       <div className="flex items-center gap-2 text-sm text-secondary">
-        <Avatar
-          size="sm"
-          label={pullRequest.author ?? "Unknown author"}
-          imageUrl={pullRequest.authorAvatarUrl ?? undefined}
-        />
+        <UserAvatar login={pullRequest.author} size="sm" />
         <span className="min-w-0 truncate">
           {pullRequest.author ?? "Unknown author"}
         </span>

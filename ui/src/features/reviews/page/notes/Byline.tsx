@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query"
 import { Avatar as MacawAvatar } from "@langchain/macaw-components/Avatar"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
@@ -7,6 +8,7 @@ import type {
   ConversationAuthor,
   ConversationReviewState,
 } from "@/features/reviews/lib/conversationApi"
+import { api } from "@/lib/api"
 import { cn, formatRelativeTime } from "@/lib/utils"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { displayName } from "@/features/reviews/lib/logins"
@@ -80,12 +82,19 @@ export function Avatar({
   size?: "xs" | "sm" | "md"
   className?: string
 }) {
+  const login = author?.bot ? undefined : author?.login
+  const profile = useQuery({
+    queryKey: ["user-avatar", login?.toLowerCase()],
+    queryFn: () => api.userAvatar(login!),
+    enabled: Boolean(login),
+    staleTime: 5 * 60_000,
+  })
   return (
     <MacawAvatar
       size={size}
       shape={author?.bot ? "square" : "circle"}
       label={displayName(author)}
-      imageUrl={author?.avatar_url || undefined}
+      imageUrl={profile.data?.avatar_url || author?.avatar_url || undefined}
       fallbackIcon={<AgentMark className="size-[70%]" />}
       className={cn("shrink-0", className)}
     />

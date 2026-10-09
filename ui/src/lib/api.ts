@@ -1452,6 +1452,10 @@ function pullRequestThread(
 }
 
 export const api = {
+  userAvatar: (login: string) =>
+    request<{ avatar_url: string }>(
+      `/users/${encodeURIComponent(login)}/avatar`
+    ),
   recordPageView: (page_name: string) =>
     request<void>("/analytics/page", {
       method: "POST",

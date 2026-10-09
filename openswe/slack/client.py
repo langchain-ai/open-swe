@@ -1446,7 +1446,7 @@ async def remove_slack_reaction(channel_id: str, message_ts: str, emoji: str) ->
 
 
 async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
-    """Get Slack user details by user ID."""
+    """Get current Slack user details without a cached identity fallback."""
     if not SLACK_BOT_TOKEN:
         return None
     try:
