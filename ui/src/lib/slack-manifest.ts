@@ -59,6 +59,14 @@ export function slackAppManifest(
       messages_tab_read_only_enabled: false,
     },
     bot_user: { display_name: "Open SWE", always_online: true },
+    shortcuts: [
+      {
+        name: "Explain This",
+        type: "message",
+        callback_id: "open_swe_explain",
+        description: "Ask Open SWE to explain this message",
+      },
+    ],
     slash_commands: [
       {
         command: ASK_COMMAND,
