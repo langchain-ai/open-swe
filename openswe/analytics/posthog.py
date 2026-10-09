@@ -23,7 +23,25 @@ async def _capture(
         "api_key": key,
         "event": event,
         "properties": {
-            **properties,
+            **{
+                key: value
+                for key, value in properties.items()
+                if key
+                in {
+                    "distinct_id",
+                    "$process_person_profile",
+                    "page_name",
+                    "tool",
+                    "is_error",
+                    "surface",
+                    "source",
+                    "event_type",
+                    "action",
+                    "workspace_id",
+                    "repository_id",
+                    "pull_request_id",
+                }
+            },
             "product": "open-swe",
             "environment": ENV.DD_ENV.get(),
             "$ip": "0.0.0.0",
@@ -45,7 +63,6 @@ async def _capture(
 async def record_usage(
     *,
     login: str,
-    email: str | None,
     event_type: str,
     name: str,
     properties: dict[str, str | bool],
@@ -62,7 +79,7 @@ async def record_usage(
             {
                 **properties,
                 "distinct_id": str(user.id),
-                "$set": {"email": email, "github_login": login, "product": "open-swe"},
+                "$process_person_profile": False,
             },
         )
     except Exception:
@@ -102,7 +119,6 @@ async def record_mcp_tool(tool: str, is_error: bool) -> None:
         cfg = RunConfig.from_config(get_config())
         await record_usage(
             login=cfg.github_login or "",
-            email=cfg.user_email,
             event_type="track",
             name="MCP Tool Called",
             properties={"tool": tool, "surface": "mcp", "is_error": is_error},

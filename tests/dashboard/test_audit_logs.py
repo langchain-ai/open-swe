@@ -166,7 +166,6 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
     assert page_views == [
         {
             "login": "alice",
-            "email": None,
             "event_type": "page",
             "name": "agents",
             "properties": {"page_name": "agents", "surface": "dashboard"},
