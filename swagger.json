@@ -4729,6 +4729,61 @@
         "title": "PullRequestThreadStatus",
         "type": "object"
       },
+      "QueuedPreview": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
+          },
+          "sender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "sender",
+          "platform",
+          "queued_at"
+        ],
+        "title": "QueuedPreview",
+        "type": "object"
+      },
       "ReasoningParam": {
         "properties": {
           "effort": {
@@ -19122,6 +19177,58 @@
           }
         ],
         "summary": "Api Get Thread Pull Request Status",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/queued-messages": {
+      "get": {
+        "operationId": "api_get_thread_queued_messages_dashboard_api_threads__thread_id__queued_messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QueuedPreview"
+                  },
+                  "title": "Response Api Get Thread Queued Messages Dashboard Api Threads  Thread Id  Queued Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Queued Messages",
         "tags": [
           "dashboard",
           "threads"
