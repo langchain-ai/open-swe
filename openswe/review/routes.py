@@ -58,7 +58,6 @@ from openswe.review.reviews import (
     get_review_diff,
     get_review_file_contents,
     get_review_summaries,
-    list_review_comments,
     list_reviews,
     post_review_comment,
     proxy_pr_image,
@@ -66,7 +65,6 @@ from openswe.review.reviews import (
     trigger_re_review,
     trigger_review_scout,
     update_pending_review_comment,
-    update_review_comment,
 )
 from openswe.review.session import ReviewSession
 from openswe.review.style_jobs import (
@@ -396,17 +394,6 @@ async def api_dismiss_walkthrough(
     return WalkthroughDismissed(dismissed=await Walkthrough.dismiss(owner, repo, pr_number))
 
 
-@router.get("/reviews/{owner}/{repo}/{pr_number}/comments")
-async def api_list_review_comments(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await list_review_comments(owner, repo, pr_number)
-
-
 @router.post("/reviews/{owner}/{repo}/{pr_number}/comments")
 @audit_endpoint
 async def api_post_review_comment(
@@ -525,38 +512,6 @@ async def api_discard_pending_review(
         discarded=await discard_pending_review(
             owner, repo, pr_number, token=token, login=session["sub"]
         )
-    )
-
-
-class ReviewCommentUpdate(BaseModel):
-    body: str
-
-
-@router.patch("/reviews/{owner}/{repo}/{pr_number}/comments/{comment_id}")
-@audit_endpoint
-async def api_update_review_comment(
-    owner: str,
-    repo: str,
-    pr_number: int,
-    comment_id: int,
-    comment: ReviewCommentUpdate,
-    session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    body = comment.body.strip()
-    if not body:
-        raise HTTPException(422, "comment body is required")
-    token = await get_valid_access_token(session["sub"])
-    if not token:
-        raise HTTPException(401, "GitHub re-auth required")
-    return await update_review_comment(
-        owner,
-        repo,
-        pr_number,
-        comment_id,
-        token=token,
-        viewer_login=session["sub"],
-        body=body,
     )
 
 

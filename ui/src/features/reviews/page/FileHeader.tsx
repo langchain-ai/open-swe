@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import {
   ArrowSquareOutIcon,
   CaretDownIcon,
@@ -6,20 +5,21 @@ import {
   CheckIcon,
   CopyIcon,
 } from "@phosphor-icons/react"
-import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
+import { copyText } from "@/features/reviews/lib/copyText"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { AgentMark } from "./AgentMark"
 import { isRenderable } from "./diffEntries"
-import { useEntry, FILE_HEADER_HEIGHT } from "./entries"
-import {
-  findingGroupColor,
-  isAnchored,
-  threadsNeedingAttention,
-} from "./findings"
-import { reviewQueries, type PullRequestRef } from "./queries"
-import { useReviewPage } from "./store"
+import { useEntry, useMarkers } from "./entries"
+import { findingGroupColor, findingTarget, threadTarget } from "./findings"
+import type { PullRequestRef } from "./queries"
+import { isCollapsed, useReviewPage } from "./store"
+import { Tag } from "./Tag"
+import { plural, splitPath } from "./text"
+
+export const FILE_HEADER_HEIGHT = 40
 
 const statusLabel = {
   added: "Added",
@@ -28,37 +28,31 @@ const statusLabel = {
   modified: null,
 } as const
 
+const iconButton =
+  "flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+// Shown while the header is hovered or holds focus, so keyboards reach them too.
+const onHover = "hidden group-focus-within/header:flex group-hover/header:flex"
+
 /** The sticky bar above each file: where it is, what it holds, and whether you've read it. */
 export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
   const entry = useEntry(id)
   const path = entry?.file.path ?? ""
   const viewed = useReviewPage((state) => state.viewed.has(path))
-  const flipped = useReviewPage((state) => state.collapsed.has(path))
+  const collapsed = useReviewPage((state) => isCollapsed(state, path))
   const markViewed = useReviewPage((state) => state.markViewed)
   const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const askInChat = useReviewPage((state) => state.askInChat)
   const jumpTo = useReviewPage((state) => state.jumpTo)
-  const setExpandedFinding = useReviewPage((state) => state.setExpandedFinding)
-  const detail = useQuery(reviewQueries.detail(pr)).data
-  const conversation = useQuery(reviewQueries.conversation(pr)).data
+  const showFinding = useReviewPage((state) => state.showFinding)
+  const { findings, threads } = useMarkers(path)
   if (!entry) return null
   const { file } = entry
   const renderable = isRenderable(file)
-  const collapsed = !renderable || viewed !== flipped
-  const findings = (detail?.findings ?? []).filter(
-    (finding) =>
-      finding.file === path && finding.status === "open" && isAnchored(finding)
-  )
-  const openThreads = threadsNeedingAttention(
-    conversation?.threads ?? [],
-    detail?.findings ?? []
-  ).filter((thread) => thread.path === path)
-  const threads = openThreads.length
-  const slash = path.lastIndexOf("/")
-  const dir = slash >= 0 ? path.slice(0, slash + 1) : ""
-  const name = path.slice(slash + 1)
+  const folded = !renderable || collapsed
+  const { dir, name } = splitPath(path)
   const status = statusLabel[file.status]
-  const worst = findings.find((f) => f.group === "bug") ?? findings[0]
+  const worst = findings[0]
+  const firstThread = threads[0]
 
   return (
     <div
@@ -74,28 +68,33 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
               console.warn("Could not prefetch file contents", { path, error })
           )
       }}
+      // Clicking the bar's empty space folds the file, as on GitHub.
       onClick={(event) => {
-        if (event.target === event.currentTarget && renderable)
+        if (
+          renderable &&
+          event.target instanceof Element &&
+          !event.target.closest("button, a")
+        )
           toggleCollapsed(path)
       }}
       style={{ height: FILE_HEADER_HEIGHT }}
       className={cn(
         "group/header flex items-center gap-2 border-b border-border bg-[color-mix(in_oklab,var(--background)_94%,var(--foreground))] px-2.5 font-sans text-xs",
-        collapsed && "border-b-transparent"
+        folded && "border-b-transparent"
       )}
     >
       <button
         type="button"
-        aria-label={collapsed ? `Expand ${path}` : `Collapse ${path}`}
-        aria-expanded={!collapsed}
+        aria-label={folded ? `Expand ${path}` : `Collapse ${path}`}
+        aria-expanded={!folded}
         disabled={!renderable}
         onClick={() => toggleCollapsed(path)}
-        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+        className={cn(iconButton, "disabled:opacity-40")}
       >
         <CaretDownIcon
           className={cn(
             "size-3.5 transition-transform",
-            collapsed && "-rotate-90"
+            folded && "-rotate-90"
           )}
         />
       </button>
@@ -126,20 +125,12 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       <button
         type="button"
         aria-label={`Copy ${path}`}
-        onClick={() =>
-          void navigator.clipboard
-            .writeText(path)
-            .then(() => toast.success("Copied the path"))
-        }
-        className="hidden size-5 shrink-0 items-center justify-center rounded text-muted-foreground group-focus-within/header:flex group-hover/header:flex hover:text-foreground"
+        onClick={() => copyText(path, "Copied the path")}
+        className={cn(iconButton, onHover, "size-5")}
       >
         <CopyIcon className="size-3" />
       </button>
-      {status && (
-        <span className="shrink-0 rounded-[4px] border border-border px-1 text-[10px] leading-4 text-muted-foreground max-sm:hidden">
-          {status}
-        </span>
-      )}
+      {status && <Tag className="max-sm:hidden">{status}</Tag>}
       <span className="flex shrink-0 gap-1.5 font-mono text-[11px] tabular-nums">
         {entry.additions > 0 && (
           <span className="text-success-foreground">+{entry.additions}</span>
@@ -153,42 +144,24 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       {worst && (
         <button
           type="button"
-          onClick={() => {
-            setExpandedFinding(worst.id)
-            jumpTo({
-              kind: "line",
-              path,
-              line: worst.end_line ?? 1,
-              start: worst.start_line ?? undefined,
-              side: worst.side,
-            })
-          }}
+          onClick={() => showFinding(worst.id, findingTarget(worst))}
           className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] hover:bg-accent"
           style={{ color: findingGroupColor[worst.group] }}
-          title={`${findings.length} open finding${findings.length === 1 ? "" : "s"} from Open SWE; go to the first`}
+          title={`${plural(findings.length, "open finding")} from Open SWE; go to the worst`}
         >
           <AgentMark className="size-3" />
           {findings.length}
         </button>
       )}
-      {threads > 0 && (
+      {firstThread && (
         <button
           type="button"
-          onClick={() => {
-            const first = openThreads[0]
-            if (first?.line != null)
-              jumpTo({
-                kind: "line",
-                path,
-                line: first.line,
-                side: first.side,
-              })
-          }}
+          onClick={() => jumpTo(threadTarget(firstThread))}
           className="flex shrink-0 items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          title={`${threads} open conversation${threads === 1 ? "" : "s"}; go to the first`}
+          title={`${plural(threads.length, "open conversation")}; go to the first`}
         >
           <ChatCircleIcon className="size-3" />
-          {threads}
+          {threads.length}
         </button>
       )}
       {!renderable && (
@@ -196,25 +169,25 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
           Binary or too large to show
         </span>
       )}
-      <span
-        className="flex-1"
-        onClick={() => renderable && toggleCollapsed(path)}
-      />
+      <span className="flex-1" />
       <button
         type="button"
         onClick={() => askInChat(`About \`${path}\` in this pull request: `)}
         aria-label={`Ask Open SWE about ${path}`}
-        className="hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground group-focus-within/header:flex group-hover/header:flex hover:bg-accent hover:text-foreground"
+        className={cn(
+          onHover,
+          "shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        )}
       >
         <AgentMark className="size-3" />
         Ask
       </button>
       <a
-        href={`https://github.com/${pr.owner}/${pr.repo}/blob/${file.headSha}/${path}`}
+        href={githubUrls.file(pr, file.headSha, path)}
         target="_blank"
         rel="noreferrer"
         aria-label={`View ${path} on GitHub`}
-        className="hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground group-focus-within/header:flex group-hover/header:flex hover:bg-accent hover:text-foreground"
+        className={cn(iconButton, onHover)}
       >
         <ArrowSquareOutIcon className="size-3.5" />
       </a>

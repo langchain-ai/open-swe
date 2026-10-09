@@ -183,12 +183,12 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
         True,
     )
     assert isinstance(first, ConversationReview)
-    assert (first.id, first.state, first.inline_comment_count) == (12, "CHANGES_REQUESTED", 2)
+    assert (first.id, first.state) == (12, "CHANGES_REQUESTED")
     assert isinstance(last, ConversationComment)
     assert (last.id, last.author, last.body) == (2, None, "")
     approved = items[-2]
     assert isinstance(approved, ConversationReview)
-    assert (approved.id, approved.state, approved.inline_comment_count) == (10, "APPROVED", 1)
+    assert (approved.id, approved.state) == (10, "APPROVED")
     assert 11 not in {getattr(item, "id", None) for item in items}
     assert [item.created_at for item in items] == sorted(item.created_at for item in items)
 

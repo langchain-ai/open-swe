@@ -5,12 +5,18 @@ import type { SelectedLineRange } from "@pierre/diffs"
 import type { PullRequestReviewEvent } from "@/lib/api"
 import type { DiffStyle } from "@/features/agents/utils/diffUtils"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
-import type { PullRequestRef } from "./queries"
+import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
+import { rangeBounds } from "@/features/reviews/lib/lineRange"
+import {
+  readPreference,
+  writePreference,
+} from "@/features/reviews/lib/preferences"
+import type { PullRequestRef } from "@/features/reviews/lib/reviewKeys"
+import { findEntry, type DiffEntry } from "./diffEntries"
 
 export type RailTab = "chat" | "discussion"
 export type DiffOrder = "files" | "guide"
 
-/** Where the diff should scroll: a file, or a line in it. */
 export type DiffTarget =
   | { kind: "top" }
   | { kind: "file"; path: string }
@@ -19,10 +25,12 @@ export type DiffTarget =
       kind: "line"
       path: string
       line: number
-      side: "LEFT" | "RIGHT"
+      side: DiffSide
       /** First line of a multi-line target; the whole range is highlighted. */
       start?: number
     }
+
+export type LineTarget = Extract<DiffTarget, { kind: "line" }>
 
 export interface CommentDraftTarget {
   path: string
@@ -31,6 +39,8 @@ export interface CommentDraftTarget {
 
 interface ReviewPageState {
   pr: PullRequestRef | null
+  /** The head the viewed marks belong to; a push starts them over. */
+  viewedSha: string | null
   railTab: RailTab
   /** Below the wide breakpoint the rail is an overlay; on wide screens it is the focus-mode toggle. */
   railOpen: boolean
@@ -61,12 +71,13 @@ interface ReviewPageState {
   findingsKey: number
   /** Files whose collapsed state the viewer flipped away from the default (viewed = collapsed). */
   collapsed: ReadonlySet<string>
-  /** The diff's entries in reading order. */
-  entryOrder: ReadonlyArray<{ id: string; path: string }>
+  entryOrder: ReadonlyArray<DiffEntry>
   /** Narrows the diff, the file tree and the walkthrough to matching paths. */
   fileFilter: string
   /** Whether the status card is on screen; when it isn't, the header carries its sentence. */
   standingInView: boolean
+  /** The finding or thread n/p last landed on, so they move on from it even after the list changes. */
+  lastStop: string | null
 }
 
 interface ReviewPageActions {
@@ -79,12 +90,14 @@ interface ReviewPageActions {
   setReviewOpen: (open: boolean) => void
   setOrder: (order: DiffOrder) => void
   setDiffStyle: (style: DiffStyle) => void
-  toggleViewed: (path: string) => boolean
   setActive: (entry: { id: string; path: string } | null) => void
   jumpTo: (target: DiffTarget) => void
+  /** Opens a finding's note and brings its lines into view. */
+  showFinding: (id: string, target: DiffTarget) => void
   setComposer: (target: CommentDraftTarget | null) => void
   setComposerText: (text: string) => void
   setExpandedFinding: (id: string | null) => void
+  focusChat: () => void
   askInChat: (text: string) => void
   attachToChat: (excerpts: ReadonlyArray<CodeExcerpt>, question: string) => void
   removeChatExcerpt: (index: number) => void
@@ -92,7 +105,7 @@ interface ReviewPageActions {
   showOpenConversations: () => void
   showFindings: () => void
   toggleCollapsed: (path: string) => void
-  setEntryOrder: (entries: ReadonlyArray<{ id: string; path: string }>) => void
+  setEntryOrder: (entries: ReadonlyArray<DiffEntry>) => void
   setFileFilter: (filter: string) => void
   setStandingInView: (inView: boolean) => void
   /** Marks an entry's file viewed (or not); from the file being read, moves on to the next unread one. */
@@ -107,23 +120,6 @@ const NAVIGATOR_KEY = "open-swe.review.navigator"
 /** Wide enough for the file list, the diff and the chat side by side. */
 export const NAVIGATOR_INLINE_QUERY = "(min-width: 1360px)"
 
-function read(key: string): string | null {
-  try {
-    return window.localStorage.getItem(key)
-  } catch (error) {
-    console.warn("Could not read a review page preference", { key, error })
-    return null
-  }
-}
-
-function write(key: string, value: string): void {
-  try {
-    window.localStorage.setItem(key, value)
-  } catch (error) {
-    console.warn("Could not save a review page preference", { key, error })
-  }
-}
-
 function viewedKey(pr: PullRequestRef, headSha: string | null): string {
   return `open-swe.review.viewed.${pr.owner}/${pr.repo}/${pr.number}.${headSha ?? ""}`
 }
@@ -135,7 +131,7 @@ function samePullRequest(a: PullRequestRef | null, b: PullRequestRef): boolean {
 }
 
 function readViewed(pr: PullRequestRef, headSha: string | null): Set<string> {
-  const raw = read(viewedKey(pr, headSha))
+  const raw = readPreference(viewedKey(pr, headSha))
   if (!raw) return new Set()
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -150,12 +146,38 @@ function readViewed(pr: PullRequestRef, headSha: string | null): Set<string> {
   }
 }
 
-let headShaForViewed: string | null = null
-let jumpKey = 0
+function excerptKey(excerpt: CodeExcerpt): string {
+  return `${excerpt.path}:${excerpt.lineLabel}`
+}
 
-export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
-  (set, get) => ({
+/** Viewed files start collapsed; the viewer can flip either way. */
+export function isCollapsed(
+  state: Pick<ReviewPageState, "viewed" | "collapsed">,
+  path: string
+): boolean {
+  return state.viewed.has(path) !== state.collapsed.has(path)
+}
+
+export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
+  set,
+  get
+) => {
+  const toggleViewed = (path: string): boolean => {
+    const { pr, viewed, viewedSha, collapsed } = get()
+    const next = new Set(viewed)
+    const nowViewed = !next.has(path)
+    if (nowViewed) next.add(path)
+    else next.delete(path)
+    if (pr) writePreference(viewedKey(pr, viewedSha), JSON.stringify([...next]))
+    const flipped = new Set(collapsed)
+    flipped.delete(path)
+    set({ viewed: next, collapsed: flipped })
+    return nowViewed
+  }
+
+  return {
     pr: null,
+    viewedSha: null,
     railTab: "chat",
     railOpen: false,
     navigatorOpen: true,
@@ -179,14 +201,14 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
     entryOrder: [],
     fileFilter: "",
     standingInView: true,
+    lastStop: null,
 
     open: (pr, headSha) => {
       const samePr = samePullRequest(get().pr, pr)
-      if (samePr && headShaForViewed === headSha) return
-      headShaForViewed = headSha
-      const storedOrder = read(ORDER_KEY)
+      if (samePr && get().viewedSha === headSha) return
       set({
         pr,
+        viewedSha: headSha,
         viewed: readViewed(pr, headSha),
         ...(samePr
           ? {}
@@ -203,10 +225,14 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
               chatExcerpts: [],
               fileFilter: "",
               collapsed: new Set(),
+              lastStop: null,
               // A walkthrough, when one exists, is the default reading order.
-              order: storedOrder === "files" ? "files" : "guide",
-              diffStyle: read(DIFF_STYLE_KEY) === "split" ? "split" : "unified",
-              navigatorOpen: read(NAVIGATOR_KEY) !== "closed",
+              order: readPreference(ORDER_KEY) === "files" ? "files" : "guide",
+              diffStyle:
+                readPreference(DIFF_STYLE_KEY) === "split"
+                  ? "split"
+                  : "unified",
+              navigatorOpen: readPreference(NAVIGATOR_KEY) !== "closed",
             }),
       })
     },
@@ -218,7 +244,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
         return
       }
       const navigatorOpen = !get().navigatorOpen
-      write(NAVIGATOR_KEY, navigatorOpen ? "open" : "closed")
+      writePreference(NAVIGATOR_KEY, navigatorOpen ? "open" : "closed")
       set({ navigatorOpen })
     },
     setNavigatorOverlay: (navigatorOverlay) => set({ navigatorOverlay }),
@@ -226,24 +252,12 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
       set({ reviewOpen: true, reviewVerdict: verdict }),
     setReviewOpen: (reviewOpen) => set({ reviewOpen }),
     setOrder: (order) => {
-      write(ORDER_KEY, order)
+      writePreference(ORDER_KEY, order)
       set({ order })
     },
     setDiffStyle: (diffStyle) => {
-      write(DIFF_STYLE_KEY, diffStyle)
+      writePreference(DIFF_STYLE_KEY, diffStyle)
       set({ diffStyle })
-    },
-    toggleViewed: (path) => {
-      const { pr, viewed } = get()
-      const next = new Set(viewed)
-      const nowViewed = !next.has(path)
-      if (nowViewed) next.add(path)
-      else next.delete(path)
-      if (pr) write(viewedKey(pr, headShaForViewed), JSON.stringify([...next]))
-      const collapsed = new Set(get().collapsed)
-      collapsed.delete(path)
-      set({ viewed: next, collapsed })
-      return nowViewed
     },
     setActive: (entry) => {
       const activeEntry = entry?.id ?? null
@@ -251,21 +265,20 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
         set({ activeEntry, activePath: entry?.path ?? null })
     },
     jumpTo: (target) => {
-      jumpKey += 1
       // Claim the target now so a key pressed before the scroll settles moves on from it.
       const landing =
-        target.kind === "entry"
-          ? get().entryOrder.find((entry) => entry.id === target.id)
-          : target.kind === "file"
-            ? get().entryOrder.find((entry) => entry.path === target.path)
-            : undefined
+        target.kind === "top" ? undefined : findEntry(get().entryOrder, target)
       set({
-        jump: { key: jumpKey, target },
+        jump: { key: (get().jump?.key ?? 0) + 1, target },
         navigatorOverlay: false,
         ...(landing
-          ? { activeEntry: landing.id, activePath: landing.path }
+          ? { activeEntry: landing.id, activePath: landing.file.path }
           : {}),
       })
+    },
+    showFinding: (id, target) => {
+      set({ expandedFinding: id })
+      get().jumpTo(target)
     },
     setComposer: (composer) => {
       const current = get().composer
@@ -274,19 +287,11 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
         return
       }
       if (current && get().composerText.trim()) {
-        const end = Math.max(current.range.start, current.range.end)
+        const { hi, side } = rangeBounds(current.range)
         toast("Finish or cancel the comment you started first", {
           id: "review-composer-busy",
         })
-        get().jumpTo({
-          kind: "line",
-          path: current.path,
-          line: end,
-          side:
-            (current.range.endSide ?? current.range.side) === "deletions"
-              ? "LEFT"
-              : "RIGHT",
-        })
+        get().jumpTo({ kind: "line", path: current.path, line: hi, side })
         return
       }
       set({ composer, composerText: "" })
@@ -303,28 +308,24 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
       set({ findingsKey: get().findingsKey + 1 })
       get().jumpTo({ kind: "top" })
     },
-    askInChat: (text) => {
-      const key = (get().chatDraft?.key ?? 0) + 1
-      set({ chatDraft: { key, text }, railTab: "chat", railOpen: true })
+    focusChat: () => {
+      set({ railTab: "chat", railOpen: true })
       focusChatComposer()
     },
+    askInChat: (text) => {
+      set({ chatDraft: { key: (get().chatDraft?.key ?? 0) + 1, text } })
+      get().focusChat()
+    },
     attachToChat: (excerpts, question) => {
-      const known = new Set(
-        get().chatExcerpts.map((item) => `${item.path}:${item.lineLabel}`)
-      )
+      const known = new Set(get().chatExcerpts.map(excerptKey))
       set({
         chatExcerpts: [
           ...get().chatExcerpts,
-          ...excerpts.filter(
-            (item) => !known.has(`${item.path}:${item.lineLabel}`)
-          ),
+          ...excerpts.filter((item) => !known.has(excerptKey(item))),
         ],
       })
       if (question) get().askInChat(question)
-      else {
-        set({ railTab: "chat", railOpen: true })
-        focusChatComposer()
-      }
+      else get().focusChat()
     },
     removeChatExcerpt: (index) =>
       set({
@@ -337,29 +338,27 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
       if (get().standingInView !== standingInView) set({ standingInView })
     },
     markViewed: (id) => {
-      const { entryOrder, activeEntry, toggleViewed, jumpTo } = get()
+      const { entryOrder, activeEntry, jumpTo } = get()
       const index = entryOrder.findIndex((entry) => entry.id === id)
       const entry = entryOrder[index]
       if (!entry) return
-      const reading = activeEntry === id
-      const nowViewed = toggleViewed(entry.path)
-      if (!reading) return
-      const viewed = get().viewed
+      const nowViewed = toggleViewed(entry.file.path)
+      if (activeEntry !== id) return
+      const { viewed } = get()
       const next = nowViewed
         ? entryOrder
             .slice(index + 1)
-            .find((candidate) => !viewed.has(candidate.path))
+            .find((candidate) => !viewed.has(candidate.file.path))
         : undefined
       jumpTo({ kind: "entry", id: (next ?? entry).id })
     },
     jumpToUnviewed: () => {
       const { entryOrder, activeEntry, viewed, jumpTo } = get()
       const from = entryOrder.findIndex((entry) => entry.id === activeEntry)
-      const ordered = [
+      const next = [
         ...entryOrder.slice(from + 1),
         ...entryOrder.slice(0, from + 1),
-      ]
-      const next = ordered.find((entry) => !viewed.has(entry.path))
+      ].find((entry) => !viewed.has(entry.file.path))
       if (next) jumpTo({ kind: "entry", id: next.id })
     },
     toggleCollapsed: (path) => {
@@ -368,11 +367,11 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()(
       else next.add(path)
       set({ collapsed: next })
     },
-  })
-)
+  }
+})
 
 /** The chat composer lives in the agents thread view; reach it through the DOM. */
-export function focusChatComposer(): void {
+function focusChatComposer(): void {
   requestAnimationFrame(() => {
     const editor = document.querySelector<HTMLElement>(
       '[data-review-rail] [data-testid="composer-editor"]'

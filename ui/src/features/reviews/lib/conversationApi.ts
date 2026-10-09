@@ -2,6 +2,8 @@ import {
   dashboardApiUrl,
   dashboardForwardedHeaders,
 } from "@/lib/dashboard-fetch"
+import type { DiffSide } from "@/features/reviews/lib/chatDiffActions"
+import type { PullRequestRef } from "@/features/reviews/lib/reviewKeys"
 
 export type ConversationReviewState =
   | "APPROVED"
@@ -17,7 +19,7 @@ export interface ConversationAuthor {
   posted_by: string | null
 }
 
-interface ConversationItemBase {
+interface Posted {
   id: number
   author: ConversationAuthor | null
   created_at: string
@@ -25,14 +27,13 @@ interface ConversationItemBase {
   html_url: string
 }
 
-export interface ConversationComment extends ConversationItemBase {
+export interface ConversationComment extends Posted {
   kind: "comment"
 }
 
-export interface ConversationReview extends ConversationItemBase {
+export interface ConversationReview extends Posted {
   kind: "review"
   state: ConversationReviewState
-  inline_comment_count: number
 }
 
 export interface ConversationCommit {
@@ -49,30 +50,24 @@ export type ConversationItem =
   | ConversationReview
   | ConversationCommit
 
-export interface ThreadComment {
-  id: number
+export interface ThreadComment extends Posted {
   /** The review this comment was submitted with; a reply is its own review on GitHub. */
   review_id: number | null
-  author: ConversationAuthor | null
-  created_at: string
-  body: string
-  html_url: string
 }
 
 /** An inline thread: its first comment's anchor, then every reply in order. */
 export interface ReviewThread {
   id: number
   node_id: string | null
-  review_id: number | null
   path: string
   line: number | null
   start_line: number | null
-  side: "LEFT" | "RIGHT"
+  side: DiffSide
   original_line: number | null
   diff_hunk: string
   outdated: boolean
   resolved: boolean
-  comments: Array<ThreadComment>
+  comments: [ThreadComment, ...Array<ThreadComment>]
 }
 
 export interface Conversation {
@@ -80,15 +75,7 @@ export interface Conversation {
   threads: Array<ReviewThread>
 }
 
-export function reviewConversationQueryKey(
-  owner: string,
-  repo: string,
-  number: number
-): ReadonlyArray<string | number> {
-  return ["review-conversation", owner, repo, number]
-}
-
-function reviewPath(owner: string, repo: string, number: number) {
+function reviewPath({ owner, repo, number }: PullRequestRef) {
   return `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`
 }
 
@@ -105,10 +92,7 @@ async function errorDetail(res: Response): Promise<string> {
   return res.statusText || `Request failed (${res.status})`
 }
 
-async function conversationRequest(
-  path: string,
-  init: RequestInit = {}
-): Promise<Response> {
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(dashboardApiUrl(path), {
     ...init,
     credentials: "include",
@@ -122,53 +106,44 @@ async function conversationRequest(
   return res
 }
 
-export async function getReviewConversation(
-  owner: string,
-  repo: string,
-  number: number
-): Promise<Conversation> {
-  const res = await conversationRequest(
-    `${reviewPath(owner, repo, number)}/conversation`
-  )
-  return (await res.json()) as Conversation
+async function read<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await (await send(path, init)).json()) as T
 }
 
-export async function postReviewConversationComment(
-  owner: string,
-  repo: string,
-  number: number,
+export function getReviewConversation(
+  pr: PullRequestRef
+): Promise<Conversation> {
+  return read<Conversation>(`${reviewPath(pr)}/conversation`)
+}
+
+export function postReviewConversationComment(
+  pr: PullRequestRef,
   body: string
 ): Promise<ConversationComment> {
-  const res = await conversationRequest(
-    `${reviewPath(owner, repo, number)}/conversation/comments`,
-    { method: "POST", body: JSON.stringify({ body }) }
-  )
-  return (await res.json()) as ConversationComment
+  return read<ConversationComment>(`${reviewPath(pr)}/conversation/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  })
 }
 
-export async function replyToReviewThread(
-  owner: string,
-  repo: string,
-  number: number,
+export function replyToReviewThread(
+  pr: PullRequestRef,
   commentId: number,
   body: string
 ): Promise<ThreadComment> {
-  const res = await conversationRequest(
-    `${reviewPath(owner, repo, number)}/threads/${commentId}/replies`,
-    { method: "POST", body: JSON.stringify({ body }) }
-  )
-  return (await res.json()) as ThreadComment
+  return read<ThreadComment>(`${reviewPath(pr)}/threads/${commentId}/replies`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
+  })
 }
 
 export async function setReviewThreadResolved(
-  owner: string,
-  repo: string,
-  number: number,
+  pr: PullRequestRef,
   threadNodeId: string,
   resolved: boolean
 ): Promise<void> {
-  await conversationRequest(
-    `${reviewPath(owner, repo, number)}/threads/${encodeURIComponent(threadNodeId)}/resolution`,
+  await send(
+    `${reviewPath(pr)}/threads/${encodeURIComponent(threadNodeId)}/resolution`,
     { method: "PUT", body: JSON.stringify({ resolved }) }
   )
 }

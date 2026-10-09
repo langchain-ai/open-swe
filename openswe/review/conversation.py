@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import re
-from collections import Counter
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -164,7 +163,6 @@ class ConversationReview(BaseModel):
     body: str
     html_url: str
     state: ReviewState
-    inline_comment_count: int
 
 
 class ConversationCommit(BaseModel):
@@ -196,7 +194,6 @@ class ReviewThread(BaseModel):
 
     id: int
     node_id: str | None
-    review_id: int | None
     path: str
     line: int | None
     start_line: int | None
@@ -295,12 +292,8 @@ def _thread_comment(comment: _GitHubReviewComment) -> ThreadComment:
 def build_timeline(
     comments: list[_GitHubIssueComment],
     reviews: list[_GitHubReview],
-    review_comments: list[_GitHubReviewComment],
     commits: list[_GitHubCommit],
 ) -> list[ConversationItem]:
-    inline_counts = Counter(
-        c.pull_request_review_id for c in review_comments if c.pull_request_review_id is not None
-    )
     items: list[ConversationItem] = [_comment_item(comment) for comment in comments]
     for review in reviews:
         if review.state not in _REVIEW_STATES or review.submitted_at is None:
@@ -313,7 +306,6 @@ def build_timeline(
                 body=_display_body(review.body),
                 html_url=review.html_url,
                 state=_REVIEW_STATE.validate_python(review.state),
-                inline_comment_count=inline_counts[review.id],
             )
         )
     items.extend(
@@ -348,7 +340,6 @@ def build_threads(
             ReviewThread(
                 id=root.id,
                 node_id=state.id if state else None,
-                review_id=root.pull_request_review_id,
                 path=root.path,
                 line=root.line,
                 start_line=root.start_line,
@@ -453,27 +444,20 @@ class PullRequestConversation:
             items=build_timeline(
                 _ISSUE_COMMENTS.validate_python(raw_comments),
                 reviews,
-                review_comments,
                 _COMMITS.validate_python(raw_commits),
             ),
             threads=build_threads(review_comments, states),
         )
 
     async def comment(self, body: str) -> ConversationComment:
-        response = await self.repo.github.request(
-            "POST",
-            f"repos/{self.repo.full_name}/issues/{self.number}/comments",
-            json={"body": body},
-        )
-        return _comment_item(_GitHubIssueComment.model_validate(response.json()))
+        created = await self.repo.post(f"issues/{self.number}/comments", {"body": body})
+        return _comment_item(_GitHubIssueComment.model_validate(created))
 
     async def reply(self, comment_id: int, body: str) -> ThreadComment:
-        response = await self.repo.github.request(
-            "POST",
-            f"repos/{self.repo.full_name}/pulls/{self.number}/comments/{comment_id}/replies",
-            json={"body": body},
+        created = await self.repo.post(
+            f"pulls/{self.number}/comments/{comment_id}/replies", {"body": body}
         )
-        return _thread_comment(_GitHubReviewComment.model_validate(response.json()))
+        return _thread_comment(_GitHubReviewComment.model_validate(created))
 
     async def resolve(self, thread_node_id: str, resolved: bool) -> None:
         await self.repo.github.graphql(
@@ -514,6 +498,7 @@ async def api_post_review_conversation_comment(
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/threads/{comment_id}/replies")
+@audit_endpoint
 async def api_reply_to_review_thread(
     owner: str,
     repo: str,
@@ -530,6 +515,7 @@ async def api_reply_to_review_thread(
 @router.put(
     "/reviews/{owner}/{repo}/{pr_number}/threads/{thread_node_id}/resolution", status_code=204
 )
+@audit_endpoint
 async def api_set_review_thread_resolution(
     owner: str,
     repo: str,

@@ -8,15 +8,20 @@ import type {
   ReviewWalkthrough,
 } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
-import type { ProposedComment } from "@/features/reviews/lib/chatDiffActions"
+import type {
+  DiffSide,
+  ProposedComment,
+} from "@/features/reviews/lib/chatDiffActions"
+import { rangeBounds, toPierreSide } from "@/features/reviews/lib/lineRange"
 import {
+  patchHeader,
   rangeLineCount,
   walkthroughFileDiff,
 } from "@/features/reviews/lib/walkthroughDiff"
-import { isAnchored } from "./findings"
-import type { CommentDraftTarget, DiffOrder } from "./store"
+import { isAnchored, mirroredThreadIds, type AnchoredFinding } from "./findings"
+import type { CommentDraftTarget, DiffOrder, DiffTarget } from "./store"
 
-export interface EntryStep {
+interface EntryStep {
   index: number
   count: number
   title: string
@@ -42,7 +47,7 @@ export type Note =
   | { kind: "draft"; id: string }
   | { kind: "composer" }
 
-export type NoteAnnotation = DiffLineAnnotation<Note>
+type NoteAnnotation = DiffLineAnnotation<Note>
 
 /** Tree order, folders before files at each level, so the diff reads like the navigator. */
 export function compareTreePaths(a: string, b: string): number {
@@ -60,23 +65,18 @@ export function compareTreePaths(a: string, b: string): number {
 
 const parsed = new WeakMap<ReviewDiffFile, FileDiffMetadata>()
 
-function emptyDiff(file: ReviewDiffFile): FileDiffMetadata {
-  const header = `diff --git a/${file.previousPath ?? file.path} b/${file.path}\n--- a/${file.previousPath ?? file.path}\n+++ b/${file.path}\n`
-  return getSingularPatch(header)
-}
-
-export function wholeFileDiff(file: ReviewDiffFile): FileDiffMetadata {
+function wholeFileDiff(file: ReviewDiffFile): FileDiffMetadata {
   const cached = parsed.get(file)
   if (cached) return cached
   let diff: FileDiffMetadata
   try {
-    diff = file.patch ? getSingularPatch(file.patch) : emptyDiff(file)
+    diff = getSingularPatch(file.patch ?? patchHeader(file))
     // An added or deleted file's patch is the whole file, so there is no hidden context to offer.
     if (file.patch && (file.status === "added" || file.status === "removed"))
       diff.isPartial = false
   } catch (error) {
     console.warn("Could not parse a file's patch", { path: file.path, error })
-    diff = emptyDiff(file)
+    diff = getSingularPatch(patchHeader(file))
   }
   parsed.set(file, diff)
   return diff
@@ -86,26 +86,25 @@ export function isRenderable(file: ReviewDiffFile): boolean {
   return !file.unrenderable && file.patch !== null
 }
 
+type EntryBody = Omit<DiffEntry, "step" | "id">
+
+function whole(file: ReviewDiffFile): EntryBody {
+  return {
+    file,
+    fileDiff: wholeFileDiff(file),
+    additions: file.additions,
+    deletions: file.deletions,
+  }
+}
+
 export function buildEntries(
   files: ReadonlyArray<ReviewDiffFile>,
   walkthrough: ReviewWalkthrough | null,
   order: DiffOrder
 ): Array<DiffEntry> {
   const sorted = [...files].sort((a, b) => compareTreePaths(a.path, b.path))
-  const whole = (
-    file: ReviewDiffFile,
-    step: EntryStep | null,
-    idPrefix = ""
-  ): DiffEntry => ({
-    id: `${idPrefix}${file.path}`,
-    file,
-    fileDiff: wholeFileDiff(file),
-    additions: file.additions,
-    deletions: file.deletions,
-    step,
-  })
   if (order === "files" || !walkthrough || walkthrough.steps.length === 0)
-    return sorted.map((file) => whole(file, null))
+    return sorted.map((file) => ({ ...whole(file), id: file.path, step: null }))
 
   const byPath = new Map(sorted.map((file) => [file.path, file]))
   const seen = new Set<string>()
@@ -113,26 +112,28 @@ export function buildEntries(
   const groups: Array<{
     title: string
     summary: string
-    entries: Array<Omit<DiffEntry, "step" | "id">>
+    entries: EntryBody[]
   }> = []
   let other: (typeof groups)[number] | null = null
   for (const step of walkthrough.steps) {
-    const entries: Array<Omit<DiffEntry, "step" | "id">> = []
+    const entries: Array<EntryBody> = []
     for (const lines of step.files) {
       const file = byPath.get(lines.path)
       if (!file) continue
       // "Other changes" is for what the steps left out, not a second copy.
       if (step.other && shownWhole.has(file.path)) continue
       seen.add(file.path)
-      const hasLines = lines.added.length > 0 || lines.deleted.length > 0
-      const sliced =
-        hasLines && isRenderable(file) ? walkthroughFileDiff(file, lines) : null
-      if (!sliced) shownWhole.add(file.path)
+      const sliced = file.unrenderable ? null : walkthroughFileDiff(file, lines)
+      if (!sliced) {
+        shownWhole.add(file.path)
+        entries.push(whole(file))
+        continue
+      }
       entries.push({
         file,
-        fileDiff: sliced ?? wholeFileDiff(file),
-        additions: sliced ? rangeLineCount(lines.added) : file.additions,
-        deletions: sliced ? rangeLineCount(lines.deleted) : file.deletions,
+        fileDiff: sliced,
+        additions: rangeLineCount(lines.added),
+        deletions: rangeLineCount(lines.deleted),
       })
     }
     if (entries.length === 0) continue
@@ -144,14 +145,7 @@ export function buildEntries(
     if (step.other) other = group
     groups.push(group)
   }
-  const leftover = sorted
-    .filter((file) => !seen.has(file.path))
-    .map((file) => ({
-      file,
-      fileDiff: wholeFileDiff(file),
-      additions: file.additions,
-      deletions: file.deletions,
-    }))
+  const leftover = sorted.filter((file) => !seen.has(file.path)).map(whole)
   if (leftover.length > 0) {
     if (other) other.entries.push(...leftover)
     else
@@ -172,10 +166,10 @@ export function buildEntries(
   )
 }
 
-export function containsLine(
+function containsLine(
   diff: FileDiffMetadata,
   line: number,
-  side: "LEFT" | "RIGHT"
+  side: DiffSide
 ): boolean {
   return diff.hunks.some((hunk) =>
     side === "LEFT"
@@ -186,8 +180,34 @@ export function containsLine(
   )
 }
 
-const toSide = (side: "LEFT" | "RIGHT") =>
-  side === "LEFT" ? "deletions" : "additions"
+/** Whether this entry shows the line: a whole file always does, a guide slice only in its hunks. */
+export function entryShows(
+  entry: DiffEntry,
+  path: string,
+  line: number,
+  side: DiffSide
+): boolean {
+  return (
+    entry.file.path === path &&
+    (entry.step === null || containsLine(entry.fileDiff, line, side))
+  )
+}
+
+/** The entry a jump lands on: the one showing the line, else the file's first. */
+export function findEntry(
+  entries: ReadonlyArray<DiffEntry>,
+  target: Exclude<DiffTarget, { kind: "top" }>
+): DiffEntry | undefined {
+  if (target.kind === "entry")
+    return entries.find((entry) => entry.id === target.id)
+  const ofFile = (entry: DiffEntry) => entry.file.path === target.path
+  if (target.kind === "file") return entries.find(ofFile)
+  return (
+    entries.find((entry) =>
+      entryShows(entry, target.path, target.line, target.side)
+    ) ?? entries.find(ofFile)
+  )
+}
 
 export interface NoteSources {
   findings: ReadonlyArray<ReviewFinding>
@@ -204,62 +224,48 @@ export function entryNotes(
 ): Array<NoteAnnotation> {
   const path = entry.file.path
   const notes: Array<NoteAnnotation> = []
-  const shows = (line: number, side: "LEFT" | "RIGHT") =>
-    entry.step === null || containsLine(entry.fileDiff, line, side)
+  // Where a note goes on this entry, or null when the line isn't in it.
+  const at = (side: DiffSide, line: number) =>
+    entryShows(entry, path, line, side)
+      ? { side: toPierreSide(side), lineNumber: line }
+      : null
   if (entry.step?.first)
     notes.push({ side: "additions", lineNumber: 0, metadata: { kind: "step" } })
-  const findingThreads = new Set<number>()
-  for (const finding of sources.findings) {
-    if (finding.file !== path || !isAnchored(finding)) continue
-    if (finding.github_review_comment_id !== null)
-      findingThreads.add(finding.github_review_comment_id)
-    const line = finding.end_line as number
-    if (!shows(line, finding.side)) continue
-    notes.push({
-      side: toSide(finding.side),
-      lineNumber: line,
-      metadata: { kind: "finding", id: finding.id },
-    })
+  const anchored = sources.findings.filter(
+    (finding): finding is AnchoredFinding =>
+      finding.file === path && isAnchored(finding)
+  )
+  for (const finding of anchored) {
+    const spot = at(finding.side, finding.end_line)
+    if (spot)
+      notes.push({ ...spot, metadata: { kind: "finding", id: finding.id } })
   }
+  // A thread that's a finding's GitHub copy shows as that finding.
+  const mirrored = mirroredThreadIds(anchored)
   for (const thread of sources.threads) {
     if (thread.path !== path || thread.outdated || thread.line === null)
       continue
-    if (findingThreads.has(thread.id) || !shows(thread.line, thread.side))
-      continue
-    notes.push({
-      side: toSide(thread.side),
-      lineNumber: thread.line,
-      metadata: { kind: "thread", id: thread.id },
-    })
+    const spot = mirrored.has(thread.id) ? null : at(thread.side, thread.line)
+    if (spot)
+      notes.push({ ...spot, metadata: { kind: "thread", id: thread.id } })
   }
   for (const comment of sources.pending) {
     if (comment.path !== path || comment.line === null) continue
-    const side = comment.side ?? "RIGHT"
-    if (!shows(comment.line, side)) continue
-    notes.push({
-      side: toSide(side),
-      lineNumber: comment.line,
-      metadata: { kind: "pending", id: comment.id },
-    })
+    const spot = at(comment.side ?? "RIGHT", comment.line)
+    if (spot)
+      notes.push({ ...spot, metadata: { kind: "pending", id: comment.id } })
   }
   for (const draft of sources.drafts) {
-    if (
-      draft.range.file !== path ||
-      !shows(draft.range.endLine, draft.range.side)
-    )
-      continue
-    notes.push({
-      side: toSide(draft.range.side),
-      lineNumber: draft.range.endLine,
-      metadata: { kind: "draft", id: draft.id },
-    })
+    const spot =
+      draft.range.file === path
+        ? at(draft.range.side, draft.range.endLine)
+        : null
+    if (spot) notes.push({ ...spot, metadata: { kind: "draft", id: draft.id } })
   }
   if (sources.composer?.path === path) {
-    const { range } = sources.composer
-    const side = range.endSide ?? range.side ?? "additions"
-    const line = Math.max(range.start, range.end)
-    if (shows(line, side === "deletions" ? "LEFT" : "RIGHT"))
-      notes.push({ side, lineNumber: line, metadata: { kind: "composer" } })
+    const { hi, side } = rangeBounds(sources.composer.range)
+    const spot = at(side, hi)
+    if (spot) notes.push({ ...spot, metadata: { kind: "composer" } })
   }
   return notes
 }
@@ -283,8 +289,8 @@ export function matchesFileFilter(path: string, filter: string): boolean {
 export function filterEntries(
   entries: ReadonlyArray<DiffEntry>,
   filter: string
-): Array<DiffEntry> {
-  if (!filter.trim()) return [...entries]
+): ReadonlyArray<DiffEntry> {
+  if (!filter.trim()) return entries
   const introduced = new Set<number>()
   return entries
     .filter((entry) => matchesFileFilter(entry.file.path, filter))

@@ -5,22 +5,30 @@ import { Textarea } from "@/components/ui/textarea"
 
 /** A one-line "Reply…" that grows into a composer, as on GitHub. ⌘↩ sends. */
 export function ReplyBox({
-  onSend,
-  pending,
+  reply,
   placeholder = "Reply…",
 }: {
-  onSend: (body: string) => void
-  pending: boolean
+  reply: {
+    isPending: boolean
+    mutate: (body: string, options: { onError: () => void }) => void
+  }
   placeholder?: string
 }) {
   const [open, setOpen] = useState(false)
   const [body, setBody] = useState("")
+  const pending = reply.isPending
   const send = () => {
     const text = body.trim()
     if (!text || pending) return
-    onSend(text)
+    // The reply shows in the thread at once; a failed one comes back here to retry.
     setBody("")
     setOpen(false)
+    reply.mutate(text, {
+      onError: () => {
+        setBody(text)
+        setOpen(true)
+      },
+    })
   }
   if (!open)
     return (

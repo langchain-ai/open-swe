@@ -289,6 +289,12 @@ class RepoClient:
     async def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
         return await self.github.get(f"repos/{self.full_name}/{path}", params)
 
+    async def post(self, path: str, body: Mapping[str, object]) -> object:
+        """What GitHub created, as JSON."""
+        return (
+            await self.github.request("POST", f"repos/{self.full_name}/{path}", json=body)
+        ).json()
+
     async def pages(
         self, path: str, *, key: str | None = None, params: Mapping[str, str] | None = None
     ) -> list[dict[str, Any]]:

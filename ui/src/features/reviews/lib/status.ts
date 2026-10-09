@@ -1,4 +1,5 @@
 import type { OpenPullRequest } from "@/lib/api"
+import type { PullRequestThreadActionName } from "./threadActions"
 
 export function pullRequestKey(pr: { repo: string; number: number }) {
   return `${pr.repo}#${pr.number}`
@@ -83,6 +84,17 @@ export function hasFailingChecks(pr: OpenPullRequest) {
 // there.
 export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
+}
+
+/** What Open SWE could fix on this PR, conflicts first since they block the rest. */
+export function pullRequestFixes(
+  pr: OpenPullRequest
+): Array<PullRequestThreadActionName> {
+  return [
+    ...(isConflicted(pr) ? (["fix-conflicts"] as const) : []),
+    ...(hasFailingChecks(pr) ? (["fix-checks"] as const) : []),
+    ...(hasUnresolvedConversations(pr) ? (["address-comments"] as const) : []),
+  ]
 }
 
 // A conflicted branch cannot be updated by GitHub; the Fix action covers it.

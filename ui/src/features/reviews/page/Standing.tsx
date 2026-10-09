@@ -22,10 +22,8 @@ import type {
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn, formatRelativeTime } from "@/lib/utils"
-import type {
-  ConversationAuthor,
-  ConversationReview,
-} from "@/features/reviews/lib/conversationApi"
+import type { ConversationReview } from "@/features/reviews/lib/conversationApi"
+import { displayName, sameLogin } from "@/features/reviews/lib/logins"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -49,19 +47,28 @@ import {
   findingGroupLabel,
   findingLocation,
   findingGroupTextColor,
+  findingTarget,
   fixFinding,
   isAnchored,
-  openConversationCounts,
+  openFindingCounts,
   rankFindings,
 } from "./findings"
 import { InlineCode } from "./inlineCode"
-import { reviewQueries, type PullRequestRef } from "./queries"
+import { ProfileLink, ReviewStateMark, reviewStateWords } from "./notes/Byline"
 import {
+  reviewQueries,
+  useOpenConversations,
+  useRefreshPullRequest,
+  type PullRequestRef,
+} from "./queries"
+import {
+  isLive,
   pullRequestStanding,
   type Standing,
   type StandingTone,
 } from "./pullRequestStanding"
 import { useReviewPage } from "./store"
+import { plural } from "./text"
 
 const toneColor: Record<StandingTone, string> = {
   ready: "var(--success)",
@@ -76,14 +83,16 @@ const toneColor: Record<StandingTone, string> = {
 export function usePullRequestStanding(pr: PullRequestRef) {
   const session = useSession()
   const detail = useQuery(reviewQueries.detail(pr)).data
-  const status = useQuery(reviewQueries.status(pr)).data
-  const threads = useQuery(reviewQueries.conversation(pr)).data?.threads
+  const statusQuery = useQuery(reviewQueries.status(pr))
+  const open = useOpenConversations(pr)
   if (!detail) return null
+  // Undefined while loading; null once GitHub couldn't say.
+  const status = statusQuery.isError ? null : statusQuery.data
   return {
     detail,
     status,
     login: session.data?.login ?? "",
-    standing: pullRequestStanding(detail, status, session.data?.login, threads),
+    standing: pullRequestStanding(detail, status, session.data?.login, open),
   }
 }
 
@@ -119,6 +128,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
     (state) => state.showOpenConversations
   )
   const setStandingInView = useReviewPage((state) => state.setStandingInView)
+  const openReview = useReviewPage((state) => state.openReview)
   // Watching the card itself, so the header knows when to carry its sentence.
   const ref = useRef<HTMLElement>(null)
   const ready = current !== null
@@ -136,7 +146,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   }, [setStandingInView, ready])
   if (!current) return null
   const { detail, status, login, standing } = current
-  const open = detail.pr.state === "open"
+  const open = isLive(detail)
 
   return (
     <section
@@ -171,20 +181,18 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
             )}
           </div>
         </div>
-        {status && (
-          <NextStepAction
-            pr={pr}
-            standing={standing}
-            status={status}
-            login={login}
-          />
+        {/* Every other next step is a button in its row below. */}
+        {standing.next?.kind === "review" && (
+          <Button size="lg" onClick={() => openReview()}>
+            Review changes
+          </Button>
         )}
       </div>
       {open && status && (
         <div className="divide-y divide-border border-t border-border">
           <ChecksRow checks={detail.checks} status={status} login={login} />
-          <ReviewsRow detail={detail} status={status} login={login} />
-          <BranchRow detail={detail} status={status} login={login} />
+          <ReviewsRow pr={pr} detail={detail} status={status} login={login} />
+          <BranchRow pr={pr} detail={detail} status={status} login={login} />
           <OpenSweRow pr={pr} detail={detail} />
           {canAttemptMerge(status) && (
             <MergeRow pr={pr} status={status} baseRef={detail.pr.base_ref} />
@@ -194,6 +202,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
       {(!open || !status) && (
         <div className="divide-y divide-border border-t border-border">
           {open &&
+            status === undefined &&
             ["Checks", "Reviews"].map((label) => (
               <Row
                 key={label}
@@ -210,64 +219,40 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   )
 }
 
-/**
- * The one thing to do next. In the card a merge lives in its own row, so it
- * appears here only `inHeader`, where the header's own Review button already
- * covers a review.
- */
+/** The one thing to do next, carried in the header; its own Review button covers a review. */
 export function NextStepAction({
   pr,
   standing,
   status,
   login,
-  inHeader = false,
 }: {
   pr: PullRequestRef
   standing: Standing
   status: OpenPullRequest
   login: string
-  inHeader?: boolean
 }) {
-  const openReview = useReviewPage((state) => state.openReview)
-  const queryClient = useQueryClient()
-  const refresh = () =>
-    void queryClient.invalidateQueries({ queryKey: ["review-page-pr"] })
+  const refresh = useRefreshPullRequest(pr)
   const next = standing.next
   if (!next) return null
   switch (next.kind) {
     case "review":
-      return inHeader ? null : (
-        <Button size="lg" onClick={() => openReview()}>
-          Review changes
-        </Button>
-      )
+      return null
     case "agent":
       return (
         <PullRequestThreadAction
           pr={status}
           login={login}
-          action={next.action}
+          actions={[next.action]}
         />
       )
     case "mark-ready":
-      return <MarkPullRequestReady pr={status} onReady={refresh} />
+      return <MarkPullRequestReady pr={status} onReady={refresh.status} />
     case "request-review":
       return <RequestHumanReview pr={status} />
     case "update-branch":
-      return <UpdatePullRequestBranch pr={status} onUpdated={refresh} />
+      return <UpdatePullRequestBranch pr={status} onUpdated={refresh.status} />
     case "merge":
-      return inHeader ? (
-        <MergePullRequest
-          pr={status}
-          apply={() => () => {}}
-          onMerged={() => {
-            void queryClient.invalidateQueries({
-              queryKey: reviewQueries.detail(pr).queryKey,
-            })
-            refresh()
-          }}
-        />
-      ) : null
+      return <MergePullRequest pr={status} onMerged={refresh.merged} />
   }
 }
 
@@ -417,7 +402,7 @@ function ChecksRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              action="fix-checks"
+              actions={["fix-checks"]}
             />
           ) : null
         }
@@ -480,11 +465,17 @@ function ChecksRow({
   )
 }
 
+function decisive(state: ConversationReview["state"]): boolean {
+  return state === "APPROVED" || state === "CHANGES_REQUESTED"
+}
+
 function ReviewsRow({
+  pr,
   detail,
   status,
   login,
 }: {
+  pr: PullRequestRef
   detail: ReviewDetail
   status: OpenPullRequest
   login: string
@@ -493,34 +484,21 @@ function ReviewsRow({
     (state) => state.showOpenConversations
   )
   const [expanded, setExpanded] = useState(false)
-  const conversation = useQuery(
-    reviewQueries.conversation({
-      owner: detail.owner,
-      repo: detail.repo,
-      number: detail.number,
-    })
-  ).data
+  const items = useQuery(reviewQueries.conversation(pr)).data?.items
+  const open = useOpenConversations(pr)
   // Each reviewer's standing review, as GitHub's sidebar lists them: a later
   // comment never replaces an approval or a change request, and the author
   // replying in threads is not reviewing.
-  const author = detail.pr.author?.login.toLowerCase()
   const verdicts = new Map<string, ConversationReview>()
-  for (const item of conversation?.items ?? []) {
+  for (const item of items ?? []) {
     if (item.kind !== "review" || !item.author) continue
-    if (item.author.login.toLowerCase() === author) continue
-    const who = item.author.login.replace(/\[bot\]$/, "")
+    if (sameLogin(item.author.login, detail.pr.author?.login)) continue
+    const who = displayName(item.author)
     const standing = verdicts.get(who)
-    const decisive = (state: ConversationReview["state"]) =>
-      state === "APPROVED" || state === "CHANGES_REQUESTED"
     if (item.state === "COMMENTED" && standing && decisive(standing.state))
       continue
     verdicts.set(who, item)
   }
-  const conversations = openConversationCounts(
-    conversation?.threads ?? [],
-    detail.findings
-  )
-  const requested = detail.pr.requested_reviewers.map((r) => `@${r.login}`)
   const decision =
     status.reviewDecision === "approved"
       ? "Approved"
@@ -529,14 +507,15 @@ function ReviewsRow({
         : status.reviewRequired
           ? "An approving review is required"
           : "No reviews required"
-  // Every unresolved thread, as GitHub and the discussion count them.
-  const unresolved = conversation
-    ? conversation.threads.filter((thread) => !thread.resolved).length
+  const unresolved = open
+    ? open.threads.length
     : (status.unresolvedThreads ?? 0)
   return (
     <div>
       <Row
-        expandable={verdicts.size > 0 || requested.length > 0}
+        expandable={
+          verdicts.size > 0 || detail.pr.requested_reviewers.length > 0
+        }
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
         icon={
@@ -561,11 +540,11 @@ function ReviewsRow({
               </button>
             )}
             {hasUnresolvedConversations(status) &&
-              (conversation ? conversations.current > 0 : unresolved > 0) && (
+              (open ? open.current > 0 : unresolved > 0) && (
                 <PullRequestThreadAction
                   pr={status}
                   login={login}
-                  action="address-comments"
+                  actions={["address-comments"]}
                 />
               )}
             {status.draft === false && <RequestHumanReview pr={status} />}
@@ -578,22 +557,15 @@ function ReviewsRow({
         <ul className="flex flex-col gap-1 pr-4 pb-3 pl-11 text-xs">
           {[...verdicts.values()].map((review) => (
             <li key={review.id} className="flex items-center gap-2">
-              <ReviewVerdictMark state={review.state} />
-              <a
-                href={profileUrl(review.author)}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium hover:underline"
-              >
-                {review.author?.login.replace(/\[bot\]$/, "")}
-              </a>
+              <ReviewStateMark state={review.state} />
+              <ProfileLink author={review.author} className="font-medium" />
               <a
                 href={review.html_url}
                 target="_blank"
                 rel="noreferrer"
                 className="text-muted-foreground hover:text-foreground hover:underline"
               >
-                {reviewVerdictWords[review.state]}{" "}
+                {reviewStateWords[review.state]}{" "}
                 {formatRelativeTime(new Date(review.created_at).getTime())}
               </a>
             </li>
@@ -601,14 +573,7 @@ function ReviewsRow({
           {detail.pr.requested_reviewers.map((reviewer) => (
             <li key={reviewer.login} className="flex items-center gap-2">
               <CircleDashedIcon className="size-3.5 text-warning" />
-              <a
-                href={`https://github.com/${reviewer.login}`}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium hover:underline"
-              >
-                {reviewer.login}
-              </a>
+              <ProfileLink author={reviewer} className="font-medium" />
               <span className="text-muted-foreground">review requested</span>
             </li>
           ))}
@@ -618,94 +583,58 @@ function ReviewsRow({
   )
 }
 
-/** Apps have no user page; their bot account lives under /apps. */
-function profileUrl(author: ConversationAuthor | null): string {
-  if (!author) return "https://github.com"
-  return author.bot
-    ? `https://github.com/apps/${author.login.replace(/\[bot\]$/, "")}`
-    : `https://github.com/${author.login}`
-}
-
-const reviewVerdictWords: Record<ConversationReview["state"], string> = {
-  APPROVED: "approved",
-  CHANGES_REQUESTED: "requested changes",
-  COMMENTED: "commented",
-  DISMISSED: "was dismissed",
-}
-
-function ReviewVerdictMark({ state }: { state: ConversationReview["state"] }) {
-  if (state === "APPROVED")
-    return <CheckCircleIcon weight="fill" className="size-3.5 text-success" />
-  if (state === "CHANGES_REQUESTED")
-    return <XCircleIcon weight="fill" className="size-3.5 text-destructive" />
-  return <ChatCircleTextIcon className="size-3.5 text-muted-foreground" />
-}
-
 function BranchRow({
+  pr,
   detail,
   status,
   login,
 }: {
+  pr: PullRequestRef
   detail: ReviewDetail
   status: OpenPullRequest
   login: string
 }) {
-  const queryClient = useQueryClient()
-  if (isConflicted(status))
-    return (
-      <Row
-        icon={failIcon}
-        label="Branch"
-        action={
-          <PullRequestThreadAction
-            pr={status}
-            login={login}
-            action="fix-conflicts"
-          />
-        }
-      >
-        Conflicts with {detail.pr.base_ref} must be resolved
-      </Row>
-    )
-  if (status.draft)
-    return (
-      <Row
-        icon={warnIcon}
-        label="Branch"
-        action={
-          <MarkPullRequestReady
-            pr={status}
-            onReady={() =>
-              void queryClient.invalidateQueries({
-                queryKey: ["review-page-pr"],
-              })
-            }
-          />
-        }
-      >
-        A draft, so reviewers aren&apos;t notified yet
-      </Row>
-    )
-  if (status.mergeState === "behind" && canUpdateBranch(status))
-    return (
-      <Row
-        icon={warnIcon}
-        label="Branch"
-        action={
-          <UpdatePullRequestBranch
-            pr={status}
-            onUpdated={() =>
-              void queryClient.invalidateQueries({
-                queryKey: ["review-page-pr"],
-              })
-            }
-          />
-        }
-      >
-        Behind {detail.pr.base_ref}
-      </Row>
-    )
-  return null
+  const refresh = useRefreshPullRequest(pr)
+  // Each is its own row, so a conflicted draft still offers to mark it ready.
+  return (
+    <>
+      {isConflicted(status) && (
+        <Row
+          icon={failIcon}
+          label="Branch"
+          action={
+            <PullRequestThreadAction
+              pr={status}
+              login={login}
+              actions={["fix-conflicts"]}
+            />
+          }
+        >
+          Conflicts with {detail.pr.base_ref} must be resolved
+        </Row>
+      )}
+      {status.mergeState === "behind" && canUpdateBranch(status) && (
+        <Row
+          icon={warnIcon}
+          label="Branch"
+          action={
+            <UpdatePullRequestBranch pr={status} onUpdated={refresh.status} />
+          }
+        >
+          Behind {detail.pr.base_ref}
+        </Row>
+      )}
+      {status.draft && (
+        <Row
+          icon={warnIcon}
+          label="Draft"
+          action={<MarkPullRequestReady pr={status} onReady={refresh.status} />}
+        >
+          Reviewers aren&apos;t notified yet
+        </Row>
+      )}
+    </>
+  )
 }
 
 function MergeRow({
@@ -717,7 +646,7 @@ function MergeRow({
   status: OpenPullRequest
   baseRef: string
 }) {
-  const queryClient = useQueryClient()
+  const refresh = useRefreshPullRequest(pr)
   const [merged, setMerged] = useState(false)
   return (
     <Row
@@ -730,12 +659,7 @@ function MergeRow({
             setMerged(true)
             return () => setMerged(false)
           }}
-          onMerged={() => {
-            void queryClient.invalidateQueries({
-              queryKey: reviewQueries.detail(pr).queryKey,
-            })
-            void queryClient.invalidateQueries({ queryKey: ["review-page-pr"] })
-          }}
+          onMerged={refresh.merged}
         />
       }
     >
@@ -756,12 +680,7 @@ function OpenSweRow({
   detail: ReviewDetail
 }) {
   const queryClient = useQueryClient()
-  const bugs = detail.findings.filter(
-    (f) => f.group === "bug" && f.status === "open"
-  ).length
-  const flags = detail.findings.filter(
-    (f) => f.group !== "bug" && f.status === "open"
-  ).length
+  const { bugs, flags } = openFindingCounts(detail.findings)
   // Open while there is something to look at, until the person folds it; a
   // link elsewhere that names the findings opens it again.
   const findingsKey = useReviewPage((state) => state.findingsKey)
@@ -807,17 +726,14 @@ function OpenSweRow({
                   : "needs human review"
               : null,
             bugs || flags
-              ? [
-                  bugs && `${bugs} bug${bugs === 1 ? "" : "s"}`,
-                  flags && `${flags} flag${flags === 1 ? "" : "s"}`,
-                ]
+              ? [bugs && plural(bugs, "bug"), flags && plural(flags, "flag")]
                   .filter(Boolean)
                   .join(", ")
               : "no open findings",
           ]
             .filter(Boolean)
             .join(" · ")
-  const prOpen = detail.pr.state === "open"
+  const prOpen = isLive(detail)
   return (
     <div>
       <Row
@@ -890,15 +806,13 @@ function OpenSweRow({
 }
 
 function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
-  const jumpTo = useReviewPage((state) => state.jumpTo)
-  const setExpandedFinding = useReviewPage((state) => state.setExpandedFinding)
+  const showFinding = useReviewPage((state) => state.showFinding)
   const askInChat = useReviewPage((state) => state.askInChat)
   const [openId, setOpenId] = useState<string | null>(null)
   return (
     <ol className="flex flex-col">
       {rankFindings(findings).map((finding) => {
         const settled = finding.status !== "open"
-        const anchored = isAnchored(finding)
         const open = openId === finding.id
         return (
           <li
@@ -930,16 +844,10 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
               <span className="ml-auto flex shrink-0 items-baseline gap-1 text-[11px] text-muted-foreground">
                 <button
                   type="button"
-                  disabled={!anchored}
+                  disabled={!isAnchored(finding)}
                   onClick={() => {
-                    setExpandedFinding(finding.id)
-                    jumpTo({
-                      kind: "line",
-                      path: finding.file,
-                      line: finding.end_line ?? 1,
-                      start: finding.start_line ?? undefined,
-                      side: finding.side,
-                    })
+                    if (isAnchored(finding))
+                      showFinding(finding.id, findingTarget(finding))
                   }}
                   className="rounded px-1 py-0.5 font-mono hover:bg-accent hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
                   title={finding.file}

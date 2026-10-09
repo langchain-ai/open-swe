@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react"
+import { useEffect, useReducer } from "react"
 import type { SelectedLineRange } from "@pierre/diffs"
 import { ChatTextIcon } from "@phosphor-icons/react"
 
 import { Kbd } from "@/components/ui/kbd"
+import { useShortcutLabel } from "@/lib/hotkeys"
 import { readDiffSelection } from "@/features/agents/utils/diffSelection"
 import { AgentMark } from "./AgentMark"
 
@@ -15,6 +16,7 @@ export interface TextSelection {
 }
 
 const BAR_WIDTH = 260
+const BAR_HEIGHT = 36
 const GAP = 8
 
 /** Under the selection and inside the diff pane; nowhere once the selection scrolls out of view. */
@@ -35,7 +37,7 @@ function placement(
     rect && rect.height > 0
       ? { x: rect.left, y: rect.bottom }
       : { x: selection.x, y: selection.y }
-  if (anchor.y < pane.top || anchor.y > pane.bottom - 36) return null
+  if (anchor.y < pane.top || anchor.y > pane.bottom - BAR_HEIGHT) return null
   const minLeft = pane.left + GAP
   const maxLeft = pane.right - BAR_WIDTH - GAP
   return {
@@ -54,26 +56,27 @@ export function SelectionBar({
   onAsk: () => void
   onComment: () => void
 }) {
-  const [position, setPosition] = useState(() => placement(selection))
-  const [tracked, setTracked] = useState(selection)
-  if (tracked !== selection) {
-    setTracked(selection)
-    setPosition(placement(selection))
-  }
+  const askShortcut = useShortcutLabel("mod+l")
+  // Placement reads the live layout, so a scroll or resize only needs a re-render.
+  const [, follow] = useReducer((frame: number) => frame + 1, 0)
   useEffect(() => {
     let frame = 0
-    const follow = () => {
+    const schedule = () => {
       cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => setPosition(placement(selection)))
+      frame = requestAnimationFrame(follow)
     }
-    window.addEventListener("scroll", follow, { capture: true, passive: true })
-    window.addEventListener("resize", follow)
+    window.addEventListener("scroll", schedule, {
+      capture: true,
+      passive: true,
+    })
+    window.addEventListener("resize", schedule)
     return () => {
       cancelAnimationFrame(frame)
-      window.removeEventListener("scroll", follow, { capture: true })
-      window.removeEventListener("resize", follow)
+      window.removeEventListener("scroll", schedule, { capture: true })
+      window.removeEventListener("resize", schedule)
     }
-  }, [selection])
+  }, [])
+  const position = placement(selection)
   if (!position) return null
   return (
     <div
@@ -91,7 +94,7 @@ export function SelectionBar({
       >
         <AgentMark />
         Ask Open SWE
-        <Kbd>⌘L</Kbd>
+        <Kbd>{askShortcut}</Kbd>
       </button>
       <button
         type="button"

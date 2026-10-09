@@ -11,3 +11,19 @@ export function plainFirstLine(body: string): string {
   }
   return ""
 }
+
+/** "1 file", "3 files"; pass `many` for irregular plurals. */
+export function plural(count: number, one: string, many = `${one}s`): string {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+/** "routes.py:53", or just the path without a line. */
+export function withLine(path: string, line: number | null): string {
+  return line ? `${path}:${line}` : path
+}
+
+/** A repository path as its folder (with trailing slash) and file name. */
+export function splitPath(path: string): { dir: string; name: string } {
+  const slash = path.lastIndexOf("/")
+  return { dir: path.slice(0, slash + 1), name: path.slice(slash + 1) }
+}

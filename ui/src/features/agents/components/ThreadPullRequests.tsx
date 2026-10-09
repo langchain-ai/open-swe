@@ -17,9 +17,8 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
-import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu"
+import { MenuItem } from "@/components/ui/menu"
+import { SplitButton } from "@/components/SplitButton"
 import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
@@ -491,50 +490,36 @@ function FixMenu({
   // The first problem is the one to fix first; the caret offers the others.
   const primary = failed ?? scopes[0]!
   return (
-    <ButtonGroup>
-      <Button
-        variant="ghost"
-        disabled={disabled || fixing}
-        aria-label={`${FIX_LABELS[primary]} on PR #${pullRequest.number}`}
-        className="text-foreground"
-        onClick={() => void handleFix(primary)}
-      >
-        <Wrench />
-        {fixing
-          ? "Starting…"
-          : failed
-            ? `Retry: ${FIX_LABELS[failed]}`
-            : FIX_LABELS[primary]}
-      </Button>
-      {scopes.length > 1 && <ButtonGroupSeparator />}
-      {scopes.length > 1 && (
-        <Menu>
-          <MenuTrigger
-            disabled={disabled || fixing}
-            render={
-              <Button
-                variant="ghost"
-                aria-label={`Fix PR #${pullRequest.number}`}
-                className="px-1.5 text-foreground"
-              />
-            }
-          >
-            <ChevronDown />
-          </MenuTrigger>
-          <MenuPopup align="end" side="top" sideOffset={6}>
-            {scopes.map((scope) => (
-              <MenuItem
-                key={scope}
-                aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
-                onClick={() => void handleFix(scope)}
-              >
-                {FIX_LABELS[scope]}
-              </MenuItem>
-            ))}
-          </MenuPopup>
-        </Menu>
-      )}
-    </ButtonGroup>
+    <SplitButton
+      variant="ghost"
+      size="default"
+      className="text-foreground"
+      disabled={disabled || fixing}
+      onClick={() => void handleFix(primary)}
+      menuLabel={`Fix PR #${pullRequest.number}`}
+      menuPopup={{ side: "top", sideOffset: 6 }}
+      menu={
+        scopes.length > 1 &&
+        scopes
+          .filter((scope) => scope !== primary)
+          .map((scope) => (
+            <MenuItem
+              key={scope}
+              aria-label={`${FIX_LABELS[scope]} on PR #${pullRequest.number}`}
+              onClick={() => void handleFix(scope)}
+            >
+              {FIX_LABELS[scope]}
+            </MenuItem>
+          ))
+      }
+    >
+      <Wrench />
+      {fixing
+        ? "Starting…"
+        : failed
+          ? `Retry: ${FIX_LABELS[failed]}`
+          : FIX_LABELS[primary]}
+    </SplitButton>
   )
 }
 

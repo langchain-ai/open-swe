@@ -1,6 +1,54 @@
-import type { ConversationAuthor } from "@/features/reviews/lib/conversationApi"
+import {
+  ChatCircleIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+} from "@phosphor-icons/react"
+
+import type {
+  ConversationAuthor,
+  ConversationReviewState,
+} from "@/features/reviews/lib/conversationApi"
 import { cn, formatRelativeTime } from "@/lib/utils"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
+import { displayName } from "@/features/reviews/lib/logins"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
+import { Tag } from "@/features/reviews/page/Tag"
+
+/** Someone's name, linked to their GitHub profile. */
+export function ProfileLink({
+  author,
+  className,
+}: {
+  author: { login: string; bot?: boolean } | null
+  className?: string
+}) {
+  if (!author) return <span className={className}>{displayName(author)}</span>
+  return (
+    <a
+      href={githubUrls.profile(author)}
+      target="_blank"
+      rel="noreferrer"
+      className={cn("hover:underline", className)}
+    >
+      {displayName(author)}
+    </a>
+  )
+}
+
+export const reviewStateWords: Record<ConversationReviewState, string> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "requested changes",
+  COMMENTED: "reviewed",
+  DISMISSED: "had a review dismissed",
+}
+
+export function ReviewStateMark({ state }: { state: ConversationReviewState }) {
+  if (state === "APPROVED")
+    return <CheckCircleIcon weight="fill" className="size-3.5 text-success" />
+  if (state === "CHANGES_REQUESTED")
+    return <XCircleIcon weight="fill" className="size-3.5 text-destructive" />
+  return <ChatCircleIcon className="size-3.5 text-muted-foreground" />
+}
 
 export function Avatar({
   author,
@@ -45,11 +93,10 @@ export function formatWhen(createdAt: string): string {
     hour: "numeric",
     minute: "2-digit",
   })
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (date.toDateString() === new Date().toDateString()) return `today ${time}`
-  if (date.toDateString() === yesterday.toDateString())
-    return `yesterday ${time}`
+  const day = new Date()
+  if (date.toDateString() === day.toDateString()) return `today ${time}`
+  day.setDate(day.getDate() - 1)
+  if (date.toDateString() === day.toDateString()) return `yesterday ${time}`
   return `${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`
 }
 
@@ -62,6 +109,7 @@ export function Byline({
 }: {
   author: ConversationAuthor | null
   createdAt: string
+  /** Empty while a comment is still being posted. */
   href?: string
   verb?: string
 }) {
@@ -69,19 +117,18 @@ export function Byline({
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-xs">
       <span className="truncate font-medium text-foreground">
-        {author?.login.replace(/\[bot\]$/, "") ?? "ghost"}
+        {displayName(author)}
       </span>
       {author?.bot && (
-        <span
+        <Tag
           title={
             author.posted_by
               ? `Posted through ${author.posted_by}'s GitHub account`
               : undefined
           }
-          className="rounded-[4px] border border-border px-1 text-[10px] leading-4 text-muted-foreground"
         >
           {author.posted_by ? `via ${author.posted_by}` : "bot"}
-        </span>
+        </Tag>
       )}
       {verb && <span className="text-muted-foreground">{verb}</span>}
       {href ? (

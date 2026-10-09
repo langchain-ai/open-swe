@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { agentThreadKeys } from "@/features/agents/lib/queries"
 import { reviewQueries, type PullRequestRef } from "./queries"
+import { plural } from "./text"
 
 /** Runs the review scout alone, so a reading order exists without a full review. */
 export function WalkthroughCallout({
@@ -107,9 +108,7 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   const { recent } = progress
   return (
     <div className="mt-2 text-muted-foreground">
-      <p>
-        {progress.steps} step{progress.steps === 1 ? "" : "s"} committed
-      </p>
+      <p>{plural(progress.steps, "step")} committed</p>
       {recent.length > 0 && (
         <ol className="mt-1 space-y-0.5 font-mono text-[11px]">
           {recent.map((action, index) => {

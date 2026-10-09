@@ -16,14 +16,17 @@ export function useAskAboutLines(pr: PullRequestRef) {
   const attachToChat = useReviewPage((state) => state.attachToChat)
   return useCallback(
     async (path: string, range: SelectedLineRange, question = "") => {
+      // Without the file's contents, the chat still gets where the lines are.
+      const byLocation = () =>
+        askInChat(
+          [`\`${path}:${commentRangeLabel(range)}\``, question]
+            .filter(Boolean)
+            .join("\n\n")
+        )
       const file = queryClient
         .getQueryData(reviewQueries.diff(pr).queryKey)
         ?.files.find((candidate) => candidate.path === path)
-      const label = `\`${path}:${commentRangeLabel(range)}\``
-      if (!file) {
-        askInChat(`${label}\n\n${question}`)
-        return
-      }
+      if (!file) return byLocation()
       try {
         const contents = await loadReviewFileContents(
           pr.owner,
@@ -37,7 +40,7 @@ export function useAskAboutLines(pr: PullRequestRef) {
         toast.error(
           "Couldn't load those lines; the chat has their location instead"
         )
-        askInChat(`${label}\n\n${question}`)
+        byLocation()
       }
     },
     [askInChat, attachToChat, pr, queryClient]

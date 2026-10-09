@@ -1,9 +1,9 @@
-import { useState } from "react"
 import { CaretRightIcon, CopyIcon } from "@phosphor-icons/react"
-import { toast } from "sonner"
 
 import type { ReviewFinding } from "@/lib/api"
 import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
+import { copyText } from "@/features/reviews/lib/copyText"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -18,10 +18,11 @@ import {
 import { InlineCode } from "@/features/reviews/page/inlineCode"
 import type { PullRequestRef } from "@/features/reviews/page/queries"
 import { useReviewPage } from "@/features/reviews/page/store"
+import { plural } from "@/features/reviews/page/text"
 import { useThreadActions } from "@/features/reviews/page/useThreadActions"
-import { Avatar, Byline } from "./Byline"
 import { NoteFrame } from "./NoteFrame"
 import { ReplyBox } from "./ReplyBox"
+import { CommentRow, ResolveButton } from "./ThreadNote"
 
 function findingMarkdown(finding: ReviewFinding): string {
   return finding.suggestion
@@ -85,8 +86,7 @@ export function FindingNote({
           )}
           {thread && thread.comments.length > 1 && (
             <span className="shrink-0 text-muted-foreground tabular-nums">
-              {thread.comments.length - 1} repl
-              {thread.comments.length === 2 ? "y" : "ies"}
+              {plural(thread.comments.length - 1, "reply", "replies")}
             </span>
           )}
           <CaretRightIcon
@@ -128,11 +128,10 @@ export function FindingNote({
                 size="sm"
                 variant="ghost"
                 onClick={() =>
-                  void navigator.clipboard
-                    .writeText(
-                      `**${finding.title}**\n\n${findingMarkdown(finding)}`
-                    )
-                    .then(() => toast.success("Copied the finding"))
+                  copyText(
+                    `**${finding.title}**\n\n${findingMarkdown(finding)}`,
+                    "Copied the finding"
+                  )
                 }
               >
                 <CopyIcon /> Copy
@@ -140,7 +139,10 @@ export function FindingNote({
               {finding.github_review_comment_id !== null && (
                 <a
                   className="ml-auto text-muted-foreground hover:text-foreground hover:underline"
-                  href={`https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}#discussion_r${finding.github_review_comment_id}`}
+                  href={githubUrls.pullRequest(
+                    pr,
+                    `#discussion_r${finding.github_review_comment_id}`
+                  )}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -163,52 +165,14 @@ function FindingReplies({
   thread: ReviewThread
 }) {
   const { reply, resolve } = useThreadActions(pr, thread)
-  const [showReply, setShowReply] = useState(false)
-  const replies = thread.comments.slice(1)
   return (
     <div className="mt-2.5 flex flex-col gap-2 border-t border-border/70 pt-2.5">
-      {replies.map((comment) => (
-        <div key={comment.id} className="flex gap-2">
-          <Avatar author={comment.author} className="mt-px size-4" />
-          <div className="min-w-0 flex-1">
-            <Byline
-              author={comment.author}
-              createdAt={comment.created_at}
-              href={comment.html_url || undefined}
-            />
-            <div className="mt-0.5 text-[13px] leading-[1.6]">
-              <Markdown content={comment.body} />
-            </div>
-          </div>
-        </div>
+      {thread.comments.slice(1).map((comment) => (
+        <CommentRow key={comment.id} comment={comment} />
       ))}
-      {(showReply || replies.length > 0) && (
-        <ReplyBox
-          pending={reply.isPending}
-          onSend={(body) => reply.mutate(body)}
-          placeholder="Reply on GitHub…"
-        />
-      )}
+      <ReplyBox reply={reply} placeholder="Reply on GitHub…" />
       <div className="flex items-center gap-1">
-        {!showReply && replies.length === 0 && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setShowReply(true)}
-          >
-            Reply
-          </Button>
-        )}
-        {thread.node_id && (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={resolve.isPending}
-            onClick={() => resolve.mutate(!thread.resolved)}
-          >
-            {thread.resolved ? "Unresolve" : "Resolve conversation"}
-          </Button>
-        )}
+        <ResolveButton thread={thread} resolve={resolve} />
       </div>
     </div>
   )

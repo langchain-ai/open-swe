@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CaretDownIcon,
   ChatCircleIcon,
@@ -8,8 +8,7 @@ import {
   MagnifyingGlassIcon,
 } from "@phosphor-icons/react"
 
-import type { ReviewDiffFile, ReviewFinding } from "@/lib/api"
-import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
+import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -19,14 +18,17 @@ import {
   matchesFileFilter,
   type DiffEntry,
 } from "./diffEntries"
-import {
-  findingGroupColor,
-  isAnchored,
-  threadsNeedingAttention,
-} from "./findings"
+import { findingGroupColor } from "./findings"
 import { InlineCode } from "./inlineCode"
-import { reviewQueries, type PullRequestRef } from "./queries"
+import {
+  reviewQueries,
+  useFileMarkers,
+  type FileMarkers,
+  type PullRequestRef,
+} from "./queries"
+import { Segmented } from "./Segmented"
 import { useReviewPage } from "./store"
+import { plural, splitPath } from "./text"
 
 interface FolderNode {
   kind: "folder"
@@ -38,6 +40,7 @@ interface FolderNode {
 interface FileNode {
   kind: "file"
   name: string
+  path: string
   file: ReviewDiffFile
 }
 
@@ -65,7 +68,8 @@ function buildTree(files: ReadonlyArray<ReviewDiffFile>): Array<TreeNode> {
     })
     folder.children.push({
       kind: "file",
-      name: parts.at(-1) ?? file.path,
+      name: splitPath(file.path).name,
+      path: file.path,
       file,
     })
   }
@@ -92,88 +96,49 @@ function buildTree(files: ReadonlyArray<ReviewDiffFile>): Array<TreeNode> {
   return compacted.name ? [compacted] : compacted.children
 }
 
-interface Markers {
-  findings: Map<string, ReviewFinding["group"]>
-  threads: Map<string, number>
-}
-
-function markersFor(
-  findings: ReadonlyArray<ReviewFinding>,
-  threads: ReadonlyArray<ReviewThread>
-): Markers {
-  const rank = { bug: 0, investigate: 1, informational: 2 } as const
-  const byFile = new Map<string, ReviewFinding["group"]>()
-  for (const finding of findings) {
-    if (finding.status !== "open" || !isAnchored(finding)) continue
-    const current = byFile.get(finding.file)
-    if (!current || rank[finding.group] < rank[current])
-      byFile.set(finding.file, finding.group)
-  }
-  const threadCount = new Map<string, number>()
-  for (const thread of threadsNeedingAttention(threads, findings))
-    threadCount.set(thread.path, (threadCount.get(thread.path) ?? 0) + 1)
-  return { findings: byFile, threads: threadCount }
-}
-
 /** The left rail: every file with what's been read and what needs attention, or the walkthrough's steps. */
 export function Navigator({ pr }: { pr: PullRequestRef }) {
-  const diff = useQuery(reviewQueries.diff(pr))
-  const detail = useQuery(reviewQueries.detail(pr)).data
-  const conversation = useQuery(reviewQueries.conversation(pr)).data
+  const files = useQuery(reviewQueries.diff(pr)).data?.files
+  const walkthrough = useQuery(reviewQueries.detail(pr)).data?.walkthrough
   const order = useReviewPage((state) => state.order)
   const setOrder = useReviewPage((state) => state.setOrder)
-  const viewed = useReviewPage((state) => state.viewed)
-  const files = diff.data?.files
-  const walkthrough = detail?.walkthrough ?? null
-  const hasWalkthrough = (walkthrough?.steps.length ?? 0) > 0
-  const showSteps = order === "guide" && hasWalkthrough
-  const viewedCount = files?.filter((file) => viewed.has(file.path)).length ?? 0
-  const markers = useMemo(
-    () => markersFor(detail?.findings ?? [], conversation?.threads ?? []),
-    [detail?.findings, conversation?.threads]
+  const viewedCount = useReviewPage(
+    (state) => files?.filter((file) => state.viewed.has(file.path)).length ?? 0
   )
+  const markers = useFileMarkers(pr)
+  const steps = walkthrough?.steps.length ?? 0
 
   return (
     <nav aria-label="Files" className="flex h-full min-h-0 flex-col">
       <div className="flex flex-col gap-2 px-3 pt-3 pb-2">
-        {hasWalkthrough && (
-          <div
-            role="group"
-            aria-label="Reading order"
-            className="flex rounded-md bg-muted p-0.5"
-          >
-            {(["guide", "files"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={order === value}
-                onClick={() => setOrder(value)}
-                className={cn(
-                  "flex-1 rounded-[5px] py-1 text-[11px] font-medium text-muted-foreground",
-                  order === value && "bg-background text-foreground shadow-xs"
-                )}
-              >
-                {value === "guide"
-                  ? `Walkthrough · ${walkthrough?.steps.length}`
-                  : `Files · ${files?.length ?? "–"}`}
-              </button>
-            ))}
-          </div>
+        {steps > 0 && (
+          <Segmented
+            label="Reading order"
+            value={order}
+            onChange={setOrder}
+            className="w-full [&>*]:flex-1"
+            options={[
+              { value: "guide", label: `Walkthrough · ${steps}` },
+              { value: "files", label: `Files · ${files?.length ?? "–"}` },
+            ]}
+          />
         )}
         {files && (
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
-            <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary transition-[width] duration-300"
-                style={{
-                  width: `${files.length ? (viewedCount / files.length) * 100 : 0}%`,
-                }}
-              />
+          <>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
+              <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-300"
+                  style={{
+                    width: `${files.length ? (viewedCount / files.length) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+              {viewedCount}/{files.length} viewed
             </div>
-            {viewedCount}/{files.length} viewed
-          </div>
+            <FileFilter />
+          </>
         )}
-        {files && <FileFilter />}
       </div>
       {!files ? (
         <div className="flex flex-col gap-2 px-3">
@@ -185,7 +150,7 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
             />
           ))}
         </div>
-      ) : showSteps && walkthrough ? (
+      ) : order === "guide" && walkthrough && steps > 0 ? (
         <StepList files={files} walkthrough={walkthrough} />
       ) : (
         <FileTree files={files} markers={markers} />
@@ -194,33 +159,50 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
   )
 }
 
+interface StepGroup {
+  step: NonNullable<DiffEntry["step"]>
+  entries: Array<DiffEntry>
+}
+
+function stepProgress(
+  entries: ReadonlyArray<DiffEntry>,
+  viewed: ReadonlySet<string>
+): string {
+  const read = entries.filter((entry) => viewed.has(entry.file.path)).length
+  if (read === entries.length) return `All ${entries.length} viewed`
+  if (read > 0) return `${read} of ${entries.length} viewed`
+  return plural(entries.length, "file")
+}
+
 function StepList({
   files,
   walkthrough,
 }: {
   files: ReadonlyArray<ReviewDiffFile>
-  walkthrough: NonNullable<Parameters<typeof buildEntries>[1]>
+  walkthrough: ReviewWalkthrough
 }) {
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const activeEntry = useReviewPage((state) => state.activeEntry)
   const viewed = useReviewPage((state) => state.viewed)
   const fileFilter = useReviewPage((state) => state.fileFilter)
   // A filter keeps only the steps that touch a matching file, each with just those files.
-  const steps = useMemo(() => {
-    const byStep = new Map<number, Array<DiffEntry>>()
+  const groups = useMemo(() => {
+    const byStep = new Map<number, StepGroup>()
     for (const entry of filterEntries(
       buildEntries(files, walkthrough, "guide"),
       fileFilter
     )) {
       if (!entry.step) continue
-      byStep.set(entry.step.index, [
-        ...(byStep.get(entry.step.index) ?? []),
-        entry,
-      ])
+      const group = byStep.get(entry.step.index) ?? {
+        step: entry.step,
+        entries: [],
+      }
+      group.entries.push(entry)
+      byStep.set(entry.step.index, group)
     }
     return [...byStep.values()]
   }, [files, walkthrough, fileFilter])
-  if (steps.length === 0)
+  if (groups.length === 0)
     return (
       <p className="px-4 py-2 text-xs text-muted-foreground">
         No step touches a matching file.
@@ -228,8 +210,7 @@ function StepList({
     )
   return (
     <ol className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-      {steps.map((entries) => {
-        const step = entries[0]!.step!
+      {groups.map(({ step, entries }) => {
         const active = entries.some((entry) => entry.id === activeEntry)
         return (
           <li key={step.index}>
@@ -260,16 +241,7 @@ function StepList({
               >
                 <InlineCode text={step.title} />
                 <span className="block text-[11px] text-muted-foreground tabular-nums">
-                  {(() => {
-                    const read = entries.filter((entry) =>
-                      viewed.has(entry.file.path)
-                    ).length
-                    return read === entries.length
-                      ? `All ${entries.length} viewed`
-                      : read > 0
-                        ? `${read} of ${entries.length} viewed`
-                        : `${entries.length} file${entries.length === 1 ? "" : "s"}`
-                  })()}
+                  {stepProgress(entries, viewed)}
                 </span>
               </span>
             </button>
@@ -310,30 +282,43 @@ function FileTree({
   markers,
 }: {
   files: ReadonlyArray<ReviewDiffFile>
-  markers: Markers
+  markers: ReadonlyMap<string, FileMarkers>
 }) {
   const filter = useReviewPage((state) => state.fileFilter)
+  const list = useRef<HTMLUListElement>(null)
+  // Scroll only the file list; scrollIntoView would also move the page around it.
+  const reveal = useCallback((row: HTMLElement) => {
+    const scroller = list.current
+    if (!scroller) return
+    const top = row.offsetTop - scroller.offsetTop
+    if (top < scroller.scrollTop) scroller.scrollTop = top
+    else if (
+      top + row.offsetHeight >
+      scroller.scrollTop + scroller.clientHeight
+    )
+      scroller.scrollTop = top + row.offsetHeight - scroller.clientHeight
+  }, [])
   const tree = useMemo(
     () =>
       buildTree(files.filter((file) => matchesFileFilter(file.path, filter))),
     [files, filter]
   )
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <ul
-        aria-label="Changed files"
-        className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-4"
-      >
-        {tree.map((node) => (
-          <TreeRow
-            key={node.kind === "folder" ? node.path : node.file.path}
-            node={node}
-            depth={0}
-            markers={markers}
-          />
-        ))}
-      </ul>
-    </div>
+    <ul
+      ref={list}
+      aria-label="Changed files"
+      className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-4"
+    >
+      {tree.map((node) => (
+        <TreeRow
+          key={node.path}
+          node={node}
+          depth={0}
+          markers={markers}
+          reveal={reveal}
+        />
+      ))}
+    </ul>
   )
 }
 
@@ -348,52 +333,56 @@ const TreeRow = memo(function TreeRow({
   node,
   depth,
   markers,
+  reveal,
 }: {
   node: TreeNode
   depth: number
-  markers: Markers
+  markers: ReadonlyMap<string, FileMarkers>
+  reveal: (row: HTMLElement) => void
 }) {
   const [open, setOpen] = useState(true)
-  if (node.kind === "folder")
+  if (node.kind === "file")
     return (
-      <li>
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-          style={{ paddingLeft: 6 + depth * 12 }}
-          className="flex h-6 w-full items-center gap-1 rounded-md pr-2 text-left text-xs text-muted-foreground hover:bg-accent"
-        >
-          <CaretDownIcon
-            className={cn(
-              "size-3 shrink-0 transition-transform",
-              !open && "-rotate-90"
-            )}
-          />
-          <FolderSimpleIcon className="size-3.5 shrink-0" />
-          <span className="truncate">{node.name}</span>
-        </button>
-        {open && (
-          <ul>
-            {node.children.map((child) => (
-              <TreeRow
-                key={child.kind === "folder" ? child.path : child.file.path}
-                node={child}
-                depth={depth + 1}
-                markers={markers}
-              />
-            ))}
-          </ul>
-        )}
-      </li>
+      <FileRow
+        file={node.file}
+        name={node.name}
+        depth={depth}
+        markers={markers.get(node.path)}
+        reveal={reveal}
+      />
     )
   return (
-    <FileRow
-      file={node.file}
-      name={node.name}
-      depth={depth}
-      markers={markers}
-    />
+    <li>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        style={{ paddingLeft: 6 + depth * 12 }}
+        className="flex h-6 w-full items-center gap-1 rounded-md pr-2 text-left text-xs text-muted-foreground hover:bg-accent"
+      >
+        <CaretDownIcon
+          className={cn(
+            "size-3 shrink-0 transition-transform",
+            !open && "-rotate-90"
+          )}
+        />
+        <FolderSimpleIcon className="size-3.5 shrink-0" />
+        <span className="truncate">{node.name}</span>
+      </button>
+      {open && (
+        <ul>
+          {node.children.map((child) => (
+            <TreeRow
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              markers={markers}
+              reveal={reveal}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
   )
 })
 
@@ -402,33 +391,29 @@ function FileRow({
   name,
   depth,
   markers,
+  reveal,
 }: {
   file: ReviewDiffFile
   name: string
   depth: number
-  markers: Markers
+  markers: FileMarkers | undefined
+  reveal: (row: HTMLElement) => void
 }) {
   const active = useReviewPage((state) => state.activePath === file.path)
   const viewed = useReviewPage((state) => state.viewed.has(file.path))
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const ref = useRef<HTMLLIElement>(null)
-  // Scroll only the file list; scrollIntoView would also move the page around it.
   useEffect(() => {
-    const row = ref.current
-    const list = row?.closest("ul[aria-label='Changed files']")
-    if (!active || !row || !(list instanceof HTMLElement)) return
-    const top = row.offsetTop - list.offsetTop
-    if (top < list.scrollTop) list.scrollTop = top
-    else if (top + row.offsetHeight > list.scrollTop + list.clientHeight)
-      list.scrollTop = top + row.offsetHeight - list.clientHeight
-  }, [active])
-  const finding = markers.findings.get(file.path)
-  const threads = markers.threads.get(file.path) ?? 0
+    if (active && ref.current) reveal(ref.current)
+  }, [active, reveal])
+  const worst = markers?.findings[0]
+  const threads = markers?.threads.length ?? 0
+  const changed = file.additions + file.deletions
   const description = [
     file.path,
-    `${file.additions + file.deletions} lines changed`,
-    finding && "Open SWE finding",
-    threads > 0 && `${threads} open conversation${threads === 1 ? "" : "s"}`,
+    `${changed} lines changed`,
+    worst && "Open SWE finding",
+    threads > 0 && plural(threads, "open conversation"),
     viewed && "viewed",
   ]
     .filter(Boolean)
@@ -468,10 +453,10 @@ function FileRow({
         >
           {name}
         </span>
-        {finding && (
+        {worst && (
           <span
             className="size-1.5 shrink-0 rounded-full"
-            style={{ background: findingGroupColor[finding] }}
+            style={{ background: findingGroupColor[worst.group] }}
             title="Open SWE finding"
           />
         )}
@@ -485,7 +470,7 @@ function FileRow({
           <CheckIcon weight="bold" className="size-3 shrink-0 text-primary" />
         ) : (
           <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
-            {file.additions + file.deletions}
+            {changed}
           </span>
         )}
       </button>

@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect } from "react"
 
-import {
-  getReviewConversation,
-  reviewConversationQueryKey,
-} from "@/features/reviews/lib/conversationApi"
 import { rangeLabel } from "@/features/reviews/lib/chatDiffActions"
+import {
+  buildCommentPayload,
+  toPierreSide,
+} from "@/features/reviews/lib/lineRange"
+import { reviewQueries } from "@/features/reviews/page/queries"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { Button } from "@/components/ui/button"
@@ -41,16 +42,16 @@ export function ProposedCommentCard({
   const addToReview = () => {
     if (!draft) return
     const { range } = draft.proposal
-    const multiLine = range.startLine < range.endLine
     post.mutate(
-      {
-        path: range.file,
-        line: range.endLine,
-        side: range.side,
-        body: draft.body.trim(),
-        start_line: multiLine ? range.startLine : null,
-        start_side: multiLine ? range.side : null,
-      },
+      buildCommentPayload(
+        range.file,
+        {
+          start: range.startLine,
+          end: range.endLine,
+          side: toPierreSide(range.side),
+        },
+        draft.body.trim()
+      ),
       {
         onSuccess: (review) =>
           drafts?.settle(id, { state: "added", reviewId: review.id }),
@@ -69,8 +70,7 @@ export function ProposedCommentCard({
         comment.line === draft.proposal.range.endLine
     )
   const conversation = useQuery({
-    queryKey: reviewConversationQueryKey(owner, repo, number),
-    queryFn: () => getReviewConversation(owner, repo, number),
+    ...reviewQueries.conversation({ owner, repo, number }),
     enabled: added !== null && pending.loaded && !stillPending,
   })
   const submitted =

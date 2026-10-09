@@ -3,14 +3,12 @@ import { PullRequestLinks } from "../PullRequestLinks"
 import {
   canAttemptMerge,
   canUpdateBranch,
-  hasFailingChecks,
-  hasUnresolvedConversations,
-  isConflicted,
+  pullRequestFixes,
 } from "../lib/status"
 import { ClosePullRequest } from "./ClosePullRequest"
 import { MarkPullRequestReady } from "./MarkPullRequestReady"
 import { MergePullRequest } from "./MergePullRequest"
-import { PullRequestFixActions } from "./PullRequestThreadAction"
+import { PullRequestThreadAction } from "./PullRequestThreadAction"
 import { RequestHumanReview } from "./RequestHumanReview"
 import { UpdatePullRequestBranch } from "./UpdatePullRequestBranch"
 
@@ -44,6 +42,7 @@ export function PullRequestActions({
     onSettled(next)
     return () => onSettled(undefined)
   }
+  const fixes = pullRequestFixes(pr)
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       {outcome && (
@@ -56,17 +55,9 @@ export function PullRequestActions({
         hidden={Boolean(outcome)}
         className="flex flex-wrap items-center gap-x-2 gap-y-2"
       >
-        <PullRequestFixActions
-          pr={pr}
-          login={login}
-          actions={[
-            ...(isConflicted(pr) ? (["fix-conflicts"] as const) : []),
-            ...(hasFailingChecks(pr) ? (["fix-checks"] as const) : []),
-            ...(hasUnresolvedConversations(pr)
-              ? (["address-comments"] as const)
-              : []),
-          ]}
-        />
+        {fixes.length > 0 && (
+          <PullRequestThreadAction pr={pr} login={login} actions={fixes} />
+        )}
         {pr.draft === true && (
           <MarkPullRequestReady pr={pr} onReady={onReady} />
         )}

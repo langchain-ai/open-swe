@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { CaretDownIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 import { toast } from "sonner"
@@ -16,7 +16,7 @@ import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
-import { reviewConversationQueryKey } from "@/features/reviews/lib/conversationApi"
+import { useRefreshPullRequest } from "@/features/reviews/page/queries"
 
 const VERDICTS: ReadonlyArray<{
   event: PullRequestReviewEvent
@@ -57,7 +57,7 @@ export function SubmitReviewPopover({
   /** The verdict the form opens on, e.g. from an "approve" shortcut. */
   defaultVerdict: PullRequestReviewEvent
 }) {
-  const queryClient = useQueryClient()
+  const refresh = useRefreshPullRequest({ owner, repo, number })
   const pending = usePendingReview(owner, repo, number)
   const pendingCount = pending.comments.length
   const setOpen = onOpenChange
@@ -95,13 +95,8 @@ export function SubmitReviewPopover({
             window.open(result.html_url, "_blank", "noopener,noreferrer"),
         },
       })
-      void queryClient.invalidateQueries({
-        queryKey: ["review", owner, repo, number],
-      })
+      refresh.reviewed()
       void pending.invalidate()
-      void queryClient.invalidateQueries({
-        queryKey: reviewConversationQueryKey(owner, repo, number),
-      })
     },
   })
   const canSubmit = !submit.isPending && (!needsBody || body.trim().length > 0)

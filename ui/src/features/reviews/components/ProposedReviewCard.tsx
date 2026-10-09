@@ -1,10 +1,11 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 
 import type { ReviewEvent } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
-import { reviewConversationQueryKey } from "@/features/reviews/lib/conversationApi"
+import { useRefreshPullRequest } from "@/features/reviews/page/queries"
+import { plural } from "@/features/reviews/page/text"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -17,10 +18,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-const EVENTS: ReadonlyArray<[ReviewEvent, string]> = [
-  ["COMMENT", "Comment"],
-  ["APPROVE", "Approve"],
-  ["REQUEST_CHANGES", "Request changes"],
+const EVENTS: ReadonlyArray<ReviewEvent> = [
+  "COMMENT",
+  "APPROVE",
+  "REQUEST_CHANGES",
 ]
 
 const EVENT_LABEL: Record<ReviewEvent, string> = {
@@ -41,7 +42,7 @@ export function ProposedReviewCard({
   number: number
   id: string
 }) {
-  const queryClient = useQueryClient()
+  const refresh = useRefreshPullRequest({ owner, repo, number })
   const drafts = useChatDrafts()
   const draft = drafts?.reviews.find((item) => item.proposal.id === id)
   const pending = usePendingReview(owner, repo, number)
@@ -49,7 +50,7 @@ export function ProposedReviewCard({
   // GitHub refuses an author's approval or change request on their own PR.
   const isAuthor = useIsPullRequestAuthor(owner, repo, number)
   const events = isAuthor
-    ? EVENTS.filter(([value]) => value === "COMMENT")
+    ? EVENTS.filter((value) => value === "COMMENT")
     : EVENTS
   const submit = useMutation({
     mutationFn: async () => {
@@ -61,13 +62,8 @@ export function ProposedReviewCard({
     },
     onSuccess: (result) => {
       drafts?.settle(id, { state: "posted", url: result.html_url })
-      void queryClient.invalidateQueries({
-        queryKey: ["review", owner, repo, number],
-      })
+      refresh.reviewed()
       void pending.invalidate()
-      void queryClient.invalidateQueries({
-        queryKey: reviewConversationQueryKey(owner, repo, number),
-      })
     },
     meta: { errorTitle: "Couldn't submit the review" },
   })
@@ -90,8 +86,7 @@ export function ProposedReviewCard({
       <CardContent className="flex flex-col gap-2">
         {!outcome && pendingCount > 0 && (
           <p className="text-muted-foreground">
-            Includes your {pendingCount} pending comment
-            {pendingCount === 1 ? "" : "s"}.
+            Includes your {plural(pendingCount, "pending comment")}.
           </p>
         )}
         {!outcome && (
@@ -100,7 +95,7 @@ export function ProposedReviewCard({
             aria-label="Review verdict"
             className="flex gap-1"
           >
-            {events.map(([value, label]) => (
+            {events.map((value) => (
               <Button
                 key={value}
                 size="sm"
@@ -115,7 +110,7 @@ export function ProposedReviewCard({
                 disabled={submit.isPending}
                 onClick={() => drafts.edit(id, { event: value })}
               >
-                {label}
+                {EVENT_LABEL[value]}
               </Button>
             ))}
           </div>

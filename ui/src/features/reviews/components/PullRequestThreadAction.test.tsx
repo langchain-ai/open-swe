@@ -58,8 +58,12 @@ it("blocks the sibling action as soon as one is queued", async () => {
   })
   render(
     <QueryClientProvider client={client}>
-      <PullRequestThreadAction pr={pr} login="me" action="fix-checks" />
-      <PullRequestThreadAction pr={pr} login="me" action="address-comments" />
+      <PullRequestThreadAction pr={pr} login="me" actions={["fix-checks"]} />
+      <PullRequestThreadAction
+        pr={pr}
+        login="me"
+        actions={["address-comments"]}
+      />
     </QueryClientProvider>
   )
 

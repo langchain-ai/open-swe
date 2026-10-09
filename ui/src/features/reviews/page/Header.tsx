@@ -12,7 +12,6 @@ import {
   TreeViewIcon,
 } from "@phosphor-icons/react"
 import { IoLogoGithub } from "react-icons/io5"
-import { toast } from "sonner"
 
 import type { ReviewDetail } from "@/lib/api"
 import { cn, formatRelativeTime } from "@/lib/utils"
@@ -26,32 +25,33 @@ import {
   MenuTrigger,
 } from "@/components/ui/menu"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StatusPill } from "@/features/reviews/components/StatusPill"
 import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
+import { copyText } from "@/features/reviews/lib/copyText"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
+import { statusLabels } from "@/features/reviews/lib/status"
+import { ProfileLink } from "./notes/Byline"
 import { reviewQueries, type PullRequestRef } from "./queries"
+import { isLive } from "./pullRequestStanding"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
 import { useReviewPage } from "./store"
-import { statusLabels } from "@/features/reviews/lib/status"
-import { StatusPill } from "@/features/reviews/components/StatusPill"
 
-type PillState = "open" | "draft" | "merged" | "closed"
+type PillState = ReviewDetail["pr"]["state"]
 
-const pill: Record<PillState, { label: string; className: string }> = {
-  open: { label: "open", className: "bg-success/15 text-success-foreground" },
-  draft: { label: "draft", className: "bg-muted text-muted-foreground" },
-  merged: { label: "merged", className: "bg-merged/15 text-merged-foreground" },
-  closed: {
-    label: "closed",
-    className: "bg-destructive/12 text-destructive-foreground",
-  },
+const pillColor: Record<PillState, string> = {
+  open: "bg-success/15 text-success-foreground",
+  draft: "bg-muted text-muted-foreground",
+  merged: "bg-merged/15 text-merged-foreground",
+  closed: "bg-destructive/12 text-destructive-foreground",
 }
 
+// The status is fresher than the detail once someone marks the PR ready.
 function pillState(
   detail: ReviewDetail,
   draft: boolean | null | undefined
 ): PillState {
-  if (detail.pr.merged_at) return "merged"
-  if (detail.pr.state === "closed") return "closed"
-  return draft ? "draft" : "open"
+  if (!isLive(detail)) return detail.pr.state
+  return (draft ?? detail.pr.state === "draft") ? "draft" : "open"
 }
 
 /** Two lines that never scroll away: what this PR is, and what you can do with it. */
@@ -68,7 +68,6 @@ export function Header({
 }) {
   const detailQuery = useQuery(reviewQueries.detail(pr))
   const detail = detailQuery.data
-  const status = useQuery(reviewQueries.status(pr)).data
   const diff = useQuery(reviewQueries.diff(pr)).data
   const viewedCount = useReviewPage(
     (state) =>
@@ -83,10 +82,13 @@ export function Header({
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
   const { openShortcutReference } = useAppCommandControls()
-  const githubUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`
-  const state = detail ? pillState(detail, status?.draft) : null
-  const files = diff?.files ?? []
+  const githubUrl = githubUrls.pullRequest(pr)
   const current = usePullRequestStanding(pr)
+  const status = current?.status
+  const state = detail ? pillState(detail, status?.draft) : null
+  const live = detail !== undefined && isLive(detail)
+  const files = diff?.files ?? []
+  const firstEntry = entryOrder[0]
   const standingInView = useReviewPage((page) => page.standingInView)
   // Once the status card scrolls away, the header carries its sentence and next step.
   const carrying = !standingInView && current !== null
@@ -119,7 +121,7 @@ export function Header({
       <div className="min-w-0 flex-1">
         <div className="flex min-h-7 min-w-0 items-center gap-2">
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
-          {(state === "open" || state === "draft") && status ? (
+          {live && status ? (
             <span className="flex shrink-0 items-center gap-1 max-sm:[&>*:not(:first-child)]:hidden">
               {statusLabels(status).map((label) => (
                 <StatusPill
@@ -129,13 +131,13 @@ export function Header({
                 />
               ))}
             </span>
-          ) : (state === "open" || state === "draft") && !status ? (
+          ) : live && status === undefined ? (
             <Skeleton className="h-5 w-16 shrink-0 rounded-full" />
           ) : state ? (
             <span
               className={cn(
                 "inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium capitalize max-sm:px-1.5",
-                pill[state].className
+                pillColor[state]
               )}
             >
               {state === "merged" ? (
@@ -143,7 +145,7 @@ export function Header({
               ) : (
                 <GitPullRequestIcon weight="bold" className="size-3" />
               )}
-              <span className="max-sm:sr-only">{pill[state].label}</span>
+              <span className="max-sm:sr-only">{state}</span>
             </span>
           ) : (
             !detailQuery.isError && (
@@ -180,7 +182,7 @@ export function Header({
               )}
             >
               <a
-                href={`https://github.com/${pr.owner}/${pr.repo}`}
+                href={githubUrls.repo(pr)}
                 target="_blank"
                 rel="noreferrer"
                 className="shrink-0 hover:text-foreground hover:underline max-lg:hidden"
@@ -190,14 +192,10 @@ export function Header({
               <span aria-hidden className="max-lg:hidden">
                 ·
               </span>
-              <a
-                href={`https://github.com/${detail.pr.author?.login ?? ""}`}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 font-medium text-foreground/80 hover:text-foreground hover:underline"
-              >
-                {detail.pr.author?.login ?? "unknown"}
-              </a>
+              <ProfileLink
+                author={detail.pr.author}
+                className="shrink-0 font-medium text-foreground/80 hover:text-foreground"
+              />
               <span className="shrink-0">
                 {state === "merged"
                   ? "merged into"
@@ -206,7 +204,7 @@ export function Header({
                     : "wants to merge into"}
               </span>
               <a
-                href={`https://github.com/${pr.owner}/${pr.repo}/tree/${detail.pr.base_ref}`}
+                href={githubUrls.branch(pr, detail.pr.base_ref)}
                 target="_blank"
                 rel="noreferrer"
                 className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground"
@@ -218,9 +216,7 @@ export function Header({
                 type="button"
                 title={`Copy ${detail.pr.head_ref}`}
                 onClick={() =>
-                  void navigator.clipboard
-                    .writeText(detail.pr.head_ref)
-                    .then(() => toast.success("Copied the branch name"))
+                  copyText(detail.pr.head_ref, "Copied the branch name")
                 }
                 className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-1 rounded bg-muted px-1 py-px font-mono text-[11px] hover:text-foreground max-xl:hidden"
               >
@@ -231,7 +227,7 @@ export function Header({
                 type="button"
                 title="Go to the changes"
                 onClick={() =>
-                  jumpTo({ kind: "entry", id: entryOrder[0]?.id ?? "" })
+                  firstEntry && jumpTo({ kind: "entry", id: firstEntry.id })
                 }
                 className="hidden shrink-0 rounded px-0.5 font-mono tabular-nums hover:bg-accent lg:inline"
               >
@@ -287,7 +283,6 @@ export function Header({
               standing={current.standing}
               status={current.status}
               login={current.login}
-              inHeader
             />
           </div>
         )}
@@ -312,7 +307,7 @@ export function Header({
             <span className="max-sm:hidden">Chat</span>
           </Button>
         )}
-        {detail?.pr.state === "open" && (
+        {detail && isLive(detail) && (
           <SubmitReviewPopover
             owner={pr.owner}
             repo={pr.repo}
@@ -343,11 +338,7 @@ export function Header({
               <IoLogoGithub /> Open on GitHub
             </MenuItem>
             <MenuItem
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(window.location.href)
-                  .then(() => toast.success("Copied the link"))
-              }
+              onClick={() => copyText(window.location.href, "Copied the link")}
             >
               <LinkIcon /> Copy link to this page
             </MenuItem>

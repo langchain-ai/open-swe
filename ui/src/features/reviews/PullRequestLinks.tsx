@@ -2,12 +2,11 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useMutation } from "@tanstack/react-query"
 import { IoLogoGithub } from "react-icons/io5"
 import { useState } from "react"
-import { ChevronDown } from "lucide-react"
 import { toast } from "sonner"
 
+import { SplitButton } from "@/components/SplitButton"
 import { Button } from "@/components/ui/button"
-import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
-import { Menu, MenuTrigger, MenuPopup, MenuItem } from "@/components/ui/menu"
+import { MenuItem } from "@/components/ui/menu"
 import {
   Dialog,
   DialogPopup,
@@ -75,38 +74,22 @@ export function PullRequestLinks({
   return (
     <div className="text-xs">
       <span className="flex flex-wrap items-center gap-0.5">
-        <ButtonGroup aria-label={`Agent for ${repo}#${number}`}>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="px-1.5 text-muted-foreground"
-            disabled={thread.isPending || thread.isSuccess}
-            aria-live="polite"
-            onClick={() => thread.mutate()}
-          >
-            {thread.isPending ? "Opening thread…" : "Agent"}
-          </Button>
-          <ButtonGroupSeparator />
-          <Menu>
-            <MenuTrigger
-              aria-label="Agent options"
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="px-1 text-muted-foreground"
-                />
-              }
-            >
-              <ChevronDown className="size-3" />
-            </MenuTrigger>
-            <MenuPopup align="start">
-              <MenuItem onClick={() => setMessageOpen(true)}>
-                Send a message…
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-        </ButtonGroup>
+        <SplitButton
+          variant="ghost"
+          className="text-muted-foreground"
+          disabled={thread.isPending || thread.isSuccess}
+          onClick={() => thread.mutate()}
+          menuLabel="Agent options"
+          menuDisabled={false}
+          menuPopup={{ align: "start" }}
+          menu={
+            <MenuItem onClick={() => setMessageOpen(true)}>
+              Send a message…
+            </MenuItem>
+          }
+        >
+          {thread.isPending ? "Opening thread…" : "Agent"}
+        </SplitButton>
         <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
           <DialogPopup className="gap-4 p-5">
             <DialogTitle>Send a message to the agent</DialogTitle>

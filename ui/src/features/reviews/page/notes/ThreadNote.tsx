@@ -6,22 +6,85 @@ import {
   CheckIcon,
 } from "@phosphor-icons/react"
 
-import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
+import type {
+  ReviewThread,
+  ThreadComment,
+} from "@/features/reviews/lib/conversationApi"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import {
+  isPlaced,
+  threadLine,
+  threadTarget,
+} from "@/features/reviews/page/findings"
 import { useReviewPage } from "@/features/reviews/page/store"
 import type { PullRequestRef } from "@/features/reviews/page/queries"
-import { plainFirstLine } from "@/features/reviews/page/text"
+import { Tag } from "@/features/reviews/page/Tag"
+import { plainFirstLine, withLine } from "@/features/reviews/page/text"
 import { useThreadActions } from "@/features/reviews/page/useThreadActions"
+import { displayName } from "@/features/reviews/lib/logins"
 import { Avatar, Byline } from "./Byline"
 import { NoteFrame } from "./NoteFrame"
 import { ReplyBox } from "./ReplyBox"
 
-export function threadQuote(thread: ReviewThread): string {
-  const first = thread.comments[0]
-  const line = thread.line ?? thread.original_line
-  return `About @${first?.author?.login ?? "someone"}'s comment on \`${thread.path}${line ? `:${line}` : ""}\`:\n> ${(first?.body ?? "").split("\n").slice(0, 6).join("\n> ")}\n\n`
+function threadQuote(thread: ReviewThread): string {
+  const [first] = thread.comments
+  const quote = first.body.split("\n").slice(0, 6).join("\n> ")
+  return `About @${displayName(first.author)}'s comment on \`${withLine(thread.path, threadLine(thread))}\`:\n> ${quote}\n\n`
+}
+
+/** One comment in a thread: who, when, and what they said. */
+export function CommentRow({
+  comment,
+  body = comment.body,
+  className,
+}: {
+  comment: ThreadComment
+  body?: string
+  className?: string
+}) {
+  return (
+    <div className={cn("flex gap-2.5", className)}>
+      <Avatar author={comment.author} className="mt-px" />
+      <div className="min-w-0 flex-1">
+        <Byline
+          author={comment.author}
+          createdAt={comment.created_at}
+          href={comment.html_url || undefined}
+        />
+        <div className="mt-1 text-[13px] leading-[1.6] [&_.markdown-body]:text-[13px]">
+          <Markdown content={body} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Resolve or reopen a thread on GitHub; threads GitHub didn't name can't be. */
+export function ResolveButton({
+  thread,
+  resolve,
+  onResolve,
+}: {
+  thread: ReviewThread
+  resolve: ReturnType<typeof useThreadActions>["resolve"]
+  onResolve?: () => void
+}) {
+  if (!thread.node_id) return null
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={resolve.isPending}
+      onClick={() => {
+        resolve.mutate(!thread.resolved)
+        if (!thread.resolved) onResolve?.()
+      }}
+    >
+      {thread.resolved ? "Unresolve" : "Resolve conversation"}
+    </Button>
+  )
 }
 
 /** A GitHub review thread on its line. Settled and bot-only threads fold to one line. */
@@ -34,8 +97,6 @@ export function ThreadNote({
 }) {
   const humans = thread.comments.some((comment) => !comment.author?.bot)
   const [open, setOpen] = useState(!thread.resolved && humans)
-  const first = thread.comments[0]
-  if (!first) return null
   return (
     <NoteFrame className={open ? undefined : "py-1"}>
       {open ? (
@@ -58,14 +119,11 @@ export function ThreadSummary({
   /** Shown where the thread is not already on its line. */
   location?: string
 }) {
-  const first = thread.comments[0]
-  if (!first) return null
+  const [first] = thread.comments
   const last = thread.comments.at(-1)!
   const said = (
     <span className="min-w-0 flex-1 truncate">
-      <span className="font-medium">
-        {first.author?.login.replace(/\[bot\]$/, "") ?? "ghost"}
-      </span>{" "}
+      <span className="font-medium">{displayName(first.author)}</span>{" "}
       <span className="text-muted-foreground">
         {plainFirstLine(first.body)}
       </span>
@@ -88,11 +146,7 @@ export function ThreadSummary({
           className="size-3 shrink-0 text-muted-foreground"
         />
       ) : (
-        thread.outdated && (
-          <span className="shrink-0 rounded-[4px] border border-border px-1 text-[10px] text-muted-foreground">
-            Outdated
-          </span>
-        )
+        thread.outdated && <Tag>Outdated</Tag>
       )}
     </>
   )
@@ -126,7 +180,7 @@ export function ThreadSummary({
       {location && thread.comments.length > 1 && (
         <span className="w-full truncate pl-5 text-muted-foreground">
           <span className="font-medium text-foreground/80">
-            {last.author?.login.replace(/\[bot\]$/, "") ?? "ghost"}
+            {displayName(last.author)}
           </span>{" "}
           {plainFirstLine(last.body)}
         </span>
@@ -202,10 +256,10 @@ export function ThreadCard({
   const askInChat = useReviewPage((state) => state.askInChat)
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const { reply, resolve } = useThreadActions(pr, thread)
-  const line = thread.line ?? thread.original_line
   const suggestion = thread.comments.findLast((comment) =>
     comment.body.includes("```suggestion")
   )
+  const quote = threadQuote(thread)
   return (
     <div
       className={cn(
@@ -216,10 +270,9 @@ export function ThreadCard({
       {withContext && (
         <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-            {thread.path}
-            {line ? `:${line}` : ""}
+            {withLine(thread.path, threadLine(thread))}
           </span>
-          {thread.comments[0]?.html_url && (
+          {thread.comments[0].html_url && (
             <a
               href={thread.comments[0].html_url}
               target="_blank"
@@ -231,90 +284,51 @@ export function ThreadCard({
               <ArrowSquareOutIcon className="size-3" />
             </a>
           )}
-          {thread.outdated ? (
-            <span className="shrink-0 rounded-[4px] border border-border px-1 text-[10px] text-muted-foreground">
-              Outdated
-            </span>
+          {isPlaced(thread) ? (
+            <button
+              type="button"
+              className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+              onClick={() => jumpTo(threadTarget(thread))}
+            >
+              Show in diff
+            </button>
           ) : (
-            thread.line !== null && (
-              <button
-                type="button"
-                className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-                onClick={() =>
-                  thread.line !== null &&
-                  jumpTo({
-                    kind: "line",
-                    path: thread.path,
-                    line: thread.line,
-                    side: thread.side,
-                  })
-                }
-              >
-                Show in diff
-              </button>
-            )
+            thread.outdated && <Tag>Outdated</Tag>
           )}
         </div>
       )}
       {withContext && <ThreadContext thread={thread} />}
       <ol className="divide-y divide-border">
         {thread.comments.map((comment) => (
-          <li key={comment.id} className="flex gap-2.5 px-3 py-2.5">
-            <Avatar author={comment.author} className="mt-px" />
-            <div className="min-w-0 flex-1">
-              <Byline
-                author={comment.author}
-                createdAt={comment.created_at}
-                href={comment.html_url || undefined}
-              />
-              <div className="mt-1 text-[13px] leading-[1.6] [&_.markdown-body]:text-[13px]">
-                <Markdown content={withSuggestions(comment.body, thread)} />
-              </div>
-            </div>
+          <li key={comment.id} className="px-3 py-2.5">
+            <CommentRow
+              comment={comment}
+              body={withSuggestions(comment.body, thread)}
+            />
           </li>
         ))}
       </ol>
       <div className="flex flex-col gap-2 border-t border-border bg-muted/40 px-3 py-2">
-        <ReplyBox
-          pending={reply.isPending}
-          onSend={(body) => reply.mutate(body)}
-        />
+        <ReplyBox reply={reply} />
         <div className="flex items-center gap-1">
-          {thread.node_id && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={resolve.isPending}
-              onClick={() => {
-                const next = !thread.resolved
-                resolve.mutate(next)
-                if (next) onCollapse()
-              }}
-            >
-              {thread.resolved ? "Unresolve" : "Resolve conversation"}
-            </Button>
-          )}
-          {suggestion ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() =>
-                askInChat(
-                  `${threadQuote(thread)}Apply ${suggestion.author?.login ?? "their"}'s suggested change on this branch.`
-                )
-              }
-            >
-              Ask Open SWE to apply
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => askInChat(threadQuote(thread))}
-            >
-              Ask Open SWE
-            </Button>
-          )}
+          <ResolveButton
+            thread={thread}
+            resolve={resolve}
+            onResolve={onCollapse}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              askInChat(
+                suggestion
+                  ? `${quote}Apply ${displayName(suggestion.author)}'s suggested change on this branch.`
+                  : quote
+              )
+            }
+          >
+            {suggestion ? "Ask Open SWE to apply" : "Ask Open SWE"}
+          </Button>
           <button
             type="button"
             onClick={onCollapse}

@@ -3,11 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowDownIcon,
   CaretRightIcon,
-  CheckCircleIcon,
   CheckIcon,
-  ChatCircleIcon,
   GitCommitIcon,
-  XCircleIcon,
 } from "@phosphor-icons/react"
 
 import {
@@ -21,17 +18,29 @@ import {
   type ReviewThread,
   type ThreadComment,
 } from "@/features/reviews/lib/conversationApi"
+import { sameLogin } from "@/features/reviews/lib/logins"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { Avatar, Byline, formatWhen } from "./notes/Byline"
+import { threadLocation } from "./findings"
+import {
+  Avatar,
+  Byline,
+  formatWhen,
+  ReviewStateMark,
+  reviewStateWords,
+} from "./notes/Byline"
 import { ThreadCard, ThreadSummary } from "./notes/ThreadNote"
-import { reviewQueries, type PullRequestRef } from "./queries"
+import {
+  reviewQueries,
+  useOpenConversations,
+  type PullRequestRef,
+} from "./queries"
 import { useReviewPage } from "./store"
 import { useResolveThreads } from "./useThreadActions"
-import { plainFirstLine } from "./text"
+import { plainFirstLine, plural } from "./text"
 
 type Said = ConversationComment | ConversationReview
 
@@ -67,13 +76,6 @@ type Block =
       replies: Array<Reply>
     }
 
-const stateWords: Record<ConversationReview["state"], string> = {
-  APPROVED: "approved",
-  CHANGES_REQUESTED: "requested changes",
-  COMMENTED: "reviewed",
-  DISMISSED: "had a review dismissed",
-}
-
 const NO_PARTS: ReviewParts = { started: [], replies: [] }
 
 function reviewParts(
@@ -95,6 +97,10 @@ function reviewParts(
       else of(comment.review_id).replies.push({ thread, comment })
     })
   return parts
+}
+
+function inThreads(parts: ReviewParts): boolean {
+  return parts.started.length > 0 || parts.replies.length > 0
 }
 
 /**
@@ -145,11 +151,11 @@ function toBlocks(
     }
     // Only a bot's spoken words fold; what it left in threads is never the same thing twice.
     const index =
-      item.author?.bot && body && parts.started.length === 0
+      item.author?.bot && body && !inThreads(parts)
         ? blocks.findLastIndex(
             (block) =>
               block.kind === "item" &&
-              block.parts.started.length === 0 &&
+              !inThreads(block.parts) &&
               block.item.author?.login === item.author?.login &&
               block.item.kind === item.kind &&
               plainFirstLine(block.item.body) === plainFirstLine(item.body)
@@ -186,21 +192,18 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
     () => toBlocks(conversation.data?.items ?? [], threads ?? []),
     [conversation.data?.items, threads]
   )
-  const open = useMemo(
-    () => (threads ?? []).filter((thread) => !thread.resolved),
-    [threads]
-  )
+  const open = useOpenConversations(pr)?.threads ?? []
   const scroller = useRef<HTMLDivElement>(null)
   const [awayFromLatest, setAwayFromLatest] = useState(false)
+  const measure = (node: HTMLElement) =>
+    setAwayFromLatest(
+      node.scrollHeight - node.scrollTop - node.clientHeight > 400
+    )
   // The tab mounts hidden, so measure again whenever it is shown or its content grows.
   useEffect(() => {
     const node = scroller.current
     if (!node) return
-    const measure = () =>
-      setAwayFromLatest(
-        node.scrollHeight - node.scrollTop - node.clientHeight > 400
-      )
-    const observer = new ResizeObserver(measure)
+    const observer = new ResizeObserver(() => measure(node))
     observer.observe(node)
     if (node.firstElementChild) observer.observe(node.firstElementChild)
     return () => observer.disconnect()
@@ -213,12 +216,7 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
     >
       <div
         ref={scroller}
-        onScroll={(event) => {
-          const node = event.currentTarget
-          setAwayFromLatest(
-            node.scrollHeight - node.scrollTop - node.clientHeight > 400
-          )
-        }}
+        onScroll={(event) => measure(event.currentTarget)}
         className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
       >
         {conversation.isPending ? (
@@ -306,9 +304,7 @@ function OpenConversations({
     (thread) =>
       thread.outdated &&
       thread.node_id &&
-      !!author &&
-      thread.comments.at(-1)?.author?.login.toLowerCase() ===
-        author.toLowerCase()
+      sameLogin(thread.comments.at(-1)?.author?.login, author)
   )
   // Folding holds until something asks for the conversations again.
   const [foldedAt, setFoldedAt] = useState<number | null>(null)
@@ -371,8 +367,6 @@ function ThreadRow({
   thread: ReviewThread
 }) {
   const [open, setOpen] = useState(false)
-  const line = thread.line ?? thread.original_line
-  const name = thread.path.split("/").pop() ?? thread.path
   return open ? (
     <ThreadCard
       pr={pr}
@@ -383,7 +377,7 @@ function ThreadRow({
   ) : (
     <ThreadSummary
       thread={thread}
-      location={`${name}${line ? `:${line}` : ""}`}
+      location={threadLocation(thread)}
       onOpen={() => setOpen(true)}
     />
   )
@@ -407,7 +401,7 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
         <span className="font-medium text-foreground/80">
           {authors.join(", ")}
         </span>{" "}
-        pushed {commits.length} commit{commits.length === 1 ? "" : "s"}{" "}
+        pushed {plural(commits.length, "commit")}{" "}
         {formatWhen(commits.at(-1)!.created_at)}
         <CaretRightIcon
           className={cn(
@@ -441,14 +435,6 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
   )
 }
 
-function ReviewStateMark({ state }: { state: ConversationReview["state"] }) {
-  if (state === "APPROVED")
-    return <CheckCircleIcon weight="fill" className="size-3.5 text-success" />
-  if (state === "CHANGES_REQUESTED")
-    return <XCircleIcon weight="fill" className="size-3.5 text-destructive" />
-  return <ChatCircleIcon className="size-3.5 text-muted-foreground" />
-}
-
 /** One person's run of thread replies: where each went and what it said. */
 function RepliesBlock({
   pr,
@@ -473,7 +459,7 @@ function RepliesBlock({
         author={author}
         createdAt={latest.created_at}
         href={latest.html_url}
-        verb={`replied in ${threadCount} thread${threadCount === 1 ? "" : "s"}`}
+        verb={`replied in ${plural(threadCount, "thread")}`}
       />
       <ul className="mt-1.5 flex flex-col gap-1">
         {replies.map((reply) => (
@@ -489,8 +475,6 @@ function RepliesBlock({
 function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
   const [open, setOpen] = useState(false)
   const { thread, comment } = reply
-  const line = thread.line ?? thread.original_line
-  const name = thread.path.split("/").pop() ?? thread.path
   if (open)
     return (
       <ThreadCard
@@ -504,15 +488,12 @@ function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
     <button
       type="button"
       onClick={() => setOpen(true)}
-      title={`${thread.path}${line ? `:${line}` : ""}`}
+      title={thread.path}
       className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-accent"
     >
       {/* Truncates from the left so the line number, which tells rows apart, stays. */}
       <span className="max-w-[45%] shrink-0 truncate text-left font-mono text-[11px] text-muted-foreground [direction:rtl]">
-        <bdi>
-          {name}
-          {line ? `:${line}` : ""}
-        </bdi>
+        <bdi>{threadLocation(thread)}</bdi>
       </span>
       <span className="min-w-0 flex-1 truncate text-foreground/90">
         {plainFirstLine(comment.body)}
@@ -547,8 +528,8 @@ function ItemBlock({
   const verb =
     item.kind === "review"
       ? leftOnlyComments && item.state === "COMMENTED"
-        ? `left ${started.length} comment${started.length === 1 ? "" : "s"}`
-        : stateWords[item.state]
+        ? `left ${plural(started.length, "comment")}`
+        : reviewStateWords[item.state]
       : "commented"
   return (
     <li className="relative pl-8">
@@ -644,8 +625,7 @@ function CommentBox({ pr }: { pr: PullRequestRef }) {
   const [body, setBody] = useState("")
   const key = reviewQueries.conversation(pr).queryKey
   const post = useMutation({
-    mutationFn: (text: string) =>
-      postReviewConversationComment(pr.owner, pr.repo, pr.number, text),
+    mutationFn: (text: string) => postReviewConversationComment(pr, text),
     meta: { errorTitle: "Couldn't post the comment", silent: true },
     onSuccess: (comment) => {
       queryClient.setQueryData<Conversation | undefined>(key, (old) =>

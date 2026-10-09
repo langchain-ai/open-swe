@@ -1,23 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react"
 
 import { api, type MergeMethod, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
-import { Button } from "@/components/ui/button"
-import { ButtonGroup } from "@/components/ui/button-group"
-import {
-  Menu,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuTrigger,
-} from "@/components/ui/menu"
+import { SplitButton } from "@/components/SplitButton"
+import { MenuRadioGroup, MenuRadioItem } from "@/components/ui/menu"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import {
-  mergeMethodButtonLabels,
-  mergeMethodDescriptions,
-  mergeMethodLabels,
+  mergeMethodCopy,
   mergeMethods,
   readPreferredMergeMethod,
   writePreferredMergeMethod,
@@ -31,11 +21,12 @@ export function MergePullRequest({
   onMerged,
 }: {
   pr: OpenPullRequest
-  apply: () => () => void
+  apply?: () => () => void
   onMerged?: () => void
 }) {
   const [choice, setChoice] = useState<MergeMethod | null>(null)
   const [preferred] = useState(readPreferredMergeMethod)
+  const [menuOpen, setMenuOpen] = useState(false)
   const allowed = useQuery({
     queryKey: ["repo-merge-methods", pr.repo],
     queryFn: () => api.repoMergeMethods(pr.repo),
@@ -51,13 +42,12 @@ export function MergePullRequest({
     : mergeMethods.filter((option) =>
         (allowed.data?.mergeMethods ?? []).includes(option)
       )
-  // Never guess between allowed methods: the only one, the last one used here, or the viewer's pick.
-  const method: MergeMethod | null =
-    (choice && options.includes(choice) ? choice : null) ??
-    (options.length === 1 ? options[0]! : null) ??
-    options.find((option) => option === preferred) ??
-    null
-  const [menuOpen, setMenuOpen] = useState(false)
+  // Never guess between allowed methods: the viewer's pick, the only one, or the last one used here.
+  const method =
+    [choice, options.length === 1 ? options[0] : null, preferred].find(
+      (candidate): candidate is MergeMethod =>
+        !!candidate && options.includes(candidate)
+    ) ?? null
   const merge = usePullRequestAction({
     pr,
     action: "merge",
@@ -70,53 +60,47 @@ export function MergePullRequest({
   })
   const busy = merge.isPending || merge.isSuccess
   const state = actionLabel(githubActions.merge.labels, merge)
-  const label =
-    state === githubActions.merge.labels.idle && method
-      ? mergeMethodButtonLabels[method]
-      : state
   return (
-    <ButtonGroup aria-label={`Merge PR #${pr.number}`}>
-      <Button
-        size="sm"
-        variant="outline"
-        aria-live="polite"
-        disabled={!pr.headSha || busy || allowed.isPending}
-        onClick={() => (method ? merge.mutate() : setMenuOpen(true))}
-      >
-        {allowed.isPending ? "Merge" : method ? label : "Choose how to merge"}
-      </Button>
-      {options.length > 1 && (
-        <Menu open={menuOpen} onOpenChange={setMenuOpen}>
-          <MenuTrigger
-            aria-label={`Merge method for PR #${pr.number}`}
-            disabled={busy}
-            render={<Button size="sm" variant="outline" className="px-1.5" />}
+    <SplitButton
+      disabled={!pr.headSha || busy || allowed.isPending}
+      onClick={() => (method ? merge.mutate() : setMenuOpen(true))}
+      menuLabel={`Merge method for PR #${pr.number}`}
+      menuDisabled={busy}
+      menuOpen={menuOpen}
+      onMenuOpenChange={setMenuOpen}
+      menuPopup={{ className: "w-72" }}
+      menu={
+        options.length > 1 && (
+          <MenuRadioGroup
+            value={method}
+            onValueChange={(value: MergeMethod) => setChoice(value)}
           >
-            <CaretDownIcon />
-          </MenuTrigger>
-          <MenuPopup align="end" className="w-72">
-            <MenuRadioGroup
-              value={method}
-              onValueChange={(value: MergeMethod) => setChoice(value)}
-            >
-              {options.map((option) => (
-                <MenuRadioItem
-                  key={option}
-                  value={option}
-                  className="items-start py-1.5"
-                >
-                  <span className="block font-medium">
-                    {mergeMethodLabels[option]}
-                  </span>
-                  <span className="block text-muted-foreground">
-                    {mergeMethodDescriptions[option]}
-                  </span>
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuPopup>
-        </Menu>
-      )}
-    </ButtonGroup>
+            {options.map((option) => (
+              <MenuRadioItem
+                key={option}
+                value={option}
+                closeOnClick
+                className="items-start py-1.5"
+              >
+                <span className="block font-medium">
+                  {mergeMethodCopy[option].label}
+                </span>
+                <span className="block text-muted-foreground">
+                  {mergeMethodCopy[option].description}
+                </span>
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        )
+      }
+    >
+      {allowed.isPending
+        ? "Merge"
+        : !method
+          ? "Choose how to merge"
+          : state === githubActions.merge.labels.idle
+            ? mergeMethodCopy[method].button
+            : state}
+    </SplitButton>
   )
 }

@@ -46,7 +46,12 @@ function hunkPatch(meta: FileDiffMetadata, hunk: Hunk): string {
   return out
 }
 
-function patchHeader(file: ReviewDiffFile): string {
+const slices = new WeakMap<
+  ReviewDiffFile,
+  Map<string, FileDiffMetadata | null>
+>()
+
+export function patchHeader(file: ReviewDiffFile): string {
   const oldPath = file.previousPath ?? file.path
   const lines = [`diff --git a/${oldPath} b/${file.path}`]
   if (file.status === "added") lines.push("new file mode 100644")
@@ -71,19 +76,11 @@ export function walkthroughFileDiff(
   if (!file.patch) return null
   // Reusing the object keeps its hydrated contents across re-renders and order switches.
   const key = JSON.stringify([lines.added, lines.deleted])
-  let cache = slices.get(file)
-  if (!cache) {
-    cache = new Map()
-    slices.set(file, cache)
-  }
+  const cache = slices.get(file) ?? new Map<string, FileDiffMetadata | null>()
+  slices.set(file, cache)
   if (!cache.has(key)) cache.set(key, sliceFileDiff(file, file.patch, lines))
   return cache.get(key) ?? null
 }
-
-const slices = new WeakMap<
-  ReviewDiffFile,
-  Map<string, FileDiffMetadata | null>
->()
 
 function sliceFileDiff(
   file: ReviewDiffFile,

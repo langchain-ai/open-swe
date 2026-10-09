@@ -1,59 +1,30 @@
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react"
-
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { useIsHydrated } from "@/lib/hydration"
 import { Button } from "@/components/ui/button"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { pageTitle } from "@/lib/pageTitle"
+import { useResizableWidth } from "@/lib/useResizableWidth"
 import { Sheet, SheetPopup, SheetTitle } from "@/components/ui/sheet"
 import { useSidebarControls } from "@/components/sidebar-layout"
+import { RightPanelResizeHandle } from "@/features/agents/components/panel/RightPanelResizeHandle"
 import {
   agentThreadKeys,
   markReviewViewed,
 } from "@/features/agents/lib/queries"
 import type { AgentThread } from "@/features/agents/lib/types"
 import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
+import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
+import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
 import { Changes } from "./Changes"
 import { Header } from "./Header"
 import { Navigator } from "./Navigator"
-import { reviewQueries, useReviewChat, type PullRequestRef } from "./queries"
+import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
-
-const RAIL_WIDTH_KEY = "open-swe.review-panel.width"
-const RAIL_MIN = 340
-const RAIL_MAX = 680
-const RAIL_DEFAULT = 420
-
-function readRailWidth(): number {
-  if (typeof window === "undefined") return RAIL_DEFAULT
-  try {
-    const stored = Number(window.localStorage.getItem(RAIL_WIDTH_KEY))
-    return Number.isFinite(stored) && stored >= RAIL_MIN
-      ? Math.min(stored, RAIL_MAX)
-      : RAIL_DEFAULT
-  } catch (error) {
-    console.warn("Could not read the chat width", error)
-    return RAIL_DEFAULT
-  }
-}
-
-function saveRailWidth(width: number): void {
-  try {
-    window.localStorage.setItem(RAIL_WIDTH_KEY, String(width))
-  } catch (error) {
-    console.warn("Could not save the chat width", error)
-  }
-}
 
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
 export function ReviewPage({ pr }: { pr: PullRequestRef }) {
@@ -119,9 +90,13 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
       : "pl-14"
     : "pl-3"
 
-  const [draggedWidth, setRailWidth] = useState<number | null>(null)
-  const railWidth = draggedWidth ?? (hydrated ? readRailWidth() : RAIL_DEFAULT)
-  const startResize = useResize(railWidth, setRailWidth)
+  const rail = useResizableWidth({
+    storageKey: "open-swe.review-panel.width",
+    defaultWidth: 420,
+    minWidth: 340,
+    maxWidth: 680,
+    edge: "left",
+  })
 
   const navigatorInline = navigatorOpen && roomForNavigator
 
@@ -147,41 +122,13 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
               <Changes pr={pr} />
             </section>
             {wide && (
-              <>
-                <div
-                  role="separator"
-                  tabIndex={0}
-                  aria-orientation="vertical"
-                  aria-label="Resize the chat"
-                  aria-valuemin={RAIL_MIN}
-                  aria-valuemax={RAIL_MAX}
-                  aria-valuenow={railWidth}
-                  onPointerDown={startResize}
-                  onKeyDown={(event) => {
-                    const step = event.shiftKey ? 80 : 20
-                    const delta =
-                      event.key === "ArrowLeft"
-                        ? step
-                        : event.key === "ArrowRight"
-                          ? -step
-                          : 0
-                    if (!delta) return
-                    event.preventDefault()
-                    const next = Math.min(
-                      RAIL_MAX,
-                      Math.max(RAIL_MIN, railWidth + delta)
-                    )
-                    setRailWidth(next)
-                    saveRailWidth(next)
-                  }}
-                  className="group relative w-px shrink-0 cursor-col-resize bg-border outline-none focus-visible:bg-primary"
-                >
-                  <span className="absolute inset-y-0 -left-1.5 w-3 group-hover:bg-primary/15" />
-                </div>
-                <div className="shrink-0" style={{ width: railWidth }}>
-                  <Rail pr={pr} />
-                </div>
-              </>
+              <div
+                className="relative shrink-0 border-l border-border"
+                style={{ width: rail.width }}
+              >
+                <RightPanelResizeHandle handlers={rail.handlers} />
+                <Rail pr={pr} />
+              </div>
             )}
           </div>
         )}
@@ -217,7 +164,6 @@ function PullRequestUnavailable({
   pr: PullRequestRef
   message: string
 }) {
-  const githubUrl = `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`
   return (
     <div
       role="alert"
@@ -241,40 +187,18 @@ function PullRequestUnavailable({
         <Button
           variant="ghost"
           size="sm"
-          render={<a href={githubUrl} target="_blank" rel="noreferrer" />}
+          render={
+            <a
+              href={githubUrls.pullRequest(pr)}
+              target="_blank"
+              rel="noreferrer"
+            />
+          }
         >
           Try it on GitHub
         </Button>
       </div>
     </div>
-  )
-}
-
-function useResize(width: number, setWidth: (width: number) => void) {
-  return useCallback(
-    (event: React.PointerEvent) => {
-      event.preventDefault()
-      const startX = event.clientX
-      const startWidth = width
-      let latest = width
-      const move = (moveEvent: PointerEvent) => {
-        latest = Math.min(
-          RAIL_MAX,
-          Math.max(RAIL_MIN, startWidth + startX - moveEvent.clientX)
-        )
-        setWidth(latest)
-      }
-      const up = () => {
-        window.removeEventListener("pointermove", move)
-        window.removeEventListener("pointerup", up)
-        document.body.style.removeProperty("cursor")
-        saveRailWidth(latest)
-      }
-      document.body.style.cursor = "col-resize"
-      window.addEventListener("pointermove", move)
-      window.addEventListener("pointerup", up)
-    },
-    [width, setWidth]
   )
 }
 

@@ -1,12 +1,14 @@
 import type { OpenPullRequest, ReviewDetail } from "@/lib/api"
-import type { ReviewThread } from "@/features/reviews/lib/conversationApi"
-import { openConversationCounts } from "./findings"
-import type { PullRequestThreadActionName } from "@/features/reviews/lib/threadActions"
+import { sameLogin } from "@/features/reviews/lib/logins"
 import {
   canAttemptMerge,
+  canUpdateBranch,
   hasFailingChecks,
   isConflicted,
 } from "@/features/reviews/lib/status"
+import type { PullRequestThreadActionName } from "@/features/reviews/lib/threadActions"
+import { openFindingCounts } from "./findings"
+import { plural } from "./text"
 
 export type StandingTone =
   | "ready"
@@ -37,14 +39,9 @@ export interface Standing {
   next: NextStep | null
 }
 
-function plural(count: number, one: string, many = `${one}s`): string {
-  return `${count} ${count === 1 ? one : many}`
-}
-
-export function openBugCount(detail: ReviewDetail): number {
-  return detail.findings.filter(
-    (finding) => finding.group === "bug" && finding.status === "open"
-  ).length
+/** Still open on GitHub, as a draft or ready for review. */
+export function isLive(detail: ReviewDetail): boolean {
+  return detail.pr.state === "open" || detail.pr.state === "draft"
 }
 
 /** One sentence on where the pull request stands, and the single thing to do next. */
@@ -52,7 +49,7 @@ export function pullRequestStanding(
   detail: ReviewDetail,
   status: OpenPullRequest | null | undefined,
   viewer: string | undefined,
-  threads: ReadonlyArray<ReviewThread> | undefined
+  open: { current: number; outdated: number } | null
 ): Standing {
   if (detail.pr.merged_at)
     return { tone: "merged", headline: "Merged.", details: [], next: null }
@@ -64,10 +61,7 @@ export function pullRequestStanding(
       next: null,
     }
   const details: Array<StandingDetail> = []
-  const bugs = openBugCount(detail)
-  const flags = detail.findings.filter(
-    (finding) => finding.group !== "bug" && finding.status === "open"
-  ).length
+  const { bugs, flags } = openFindingCounts(detail.findings)
   if (bugs > 0)
     details.push({
       text: `Open SWE flagged ${plural(bugs, "bug")}`,
@@ -81,16 +75,18 @@ export function pullRequestStanding(
   if (!status)
     return {
       tone: "unknown",
-      headline: "Checking where this stands…",
+      headline:
+        status === undefined
+          ? "Checking where this stands…"
+          : "Open. GitHub didn't say whether it can merge.",
       details,
       next: null,
     }
-  const isAuthor =
-    !!viewer && detail.pr.author?.login.toLowerCase() === viewer.toLowerCase()
-  // A finding's own GitHub thread is already counted as a finding above.
-  const conversations = threads
-    ? openConversationCounts(threads, detail.findings)
-    : { current: status.unresolvedThreads ?? 0, outdated: 0 }
+  const isAuthor = sameLogin(detail.pr.author?.login, viewer)
+  const conversations = open ?? {
+    current: status.unresolvedThreads ?? 0,
+    outdated: 0,
+  }
   if (conversations.current)
     details.push({
       text: plural(conversations.current, "open conversation"),
@@ -128,9 +124,11 @@ export function pullRequestStanding(
       tone: "blocked",
       headline: "Changes requested.",
       details,
-      next: isAuthor
-        ? { kind: "agent", action: "address-comments" }
-        : { kind: "review" },
+      next: !isAuthor
+        ? { kind: "review" }
+        : conversations.current > 0
+          ? { kind: "agent", action: "address-comments" }
+          : null,
     }
   if (status.missingChecks.length)
     return {
@@ -140,8 +138,8 @@ export function pullRequestStanding(
       next: null,
     }
   if (status.reviewRequired) {
-    const askedOfViewer = detail.pr.requested_reviewers.some(
-      (reviewer) => reviewer.login.toLowerCase() === viewer?.toLowerCase()
+    const askedOfViewer = detail.pr.requested_reviewers.some((reviewer) =>
+      sameLogin(reviewer.login, viewer)
     )
     return {
       tone: "waiting",
@@ -164,7 +162,7 @@ export function pullRequestStanding(
       tone: "waiting",
       headline: `Behind ${detail.pr.base_ref}.`,
       details,
-      next: { kind: "update-branch" },
+      next: canUpdateBranch(status) ? { kind: "update-branch" } : null,
     }
   if (canAttemptMerge(status)) {
     // GitHub would merge it, but someone still has something to say about it.
