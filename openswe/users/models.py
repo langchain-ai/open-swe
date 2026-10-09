@@ -121,18 +121,15 @@ class User(Base):
     async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
         """The person a dashboard session belongs to.
 
-        The session's ``user_id`` wins only while that person still holds its
-        GitHub login: identities move between rows, so an older claim can name a
-        row the rest of the app no longer resolves the login to.
+        The session's ``user_id`` wins while that row still holds any GitHub
+        identity, so a renamed login never falls through to whoever took the old
+        handle; only a row whose GitHub identity moved away falls back to the login.
         """
         if not postgres.configured():
             return None
         if user_id is not None:
             user = await cls.get(user_id)
-            if user is not None and any(
-                identity.provider == "github" and identity.login.lower() == github_login.lower()
-                for identity in user.identities
-            ):
+            if user is not None and any(i.provider == "github" for i in user.identities):
                 return user
         return await cls.for_login("github", github_login)
 
