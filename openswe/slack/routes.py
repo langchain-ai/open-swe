@@ -883,6 +883,33 @@ async def slack_interactivity(
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
+    if interaction.type == "message_action" and interaction.callback_id == "open_swe_explain":
+        if not (
+            interaction.channel_id
+            and interaction.user.id
+            and interaction.message_ts
+            and interaction.message.text.strip()
+            and interaction.response_url
+            and interaction.trigger_id
+        ):
+            return ignored("Missing Explain This message context")
+        background_tasks.add_task(
+            process_slack_ask,
+            SlackAskRequest(
+                channel_id=interaction.channel_id,
+                user_id=interaction.user.id,
+                question="Explain this Slack message",
+                command="Explain This",
+                thread_id=ask_thread_id(
+                    interaction.channel_id, interaction.user.id, interaction.trigger_id
+                ),
+                team_id=interaction.team.id,
+                response_url=interaction.response_url,
+                selected_message=interaction.message.text,
+                message_ts=interaction.message_ts,
+            ),
+        )
+        return {}
     if (
         interaction.type == "view_submission"
         and interaction.view.callback_id == expedited_review.CHANNEL_MODAL
