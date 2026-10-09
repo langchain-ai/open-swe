@@ -49,7 +49,7 @@ async def linear_mcp(fake_store, monkeypatch: pytest.MonkeyPatch, comment_tool: 
     )
     definition = Tool(
         name=comment_tool,
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {"issueId": {"type": "string"}, "body": {"type": "string"}},
             "required": ["issueId", "body"],

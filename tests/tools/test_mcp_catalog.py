@@ -10,8 +10,8 @@ from openswe.mcp import MCPConnectionUpdate, runtime
 from openswe.mcp import workspace as settings
 from openswe.tool_loaders import workspace_mcp as loader
 
-SEARCH = Tool(name="search", inputSchema={"type": "object"})
-FETCH = Tool(name="fetch", inputSchema={"type": "object"})
+SEARCH = Tool(name="search", input_schema={"type": "object"})
+FETCH = Tool(name="fetch", input_schema={"type": "object"})
 
 
 @pytest.fixture(autouse=True)

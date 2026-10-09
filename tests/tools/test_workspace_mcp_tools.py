@@ -32,7 +32,7 @@ async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
         Tool(
             name=name,
             description=name,
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"query": {"type": "string"}, "runtime": {"type": "string"}},
                 "required": ["query"],
@@ -68,7 +68,7 @@ async def test_delete_and_allowlist_changes_revoke_already_loaded_tools(fake_sto
     monkeypatch.setattr(
         runtime,
         "_discover_tools",
-        AsyncMock(return_value=[Tool(name="search", inputSchema={"type": "object"})]),
+        AsyncMock(return_value=[Tool(name="search", input_schema={"type": "object"})]),
     )
     tool = (await loader.load_workspace_mcp_tools("default"))[0]
     await save(allowed_tools=[])
@@ -94,7 +94,7 @@ async def test_duplicate_catalog_is_isolated_from_other_connections(fake_store, 
         ),
     )
     await save("working", allowed_tools=["search"])
-    definition = Tool(name="search", inputSchema={"type": "object"})
+    definition = Tool(name="search", input_schema={"type": "object"})
 
     async def list_tools(transport):
         broken = transport.url == "https://broken.example/mcp"
@@ -120,7 +120,7 @@ async def test_expired_catalog_failure_does_not_log_upstream_details(
         "_discover_tools",
         AsyncMock(
             side_effect=[
-                [Tool(name="search", inputSchema={"type": "object"})],
+                [Tool(name="search", input_schema={"type": "object"})],
                 ExceptionGroup("test-secret", [ValueError("test-secret")]),
             ]
         ),
@@ -136,7 +136,7 @@ async def test_remote_arguments_survive_langchain_invocation(fake_store, monkeyp
     await save(allowed_tools=["search"])
     definition = Tool(
         name="search",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {argument: {"type": "string"}},
             "required": [argument],

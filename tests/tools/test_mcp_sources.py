@@ -36,7 +36,7 @@ def source(namespace, records):
 def remote(monkeypatch):
     async def discover(record, namespace):
         return [
-            Tool(name=name, description=record.url, inputSchema={"type": "object"})
+            Tool(name=name, description=record.url, input_schema={"type": "object"})
             for name in record.allowed_tools
         ]
 
