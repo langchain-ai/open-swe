@@ -9,11 +9,13 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.agent_overrides import resolve_github_login
 from openswe.dashboard.user_instructions import MAX_USER_INSTRUCTIONS_CHARS, set_user_instructions
 from openswe.tools.access import Policy, access, unchanged
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.json_types import as_json_object
 
 logger = logging.getLogger(__name__)
 
 
+@expose_mcp()
 @audit_tool()
 @access(Policy(trusted="private", actor="owner", sole=unchanged))
 async def save_user_instructions(instructions: str) -> dict[str, Any]:

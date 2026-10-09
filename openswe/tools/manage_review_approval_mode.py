@@ -14,11 +14,13 @@ from openswe.review.styles import (
 )
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable
+from openswe.tools.mcp_exposure import expose_mcp
 
 _READ = Policy(trusted="admin_surface", actor="admin")
 _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "mode"))
 
 
+@expose_mcp(access="admin")
 @audit_tool(skip_read=True)
 @access(_WRITE, per_call=lambda args: _WRITE if args.get("action") == "set" else _READ)
 async def manage_review_approval_mode(
