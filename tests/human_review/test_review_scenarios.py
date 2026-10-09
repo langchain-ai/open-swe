@@ -201,7 +201,7 @@ async def test_github_requiring_code_owner_review_asks_every_areas_owners(
 ) -> None:
     """GitHub requiring code owner review asks every area's owners.
 
-    A ruleset on the base branch requires a code owner's approval for every owned file. Bob's
+    The base branch's protection requires a code owner's approval for every owned file. Bob's
     approval covers the API but not the UI, so one approval is not enough: Open SWE asks the
     implementer for a UI owner, and it picks Dana.
     """

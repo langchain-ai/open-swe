@@ -212,7 +212,7 @@ class ReviewScenario(Scenario):
         self.repo_files[REVIEWER_INSTRUCTIONS_PATH] = text
 
     def requires_code_owner_review(self) -> None:
-        """A ruleset on the base branch requires a code owner's approval for every owned file."""
+        """The base branch's protection requires a code owner's approval for every owned file."""
         self.code_owner_review_required = True
 
     def pull_request(self, *, author: Person, files: list[str]) -> None:

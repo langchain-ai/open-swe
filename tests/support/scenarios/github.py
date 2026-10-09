@@ -107,13 +107,10 @@ class GitHub:
             if (content := self.repo_files.get(path.removeprefix("contents/"))) is None:
                 return httpx2.Response(404, json={"message": "Not Found"}, request=request)
             return httpx2.Response(200, text=content, request=request)
-        if path.startswith("rules/branches/"):
-            rules = (
-                [{"type": "pull_request", "parameters": {"require_code_owner_review": True}}]
-                if self.code_owner_review_required
-                else []
-            )
-            return httpx2.Response(200, json=rules, request=request)
+        if url.endswith("/graphql"):
+            pull = {"reviewDecision": self.review_decision}
+            data = {"data": {"repository": {"pullRequest": pull}}}
+            return httpx2.Response(200, json=data, request=request)
         if path == f"pulls/{self.number}":
             return httpx2.Response(200, json=self.pull, request=request)
         if path.startswith("collaborators/") and path.endswith("/permission"):
@@ -133,6 +130,21 @@ class GitHub:
             "head": {"ref": "feature", "sha": "abc"},
             "base": {"ref": "main"},
         }
+
+    @property
+    def review_decision(self) -> str:
+        """GitHub's ``reviewDecision``: with code owner review required, every owned file needs
+        an approval from one of its owners."""
+        approved = {
+            f"@{login.lower()}" for login, state in self.reviews.items() if state == "APPROVED"
+        }
+        if self.code_owner_review_required and any(
+            (owners := self.parsed_codeowners.owners_for(path))
+            and not approved & {owner.lower() for owner in owners}
+            for path in self.files
+        ):
+            return "REVIEW_REQUIRED"
+        return "APPROVED" if approved else "REVIEW_REQUIRED"
 
     async def _readiness(self, *_: object) -> Readiness:
         snapshot = PullRequestSnapshot(
