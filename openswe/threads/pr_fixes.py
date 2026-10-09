@@ -20,7 +20,7 @@ from openswe.threads.runs import (
     _build_dashboard_configurable,
     create_dashboard_thread_record,
 )
-from openswe.threads.summary import _assert_thread_postable, thread_is_unlisted
+from openswe.threads.summary import _assert_thread_postable
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
@@ -259,7 +259,7 @@ async def find_pr_threads(
         metadata = thread_metadata(thread)
         if metadata.get("kind") or metadata.get("graph_id") not in (None, "agent"):
             continue
-        if thread_is_unlisted(metadata) is not unlisted:
+        if (metadata.get("unlisted") is True) is not unlisted:
             continue
         try:
             _assert_thread_postable(metadata, login, email)
@@ -293,6 +293,7 @@ async def _find_or_create_pr_thread(
     prompt: str,
     title: str,
     unlisted: bool = False,
+    review_chat: bool = False,
 ) -> str:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
@@ -315,6 +316,7 @@ async def _find_or_create_pr_thread(
             "pr_number": number,
             "source_context": {"pr_number": number},
             "unlisted": unlisted,
+            "review_chat": review_chat,
         },
     )
     await _link_pr_thread(owner, repo, number, thread_id)
@@ -373,6 +375,7 @@ async def start_pull_request_thread(
             email,
             prompt=prompt,
             title=intent.thread_title(full_name, number),
+            review_chat=isinstance(intent, (OpenThreadIntent, MessageIntent)),
         )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
@@ -384,7 +387,12 @@ async def start_pull_request_thread(
         async with agent_thread_pr_state_lock(client, thread_id):
             await client.threads.update(
                 thread_id=thread_id,
-                metadata={"resolved": False, "resolved_at_ms": None, "auto_resolved_by_prs": False},
+                metadata={
+                    "resolved": False,
+                    "resolved_at_ms": None,
+                    "auto_resolved_by_prs": False,
+                    **({"review_chat": False} if not isinstance(intent, MessageIntent) else {}),
+                },
             )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
@@ -426,6 +434,7 @@ async def dispatch_pull_request_prompt(
             owner, repo, number, login, None, prompt=prompt, title=title, unlisted=unlisted
         )
         await before_dispatch(thread_id)
+        await client.threads.update(thread_id=thread_id, metadata={"review_chat": False})
         current = await client.threads.get(thread_id)
         configurable = await _build_dashboard_configurable(
             thread_id, login, thread_metadata(current)

@@ -1,7 +1,9 @@
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowLeftIcon, GitPullRequestIcon } from "@phosphor-icons/react"
 
 import type { PrReviewComment } from "@/lib/api"
 import { ReviewCommentsMenu } from "@/features/reviews/components/ReviewCommentsMenu"
@@ -12,8 +14,8 @@ import {
   markReviewViewed,
   reviewChatQuery,
 } from "@/features/agents/lib/queries"
+import { pullRequestTopic } from "@/features/reviews/lib/cache"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
-import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -73,11 +75,11 @@ function ReviewDetailPage() {
     queryKey: ["review", owner, repo, prNumber],
     queryFn: () => api.getReview(owner, repo, prNumber),
     enabled: !!session.data && Number.isFinite(prNumber),
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ||
-      query.state.data?.walkthrough_running
-        ? 5000
-        : false,
+    meta: {
+      invalidatedBy: [
+        pullRequestTopic({ repo: `${owner}/${repo}`, number: prNumber }),
+      ],
+    },
   })
   const diff = useQuery({
     queryKey: ["reviewDiff", owner, repo, prNumber],
@@ -127,30 +129,31 @@ function ReviewDetailPage() {
   if (!session.data) return <RequireLogin />
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
       <header
         data-desktop-drag-region=""
         className={cn(
-          "flex h-12 shrink-0 items-center gap-3 border-b border-border pr-4 text-xs",
+          "flex h-12 shrink-0 items-center gap-3 border-b border-default pr-4 text-xs",
           // Clear room for the fixed collapse toggle when the sidebar is hidden.
           sidebarCollapsed ? (isDesktop ? "pl-32" : "pl-14") : "pl-4"
         )}
       >
         <Link
           to="/agents/reviews"
-          className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1.5 text-secondary hover:text-primary"
         >
-          <ArrowLeftIcon className="size-3.5" />
+          <ArrowLeftIcon weight="regular" className="size-3.5" />
           Reviews
         </Link>
-        <span className="text-muted-foreground">/</span>
+        <span className="text-secondary">/</span>
         <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
-          <GitPullRequestIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <GitPullRequestIcon
+            weight="regular"
+            className="size-3.5 shrink-0 text-icon-secondary"
+          />
           <span className="truncate font-medium">
             {owner}/{repo}
-            <span className="ml-1.5 font-normal text-muted-foreground">
-              #{number}
-            </span>
+            <span className="ml-1.5 font-normal text-secondary">#{number}</span>
             {detail.data ? ` ${detail.data.pr.title}` : ""}
           </span>
         </span>
@@ -168,7 +171,7 @@ function ReviewDetailPage() {
       </header>
 
       {detail.error ? (
-        <div className="p-6 text-xs text-destructive">
+        <div className="p-6 text-xs text-error-secondary">
           {detail.error.message}
         </div>
       ) : !detail.data ? (

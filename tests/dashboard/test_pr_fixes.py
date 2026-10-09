@@ -150,7 +150,7 @@ async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
         unlisted=True,
     )
     assert thread_id == "new"
-    metadata = setup.client.threads.update.call_args.kwargs["metadata"]
+    metadata = setup.client.threads.update.await_args_list[0].kwargs["metadata"]
     assert metadata["unlisted"] is True
     assert setup.threads["existing"]["metadata"].get("unlisted") is None
     setup.threads["new"]["metadata"].update(metadata)
@@ -162,6 +162,22 @@ async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
         t["thread_id"]
         for t in await pr_fixes.find_pr_threads("acme", "app", 12, "alice", None, unlisted=True)
     ] == ["new"]
+
+
+async def test_review_open_preserves_existing_task_and_fix_lists_review_chat(setup):
+    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
+    setup.client.threads.update.assert_not_awaited()
+    setup.threads["existing"]["metadata"]["review_chat"] = True
+    await pr_fixes.start_pull_request_thread(
+        "acme",
+        "app",
+        12,
+        "alice",
+        intent=pr_fixes.MessageIntent(intent="message", title="Discuss PR", message="Explain this"),
+    )
+    assert "review_chat" not in setup.client.threads.update.await_args.kwargs["metadata"]
+    await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=FIX)
+    assert setup.client.threads.update.await_args.kwargs["metadata"]["review_chat"] is False
 
 
 async def test_denied_repo_never_reads_or_starts_threads(setup):
@@ -197,6 +213,7 @@ async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypat
     FakeRegistry.thread_ids = []
     await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
     metadata = setup.client.threads.update.await_args.kwargs["metadata"]
+    assert metadata["review_chat"] is True
     monkeypatch.setattr(runs, "resolve_run_email", AsyncMock(return_value=None))
     configurable = await runs._build_dashboard_configurable(
         "new",

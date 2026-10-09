@@ -89,6 +89,11 @@ def apply() -> None:
     auth.get_github_app_installation_token_with_expiry = _dummy_install_token_with_expiry
     auth.get_github_app_installation_token = _dummy_install_token
     auth.get_github_app_installation_id_for_repo = _dummy_install_id
+    # GitHubClient.as_app reads these from their defining module at call time.
+    from openswe.github import app as github_app
+
+    github_app.get_github_app_installation_token = _dummy_install_token
+    github_app.get_github_app_installation_id_for_repo = _dummy_install_id
     opr.__dict__["get_github_app_installation_token"] = _dummy_install_token
 
     # The App-token boundary again, for the modules that bound these names at
@@ -115,6 +120,18 @@ def apply() -> None:
     # Point the real PR/Slack code at the in-process fakes.
     opr.__dict__["GITHUB_API"] = FAKE_GITHUB_API
     slack_http.SLACK_API_BASE_URL = FAKE_SLACK_API
+
+    # Production resolves no completion webhook for a loopback deployment, since
+    # the platform rejects those; langgraph.e2e.json opts this server back in, so
+    # the platform delivers every run's completion to the real route.
+    from openswe import dispatch
+
+    schedule_thread_wakeup = importlib.import_module("openswe.tools.schedule_thread_wakeup")
+    completion_webhook = (
+        f"{BASE_URL}/webhooks/run-complete?token={os.environ['RUN_COMPLETE_WEBHOOK_SECRET']}"
+    )
+    for module in (dispatch, schedule_thread_wakeup):
+        module.__dict__["COMPLETION_WEBHOOK_URL"] = completion_webhook
 
     # A PR URL identifies the repository a tool is allowed to act on, so the real
     # parser only accepts github.com. The fake GitHub serves its pull requests
@@ -204,12 +221,7 @@ def apply() -> None:
     # the real ownership/authorization checks still run.
     from openswe.dashboard import profiles, repo_access
     from openswe.github import http as github_http
-    from openswe.github import (
-        pull_request_actions,
-        pull_request_context,
-        pull_request_status,
-        repo_merge_methods,
-    )
+    from openswe.github import pull_request_actions, pull_request_context, pull_request_status
     from openswe.threads import access as thread_access
 
     async def _dummy_user_token(login: str, **_kwargs: object) -> str:
@@ -267,8 +279,6 @@ def apply() -> None:
     # the one their calls read.
     pull_request_status.GITHUB_API_BASE = FAKE_GITHUB_API
     pull_request_actions.GITHUB_API_BASE = FAKE_GITHUB_API
-    repo_merge_methods.GITHUB_API_BASE = FAKE_GITHUB_API
-    pull_request_status.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_context.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
     pull_request_actions.GITHUB_GRAPHQL = f"{FAKE_GITHUB_API}/graphql"
 
@@ -278,30 +288,10 @@ def apply() -> None:
     # mapping still run.
     repo_access.assert_repo_access = _fake_assert_repo_access
 
-    # Every other module that captured the REST base at import time: PR and
-    # check reads (``ci``), the check-run writes, and the expedited-review
-    # eligibility, readiness, review and merge calls.
-    from openswe.expedited_review import eligibility, readiness
+    # The check-run writes captured the REST base at import time.
     from openswe.github import checks as github_checks
-    from openswe.github import ci as github_ci
 
-    github_ci.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
     github_checks.__dict__["_GITHUB_API_BASE"] = FAKE_GITHUB_API
-    from openswe.github import repo_files
-    from openswe.human_review import standard
-    from openswe.threads import session_upload
-
-    for module in (
-        eligibility,
-        readiness,
-        reviews,
-        merge,
-        merging,
-        standard,
-        repo_files,
-        session_upload,
-    ):
-        module.__dict__["GITHUB_API_BASE"] = FAKE_GITHUB_API
 
     # Snapshot service: another external boundary. The E2E runs the local sandbox
     # provider, so there is nothing to capture from — record the request in the
@@ -324,18 +314,14 @@ def apply() -> None:
     workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
     workspace_refresh._release_builder_sandbox = _release_nothing
 
-    # The review page reads the PR, its diff and its comments with the App token
-    # against a REST base each module captured at import time.
+    # The review diff reads against a REST base its module captured at import time.
     from openswe import chat as chat_graph
     from openswe.github import pull_request_diff
     from openswe.review import chat as review_chat
-    from openswe.review import conversation as review_conversation
     from openswe.review import reviews as review_reviews
     from openswe.review_scout import graph as review_scout_graph
 
-    for module in (review_reviews, pull_request_diff, review_conversation):
-        module.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
-    review_conversation.__dict__["get_valid_access_token"] = _dummy_user_token
+    pull_request_diff.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
     for module in (review_reviews, review_chat, chat_graph):
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff

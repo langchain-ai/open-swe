@@ -13,6 +13,10 @@ from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
+from openswe.review_guide.advance import advance
+from openswe.review_guide.buttons import NEXT_LABELS
+from openswe.review_guide.launch import close_guide_for_channel
+from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -61,6 +65,7 @@ from openswe.slack.thread_feedback import (
 )
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
+from openswe.utils.message_commands import PERFORMANCE_COMMAND, find_message_command
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -351,6 +356,12 @@ async def slack_webhook(
     event_id = envelope.event_id
     team_id = envelope.team_id or event.team
     channel_id = event.resolve_channel_id()
+    # Checked before eligibility: an archived channel may no longer read as operable.
+    if channel_id and (
+        event.type == "channel_archive"
+        or (event.type == "message" and event.subtype == "channel_archive")
+    ):
+        background_tasks.add_task(close_guide_for_channel, channel_id)
     channel_context: SlackChannelContext | None = None
     if channel_id:
         channel_context = await common.resolve_slack_channel_context(channel_id, use_cache=False)
@@ -545,11 +556,17 @@ async def slack_webhook(
     explicit_mention = bool(
         event.type == "app_mention" or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
+    performance_requested = bool(
+        not is_message_update
+        and allowed_bot is None
+        and find_message_command(PERFORMANCE_COMMAND, text)
+    )
     leading_mention = re.match(r"\s*<@([^>]+)>", text)
     if (
         not in_code_channel
         and not in_dm_channel
         and allowed_bot is None
+        and not performance_requested
         and leading_mention
         and leading_mention.group(1) != bot_user_id
     ):
@@ -581,6 +598,7 @@ async def slack_webhook(
         )
     if not (
         explicit_mention
+        or performance_requested
         or is_message_update
         or in_code_channel
         or (
@@ -1046,7 +1064,11 @@ async def slack_interactivity(
         if not response:
             return ignored("Empty response")
 
-        option_thread_ts = thread_ts or action_ts
+        # A code channel is one session, so its buttons map to the session, not the clicked message.
+        in_code_channel = await common.is_code_channel(channel_id)
+        option_thread_ts = (
+            common.CODE_CHANNEL_SESSION_TS if in_code_channel else thread_ts or action_ts
+        )
         if not channel_id or not option_thread_ts or not action_ts or not user_id:
             return ignored("Missing Slack action context")
 
@@ -1055,6 +1077,21 @@ async def slack_interactivity(
         )
         if not thread_id:
             return ignored("Slack thread is not associated")
+        # A review guide's "Next" is recorded by the server, never by the model, and
+        # only for the person being walked through: approval marks their lines as reviewed.
+        guide = (
+            await ReviewGuideSession.for_channel(channel_id)
+            if in_code_channel and response in NEXT_LABELS
+            else None
+        )
+        if guide is not None:
+            if not await guide.is_reader(user_id):
+                return ignored("Only the review guide's reader can approve its chunks")
+            background_tasks.add_task(
+                _update_selected_option_message, interaction, action, response
+            )
+            background_tasks.add_task(advance, channel_id, interaction.message_ts)
+            return accepted("Slack option queued")
         repo = await common.get_slack_repo_config(
             channel_id,
             option_thread_ts,
@@ -1063,22 +1100,23 @@ async def slack_interactivity(
             thread_id=thread_id,
         )
         background_tasks.add_task(_update_selected_option_message, interaction, action, response)
-        background_tasks.add_task(
-            service.process_slack_mention,
-            SlackRequest(
-                channel_id=channel_id,
-                channel_context=channel_context,
-                thread_ts=option_thread_ts,
-                event_ts=action_ts,
-                user_id=user_id,
-                text=response,
-                bot_user_id=common.SLACK_BOT_USER_ID,
-                thread_id=thread_id,
-                concierge_mode=in_concierge_mode,
-                reply_thread_ts=reply_thread_ts,
-            ),
-            repo,
+        request = SlackRequest(
+            channel_id=channel_id,
+            channel_context=channel_context,
+            thread_ts=option_thread_ts,
+            event_ts=action_ts,
+            user_id=user_id,
+            text=response,
+            bot_user_id=common.SLACK_BOT_USER_ID,
+            thread_id=thread_id,
+            concierge_mode=in_concierge_mode,
+            reply_thread_ts=reply_thread_ts,
+            treat_all_messages_as_mentions=in_code_channel,
+            code_channel=in_code_channel,
+            explicit_request=in_code_channel,
         )
+
+        background_tasks.add_task(service.process_slack_mention, request, repo)
         return accepted("Slack option queued")
 
     return await answer_slack_request(target, dispatch)
