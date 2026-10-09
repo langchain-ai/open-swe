@@ -1,14 +1,22 @@
 """PostgreSQL regressions for clicks on an expedited review card."""
 
+import re
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
+from openswe.dashboard import profiles
 from openswe.expedited_review import voting
-from openswe.human_review import lifecycle, people
+from openswe.expedited_review.eligibility import ChangedFile
+from openswe.github import http as github_http
+from openswe.github.http import RepoClient
+from openswe.github.pull_request_status import PullRequestClient
+from openswe.human_review import lifecycle
+from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
 from openswe.slack import cards
@@ -26,12 +34,14 @@ class _Harness:
         self.review_error: str | None = None
         self.diff_unchanged = True
 
-    async def notify_agent(self, approval: HumanReviewRequest, prompt: str) -> bool:
+    async def notify_agent(self, prompt: str) -> bool:
         self.agent_prompts.append(prompt)
         return self.wake_succeeds
 
-    async def mark_ready(self, owner: str, repo: str, number: int, action: object, token: str):
-        self.marked_ready.append(token)
+    async def mark_ready(self, pull: PullRequestClient, action: object) -> None:
+        self.marked_ready.append(
+            pull.repo.github.http.headers["Authorization"].removeprefix("Bearer ")
+        )
 
     async def submit_approval(
         self, approval: HumanReviewRequest, vote: HumanReviewParticipant, head_sha: str
@@ -44,27 +54,40 @@ class _Harness:
         return None
 
 
+def _json(request: httpx2.Request, payload: object, status: int = 200) -> httpx2.Response:
+    return httpx2.Response(status, json=payload, request=request)
+
+
+async def _fake_github(
+    _client: httpx2.AsyncClient, method: str, url: str, **_kwargs: object
+) -> httpx2.Response:
+    """GitHub as a card flow reads it: an open PR on ``def456`` with no files, reviews or config."""
+    request = httpx2.Request(method, url)
+    path = request.url.path
+    if path.endswith("/permission"):
+        return _json(request, {"permission": "write"})
+    if path.endswith(("/files", "/reviews")):
+        return _json(request, [])
+    if re.search(r"/pulls/\d+$", path):
+        return _json(request, {"state": "open", "head": {"sha": "def456"}})
+    return _json(request, {"message": "Not Found"}, 404)
+
+
 @pytest.fixture
-def harness(monkeypatch: pytest.MonkeyPatch) -> _Harness:
+def harness(monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock) -> _Harness:
     h = _Harness()
-    monkeypatch.setattr(voting, "repo_token", AsyncMock(return_value="app-token"))
-    monkeypatch.setattr(people, "repo_token", AsyncMock(return_value="app-token"))
-    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=True))
+    monkeypatch.setattr(github_http, "github_request", _fake_github)
 
     async def user_token(login: str) -> str:
         return f"token-{login}"
 
     monkeypatch.setattr(voting, "get_valid_access_token", user_token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", user_token)
     monkeypatch.setattr(voting, "act_on_pull_request", h.mark_ready)
-    monkeypatch.setattr(voting, "refresh_card", AsyncMock())
-    monkeypatch.setattr(voting, "notify_agent", h.notify_agent)
-    monkeypatch.setattr(voting, "fetch_pr", AsyncMock(return_value={"head": {"sha": "def456"}}))
-    monkeypatch.setattr(voting, "fetch_changed_files", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
+    monkeypatch.setattr(ReviewCard, "notify_agent", h.notify_agent)
     monkeypatch.setattr(voting, "fingerprint_matches", lambda files, fp: h.diff_unchanged)
     monkeypatch.setattr(voting, "submit_approval", h.submit_approval)
-    monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
-    monkeypatch.setattr(lifecycle, "notify_agent", h.notify_agent)
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
     return h
 
 
@@ -92,7 +115,6 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> _FakeSlack:
     )
     monkeypatch.setattr(lifecycle, "delete_slack_message", fake.delete)
     monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://t"))
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value=None))
     monkeypatch.setattr(cards, "post_slack_thread_reply_with_ts", fake.post)
     monkeypatch.setattr(cards, "delete_slack_message", fake.delete)
     return fake
@@ -201,7 +223,7 @@ async def test_a_draft_waits_for_its_author_to_mark_it_ready(
 
 
 async def test_readiness_button_is_delivered_only_to_the_author(
-    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
     private_messages: list[tuple[str, object]] = []
@@ -215,13 +237,12 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     ephemeral = AsyncMock(return_value=True)
     monkeypatch.setattr("openswe.slack.client.post_slack_ephemeral_message", ephemeral)
     monkeypatch.setattr(lifecycle, "send_dm_with_location", deliver)
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
-    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
-    from openswe.expedited_review.eligibility import ChangedFile
-
     monkeypatch.setattr(
-        lifecycle,
-        "fetch_changed_files",
+        lifecycle, "upload_slack_thread_file", AsyncMock(side_effect=SlackRequestError("down"))
+    )
+    monkeypatch.setattr(
+        ChangedFile,
+        "of_pull",
         AsyncMock(
             return_value=[
                 ChangedFile(filename="agent/example.py", additions=1, deletions=0, patch="+fixed")
@@ -230,8 +251,8 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     )
     current = await _stored(approval)
 
-    assert await lifecycle.prompt_author_ready(current) is None
-    _, shared_blocks = await lifecycle.render(current, None)
+    assert await ReviewCard(current).prompt_author_ready() is None
+    _, shared_blocks = await ReviewCard(current).render(None)
 
     assert len(private_messages) == 1
     recipient, private_blocks = private_messages[0]
@@ -242,14 +263,14 @@ async def test_readiness_button_is_delivered_only_to_the_author(
     assert "open_swe_option_select_ready" not in str(shared_blocks)
     assert "open_swe_option_select_approve" not in str(shared_blocks)
     current.awaiting_ready = False
-    _, ready_blocks = await lifecycle.render(current, None)
+    _, ready_blocks = await ReviewCard(current).render(None)
     assert "open_swe_option_select_approve" in str(ready_blocks)
-    assert await lifecycle.prompt_author_ready(current) is None
+    assert await ReviewCard(current).prompt_author_ready() is None
     assert len(private_messages) == 1
 
 
 async def test_draft_card_is_not_posted_until_ready(
-    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
     approval.slack_message_ts = ""
@@ -258,40 +279,57 @@ async def test_draft_card_is_not_posted_until_ready(
     approval = await approval.save()
     deleted = AsyncMock(return_value=True)
     monkeypatch.setattr(lifecycle, "delete_slack_message", deleted)
-    monkeypatch.setattr(lifecycle, "note_for_concierge", AsyncMock())
+    notes = AsyncMock()
+    monkeypatch.setattr(lifecycle, "note_for_concierge", notes)
+    updated = AsyncMock()
+    monkeypatch.setattr(lifecycle, "update_slack_message", updated)
+    monkeypatch.setattr(lifecycle, "get_slack_permalink", AsyncMock(return_value="https://origin"))
     posted = AsyncMock(return_value="3.0")
     monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", posted)
-    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "channel_choices", AsyncMock(return_value=[]))
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
-    monkeypatch.setattr(lifecycle, "_files_for", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ChangedFile, "of_pull", AsyncMock(return_value=[]))
 
     with pytest.raises(SlackRequestError, match="draft card is author-only"):
-        await lifecycle.post_card(approval, title="Fix", files=[])
-    await lifecycle.refresh_card(approval)
+        await ReviewCard(approval).post_expedited(title="Fix", files=[])
+    await ReviewCard(approval).refresh()
     posted.assert_not_called()
     deleted.assert_not_awaited()
     approval.awaiting_ready = False
     await approval.save()
-    await lifecycle.refresh_card(approval)
+    await ReviewCard(approval).refresh()
 
     stored = await _stored(approval)
     assert stored.slack_message_ts == "3.0"
-    assert not stored.slack_dm_channel_id and not stored.slack_dm_message_ts
-    deleted.assert_awaited_once_with("D_ADA", "4.0")
+    assert (stored.slack_dm_channel_id, stored.slack_dm_message_ts) == ("D_ADA", "4.0")
+    deleted.assert_not_awaited()
+    assert "Ready for review" in str(updated.call_args)
+    assert "https://origin" in str(updated.call_args)
+    assert "actions" not in str(updated.call_args)
+    assert await ReviewCard(await _stored(approval)).refresh_author_dm(None)
+    assert await ReviewCard(approval).refresh_author_dm(None)
+    assert updated.await_count == notes.await_count == 1
+    approval.state = "cancelled"
+    approval.detail = "dismissed by <@U_ADA>"
+    await approval.save()
+    await ReviewCard(approval).refresh()
+    await ReviewCard(approval).prompt_author_ready()
+    assert notes.await_count == 2
+    assert sum(call.args[0] == "D_ADA" for call in updated.await_args_list) == 2
+    dm_updates = [call for call in updated.await_args_list if call.args[0] == "D_ADA"]
+    assert "dismissed by" in str(dm_updates[-1])
+    assert "actions" not in str(dm_updates[-1])
+    deleted.assert_not_awaited()
     assert "open_swe_option_select_approve" in str(posted.call_args)
 
 
 async def test_author_only_prompt_delivery_failure_is_reported(
-    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
     monkeypatch.setattr(lifecycle, "send_dm_with_location", AsyncMock(return_value=None))
-    monkeypatch.setattr(lifecycle, "repo_token", AsyncMock(return_value="token"))
-    monkeypatch.setattr(lifecycle, "fetch_changed_files", AsyncMock(return_value=[]))
-    monkeypatch.setattr(lifecycle, "_diff_image_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(ChangedFile, "of_pull", AsyncMock(return_value=[]))
 
-    problem = await lifecycle.prompt_author_ready(await _stored(approval))
+    problem = await ReviewCard(await _stored(approval)).prompt_author_ready()
 
     assert problem is not None and "mark it ready on GitHub" in problem
     assert (await _stored(approval)).awaiting_ready
@@ -301,7 +339,7 @@ async def test_a_fork_author_without_write_access_can_mark_their_draft_ready(
     harness: _Harness, open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
-    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=False))
+    monkeypatch.setattr(RepoClient, "can_write", AsyncMock(return_value=False))
 
     outcome = await _click(approval, "U_ADA", decision="ready")
 
@@ -355,7 +393,7 @@ async def test_unlinked_read_only_or_tokenless_users_cannot_vote(
     unlinked = await _click(approval, "U_NOBODY")
     monkeypatch.setattr(voting, "get_valid_access_token", AsyncMock(return_value=None))
     tokenless = await _click(approval, "U_GRACE")
-    monkeypatch.setattr(people, "has_repo_write_permission", AsyncMock(return_value=False))
+    monkeypatch.setattr(RepoClient, "can_write", AsyncMock(return_value=False))
     read_only = await _click(approval, "U_LINUS")
 
     assert "not linked" in unlinked.message
@@ -369,8 +407,8 @@ async def test_anyone_can_dismiss_the_card_without_waking_the_agent(
 ) -> None:
     approval = await open_approval(awaiting_ready=True)
 
-    first = await lifecycle.dismiss_request(await _stored(approval), "U_NOBODY")
-    again = await lifecycle.dismiss_request(await _stored(approval), "U_GRACE")
+    first = await ReviewCard(await _stored(approval)).dismiss("U_NOBODY")
+    again = await ReviewCard(await _stored(approval)).dismiss("U_GRACE")
 
     stored = await _stored(approval)
     assert first.message == "Dismissed."
@@ -387,7 +425,7 @@ async def test_a_broadcast_card_leaves_the_channel_once_it_closes(
 
     sent = await voting.request_broadcast(await _stored(approval))
     again = await voting.request_broadcast(await _stored(approval))
-    await lifecycle.dismiss_request(await _stored(approval), "U_GRACE")
+    await ReviewCard(await _stored(approval)).dismiss("U_GRACE")
 
     stored = await _stored(approval)
     assert sent.message == "Sent to the channel."
@@ -436,7 +474,7 @@ async def test_a_copied_card_leaves_the_other_channel_once_it_closes_and_is_offe
 
     sent = await voting.request_copy(await _stored(approval), "C_OTHER", grace)
     again = await voting.request_copy(await _stored(approval), "C_OTHER", grace)
-    await lifecycle.dismiss_request(await _stored(approval), "U_GRACE")
+    await ReviewCard(await _stored(approval)).dismiss("U_GRACE")
 
     stored = await _stored(approval)
     assert sent.message == "Sent to <#C_OTHER>."
@@ -469,8 +507,8 @@ async def test_broadcast_to_configured_review_channel(
     approval = await _stored(approval)
     monkeypatch.setattr(voting, "still_internal", AsyncMock(return_value=True))
     monkeypatch.setattr(voting, "sendable_channel", AsyncMock(return_value=_OtherChannel()))
-    monkeypatch.setattr(lifecycle, "render", AsyncMock(return_value=("card", [])))
-    monkeypatch.setattr(lifecycle, "refresh_card", AsyncMock())
+    monkeypatch.setattr(ReviewCard, "render", AsyncMock(return_value=("card", [])))
+    monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
 
     sent = await voting.request_broadcast(approval)
     assert sent.message == "Sent to <#C_OTHER>."
@@ -479,3 +517,49 @@ async def test_broadcast_to_configured_review_channel(
     assert stored.slack_copy_channel_id == "C_OTHER"
     assert stored.slack_copy_ts == "9.0"
     assert stored.slack_broadcast is False
+
+
+async def test_author_dm_success_is_quiet_only_when_the_status_card_updates(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import asynccontextmanager
+
+    from openswe.human_review import clicks
+
+    approval = await open_approval(awaiting_ready=True)
+    approval.slack_dm_channel_id = "D_ADA"
+    approval.slack_dm_message_ts = "4.0"
+    approval = await approval.save()
+
+    @asynccontextmanager
+    async def lock(*args: object, **kwargs: object):
+        yield
+
+    monkeypatch.setattr(clicks, "slack_thread_mutation_lock", lock)
+    monkeypatch.setattr(clicks, "langgraph_client", lambda: None)
+    ephemeral = AsyncMock(return_value=True)
+    monkeypatch.setattr(clicks, "post_slack_ephemeral_message", ephemeral)
+    updated = AsyncMock(return_value=True)
+    monkeypatch.setattr(ReviewCard, "refresh_author_dm", updated)
+    handle = AsyncMock(return_value=Outcome("Dismissed.", dm_card_success=True))
+
+    async def click(channel: str) -> None:
+        await clicks.answer_click(
+            str(approval.id),
+            channel_id=channel,
+            thread_ts="4.0",
+            slack_user_id="U_ADA",
+            handle=handle,
+        )
+
+    await click("D_ADA")
+    ephemeral.assert_not_awaited()
+    await click("C1")
+    assert ephemeral.call_args.args[2] == "Dismissed."
+    updated.return_value = False
+    await click("D_ADA")
+    assert ephemeral.await_count == 2
+    handle.return_value = Outcome("GitHub did not mark the pull request ready: nope")
+    updated.return_value = True
+    await click("D_ADA")
+    assert "nope" in ephemeral.call_args.args[2]

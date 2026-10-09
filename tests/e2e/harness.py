@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -76,6 +76,7 @@ from langgraph_sdk import get_client  # noqa: E402
 from openswe.api.app import app  # noqa: E402
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from openswe.slack.client import lookup_slack_thread_id  # noqa: E402
+from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
@@ -195,25 +196,6 @@ async def control_state() -> JSONResponse:
     )
 
 
-@app.post("/control/slack-run-complete")
-async def control_slack_run_complete() -> JSONResponse:
-    """Deliver the platform completion event omitted by the local runtime."""
-    from openswe.completion import handle_run_completion
-    from openswe.slack.client import lookup_slack_thread_run_mapping
-
-    client = get_client(url=BASE_URL)
-    channel = CURRENT_THREAD["channel"]
-    thread_ts = CURRENT_THREAD["thread_ts"]
-    thread_id = await lookup_slack_thread_id(client, channel, thread_ts)
-    mapping = await lookup_slack_thread_run_mapping(client, channel, thread_ts)
-    if not thread_id or not mapping:
-        raise HTTPException(409, "Run mapping not ready")
-    run = await client.runs.get(thread_id, mapping["run_id"])
-    if run["status"] != "success":
-        raise HTTPException(409, "Run has not completed")
-    return JSONResponse(await handle_run_completion(dict(run)))
-
-
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
     """Snapshot captures/deletes the workspace tools asked the platform for."""
@@ -327,26 +309,42 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/control/walkthrough")
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
-    """Store a one-step walkthrough for a fake pull request's current head, as a scout would."""
-    from openswe.review.walkthrough import FileLines, StepDraft, Walkthrough
+    """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
+    from openswe.github.pull_requests import PullRequest
+    from openswe.walkthrough.diff import parse
+    from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+    from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
     pull = _seeded_pull(body)
-    await Walkthrough.replace(
-        pull["owner"],
-        pull["repo"],
-        pull["number"],
+    changes = parse(
+        "\n".join(
+            f"diff --git a/{file['filename']} b/{file['filename']}\n"
+            f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
+            for file in pull["files"]
+        )
+    )
+    plan = Plan(
         head_sha=pull["head_sha"],
-        merge_base_sha=fakes.base_sha(pull),
-        scout_thread_id="",
-        steps=[
-            StepDraft(
-                title=str(body.get("title") or "Seeded step"),
-                files=[FileLines(path=file["filename"]) for file in pull["files"]],
+        chunks=[
+            PlanChunk(
+                title=str(body.get("title") or "Seeded chunk"),
+                lines=[LineRef.of(line) for change in changes for line in change.lines],
             )
         ],
-        human_input_summary=str(body.get("human_input") or ""),
     )
+    pull_request = await PullRequest(
+        owner=pull["owner"], repo=pull["repo"], number=pull["number"]
+    ).ensure()
+    await Walkthrough.dismiss(pull["owner"], pull["repo"], pull["number"])
+    await Walkthrough.install(
+        pull_request.id,
+        plan,
+        merge_base_sha=fakes.base_sha(pull),
+        changes=changes,
+        replacing=None,
+    )
+    await Walkthrough.set_human_input(pull_request.id, str(body.get("human_input") or ""))
     return JSONResponse({"ok": True})
 
 
@@ -451,10 +449,27 @@ async def control_expedited_approvals(owner: str = OWNER, repo: str = REPO) -> J
                     }
                     for vote in approval.participants
                 ],
+                "pull_request_id": str(approval.pull_request_id),
+                "excluded_hunks": approval.excluded_hunks,
             }
             for approval in approvals
         ]
     )
+
+
+@app.get("/control/audit-logs")
+async def control_audit_logs(operation_name: str) -> JSONResponse:
+    """The last day's audit entries for one operation, newest first."""
+    from openswe.audit_logs.store import list_logs
+
+    now = datetime.now(UTC)
+    page = await list_logs(
+        start_time=now - timedelta(days=1),
+        end_time=now,
+        limit=50,
+        operation_name=operation_name,
+    )
+    return JSONResponse([entry.model_dump(mode="json") for entry in page.items])
 
 
 @app.get("/control/human-review-requests")
@@ -545,22 +560,15 @@ async def control_repo_file(request: Request) -> JSONResponse:
 
 @app.get("/control/queued")
 async def control_queued(thread_id: str = "") -> JSONResponse:
-    """Count the follow-ups parked on a busy thread's message queue.
+    """The follow-ups parked on a busy thread's message queue, oldest first.
 
-    While the agent is busy, debounced follow-ups accumulate here (namespace
-    ``("queue", thread_id)``) until the active run drains them together at its
+    While the agent is busy, debounced follow-ups accumulate in
+    ``thread_queued_message`` until the active run drains them together at its
     next model call. Lets the E2E assert coalescing instead of per-message runs."""
-    from langgraph_sdk import get_client
+    from openswe.message_queue import QueuedMessage
 
-    value: Any = None
-    try:
-        client = get_client(url=os.environ["LANGGRAPH_URL"])
-        item = await client.store.get_item(("queue", thread_id), key="pending_messages")
-        value = item.get("value") if item else None
-    except Exception:  # noqa: BLE001
-        value = None
-    messages = value.get("messages") if isinstance(value, dict) else None
-    return JSONResponse({"queued_count": len(messages) if isinstance(messages, list) else 0})
+    messages = [message.content for message in await QueuedMessage.for_thread(thread_id)]
+    return JSONResponse({"queued_count": len(messages), "messages": messages})
 
 
 _MAPPINGS_SEEDED = False
@@ -756,6 +764,7 @@ async def slack_action(request: Request) -> JSONResponse:
 
     payload = {
         "type": "block_actions",
+        "trigger_id": f"trigger-{fakes.next_slack_ts()}",
         "user": {"id": user_id},
         "channel": {"id": channel_id},
         "container": {
@@ -775,19 +784,24 @@ async def slack_action(request: Request) -> JSONResponse:
     return JSONResponse(response.json(), status_code=response.status_code)
 
 
+async def _signed_in(login: str, email: str) -> User:
+    """The ``users`` row a real sign-in would give ``login``, created like the OAuth callback does."""
+    await _seed_test_user_mappings()
+    user = await User.for_login("github", login)
+    if user is not None:
+        return user
+    github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
+    return await User.sign_in("github", github_id, login=login, email=email)
+
+
 @app.post("/control/login")
 async def control_login(request: Request) -> JSONResponse:
     """Simulate a signed-in dashboard user by minting the real session cookie."""
     form = await request.json()
     login = str(form.get("login", "dev-user"))
     email = str(form.get("email", "dev@example.com"))
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = JSONResponse({"ok": True, "login": login, "email": email})
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -820,13 +834,8 @@ async def control_login_get(login: str = "", email: str = "", next_url: str = ""
     if not email:
         match = next((u for u in TEST_USERS if u["login"] == login), None)
         email = match["email"] if match else f"{login}@example.com"
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -874,13 +883,8 @@ async def fake_github_authorize(redirect_to: str = "", login: str = "") -> Respo
         )
     match = next((u for u in TEST_USERS if u["login"] == login), None)
     email = match["email"] if match else f"{login}@example.com"
-    from openswe.users import User
-
-    await _seed_test_user_mappings()
-    user = await User.for_login("github", login)
-    token = issue_session(
-        login=login, email=email, avatar_url=None, user_id=str(user.id) if user else None
-    )
+    user = await _signed_in(login, email)
+    token = issue_session(login=login, email=email, avatar_url=None, user_id=str(user.id))
     resp = RedirectResponse(url=dest, status_code=303)
     resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", secure=False, path="/")
     return resp
@@ -1183,14 +1187,18 @@ async def gh_search_issues(
     sort: str = "updated",
     order: str = "desc",
 ) -> JSONResponse:
-    """The PR search ``list_open_pull_requests`` drives the "Mine" dashboard with.
-
-    Only the qualifiers that code sends are honoured: ``is:pr``, ``is:open``,
-    ``author:<login>`` and any number of ``repo:<owner>/<name>`` (OR'd, as GitHub
-    does)."""
+    """Search authored or awaiting-review PRs for the dashboard."""
     terms = q.split()
     author = next(
         (term.removeprefix("author:") for term in terms if term.startswith("author:")), ""
+    )
+    reviewer = next(
+        (
+            term.removeprefix("review-requested:")
+            for term in terms
+            if term.startswith("review-requested:")
+        ),
+        "",
     )
     repositories = {
         term.removeprefix("repo:").lower() for term in terms if term.startswith("repo:")
@@ -1200,6 +1208,10 @@ async def gh_search_issues(
         pull
         for pull in fakes.pulls()
         if (not author or pull["author"].lower() == author.lower())
+        and (
+            not reviewer
+            or reviewer.lower() in {login.lower() for login in pull["requested_reviewers"]}
+        )
         and (not repositories or f"{pull['owner']}/{pull['repo']}".lower() in repositories)
         and (not open_only or (pull["state"] == "open" and not pull["merged"]))
     ]
@@ -1258,6 +1270,13 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
     if "vnd.github.diff" in request.headers.get("Accept", ""):
         return Response(fakes.pull_diff(pr), media_type="text/plain")
     return JSONResponse(_gh_pr_json(pr))
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/commits")
+async def gh_list_pull_commits(owner: str, repo: str, number: int) -> JSONResponse:
+    if fakes.find_pull(number, owner, repo) is None:
+        return JSONResponse({"message": "Not Found"}, status_code=404)
+    return JSONResponse([])
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
@@ -1686,6 +1705,47 @@ async def slack_conversations_open(request: Request) -> JSONResponse:
     body = await _slack_form(request)
     user = str(body.get("users") or "")
     return _ok({"channel": {"id": f"D_{user.removeprefix('U_')}"}})
+
+
+@app.post("/fake-slack/views.open")
+async def slack_views_open(request: Request) -> JSONResponse:
+    body = await _slack_form(request)
+    view = body.get("view")
+    if isinstance(view, str):
+        view = json.loads(view)
+    if not isinstance(view, dict) or not body.get("trigger_id"):
+        return JSONResponse({"ok": False, "error": "invalid_arguments"})
+    opened = {**view, "id": f"V{fakes.next_slack_ts().replace('.', '')}"}
+    fakes.VIEWS.append(opened)
+    return _ok({"view": opened})
+
+
+@app.get("/mock/slack/views")
+async def mock_slack_views() -> JSONResponse:
+    return JSONResponse(fakes.VIEWS)
+
+
+@app.post("/mock/slack/view-submit")
+async def mock_slack_view_submit(request: Request) -> JSONResponse:
+    """Submit an opened modal as ``user`` with ``values``, the way Slack delivers it."""
+    body = await request.json()
+    view = next((item for item in fakes.VIEWS if item["id"] == body.get("view_id")), None)
+    if view is None:
+        raise HTTPException(status_code=404, detail="View not found")
+    payload = {
+        "type": "view_submission",
+        "user": {"id": str(body.get("user") or "")},
+        "view": {
+            "id": view["id"],
+            "callback_id": view.get("callback_id", ""),
+            "private_metadata": view.get("private_metadata", ""),
+            "state": {"values": body.get("values") or {}},
+        },
+    }
+    response = await _deliver_slack_interaction(payload)
+    return JSONResponse(
+        response.json() if response.content else {}, status_code=response.status_code
+    )
 
 
 @app.post("/fake-slack/chat.postEphemeral")

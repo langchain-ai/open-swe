@@ -12,11 +12,13 @@ import asyncio
 import logging
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal, TypedDict
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from openswe.audit_logs.context import bind_workspace, current_audit_log
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
@@ -92,6 +94,9 @@ class WorkspaceSettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
+    # The LangSmith Managed Tools gateway private threads load with the owner's own
+    # LangSmith connection; unset means none.
+    managed_tools_gateway_id: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -112,6 +117,16 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
+
+    @field_validator("managed_tools_gateway_id", mode="before")
+    @classmethod
+    def _gateway_id(cls, v: object) -> str | None:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        try:
+            return str(UUID(str(v).strip()))
+        except ValueError:
+            raise ValueError("managed tools gateway must be a gateway id") from None
 
     @field_validator("org_guidelines", mode="before")
     @classmethod
@@ -331,6 +346,7 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
+        "managed_tools_gateway_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
         "default_agent_reasoning_effort": fallback_effort,
@@ -759,6 +775,12 @@ class WorkspaceSettings(Mapping[str, Any]):
         return self.get("sandbox_openai_enabled") is True
 
     @property
+    def managed_tools_gateway_id(self) -> str | None:
+        """The LangSmith Managed Tools gateway this workspace's private threads load."""
+        value = self.get("managed_tools_gateway_id")
+        return value if isinstance(value, str) and value else None
+
+    @property
     def org_review_guidelines(self) -> str | None:
         """The reviewer guidelines supplement, if any."""
         value = self.get("org_guidelines")
@@ -794,6 +816,7 @@ async def api_get_instance_settings(_session: dict[str, Any] = SESSION_DEP) -> d
 
 @router.put("/settings")
 @router.put("/team-settings", include_in_schema=False)
+@audit_endpoint
 async def api_put_instance_settings(
     body: WorkspaceSettingsUpdate, _admin: dict[str, Any] = ADMIN_DEP
 ) -> dict[str, Any]:
@@ -812,6 +835,7 @@ async def api_get_workspace_settings(
 
 
 @router.put("/workspaces/{workspace}/settings")
+@audit_endpoint
 async def api_put_workspace_settings(
     workspace: str,
     body: WorkspaceSettingsUpdate,

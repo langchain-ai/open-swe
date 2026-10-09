@@ -67,10 +67,24 @@ def farewell(name):
 EOF
 """.strip()
 
-# The expedited-review flow needs a change small enough to qualify, so it
-# touches one line of one file.
+# The expedited-review change is too big to qualify until the agent excludes what
+# the spec's seeded APPROVALS.md covers: CHANGELOG.md and config.py's trailing
+# generated block, whose hunk starts at new line 28.
 EXPEDITE_MARKER = "E2E_EXPEDITE"
 EXPEDITE_PR_TITLE = "Fix the greeting punctuation"
+EXPEDITE_EXCLUDED = [
+    {
+        "path": "CHANGELOG.md",
+        "guideline": "Release notes",
+        "reason": "Only appends release-note bullets to CHANGELOG.md.",
+    },
+    {
+        "path": "config.py",
+        "hunks": [28],
+        "guideline": "Generated constants",
+        "reason": "Appends the regenerated GENERATED_* table and edits nothing else.",
+    },
+]
 
 # Human review: a Slack request names an existing PR; `_HERE` names the review channel too.
 HUMAN_REVIEW_MARKER = "E2E_HUMAN_REVIEW"
@@ -82,11 +96,12 @@ HUMAN_REVIEW_DISMISS_MARKER = "E2E_HUMAN_REVIEW_DISMISS"
 HUMAN_REVIEW_DISMISS_REASON = "posted with the wrong summary"
 HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
+_DECLINED_MARKER = "declined the review of"
 _PICK_REQUEST = "reviewer for it"
 _SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
 
-# The seeded remote holds only a README, so the first turn writes the file. Two
-# added lines keeps the pull request inside the eligibility limit.
+# The spec seeds config.py (VALUE_1..VALUE_30) and CHANGELOG.md on main. Drawn:
+# greet.py and config.py's VALUE_2 hunk, four lines. Excluded: 40 more.
 _EXPEDITE_SETUP_SCRIPT = f"""
 set -e
 rm -rf repo
@@ -99,6 +114,14 @@ cat > {FEATURE_FILE} <<'EOF'
 def greet(name):
     return "Hello!!"
 EOF
+python3 - <<'PY'
+lines = open("config.py").read().splitlines()
+lines[1] = "VALUE_2 = 22"
+lines += [f"GENERATED_{{i}} = {{i}}" for i in range(1, 11)]
+open("config.py", "w").write("\\n".join(lines) + "\\n")
+with open("CHANGELOG.md", "a") as changelog:
+    changelog.writelines(f"- note {{i}}\\n" for i in range(1, 31))
+PY
 git add -A
 git commit -m "{EXPEDITE_PR_TITLE}"
 git push origin {FEATURE_BRANCH}
@@ -260,6 +283,9 @@ class ScriptContext:
     first_text: str
     last_text: str
     human_count: int
+    # The whole latest turn: a wake-up's event can be followed by notes queued
+    # for the thread meanwhile, so it is not always the last message.
+    pending_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -340,6 +366,19 @@ def _envelope_follows(messages: list[BaseMessage], index: int) -> bool:
             continue
         return text.startswith("<input-message ")
     return False
+
+
+def _latest_turn_text(messages: list[BaseMessage]) -> str:
+    """The human messages that arrived together before the model's latest replies."""
+    last_human = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1)
+    replied = max(
+        (i for i, m in enumerate(messages[:last_human]) if isinstance(m, AIMessage)), default=-1
+    )
+    return "\n".join(
+        _text(m.content)
+        for m in messages[replied + 1 : last_human + 1]
+        if isinstance(m, HumanMessage)
+    )
 
 
 def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
@@ -440,7 +479,7 @@ def _expedite_request_step(messages: list[BaseMessage]) -> AIMessage:
         tool_calls=[
             {
                 "name": "expedite_pr_approval",
-                "args": {"pr_url": url},
+                "args": {"pr_url": url, "excluded": EXPEDITE_EXCLUDED},
                 "id": f"call-expedite-{len(messages)}",
             }
         ],
@@ -1434,7 +1473,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         ),
     ),
     ScriptRule("expedite", lambda ctx: EXPEDITE_MARKER in ctx.first_text),
-    ScriptRule("human_review_assign", lambda ctx: _UNCLAIMED_MARKER in ctx.last_text),
+    ScriptRule(
+        "human_review_assign",
+        lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.pending_text,
+    ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(
@@ -1509,6 +1551,7 @@ class FakeScriptedChatModel(BaseChatModel):
             first_text=_text(humans[0].content) if humans else "",
             last_text=_text(humans[-1].content) if humans else "",
             human_count=len(humans),
+            pending_text=_latest_turn_text(messages),
         )
         script = _script_for(context)
 

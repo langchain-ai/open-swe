@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
@@ -10,7 +11,6 @@ import {
   selectCollapsedTurnItems,
   splitWorkAndReply,
 } from "../renderItems"
-import { MessageCopyButton } from "./MessageCopyButton"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
@@ -21,7 +21,7 @@ import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import { ReplyCard } from "@/features/agents/components/chat/ReplyCard"
-import { ServiceConnectionCard } from "@/features/agents/components/chat/ServiceConnectionCard"
+import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/ManagedToolsConnectionCard"
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
@@ -102,6 +102,7 @@ export function AgentTurn({
   isMarkdownLive,
   repoPath,
   activityLabel,
+  costUsd,
   ...callbacks
 }: {
   message: Message
@@ -109,6 +110,7 @@ export function AgentTurn({
   isMarkdownLive?: boolean
   repoPath?: string
   activityLabel?: string
+  costUsd?: number
 } & ApprovalCallbacks) {
   const renderItems = useMemo(
     () => buildRenderItems(message.chunks, message.id),
@@ -246,8 +248,14 @@ export function AgentTurn({
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
 
-      case "connection-item":
-        return <ServiceConnectionCard key={item.key} />
+      case "managed-tools-item":
+        return (
+          <ManagedToolsConnectionCard
+            key={item.key}
+            cardId={item.chunk.toolCallId}
+            offer={item.offer}
+          />
+        )
 
       case "iframe-item":
         return item.chunk.display ? (
@@ -270,7 +278,7 @@ export function AgentTurn({
       // here too, so this has to go through the full chunk renderer.
       case "text-chunk":
         return (
-          <div key={item.key} className="min-w-0 px-1 py-0.5">
+          <div key={item.key} className="min-w-0 px-space-1 py-0.5">
             <ChunkRenderer
               chunk={item.chunk}
               repoPath={repoPath}
@@ -311,7 +319,7 @@ export function AgentTurn({
   ).length
 
   return (
-    <div className="group/turn my-2 min-w-0 space-y-1.5">
+    <div className="group/turn my-space-2 min-w-0 space-y-1.5">
       {visibleItems
         .slice(0, foldIndex)
         .map((item, index) => renderItem(item, index, visibleItems.length))}
@@ -329,17 +337,20 @@ export function AgentTurn({
           renderItem(item, foldIndex + index, visibleItems.length)
         )}
 
-      <div className="mt-1 flex items-center gap-1">
+      <div className="mt-space-1 flex items-center gap-space-1">
         {replyText && !isStreaming && (
-          <MessageCopyButton
-            className="opacity-0 transition-opacity duration-200 group-hover/turn:opacity-100 focus-visible:opacity-100"
-            text={replyText}
+          <CopyIconButton
+            copy={replyText}
+            label="Copy message"
+            size="xs"
+            className="opacity-0 transition-opacity duration-normal group-hover/turn:opacity-100 focus-visible:opacity-100"
           />
         )}
         {!message.timestampIsFallback && (
           <MessageTimestamp
             timestamp={message.timestamp}
             startedAt={message.startedAt}
+            costUsd={costUsd}
           />
         )}
       </div>

@@ -129,6 +129,9 @@ class RunConfig(BaseModel):
     diff_text: str | None = None
     diff_line_set: dict[str, Any] | None = None
 
+    # The review guide message whose "Next" this run records before the model runs.
+    review_guide_approve_ts: str = ""
+
     # Reviewer run shape
     reviewer_event: str | None = None
     reviewer_thread_id: str | None = None

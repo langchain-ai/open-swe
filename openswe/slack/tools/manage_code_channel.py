@@ -159,7 +159,7 @@ async def manage_code_channel(
             data = await set_commands(channel_id, commands)
             return _result(action, channel_id, data)
         if action == "view":
-            resolved_content = await _resolve_content(content, file_path)
+            resolved_content = await resolve_view_content(content, file_path)
             if suggestions is not None:
                 if view_type != "block_kit":
                     return {
@@ -208,7 +208,7 @@ async def manage_code_channel(
             data = await get_canvas(channel_id, canvas_id, include_resolved=include_resolved)
             return _result(action, channel_id, data)
         if action == "set_canvas":
-            resolved_content = await _resolve_content(content, file_path)
+            resolved_content = await resolve_view_content(content, file_path)
             data = await set_canvas_content(channel_id, canvas_id, resolved_content)
             return _result(action, channel_id, data)
         if action == "archive":
@@ -257,7 +257,7 @@ def _result(
     return result
 
 
-async def _resolve_content(content: str, file_path: str) -> str:
+async def resolve_view_content(content: str, file_path: str) -> str:
     if content and file_path:
         raise ValueError("Pass content or file_path, not both")
     if not file_path:

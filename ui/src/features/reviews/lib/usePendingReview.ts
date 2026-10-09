@@ -19,6 +19,8 @@ export function usePendingReview(owner: string, repo: string, number: number) {
     queryKey: key,
     queryFn: () => api.getPendingReview(owner, repo, number),
     refetchOnWindowFocus: false,
+    // Only this viewer's own mutations change it, and they write the cache.
+    refetchOnMount: false,
   })
   const setPending = (review: PendingReview | null) =>
     queryClient.setQueryData(key, review)
