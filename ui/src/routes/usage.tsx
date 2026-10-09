@@ -480,8 +480,8 @@ function AnalyticsCoverage({
 
   return (
     <div role="status" aria-label="Analytics coverage">
-      <details className="group rounded-xl border border-default bg-surface-level-1 text-xs">
-        <summary className="flex cursor-pointer list-none items-center gap-space-3 rounded-xl px-space-4 py-space-3 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+      <details className="group rounded-lg border border-muted bg-surface-level-2 text-xs">
+        <summary className="flex cursor-pointer list-none items-center gap-space-3 rounded-lg px-space-4 py-space-3 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none [&::-webkit-details-marker]:hidden">
           <StatusIcon
             aria-hidden="true"
             size={16}
@@ -1126,14 +1126,14 @@ function PRMergeRateTable({
                   }}
                   className={
                     column.key === "model"
-                      ? "sticky left-0 z-table-sticky-cell bg-surface-level-1 pl-space-4 text-left"
+                      ? "sticky left-0 z-table-sticky-cell bg-surface-level-2 pl-space-4 text-left"
                       : "text-right"
                   }
                 />
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-subtle [&>tr]:bg-surface-level-1">
+          <tbody className="divide-y divide-subtle [&>tr]:bg-surface-level-2">
             {rows.map((cohort) => {
               const key = `${cohort.model_id}-${cohort.model_attribution_quality}`
               const modelLabel =
@@ -1387,7 +1387,7 @@ function UsageTable({
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={onSort}
-                  className={`${index === 0 ? "w-14 pr-0 pl-space-4" : index === columns.length - 1 ? "pr-space-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-table-sticky-cell bg-surface-level-1" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
+                  className={`${index === 0 ? "w-14 pr-0 pl-space-4" : index === columns.length - 1 ? "pr-space-4 pl-0" : "px-0"} ${column.key === "user" ? "sticky left-0 z-table-sticky-cell bg-surface-level-2" : ""} ${column.align === "right" ? "text-right" : "text-left"}`}
                 />
               ))}
             </tr>
@@ -1398,7 +1398,7 @@ function UsageTable({
             {rows.map((row) => (
               <tr
                 key={`${row.rank}-${row.user.github_login ?? row.user.email ?? row.user.name}`}
-                className="bg-surface-level-1"
+                className="bg-surface-level-2"
               >
                 <td className="px-space-4 py-space-3 text-secondary">
                   {row.rank}

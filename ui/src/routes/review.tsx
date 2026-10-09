@@ -81,7 +81,7 @@ function RepositoriesSection() {
               key={owner}
               to="/review/repositories/$owner"
               params={{ owner }}
-              className="flex items-center justify-between gap-space-4 px-space-4 py-space-3 hover:bg-surface-level-1-hover"
+              className="flex items-center justify-between gap-space-4 px-space-4 py-space-3 hover:bg-surface-level-2-hover"
             >
               <div className="flex items-center gap-space-3">
                 <GithubLogoIcon
