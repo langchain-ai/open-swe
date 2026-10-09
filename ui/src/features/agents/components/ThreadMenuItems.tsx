@@ -32,6 +32,7 @@ export function ThreadMenuItems({
   onTogglePin,
   onToggleArchived,
   onDelete,
+  onConfigureEnvironment,
 }: {
   menu?: ThreadMenuKind
   thread: AgentThread | null
@@ -42,6 +43,7 @@ export function ThreadMenuItems({
   onTogglePin: () => void
   onToggleArchived: () => void
   onDelete: () => void
+  onConfigureEnvironment?: () => void
 }) {
   const Item = MENU_ITEM[menu]
   const threadId = thread?.id ?? localThread?.id
@@ -100,6 +102,14 @@ export function ThreadMenuItems({
           <CopyIcon size={ICON_SIZE} weight="regular" />
           Copy sandbox ID
         </Item>
+      )}
+      {onConfigureEnvironment && (
+        <Menu.Item
+          onClick={onConfigureEnvironment}
+          className={menuItemClassName}
+        >
+          Configure sandbox environment
+        </Menu.Item>
       )}
       {threadId && (
         <Item

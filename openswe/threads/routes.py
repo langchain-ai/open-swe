@@ -15,7 +15,7 @@ from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
-from openswe.threads import terminal
+from openswe.threads import environment, terminal
 from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
@@ -289,6 +289,7 @@ async def api_get_thread(
 
 
 router.include_router(terminal.router)
+router.include_router(environment.router)
 
 
 @router.get("/threads/{thread_id}/recovery.patch")
