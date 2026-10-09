@@ -982,7 +982,8 @@ class TokenRun:
 
     async def route_model(self, request: Routed) -> Route:
         """The route the person's latest request takes."""
-        return Route(route=await classify_route(messages_from_dict(request.humans)))
+        selection = await classify_route(messages_from_dict(request.humans))
+        return Route(route=selection.route, persist=selection.persist)
 
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         return chosen_model(request.model_id, request.effort)

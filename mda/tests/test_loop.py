@@ -223,6 +223,27 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
     ]
 
 
+async def test_a_route_the_classifier_fell_back_to_is_not_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {"route_model": Route(route="default", persist=False)},
+        LoopRules(routing=RoutingRules(mode="auto")),
+    )
+    loop = RunLoop(backend)
+    asked = _state(HumanMessage(content="Fix the login", id="human-1"))
+
+    first = await loop.before_model(asked)
+    second = await loop.before_model(asked)
+
+    assert first.call is not None and first.call.model == _MAIN
+    assert "model_route" not in first.update
+    # The next call asks again, so routing recovers once the classifier does.
+    assert [name for name, _ in calls] == ["route_model", "route_model"]
+    assert second.call is not None and second.call.model == _MAIN
+
+
 @pytest.mark.parametrize(
     "state",
     [

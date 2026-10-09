@@ -186,6 +186,9 @@ class GitHubProxyRefreshed(BaseModel):
 class Route(BaseModel):
     # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
     route: str
+    # False when the classifier could not decide; the run uses the route for this
+    # call only, so a later turn classifies again instead of keeping a fallback.
+    persist: bool = True
 
 
 class ChosenModel(RunRequest):
