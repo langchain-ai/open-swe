@@ -34,10 +34,6 @@ import type {
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
-import {
-  type ThreadTarget,
-  ThreadTargetMenu,
-} from "@/features/agents/components/ThreadTargetMenu"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
 import { AgentPromptBar } from "@/features/agents/components/AgentPromptBar"
 import { AgentComposerDock } from "@/features/agents/components/composer/AgentComposerDock"
@@ -77,6 +73,7 @@ import type {
   RestoredDraft,
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
+import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
   localThreadKeys,
@@ -154,7 +151,7 @@ export function AgentThreadView({
   const runsElsewhere =
     runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
   // A move takes effect with the next message, whose run carries the checkout over.
-  const [handoff, setHandoff] = useState<ThreadTarget | null>(null)
+  const [handoff, setHandoff] = useState<RunTarget | null>(null)
   // A thread its Mac isn't serving can still move to the cloud, from its pushed work.
   const macOffline = runsElsewhere && handoff !== "cloud"
   // A Slack bot's thread is steered from its Slack thread, never from here.
@@ -220,7 +217,7 @@ export function AgentThreadView({
         ? localBridge.error.message
         : "This Mac could not be reached"
       : null
-  const runsHere: ThreadTarget = runsOnAMac(thread) ? "local" : "cloud"
+  const runsHere: RunTarget = runsOnAMac(thread) ? "local" : "cloud"
   const canMove =
     (runsElsewhere || Boolean(window.openSweDesktop)) &&
     thread.sandboxBridgeClient !== "cli" &&
@@ -770,18 +767,6 @@ export function AgentThreadView({
                   ? "Local CLI"
                   : "Cloud"
             }
-            targetMenu={
-              canMove ? (
-                <ThreadTargetMenu
-                  value={handoff ?? runsHere}
-                  pending={handoff !== null}
-                  disabled={isStreaming}
-                  onChange={(next) =>
-                    setHandoff(next === runsHere ? null : next)
-                  }
-                />
-              ) : undefined
-            }
             panelCollapsed={panelCollapsed}
             thread={thread}
           />
@@ -1042,6 +1027,14 @@ export function AgentThreadView({
                       localWorktreeLabel: "Worktree",
                     }
                   : {})}
+                {...(canMove && {
+                  runTarget: handoff ?? runsHere,
+                  runTargetPending: handoff !== null,
+                  onRunTargetChange: isStreaming
+                    ? undefined
+                    : (next: RunTarget) =>
+                        setHandoff(next === runsHere ? null : next),
+                })}
                 contextUsage={{
                   usedTokens: contextUsage?.tokens,
                   contextWindow: activeModel?.context_window ?? null,

@@ -1,4 +1,5 @@
-import { type ReactNode, useRef, useState } from "react"
+import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
+import { useRef, useState } from "react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -11,8 +12,10 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
+import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 
 import { useNavigate } from "@tanstack/react-router"
 import type { DesktopLegacyLocalThread } from "@/desktop"
@@ -89,10 +92,15 @@ function ThreadRepoIndicator({
   )
 }
 
+const TARGET_ICONS = {
+  Cloud: CloudIcon,
+  "This Mac": LaptopRegularIcon,
+  "Local CLI": TerminalIcon,
+}
+
 export function AgentThreadHeader({
   title,
   target,
-  targetMenu,
   panelCollapsed,
   thread,
   onRename,
@@ -101,9 +109,7 @@ export function AgentThreadHeader({
   onVisibilityChange,
 }: {
   title?: string | null
-  target: "Cloud" | "This Mac" | "Local CLI"
-  /** Replaces the target label with a control that moves the thread. */
-  targetMenu?: ReactNode
+  target: keyof typeof TARGET_ICONS
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
   localThread?: DesktopLegacyLocalThread
@@ -118,6 +124,7 @@ export function AgentThreadHeader({
   const [deletingLocal, setDeletingLocal] = useState(false)
   const worktreeThread = useLocalThread(thread?.id ?? "") ?? localThread
   const sidebarCollapsed = useSidebarCollapsed()
+  const TargetIcon = TARGET_ICONS[target]
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const pinnedThreads = useSidebarPinnedThreads({ enabled: Boolean(thread) })
@@ -340,9 +347,14 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          {targetMenu ?? (
-            <span className="text-xs text-secondary">{target}</span>
-          )}
+          <span
+            role="img"
+            aria-label={`Runs on ${target}`}
+            title={target}
+            className="text-icon-secondary"
+          >
+            <TargetIcon size={16} weight="regular" />
+          </span>
           {!localThread && visibilityMenu}
         </div>
       </div>
