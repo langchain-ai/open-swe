@@ -77,6 +77,9 @@ export function SplitButton({
         <DropdownMenuTrigger asChild>
           <IconButton
             icon={CaretDownIcon}
+            color={color}
+            variant={variant}
+            size={size}
             label={menuLabel}
             disabled={menuDisabled}
             tooltipProps={{ disabled: true }}
