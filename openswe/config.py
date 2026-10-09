@@ -372,8 +372,7 @@ ENV.var(
     "Deployment environment; `preview` lets startup drop superseded migration revisions and "
     "turns off reviewer auto-assignment.",
 )
-ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
-ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
+ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
 ENV.var("ANALYTICS_MIN_COHORT_SIZE", "Minimum aggregate cohort size.", default="5")

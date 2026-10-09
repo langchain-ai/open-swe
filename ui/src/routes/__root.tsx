@@ -20,7 +20,6 @@ import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { Toaster } from "@/components/Toaster"
 import { VersionMismatchBanner } from "@/components/VersionMismatchBanner"
 import { ThemeSync } from "@/lib/ThemeSync"
-import { PageTracking } from "@/lib/PageTracking"
 import { InvalidationStream } from "@/lib/invalidations/InvalidationStream"
 import { THEME_COLOR } from "@/lib/theme"
 import { apiWarmupScript } from "@/features/agents/lib/apiWarmup"
@@ -109,7 +108,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <Toaster position="bottom-right" closeButton />
         <QueryClientProvider client={queryClient}>
           <TooltipProvider>
-            <PageTracking />
             <InvalidationStream />
             <VersionMismatchBanner />
             <AppCommandProvider>{children ?? <Outlet />}</AppCommandProvider>

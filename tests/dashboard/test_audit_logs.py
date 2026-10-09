@@ -7,8 +7,6 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from openswe.analytics import routes as analytics_routes
-from openswe.analytics import segment
 from openswe.api_keys.models import ApiKey
 from openswe.audit_logs import middleware, store
 from openswe.audit_logs.context import current_audit_log
@@ -122,25 +120,19 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     entries: list[AuditLog] = []
-    page_views: list[dict[str, object]] = []
     heartbeats: list[tuple[str, str]] = []
 
     async def append(entry: AuditLog) -> None:
         entries.append(entry)
-
-    async def record_usage(**kwargs: object) -> None:
-        page_views.append(kwargs)
 
     async def heartbeat(bridge_id: str, *, owner_id: str) -> bool:
         heartbeats.append((bridge_id, owner_id))
         return True
 
     monkeypatch.setattr(middleware, "append_safely", append)
-    monkeypatch.setattr(segment, "record_usage", record_usage)
     monkeypatch.setattr(postgres, "configured", lambda: True)
     monkeypatch.setattr(BridgeStore, "heartbeat", heartbeat)
     application = app()
-    application.include_router(analytics_routes.router, prefix="/dashboard/api")
     application.include_router(bridge_routes.router, prefix="/dashboard/api")
     root = FastAPI()
     root.mount(prefix or "/", application)
@@ -151,11 +143,6 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
         cookies=cookie("alice", str(uuid4())),
     ) as client:
         assert (
-            await client.post(
-                f"{prefix}/dashboard/api/analytics/page", json={"page_name": "agents"}
-            )
-        ).status_code == 204
-        assert (
             await client.post(f"{prefix}/dashboard/api/bridges/{bridge_id}/heartbeat")
         ).status_code == 204
         assert (await client.post(f"{prefix}/dashboard/api/untracked")).status_code == 200
@@ -163,15 +150,6 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
         assert (
             await client.put(f"{prefix}/dashboard/api/settings/item", json={"token": "x"})
         ).status_code == 200
-    assert page_views == [
-        {
-            "login": "alice",
-            "email": None,
-            "event_type": "page",
-            "name": "agents",
-            "properties": {"page_name": "agents", "surface": "dashboard"},
-        }
-    ]
     assert heartbeats == [(bridge_id, "github:alice")]
     assert [entry.operation_name for entry in entries] == ["save"]
 
