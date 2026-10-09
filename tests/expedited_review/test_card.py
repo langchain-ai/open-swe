@@ -2,13 +2,53 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openswe.expedited_review.card import _diffstat, open_card
+from openswe.expedited_review.card import _diff_sections, _diffstat, open_card
 from openswe.expedited_review.eligibility import ChangedFile, Exclusion
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review import lifecycle
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.blocks import SECTION_TEXT_MAX_CHARS
+from openswe.slack.client import SlackRequestError
+
+
+def test_missing_image_refuses_text_diff(caplog: pytest.LogCaptureFixture) -> None:
+    files = [ChangedFile(filename="app.py", additions=1, patch="+secret_patch")]
+    with pytest.raises(SlackRequestError, match="missing_expedited_diff_image"):
+        pr = PullRequest(owner="lc", repo="repo", number=7)
+        approval = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="expedited")
+        _diff_sections(approval, files, None)
+    assert "without a diff image" in caplog.text
+    assert "secret_patch" not in caplog.text
+
+
+@pytest.mark.parametrize("failure", ["render", "upload", "processing"])
+async def test_image_failure_is_logged_and_raised(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, failure: str
+) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7)
+    approval = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="expedited")
+    files = [ChangedFile(filename="app.py", additions=1, patch="+x")]
+    monkeypatch.setattr(lifecycle, "render_diff_png", lambda _: b"png")
+    monkeypatch.setattr(lifecycle, "upload_slack_thread_file", AsyncMock(return_value="F1"))
+    monkeypatch.setattr(lifecycle, "wait_for_slack_file", AsyncMock(return_value=True))
+    if failure == "render":
+
+        def fail_render(_: object) -> bytes:
+            raise ValueError("render failed")
+
+        monkeypatch.setattr(lifecycle, "render_diff_png", fail_render)
+    elif failure == "upload":
+        monkeypatch.setattr(
+            lifecycle,
+            "upload_slack_thread_file",
+            AsyncMock(side_effect=SlackRequestError("upload_failed")),
+        )
+    else:
+        monkeypatch.setattr(lifecycle, "wait_for_slack_file", AsyncMock(return_value=False))
+    with pytest.raises(SlackRequestError):
+        await lifecycle._diff_image_id(approval, files)
+    assert any(record.levelname == "ERROR" for record in caplog.records)
 
 
 def test_long_test_paths_stay_under_the_slack_limit_and_count_the_rest() -> None:
@@ -76,7 +116,7 @@ def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline
         pull_request_id=pr.id, head_sha="abc", kind="expedited", excluded_hunks=excluded
     )
     approval.pull_request = pr
-    _, blocks = open_card(approval, title="t", author="<@U1>", files=files)
+    _, blocks = open_card(approval, title="t", author="<@U1>", files=files, diff_image_id="F1")
     texts: list[str] = []
     for block in blocks:
         match block["type"]:
@@ -85,9 +125,8 @@ def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline
             case "context":
                 texts.extend(element["text"] for element in block["elements"])
 
-    drawn = [text for text in texts if text.startswith("```")]
-    assert drawn == ["```\n@@ -1,3 +1,3 @@\n-DEBUG = True\n+DEBUG = False\n a\n b\n```"]
-    assert "`src/app.py`  +1 −1" in texts
+    assert not any(text.startswith("```") for text in texts)
+    assert any(block["type"] == "image" for block in blocks)
     assert texts[-3:-1] == [
         "*Tests (not shown)*\n`tests/test_app.py`  +5 −0",
         "*Open SWE judged these auto-approvable under `.open-swe/APPROVALS.md` (not shown)*\n"

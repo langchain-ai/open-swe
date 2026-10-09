@@ -1,6 +1,7 @@
 """The Slack message people vote on: the whole diff plus Approve and Dismiss."""
 
 import json
+import logging
 
 from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
@@ -10,7 +11,6 @@ from openswe.slack.blocks import (
     ButtonElement,
     actions,
     button,
-    code_block,
     context,
     divider,
     escape,
@@ -19,15 +19,16 @@ from openswe.slack.blocks import (
     section,
     static_select,
 )
+from openswe.slack.client import SlackRequestError
 
 BUTTON_TYPE = "expedited_review"
 SEND_BLOCK_ID = "expedited_review_send"
 CHANNEL_SELECT_ACTION = "expedited_review_channel"
 OTHER_CHANNEL = "other"
 
+logger = logging.getLogger(__name__)
+
 _MAX_FILE_SECTIONS = 20
-# Slack refuses a section over 3000 characters, and refusing means no card at all.
-_MAX_PATCH_LINES = 60
 _OVERFLOW_NOTE_RESERVE = 64
 
 
@@ -65,20 +66,10 @@ def _diff_sections(
     if diff_image_id:
         names = ", ".join(escape(file.filename) for file in shown[:_MAX_FILE_SECTIONS])
         return [image(diff_image_id, f"Diff of {names}"), *trailer]
-    sections: list[Block] = []
-    for file in shown[:_MAX_FILE_SECTIONS]:
-        sections.append(section(f"`{escape(file.filename)}`  +{file.additions} −{file.deletions}"))
-        sections.append(section(code_block(_clip(file.patch or ""))))
-    return [*sections, *trailer]
-
-
-def _clip(patch: str) -> str:
-    lines = patch.splitlines()
-    if len(lines) <= _MAX_PATCH_LINES:
-        return patch
-    return "\n".join(
-        [*lines[:_MAX_PATCH_LINES], f"… {len(lines) - _MAX_PATCH_LINES} more lines on GitHub"]
-    )
+    if shown:
+        logger.error("Cannot render expedited review card without a diff image")
+        raise SlackRequestError("missing_expedited_diff_image")
+    return trailer
 
 
 def _overflow_note(files: list[ChangedFile]) -> list[Block]:
