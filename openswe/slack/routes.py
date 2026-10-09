@@ -14,7 +14,7 @@ from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
 from openswe.review_guide.advance import advance
-from openswe.review_guide.buttons import LOOKS_GOOD
+from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.slack import webhook as service
@@ -1077,11 +1077,11 @@ async def slack_interactivity(
         )
         if not thread_id:
             return ignored("Slack thread is not associated")
-        # A review guide's "Looks good" is recorded by the server, never by the model, and
+        # A review guide's "Next" is recorded by the server, never by the model, and
         # only for the person being walked through: approval marks their lines as reviewed.
         guide = (
             await ReviewGuideSession.for_channel(channel_id)
-            if in_code_channel and response == LOOKS_GOOD
+            if in_code_channel and response in NEXT_LABELS
             else None
         )
         if guide is not None:

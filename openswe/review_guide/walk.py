@@ -74,7 +74,7 @@ class FileRanges(BaseModel):
 class Group(BaseModel):
     """A chunk prepared for the reader or shown to them, or lines they chose to skip.
 
-    A queued chunk is fully rendered ahead of time, so "Looks good" can show it
+    A queued chunk is fully rendered ahead of time, so "Next" can show it
     without waiting on the model.
     """
 
@@ -207,7 +207,7 @@ class Walk(BaseModel):
         return [line for line in unseen if LineRef.of(line) not in taken]
 
     def approve(self, message_ts: str) -> Group | None:
-        """Approve the chunk or Other whose "Looks good" was clicked, if it is still on screen.
+        """Approve the chunk or Other whose "Next" was clicked, if it is still on screen.
 
         Returns what was approved, with Other as a group of its lines.
         """
