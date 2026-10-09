@@ -57,8 +57,7 @@ from openswe.slack.client import (
     upload_slack_thread_file,
     wait_for_slack_file,
 )
-from openswe.slack.concierge import send_alert
-from openswe.slack.dm import note_for_concierge, send_dm_with_location
+from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
@@ -857,7 +856,7 @@ async def _release_picks(
                 "Open SWE removed you as a reviewer."
             )
             origin = request.dm_origin
-            await send_alert(
+            await send_dm(
                 reviewer.user.slack_user_id,
                 text,
                 blocks=block_payload(
@@ -912,7 +911,7 @@ async def drop_picks(
         )
         if pick.user.slack_user_id:
             origin = request.dm_origin
-            await send_alert(
+            await send_dm(
                 pick.user.slack_user_id,
                 message,
                 blocks=block_payload(
