@@ -217,13 +217,18 @@ export const DIFF_WORKER_HIGHLIGHTER_OPTIONS = {
   langs: ["text"],
 } satisfies WorkerInitializationRenderOptions
 
-function hashFileContents(contents: string): string {
+/** FNV-1a: a fast, stable fingerprint for cache keys and versions, not for security. */
+export function hashText(text: string): number {
   let hash = 0x811c9dc5
-  for (let i = 0; i < contents.length; i++) {
-    hash ^= contents.charCodeAt(i)
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
     hash = Math.imul(hash, 0x01000193)
   }
-  return (hash >>> 0).toString(36)
+  return hash >>> 0
+}
+
+export function hashFileContents(contents: string): string {
+  return hashText(contents).toString(36)
 }
 
 // Stable per-file content key so the worker pool dedupes highlight work across

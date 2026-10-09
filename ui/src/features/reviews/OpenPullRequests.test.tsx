@@ -170,17 +170,34 @@ const statuses = (card: HTMLElement) =>
   statusNames.filter((status) => within(card).queryAllByText(status).length > 0)
 const titles = () =>
   cards().map((card) => within(card).getByText(/^Change/).textContent)
-const mergeSelect = async (number: number) => {
-  const select = (await screen.findByRole("combobox", {
+// The merge button's face: a method once one is known, else a prompt to pick one.
+const MERGE = /^(Squash and merge|Merge|Rebase and merge|Choose how to merge)$/
+const openMergeMethods = async (number: number) => {
+  const trigger = (await screen.findByRole("button", {
     name: `Merge method for PR #${number}`,
-  })) as HTMLSelectElement
-  await waitFor(() => expect(select.disabled).toBe(false))
-  return select
+  })) as HTMLButtonElement
+  await waitFor(() => expect(trigger.disabled).toBe(false))
+  // Radix opens its menus on pointer-down or a key, never on a bare click.
+  fireEvent.keyDown(trigger, { key: "Enter" })
+  return screen.findAllByRole("menuitemradio")
 }
-const mergeOptions = (select: HTMLSelectElement) =>
-  within(select)
-    .getAllByRole("option")
-    .map((option) => option.textContent)
+const mergeOptions = async (number: number) => {
+  const items = await openMergeMethods(number)
+  const labels = items.map(
+    (item) => item.querySelector(".font-medium")?.textContent
+  )
+  fireEvent.keyDown(items[0]!, { key: "Escape" })
+  await waitFor(() =>
+    expect(screen.queryAllByRole("menuitemradio")).toEqual([])
+  )
+  return labels
+}
+const chooseMergeMethod = async (number: number, label: string) => {
+  await openMergeMethods(number)
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: new RegExp(`^${label}`) })
+  )
+}
 
 beforeEach(() => {
   vi.mocked(api.repoMergeMethods).mockResolvedValue({
@@ -228,7 +245,7 @@ describe("My PRs", () => {
     vi.mocked(api.pullRequestThreadStatus).mockResolvedValue({ running: true })
     mount()
     const button = await screen.findByRole("button", {
-      name: "Fixing checks",
+      name: "Fixing conflicts",
     })
     expect((button as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByRole("button", { name: "Fix checks" })).toBeNull()
@@ -301,8 +318,10 @@ describe("My PRs", () => {
     )
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
-    fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
-    fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Squash and merge" })
+    )
     expect(await within(card).findByText(/^Merged ·/)).toBeTruthy()
     expect(screen.getByText("Change 1")).toBeTruthy()
     expect(api.mergePullRequest).toHaveBeenCalledWith(
@@ -314,7 +333,7 @@ describe("My PRs", () => {
       expect(within(card).getByText(/^Merged ·/)).toBeTruthy()
     )
     expect(titles()).toEqual(["Change 1", "Change 2"])
-    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
+    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
     expect(toast.success).toHaveBeenCalledWith("Merged acme/app#1")
     expect(navigate).not.toHaveBeenCalled()
   })
@@ -329,7 +348,7 @@ describe("My PRs", () => {
     )
     mount()
     await screen.findByText("Change 1")
-    fireEvent.change(await mergeSelect(1), { target: { value: "merge" } })
+    await chooseMergeMethod(1, "Merge commit")
     fireEvent.click(screen.getByRole("button", { name: "Merge" }))
     await expectReported(
       "Could not merge acme/app#1",
@@ -571,7 +590,7 @@ describe("My PRs", () => {
     expect(within(card).getByText("Approved")).toBeTruthy()
     expect(within(card).queryByText("Status unavailable")).toBeNull()
     // The card offers the merge and lets GitHub reject it.
-    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
+    expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
   it("names a required check that never reported instead of offering the merge", async () => {
@@ -589,7 +608,7 @@ describe("My PRs", () => {
     expect(
       within(card).getByText("Merge blocked: Lint Final Results never reported")
     ).toBeTruthy()
-    expect(within(card).queryByRole("button", { name: "Merge" })).toBeNull()
+    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
     expect(
       within(card).getByRole("button", { name: "Update branch" })
     ).toBeTruthy()
@@ -614,7 +633,7 @@ describe("My PRs", () => {
     expect(
       within(card).getByRole("button", { name: "Fix checks" })
     ).toBeTruthy()
-    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
+    expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
   it("shows a draft's conflicts and failing checks alongside Draft", async () => {
@@ -659,7 +678,7 @@ describe("My PRs", () => {
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
     expect(within(card).getByText("Approved")).toBeTruthy()
-    expect(within(card).getByRole("button", { name: "Merge" })).toBeTruthy()
+    expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
   it("withholds the merge only where GitHub has already refused it", async () => {
@@ -674,7 +693,7 @@ describe("My PRs", () => {
     mount()
     const card = async (title: string) =>
       within((await screen.findByText(title)).closest("li")!)
-    const merge = { name: "Merge" }
+    const merge = { name: MERGE }
     expect((await card("Change 1")).queryByRole("button", merge)).toBeNull()
     expect((await card("Change 2")).queryByRole("button", merge)).toBeNull()
     // A failing check may be one GitHub does not require, so the attempt stands.
@@ -692,10 +711,11 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 1")
-    const select = await mergeSelect(1)
-    expect(select.value).toBe("")
-    fireEvent.change(select, { target: { value: "rebase" } })
-    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    expect(
+      await screen.findByRole("button", { name: "Choose how to merge" })
+    ).toBeTruthy()
+    await chooseMergeMethod(1, "Rebase merge")
+    fireEvent.click(screen.getByRole("button", { name: "Rebase and merge" }))
     await waitFor(() =>
       expect(window.localStorage.getItem("open-swe.reviews.mergeMethod")).toBe(
         "rebase"
@@ -708,7 +728,9 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 2")
-    expect((await mergeSelect(2)).value).toBe("rebase")
+    expect(
+      await screen.findByRole("button", { name: "Rebase and merge" })
+    ).toBeTruthy()
   })
 
   it("offers only the merge methods the repository allows", async () => {
@@ -729,20 +751,19 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 2")
     const card = screen.getByText("Change 1").closest("li")!
-    await waitFor(() => expect(within(card).queryByRole("combobox")).toBeNull())
-    const pair = await mergeSelect(2)
-    expect(mergeOptions(pair)).toEqual([
-      "Merge method",
-      "Squash merge",
-      "Merge commit",
-    ])
-    expect(pair.value).toBe("")
-    fireEvent.click(
-      within((await screen.findByText("Change 1")).closest("li")!).getByRole(
-        "button",
-        { name: "Merge" }
-      )
-    )
+    // The only allowed method needs no menu; the button already names it.
+    const only = await within(card).findByRole("button", {
+      name: "Squash and merge",
+    })
+    expect(
+      within(card).queryByRole("button", { name: "Merge method for PR #1" })
+    ).toBeNull()
+    expect(await mergeOptions(2)).toEqual(["Squash merge", "Merge commit"])
+    const pair = screen.getByText("Change 2").closest("li")!
+    expect(
+      within(pair).getByRole("button", { name: "Choose how to merge" })
+    ).toBeTruthy()
+    fireEvent.click(only)
     await waitFor(() =>
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
@@ -765,16 +786,14 @@ describe("My PRs", () => {
     })
     mount()
     await screen.findByText("Change 1")
-    const select = await mergeSelect(1)
-    expect(mergeOptions(select)).toEqual([
-      "Merge method",
+    expect(await mergeOptions(1)).toEqual([
       "Squash merge",
       "Merge commit",
       "Rebase merge",
     ])
     expect(screen.queryByRole("alert")).toBeNull()
-    fireEvent.change(select, { target: { value: "rebase" } })
-    fireEvent.click(screen.getByRole("button", { name: "Merge" }))
+    await chooseMergeMethod(1, "Rebase merge")
+    fireEvent.click(screen.getByRole("button", { name: "Rebase and merge" }))
     await waitFor(() =>
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
@@ -965,7 +984,11 @@ describe("My PRs", () => {
         })
     )
     mount()
-    fireEvent.click(await screen.findByRole("button", { name: "Fix checks" }))
+    fireEvent.keyDown(
+      await screen.findByRole("button", { name: "More fixes for PR #2" }),
+      { key: "Enter" }
+    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Fix checks" }))
     expect(
       (
         (await screen.findByRole("button", {
@@ -1070,8 +1093,10 @@ describe("My PRs", () => {
     )
     mount()
     const card = (await screen.findByText("Change 1")).closest("li")!
-    fireEvent.change(await mergeSelect(1), { target: { value: "squash" } })
-    fireEvent.click(within(card).getByRole("button", { name: "Merge" }))
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Squash and merge" })
+    )
     await expectReported(
       "Could not merge acme/app#1",
       "A conversation must be resolved"
