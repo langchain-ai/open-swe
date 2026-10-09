@@ -87,6 +87,34 @@ async def test_auto_merge_refuses_a_stale_head(monkeypatch):
         await _pull(1).enable_auto_merge(sha="a" * 40, method="squash")
 
 
+async def test_auto_merge_rejects_a_head_changed_after_the_read(monkeypatch):
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
+        AsyncMock(
+            return_value={
+                "head": {"sha": "a" * 40},
+                "node_id": "PR_1",
+                "state": "open",
+                "draft": False,
+            }
+        ),
+    )
+
+    async def changed_head(_github, _query, variables):
+        if variables["input"].get("expectedHeadOid") != "b" * 40:
+            raise ValueError("Head changed during auto-merge")
+        return {
+            "enablePullRequestAutoMerge": {
+                "pullRequest": {"autoMergeRequest": {"enabledAt": "now"}}
+            }
+        }
+
+    monkeypatch.setattr(GitHubClient, "graphql", changed_head)
+    with pytest.raises(ValueError, match="Head changed during auto-merge"):
+        await _pull(1).enable_auto_merge(sha="a" * 40, method="squash")
+
+
 async def test_squash_merge_sends_the_description_and_commits(github):
     commit = {
         "commit": {"message": "fix: spelling", "author": {"name": "Ada", "email": "ada@x.com"}},

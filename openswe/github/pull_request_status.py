@@ -592,7 +592,13 @@ class PullRequestClient:
               }
             }
             """,
-            {"input": {"pullRequestId": node_id, "mergeMethod": method.upper()}},
+            {
+                "input": {
+                    "pullRequestId": node_id,
+                    "mergeMethod": method.upper(),
+                    "expectedHeadOid": sha,
+                }
+            },
         )
         result = data.get("enablePullRequestAutoMerge")
         queued = result.get("pullRequest") if isinstance(result, dict) else None
