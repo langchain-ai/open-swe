@@ -18,7 +18,7 @@ from open_swe_reviewer.backend import MCP_SERVER_NAME, OpenSweBackend
 from open_swe_reviewer.middleware import BackendRunMiddleware
 from open_swe_reviewer.models import RunModels, build_model
 from open_swe_reviewer.tools import runtime_spec, sandbox_tools
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 _DEFAULT_MODEL = "anthropic:claude-opus-5-5"
 # Matches the in-process reviewer's cap on model calls per run.
@@ -51,7 +51,8 @@ class ReviewerRunContext(BaseModel):
     run_token: str | None = None
     invocation_id: str | None = None
     snapshot_id: str | None = None
-    models: RunModels | None = None
+    # JSON, not RunModels: the gRPC runtime serializes only the context's top level.
+    models: dict[str, JsonValue] | None = None
 
 
 def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
@@ -61,7 +62,7 @@ def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     )
     backend = OpenSweBackend(context.run_token)
     subagent = runtime_spec()["subagent"]
-    models = context.models
+    models = RunModels.model_validate(context.models) if context.models is not None else None
     return define_deep_agent(
         name="reviewer",
         # Runs without a context (state reads, assistant reads) never call a model.
