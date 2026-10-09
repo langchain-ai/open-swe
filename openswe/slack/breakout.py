@@ -51,12 +51,12 @@ class BreakoutCommand:
             options=message.options,
             workspace=message.workspace,
         )
+        if message.action is not SlackAction.BREAKOUT:
+            return command
         parts = message.argument.split(maxsplit=1)
-        if (
-            message.action is not SlackAction.BREAKOUT
-            or not parts
-            or not parts[0].startswith(("#", "<#"))
-        ):
+        if len(parts) == 2 and parts[0].lower() == "in":
+            parts = parts[1].split(maxsplit=1)
+        if not parts or not parts[0].startswith(("#", "<#")):
             return command
         channel = _CHANNEL_MENTION_RE.fullmatch(parts[0])
         return replace(
