@@ -1,6 +1,6 @@
+import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
-import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Badge } from "@langchain/macaw-components/Badge"
@@ -59,7 +59,7 @@ export function SubagentThreadView({
       params={{ threadId: thread.id }}
       search={{}}
       data-no-drag=""
-      className="flex h-7 shrink-0 items-center gap-space-1 rounded-md px-1.5 text-secondary transition-colors duration-normal hover:bg-surface-level-1-hover hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+      className="flex h-7 shrink-0 items-center gap-space-1 rounded-md px-space-1 text-secondary transition-colors duration-normal hover:bg-surface-level-1-hover hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
     >
       <ArrowLeftIcon size={14} weight="regular" aria-hidden />
       <span className="max-w-48 truncate text-xs" title={thread.title}>
@@ -79,12 +79,12 @@ export function SubagentThreadView({
     )
   } else if (source.isHydrating) {
     body = (
-      <div className="flex flex-1 items-center justify-center px-6">
-        <img
-          src={`${import.meta.env.BASE_URL}logo-mark.png`}
-          alt="Loading subagent"
-          className="size-12 animate-pulse"
-        />
+      <div
+        role="status"
+        aria-label="Loading subagent"
+        className="flex flex-1 items-center justify-center px-space-5"
+      >
+        <Spinner size="md" />
       </div>
     )
   } else if (!task) {
@@ -118,12 +118,12 @@ export function SubagentThreadView({
     <div className="flex min-w-0 flex-1 flex-col">
       <header
         data-desktop-drag-region=""
-        className="relative z-10 h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
+        className="relative z-pane-header h-11 shrink-0 border-b border-subtle bg-surface-level-1/80 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-surface-level-1/60 after:to-transparent"
       >
         <div
           className={cn(
             "flex h-full w-full items-center gap-space-2 px-space-4",
-            sidebarCollapsed && (isDesktop ? "pl-32" : "pl-14")
+            sidebarCollapsed && (isDesktop ? "pl-32" : "pl-space-8")
           )}
         >
           {backLink}

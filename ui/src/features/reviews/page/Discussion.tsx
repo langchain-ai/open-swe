@@ -1,11 +1,13 @@
+import {
+  ArrowDownIcon,
+  CaretRightIcon,
+  CheckIcon,
+} from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDownIcon } from "@phosphor-icons/react/dist/ssr/ArrowDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { GitCommitIcon } from "@phosphor-icons/react/dist/ssr/GitCommit"
 
 import {
@@ -75,8 +77,7 @@ type Block =
     }
 
 // Sits on the timeline's rule, ringed in the page colour so the rule breaks around it.
-const TIMELINE_AVATAR =
-  "absolute top-0 left-0 ring-4 ring-[var(--bg-surface-level-1)]"
+const TIMELINE_AVATAR = "absolute top-0 left-0 ring-4 ring-surface-level-1"
 
 const NO_PARTS: ReviewParts = { started: [], replies: [] }
 
@@ -219,12 +220,12 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
       <div
         ref={scroller}
         onScroll={(event) => measure(event.currentTarget)}
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+        className="min-h-0 flex-1 overflow-y-auto px-space-4 py-space-4"
       >
         {conversation.isPending ? (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-space-4">
             {Array.from({ length: 4 }, (_, i) => (
-              <div key={i} className="flex gap-2">
+              <div key={i} className="flex gap-space-2">
                 <Skeleton className="size-6 rounded-full" />
                 <Skeleton className="h-14 flex-1" />
               </div>
@@ -242,7 +243,7 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
                 No one has commented yet.
               </p>
             ) : (
-              <ol className="relative flex flex-col gap-3 before:absolute before:inset-y-2 before:left-[11px] before:w-px before:bg-[var(--border-default)]">
+              <ol className="relative flex flex-col gap-space-3 before:absolute before:inset-y-2 before:left-[11px] before:border-l before:border-default">
                 {blocks.map((block) =>
                   block.kind === "commits" ? (
                     <CommitsBlock key={block.key} commits={block.commits} />
@@ -278,7 +279,7 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
               behavior: "smooth",
             })
           }
-          className="flex shrink-0 items-center justify-center gap-1 border-t border-default py-1 text-[11px] font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+          className="flex shrink-0 items-center justify-center gap-space-1 border-t border-default py-space-1 text-xxs font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
         >
           Jump to the latest
           <ArrowDownIcon className="size-3" />
@@ -316,13 +317,13 @@ function OpenConversations({
       ref.current?.scrollIntoView({ block: "start", behavior: "smooth" })
   }, [focusKey])
   return (
-    <div ref={ref} className="mb-5 scroll-mt-2">
-      <div className="mb-2 flex items-center gap-2">
+    <div ref={ref} className="mb-space-4 scroll-mt-2">
+      <div className="mb-space-2 flex items-center gap-space-2">
         <button
           type="button"
           aria-expanded={!folded}
           onClick={() => setFoldedAt(folded ? null : focusKey)}
-          className="flex items-center gap-1.5 text-xs font-medium text-primary"
+          className="flex items-center gap-space-2 text-xs font-medium text-primary"
         >
           <CaretRightIcon
             className={cn(
@@ -331,24 +332,28 @@ function OpenConversations({
             )}
           />
           Open conversations
-          <span className="rounded-full bg-surface-level-3 px-1.5 text-[10px] text-secondary tabular-nums">
+          <span className="rounded-full bg-surface-level-3 px-space-1 text-xxs text-secondary tabular-nums">
             {threads.length}
           </span>
         </button>
         {answered.length > 0 && (
-          <button
-            type="button"
+          <Button
+            size="xs"
+            variant="plain"
+            color="secondary"
+            className="ml-auto"
+            loading={resolveThreads.isPending}
             disabled={resolveThreads.isPending}
             onClick={() => resolveThreads.mutate(answered)}
             title="Outdated conversations where the author replied last"
-            className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-secondary hover:bg-surface-level-1-hover hover:text-primary disabled:opacity-50"
+            aria-label={`Resolve ${answered.length} answered`}
           >
             Resolve {answered.length} answered
-          </button>
+          </Button>
         )}
       </div>
       {!folded && (
-        <ul className="flex flex-col gap-1.5">
+        <ul className="flex flex-col gap-space-2">
           {threads.map((thread) => (
             <li key={thread.id}>
               <ThreadRow pr={pr} thread={thread} />
@@ -391,9 +396,9 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
     ...new Set(commits.map((commit) => commit.author?.login ?? "someone")),
   ]
   return (
-    <li className="relative pl-8 text-xs">
-      <span className="absolute top-0.5 left-[5px] flex size-[13px] items-center justify-center rounded-full bg-surface-level-1 text-secondary ring-4 ring-[var(--bg-surface-level-1)]">
-        <GitCommitIcon className="size-3.5" />
+    <li className="relative pl-space-6 text-xs">
+      <span className="absolute top-0.5 left-[5px] flex size-[13px] items-center justify-center rounded-full bg-surface-level-1 text-secondary ring-4 ring-surface-level-1">
+        <GitCommitIcon className="size-3.5" weight="regular" />
       </span>
       <button
         type="button"
@@ -405,25 +410,25 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
         {formatWhen(commits.at(-1)!.created_at)}
         <CaretRightIcon
           className={cn(
-            "ml-1 inline size-3 align-[-2px] transition-transform",
+            "ml-space-1 inline size-3 align-[-2px] transition-transform",
             open && "rotate-90"
           )}
         />
       </button>
       {open && (
-        <ul className="mt-1 flex flex-col gap-0.5">
+        <ul className="mt-space-1 flex flex-col gap-0.5">
           {commits.map((commit) => (
             <li key={commit.sha}>
               <a
                 href={commit.html_url}
                 target="_blank"
                 rel="noreferrer"
-                className="group/commit flex items-center gap-2 text-secondary hover:text-primary"
+                className="group/commit flex items-center gap-space-2 text-secondary hover:text-primary"
               >
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] group-hover/commit:underline">
+                <span className="min-w-0 flex-1 truncate font-mono text-xxs group-hover/commit:underline">
                   {commit.message.split("\n")[0]}
                 </span>
-                <span className="shrink-0 font-mono text-[10px] text-tertiary">
+                <span className="shrink-0 font-mono text-xxs text-tertiary">
                   {commit.sha.slice(0, 7)}
                 </span>
               </a>
@@ -450,7 +455,7 @@ function RepliesBlock({
   const latest = reviews.at(-1)!
   const threadCount = new Set(replies.map((reply) => reply.thread.id)).size
   return (
-    <li className="relative pl-8">
+    <li className="relative pl-space-6">
       <Avatar author={author} size="md" className={TIMELINE_AVATAR} />
       <Byline
         author={author}
@@ -458,7 +463,7 @@ function RepliesBlock({
         href={latest.html_url}
         verb={`replied in ${plural(threadCount, "thread")}`}
       />
-      <ul className="mt-1.5 flex flex-col gap-1">
+      <ul className="mt-space-1 flex flex-col gap-space-1">
         {replies.map((reply) => (
           <li key={reply.comment.id}>
             <ReplyRow pr={pr} reply={reply} />
@@ -486,10 +491,10 @@ function ReplyRow({ pr, reply }: { pr: PullRequestRef; reply: Reply }) {
       type="button"
       onClick={() => setOpen(true)}
       title={thread.path}
-      className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-surface-level-1-hover"
+      className="flex w-full min-w-0 items-baseline gap-space-2 rounded-md px-space-1 py-space-1 text-left text-xs hover:bg-surface-level-1-hover"
     >
       {/* Truncates from the left so the line number, which tells rows apart, stays. */}
-      <span className="max-w-[45%] shrink-0 truncate text-left font-mono text-[11px] text-secondary [direction:rtl]">
+      <span className="max-w-[45%] shrink-0 truncate text-left font-mono text-xxs text-secondary [direction:rtl]">
         <bdi>{threadLocation(thread)}</bdi>
       </span>
       <span className="min-w-0 flex-1 truncate text-primary">
@@ -529,9 +534,9 @@ function ItemBlock({
         : reviewStateWords[item.state]
       : "commented"
   return (
-    <li className="relative pl-8">
+    <li className="relative pl-space-6">
       <Avatar author={item.author} size="md" className={TIMELINE_AVATAR} />
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div className="flex min-w-0 items-center gap-space-2">
         {item.kind === "review" && item.state !== "COMMENTED" && (
           <ReviewStateMark state={item.state} />
         )}
@@ -546,7 +551,7 @@ function ItemBlock({
             type="button"
             aria-expanded={showEarlier}
             onClick={() => setShowEarlier((value) => !value)}
-            className="shrink-0 rounded px-1 text-[11px] text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+            className="shrink-0 rounded-sm px-space-1 text-xxs text-secondary hover:bg-surface-level-1-hover hover:text-primary"
             title="Said the same thing before"
           >
             ×{earlier.length + 1}
@@ -554,7 +559,7 @@ function ItemBlock({
         )}
       </div>
       {showEarlier && (
-        <ul className="mt-1 flex flex-col gap-0.5 text-[11px] text-secondary">
+        <ul className="mt-space-1 flex flex-col gap-0.5 text-xxs text-secondary">
           {earlier.map((said) => (
             <li key={said.id}>
               <a
@@ -571,13 +576,13 @@ function ItemBlock({
       )}
       {body &&
         (open ? (
-          <div className="mt-1.5 rounded-lg border border-default bg-surface-level-1 px-3 py-2 text-[13px] leading-[1.6]">
+          <div className="mt-space-1 rounded-lg border border-default bg-surface-level-1 px-space-3 py-space-2 text-xs leading-[1.6]">
             <Markdown content={item.body} />
             {bot && (
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="mt-1 text-[11px] text-secondary hover:text-primary"
+                className="mt-space-1 text-xxs text-secondary hover:text-primary"
               >
                 Fold
               </button>
@@ -593,7 +598,7 @@ function ItemBlock({
           </button>
         ))}
       {started.length > 0 && (
-        <ul className="mt-1.5 flex flex-col gap-1">
+        <ul className="mt-space-1 flex flex-col gap-space-1">
           {started.map((thread) => (
             <li key={thread.id}>
               <ThreadRow pr={pr} thread={thread} />
@@ -602,7 +607,7 @@ function ItemBlock({
         </ul>
       )}
       {replies.length > 0 && (
-        <ul className="mt-1.5 flex flex-col gap-1">
+        <ul className="mt-space-1 flex flex-col gap-space-1">
           {replies.map((reply) => (
             <li key={reply.comment.id}>
               <ReplyRow pr={pr} reply={reply} />
@@ -634,7 +639,7 @@ function CommentBox({ pr }: { pr: PullRequestRef }) {
     if (text && !post.isPending) post.mutate(text)
   }
   return (
-    <div className="border-t border-default p-3">
+    <div className="border-t border-default p-space-3">
       <Textarea
         size="sm"
         aria-label="Comment on this pull request"
@@ -652,11 +657,11 @@ function CommentBox({ pr }: { pr: PullRequestRef }) {
         }}
       />
       {post.error && (
-        <p role="alert" className="mt-1 text-xs text-error-secondary">
+        <p role="alert" className="mt-space-1 text-xs text-error-secondary">
           {post.error.message}
         </p>
       )}
-      <div className="mt-2 flex justify-end">
+      <div className="mt-space-2 flex justify-end">
         <Button
           size="sm"
           disabled={!body.trim() || post.isPending}

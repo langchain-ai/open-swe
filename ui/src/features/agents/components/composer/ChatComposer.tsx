@@ -1,3 +1,4 @@
+import { PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import {
@@ -8,8 +9,6 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
@@ -147,6 +146,8 @@ export interface ChatComposerProps {
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
+  /** The run target is a staged move that takes effect with the next message. */
+  runTargetPending?: boolean
   localRepos?: Array<DesktopProject>
   selectedLocalRepoPath?: string | null
   selectedLocalRepoBranch?: string | null
@@ -283,6 +284,7 @@ export const ChatComposer = memo(function ChatComposer({
   onRepoChange,
   runTarget,
   onRunTargetChange,
+  runTargetPending,
   localRepos = [],
   selectedLocalRepoPath = null,
   selectedLocalRepoBranch = null,
@@ -701,13 +703,14 @@ export const ChatComposer = memo(function ChatComposer({
     [addFiles]
   )
 
-  const targetControls = (onRepoChange ||
-    onRunTargetChange ||
-    onWorkspaceChange ||
-    (runTarget === "local" && onSelectLocalRepoBranch)) && (
+  const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
-      {runTarget && onRunTargetChange && (
-        <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
+      {runTarget && (
+        <RunTargetSelector
+          onChange={onRunTargetChange}
+          pending={runTargetPending}
+          value={runTarget}
+        />
       )}
       {runTarget !== "local" && onWorkspaceChange && (
         <WorkspaceSelector
@@ -766,18 +769,21 @@ export const ChatComposer = memo(function ChatComposer({
   return (
     <div
       className={cn(
-        "relative w-full font-sans text-[13px]",
+        "relative w-full font-sans text-xs",
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
       {composerError && (
-        <div className="mb-2 px-1 text-xs text-error-secondary" role="alert">
+        <div
+          className="mb-space-2 px-space-1 text-xs text-error-secondary"
+          role="alert"
+        >
           {composerError}
         </div>
       )}
 
       {!selectedModelSupportsImages && (
-        <Banner className="mb-2" intent="warning">
+        <Banner className="mb-space-2" intent="warning">
           {`The selected model does not accept image input. Remove the image${
             pendingImages.length > 1 ? "s" : ""
           } or switch to a vision-enabled model to send.`}
@@ -787,7 +793,7 @@ export const ChatComposer = memo(function ChatComposer({
       <div
         data-chat-composer
         className={cn(
-          "relative z-10 flex flex-col rounded-xl border bg-elevated px-3 py-2.5 shadow-md transition-[border-color,box-shadow] duration-slow hover:shadow-lg",
+          "relative z-floating-bar flex flex-col rounded-xl border bg-elevated px-space-3 py-space-2 shadow-md transition-[border-color,box-shadow] duration-slow hover:shadow-lg",
           compact ? "min-h-[88px]" : "min-h-[106px]",
           dragKind ? "border-brand" : "border-default"
         )}
@@ -807,8 +813,8 @@ export const ChatComposer = memo(function ChatComposer({
         )}
 
         {dragKind && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-elevated/80 backdrop-blur-sm">
-            <span className="rounded-md bg-brand-subtle px-3 py-1.5 text-xs font-medium text-brand-primary">
+          <div className="pointer-events-none absolute inset-0 z-drag-overlay flex items-center justify-center rounded-xl bg-elevated/80 backdrop-blur-sm">
+            <span className="rounded-md bg-brand-subtle px-space-3 py-space-1 text-xs font-medium text-brand-primary">
               {dragKind === "path"
                 ? "Drop to mention this file"
                 : "Drop images here"}
@@ -826,7 +832,7 @@ export const ChatComposer = memo(function ChatComposer({
         />
 
         {pendingImages.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="mb-space-2 flex flex-wrap gap-space-2">
             {pendingImages.map((image, index) => (
               <div
                 className="group relative"
@@ -878,7 +884,7 @@ export const ChatComposer = memo(function ChatComposer({
           value={value}
         />
 
-        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-1 pt-2 text-xs text-secondary">
+        <div className="mt-auto grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_auto] items-end gap-space-1 pt-space-2 text-xs text-secondary">
           <DropdownMenu onOpenChange={setExtrasMenuOpen}>
             <DropdownMenuTrigger asChild>
               <IconButton
@@ -910,7 +916,7 @@ export const ChatComposer = memo(function ChatComposer({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-space-1">
             {models.length > 0 && (
               <ModelPicker
                 models={models}
@@ -920,12 +926,12 @@ export const ChatComposer = memo(function ChatComposer({
                 requireImageSupport={pendingImages.length > 0}
                 routed={routed}
                 selection={selection}
-                triggerClassName="h-7 max-w-full rounded-md px-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"
+                triggerClassName="h-7 max-w-full rounded-md px-space-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"
               />
             )}
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-space-1">
             <ContextWindowMeter {...contextUsage} />
           </div>
 
@@ -944,7 +950,7 @@ export const ChatComposer = memo(function ChatComposer({
       </div>
 
       {targetControls && (
-        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 px-3 text-xs">
+        <div className="mt-space-2 flex min-w-0 flex-wrap items-center gap-x-space-5 gap-y-space-2 px-space-3 text-xs">
           {targetControls}
         </div>
       )}

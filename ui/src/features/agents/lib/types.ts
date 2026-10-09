@@ -42,7 +42,6 @@ export type AgentTriggerKind =
   | "schedule_test"
   | "wakeup"
   | "reviewer"
-  | "analyzer"
   | "ci_autofix"
   | "slack_bot"
 

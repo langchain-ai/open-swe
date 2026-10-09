@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
-import { StackIcon } from "@phosphor-icons/react/dist/ssr/Stack"
+import { StackRegularIcon } from "@langchain/macaw-components/icons"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
 
+import {
+  COMPOSER_TRIGGER_CLASS_NAME,
+  ComposerControlChevron,
+  ComposerMenuLabel,
+  ComposerMenuOption,
+  ComposerTriggerIcon,
+} from "./ComposerControl"
 import type { WorkspaceOption } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -34,20 +44,6 @@ export function WorkspaceSelector({
   placeholder = "No workspace",
   side = "bottom",
 }: WorkspaceSelectorProps) {
-  const [open, setOpen] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node
-      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
-
   if (workspaces.length < (showWithOneWorkspace ? 1 : 2)) return null
 
   const selected = workspaces.find(
@@ -55,63 +51,42 @@ export function WorkspaceSelector({
   )
 
   return (
-    <div ref={dropdownRef} className="relative min-w-0 shrink">
-      <button
-        type="button"
-        disabled={disabled}
+    <DropdownMenu>
+      <DropdownMenuTrigger
         aria-label="Workspace"
-        onClick={() => setOpen((value) => !value)}
-        className="flex max-w-[220px] cursor-pointer items-center gap-1 text-secondary transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+        disabled={disabled}
+        className={cn(COMPOSER_TRIGGER_CLASS_NAME, "max-w-[220px] min-w-0")}
       >
-        <StackIcon className="size-3.5 shrink-0" weight="regular" />
-        <span className="flex-1 truncate text-left">
-          {selected?.name ?? placeholder}
-        </span>
-        <CaretDownIcon className="size-3 shrink-0 opacity-70" weight="bold" />
-      </button>
-      {open && (
-        <div
-          className={cn(
-            "absolute left-0 z-50 flex max-h-72 w-64 flex-col overflow-y-auto rounded-md border border-subtle bg-elevated text-xs text-primary shadow-md",
-            side === "top" ? "bottom-full mb-1" : "top-full mt-1"
-          )}
-        >
-          <div className="px-2 pt-2 pb-1 text-secondary">Workspace</div>
-          {workspaces.map((workspace) => {
-            const isSelected = workspace.slug === selectedSlug
-            return (
-              <button
-                key={workspace.slug}
-                type="button"
-                onClick={() => {
-                  onChange(workspace.slug)
-                  setOpen(false)
-                }}
-                className={cn(
-                  "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-elevated-hover",
-                  isSelected ? "text-primary" : "text-secondary"
-                )}
-              >
-                <span className="truncate">{workspace.name}</span>
-                {!workspace.has_snapshot && (
-                  <span className="ml-2 shrink-0 text-xxs text-tertiary">
-                    no snapshot
+        <ComposerTriggerIcon icon={StackRegularIcon} />
+        <span className="truncate">{selected?.name ?? placeholder}</span>
+        <ComposerControlChevron />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="max-h-72 w-64"
+        side={side}
+        sideOffset={7}
+      >
+        <DropdownMenuGroup>
+          <ComposerMenuLabel>Workspace</ComposerMenuLabel>
+          {workspaces.map((workspace) => (
+            <ComposerMenuOption
+              key={workspace.slug}
+              onSelect={() => onChange(workspace.slug)}
+              selected={workspace.slug === selectedSlug}
+              trailing={
+                !workspace.has_snapshot && (
+                  <span className="shrink-0 text-xxs text-tertiary">
+                    No snapshot
                   </span>
-                )}
-                {isSelected && (
-                  <span className="ml-auto shrink-0 pl-3">
-                    <CheckIcon
-                      aria-hidden="true"
-                      className="size-3.5 text-icon-secondary"
-                      weight="regular"
-                    />
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
+                )
+              }
+            >
+              {workspace.name}
+            </ComposerMenuOption>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

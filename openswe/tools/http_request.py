@@ -4,6 +4,7 @@ from typing import Any
 
 import httpx2
 
+from openswe.tools.mcp_exposure import expose_mcp
 from openswe.tools.sandbox_output import chunk_output_as_jsonl, write_sandbox_output
 from openswe.tools.sandbox_preference import replaced_by_curl
 from openswe.utils.url_safety import UnsafeUrlError
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 HTTP_REQUEST_MAX_INLINE_CHARS = 100_000
 
 
+@expose_mcp()
 @replaced_by_curl
 async def http_request(
     url: str,

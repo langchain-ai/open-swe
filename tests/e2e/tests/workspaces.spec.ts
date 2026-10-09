@@ -322,7 +322,7 @@ test.describe("Workspaces", () => {
     await expect(picker).toContainText("Default");
 
     await picker.click();
-    await page.getByRole("button", { name: new RegExp(ALT_NAME) }).click();
+    await page.getByRole("menuitem", { name: new RegExp(ALT_NAME) }).click();
     await expect(picker).toContainText(ALT_NAME);
 
     await typeIntoComposer(page, "Which workspace am I in?");

@@ -105,6 +105,19 @@ async def test_private_owner_gets_full_results_and_unknown_scope_fails_closed(
         assert resolved == tool_access.Access()
 
 
+@pytest.mark.parametrize("admin", [False, True])
+async def test_mcp_caller_owns_their_surface_but_only_admins_get_admin_places(
+    metadata: dict[str, object], monkeypatch: pytest.MonkeyPatch, admin: bool
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "alice" if admin else "carol")
+    caller = await resolve_access(_cfg(thread_id=None, source="mcp", admin_thread=True))
+    assert caller.mode(_OWN) == "full"
+    for place in ("admin_thread", "admin_surface"):
+        assert (caller.mode(Policy(trusted=place, actor="admin")) is not None) is admin
+    # A thread run that claims the MCP source is still judged by its thread.
+    assert (await resolve_access(_cfg(source="mcp"))).mode(_OWN) is None
+
+
 @pytest.mark.parametrize("place", ["private", "admin_thread", "admin_surface"])
 async def test_sharing_revokes_tools_despite_stale_private_admin_run_config(
     metadata: dict[str, object], monkeypatch: pytest.MonkeyPatch, place: tool_access.Place

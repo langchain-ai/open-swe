@@ -122,7 +122,7 @@ export function PullRequestThreadAction({
         {label}
       </SplitButton>
       {thread.error && (
-        <p role="alert" className="mt-1 text-error-secondary">
+        <p role="alert" className="mt-space-1 text-error-secondary">
           {thread.error.message}
         </p>
       )}

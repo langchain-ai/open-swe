@@ -238,7 +238,7 @@ export function GeneralSettings() {
       </SettingsSection>
 
       {typeof window !== "undefined" && window.openSweDesktop && (
-        <SettingsSection title="Desktop app">
+        <SettingsSection title="Desktop App">
           <SettingsRow
             label="Local tracing project"
             description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."

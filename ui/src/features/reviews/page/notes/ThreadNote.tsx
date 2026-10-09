@@ -1,8 +1,7 @@
+import { CaretRightIcon, CheckIcon } from "@langchain/macaw-components/icons"
 import { useState } from "react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 
 import type {
   ReviewThread,
@@ -43,7 +42,7 @@ export function CommentRow({
   className?: string
 }) {
   return (
-    <div className={cn("flex gap-2.5", className)}>
+    <div className={cn("flex gap-space-3", className)}>
       <Avatar author={comment.author} className="mt-px" />
       <div className="min-w-0 flex-1">
         <Byline
@@ -51,7 +50,7 @@ export function CommentRow({
           createdAt={comment.created_at}
           href={comment.html_url || undefined}
         />
-        <div className="mt-1 text-[13px] leading-[1.6] [&_.markdown-body]:text-[13px]">
+        <div className="mt-space-1 text-xs leading-[1.6] [&_.markdown-body]:text-xs">
           <Markdown content={body} />
         </div>
       </div>
@@ -97,7 +96,7 @@ export function ThreadNote({
   const humans = thread.comments.some((comment) => !comment.author?.bot)
   const [open, setOpen] = useState(!thread.resolved && humans)
   return (
-    <NoteFrame className={open ? undefined : "py-1"}>
+    <NoteFrame className={open ? undefined : "py-space-1"}>
       {open ? (
         <ThreadCard pr={pr} thread={thread} onCollapse={() => setOpen(false)} />
       ) : (
@@ -133,7 +132,7 @@ export function ThreadSummary({
           title={`${thread.comments.length} comments`}
           className="flex shrink-0 items-center gap-0.5 text-secondary tabular-nums"
         >
-          <ChatCircleIcon className="size-3" />
+          <ChatCircleIcon className="size-3" weight="regular" />
           {thread.comments.length}
         </span>
       )}
@@ -151,21 +150,21 @@ export function ThreadSummary({
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full min-w-0 flex-col gap-0.5 overflow-hidden rounded-lg border border-default bg-surface-level-1 px-2.5 py-1.5 text-left text-xs hover:bg-surface-level-1-hover"
+      className="flex w-full min-w-0 flex-col gap-0.5 overflow-hidden rounded-lg border border-default bg-surface-level-1 px-space-2 py-space-1 text-left text-xs hover:bg-surface-level-1-hover"
     >
-      <span className="flex w-full min-w-0 items-center gap-2">
+      <span className="flex w-full min-w-0 items-center gap-space-2">
         <CaretRightIcon className="size-3 shrink-0 text-secondary" />
-        <span className="flex shrink-0 -space-x-1">
+        <span className="flex shrink-0 -space-x-space-1">
           {thread.comments.slice(0, 3).map((comment) => (
             <Avatar
               key={comment.id}
               author={comment.author}
-              className="size-4 ring-2 ring-[var(--bg-surface-level-1)]"
+              className="size-4 ring-2 ring-surface-level-1"
             />
           ))}
         </span>
         {location ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-secondary">
+          <span className="min-w-0 flex-1 truncate font-mono text-xxs text-secondary">
             {location}
           </span>
         ) : (
@@ -173,9 +172,11 @@ export function ThreadSummary({
         )}
         {state}
       </span>
-      {location && <span className="flex w-full min-w-0 pl-5">{said}</span>}
+      {location && (
+        <span className="flex w-full min-w-0 pl-space-4">{said}</span>
+      )}
       {location && thread.comments.length > 1 && (
-        <span className="w-full truncate pl-5 text-secondary">
+        <span className="w-full truncate pl-space-4 text-secondary">
           <span className="font-medium text-primary">
             {displayName(last.author)}
           </span>{" "}
@@ -219,7 +220,7 @@ function ThreadContext({ thread }: { thread: ReviewThread }) {
   const lines = thread.diff_hunk.split("\n").filter(Boolean).slice(-6)
   if (lines.length === 0) return null
   return (
-    <pre className="overflow-x-auto border-b border-default bg-surface-level-2 px-3 py-2 font-mono text-[11px] leading-[18px]">
+    <pre className="overflow-x-auto border-b border-default bg-surface-level-2 px-space-3 py-space-2 font-mono text-xxs leading-[18px]">
       {lines.map((line, index) => (
         <div
           key={index}
@@ -265,8 +266,8 @@ export function ThreadCard({
       )}
     >
       {withContext && (
-        <div className="flex items-center gap-2 border-b border-default px-3 py-1.5">
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-secondary">
+        <div className="flex items-center gap-space-2 border-b border-default px-space-3 py-space-1">
+          <span className="min-w-0 flex-1 truncate font-mono text-xxs text-secondary">
             {withLine(thread.path, threadLine(thread))}
           </span>
           {thread.comments[0].html_url && (
@@ -275,16 +276,16 @@ export function ThreadCard({
               target="_blank"
               rel="noreferrer"
               aria-label="View this conversation on GitHub"
-              className="flex shrink-0 items-center gap-1 text-[11px] text-secondary hover:text-primary hover:underline"
+              className="flex shrink-0 items-center gap-space-1 text-xxs text-secondary hover:text-primary hover:underline"
             >
               GitHub
-              <ArrowSquareOutIcon className="size-3" />
+              <ArrowSquareOutIcon className="size-3" weight="regular" />
             </a>
           )}
           {isPlaced(thread) ? (
             <button
               type="button"
-              className="shrink-0 text-[11px] text-secondary hover:text-primary hover:underline"
+              className="shrink-0 text-xxs text-secondary hover:text-primary hover:underline"
               onClick={() => jumpTo(threadTarget(thread))}
             >
               Show in diff
@@ -297,7 +298,7 @@ export function ThreadCard({
       {withContext && <ThreadContext thread={thread} />}
       <ol className="divide-y">
         {thread.comments.map((comment) => (
-          <li key={comment.id} className="px-3 py-2.5">
+          <li key={comment.id} className="px-space-3 py-space-2">
             <CommentRow
               comment={comment}
               body={withSuggestions(comment.body, thread)}
@@ -305,9 +306,9 @@ export function ThreadCard({
           </li>
         ))}
       </ol>
-      <div className="flex flex-col gap-2 border-t border-default bg-surface-level-2 px-3 py-2">
+      <div className="flex flex-col gap-space-2 border-t border-default bg-surface-level-2 px-space-3 py-space-2">
         <ReplyBox reply={reply} />
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-space-1">
           <ResolveButton
             thread={thread}
             resolve={resolve}
@@ -327,13 +328,15 @@ export function ThreadCard({
           >
             {suggestion ? "Ask Open SWE to apply" : "Ask Open SWE"}
           </Button>
-          <button
-            type="button"
+          <Button
+            size="xs"
+            variant="plain"
+            color="secondary"
+            className="ml-auto"
             onClick={onCollapse}
-            className="ml-auto text-secondary hover:text-primary"
           >
             Collapse
-          </button>
+          </Button>
         </div>
       </div>
     </div>

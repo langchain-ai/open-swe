@@ -241,7 +241,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
   if (collapsed) {
     return (
       <IconButton
-        className="fixed top-2 right-2 z-30 size-7"
+        className="fixed top-2 right-2 z-sidebar size-7"
         color="secondary"
         icon={SidebarSimpleIcon}
         label="Show panel"

@@ -1,4 +1,4 @@
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 
 import type { ReviewFinding } from "@/lib/api"
@@ -63,7 +63,7 @@ export function FindingNote({
           type="button"
           aria-expanded={open}
           onClick={() => setExpandedFinding(open ? null : finding.id)}
-          className="flex w-full items-start gap-2 px-3 py-2 text-left"
+          className="flex w-full items-start gap-space-2 px-space-3 py-space-2 text-left"
         >
           <AgentMark className="mt-0.5" />
           <span
@@ -92,21 +92,23 @@ export function FindingNote({
           )}
           <CaretRightIcon
             className={cn(
-              "mt-1 size-3 shrink-0 text-secondary transition-transform",
+              "mt-space-1 size-3 shrink-0 text-secondary transition-transform",
               open && "rotate-90"
             )}
           />
         </button>
         {open && (
-          <div className="border-t border-subtle px-3 pt-2 pb-2.5">
-            <div className="text-[13px] leading-[1.6]">
+          <div className="border-t border-subtle px-space-3 pt-space-2 pb-space-2">
+            <div className="text-xs leading-[1.6]">
               <Markdown content={findingMarkdown(finding)} />
             </div>
             {finding.resolution_note && (
-              <p className="mt-2 text-secondary">{finding.resolution_note}</p>
+              <p className="mt-space-2 text-secondary">
+                {finding.resolution_note}
+              </p>
             )}
             {thread && <FindingReplies pr={pr} thread={thread} />}
-            <div className="mt-2 flex flex-wrap items-center gap-1">
+            <div className="mt-space-2 flex flex-wrap items-center gap-space-1">
               <Button
                 size="sm"
                 color="secondary"
@@ -169,12 +171,12 @@ function FindingReplies({
 }) {
   const { reply, resolve } = useThreadActions(pr, thread)
   return (
-    <div className="mt-2.5 flex flex-col gap-2 border-t border-subtle pt-2.5">
+    <div className="mt-space-2 flex flex-col gap-space-2 border-t border-subtle pt-space-2">
       {thread.comments.slice(1).map((comment) => (
         <CommentRow key={comment.id} comment={comment} />
       ))}
       <ReplyBox reply={reply} placeholder="Reply on GitHub…" />
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-space-1">
         <ResolveButton thread={thread} resolve={resolve} />
       </div>
     </div>

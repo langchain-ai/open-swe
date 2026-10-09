@@ -364,37 +364,6 @@ async def test_missing_workspace_does_not_inherit_default_access(
     assert github == []
 
 
-async def test_analyzer_resolves_repository_workspace_without_using_user_token(
-    monkeypatch: pytest.MonkeyPatch,
-    github: list[dict[str, object]],
-) -> None:
-    from openswe.analyzer import PrepareAnalyzerRunMiddleware
-
-    async def load(slug: str) -> Workspace:
-        return Workspace(slug=slug, repos=["acme/api"] if slug == "oss" else [])
-
-    monkeypatch.setattr(WORKSPACES, "get", load)
-    monkeypatch.setattr(WORKSPACES, "owner_of_repo", AsyncMock(return_value="oss"))
-    monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
-    monkeypatch.setattr(
-        "openswe.analyzer.resolve_sandbox_work_dir", AsyncMock(return_value="/workspace")
-    )
-    middleware = PrepareAnalyzerRunMiddleware(
-        thread_id="thread",
-        config={
-            "configurable": {
-                "thread_id": "thread",
-                "review_style_full_name": "acme/api",
-                "review_style_github_token": "user-token-with-broader-access",
-            }
-        },
-    )
-
-    await middleware._prepare({"messages": []}, MagicMock())
-
-    assert injected_auth(github) == ["x-access-token:repos:11"]
-
-
 async def test_scoped_token_failure_does_not_inject_discovery_token(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],

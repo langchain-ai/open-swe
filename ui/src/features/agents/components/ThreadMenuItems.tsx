@@ -1,9 +1,9 @@
+import { PushPinRegularIcon } from "@langchain/macaw-components/icons"
 import { ContextMenuItem } from "@langchain/macaw-components/ContextMenu"
 import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
-import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
@@ -82,7 +82,7 @@ export function ThreadMenuItems({
         {pinned ? (
           <PushPinSlashIcon size={ICON_SIZE} weight="regular" />
         ) : (
-          <PushPinIcon size={ICON_SIZE} weight="regular" />
+          <PushPinRegularIcon size={ICON_SIZE} />
         )}
         {pinned ? "Unpin thread" : "Pin thread"}
       </Item>

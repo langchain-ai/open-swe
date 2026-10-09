@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,7 @@ from openswe.config import ENV
 from openswe.dashboard import router as dashboard_router
 from openswe.github.routes import router as github_webhook_router
 from openswe.linear.routes import router as linear_webhook_router
+from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
 from openswe.remote_runtime import server as remote_runtime_server
 from openswe.rollout_events import router as rollout_webhook_router
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 pin_single_event_loop()
 
 REMOTE_RUNTIME = remote_runtime_server.build_mount()
+AGENT_MCP = agent_mcp_server.build_mount()
 
 
 @asynccontextmanager
@@ -49,6 +51,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
     from openswe.database.store_imports import run_store_import
+    from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.schedules.store import import_store_automations
     from openswe.skill_store.store import import_store_skills
@@ -116,6 +119,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Startup continues: skills still in the Store are missing until an
         # import succeeds.
         logger.exception("Importing skills from the LangGraph Store failed")
+    try:
+        # The review-style analyzer is gone; its nightly crons would fail every run.
+        await delete_analyzer_crons()
+    except Exception:  # noqa: BLE001
+        logger.exception("Deleting review-style analyzer crons failed")
     blob_import = asyncio.create_task(run_blob_import())
     if admins := configured_admins():
         await User.sync_admins(admins)
@@ -145,7 +153,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("UI invalidation hub startup failed", exc_info=True)
     LISTENER.start()
     try:
-        async with REMOTE_RUNTIME.lifespan():
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(REMOTE_RUNTIME.lifespan())
+            if AGENT_MCP is not None:
+                await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield
     finally:
         blob_import.cancel()
@@ -203,6 +214,9 @@ def create_app() -> FastAPI:
     app.router.routes.append(
         Route(remote_runtime_server.HOOKS_PATH, REMOTE_RUNTIME.hooks, methods=["POST"])
     )
+    if AGENT_MCP is not None:
+        app.router.routes.extend(AGENT_MCP.root_routes)
+        app.mount(agent_mcp_server.PREFIX, AGENT_MCP.app)
     mount_dashboard_ui(app)
     return app
 

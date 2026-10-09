@@ -1,8 +1,10 @@
+import {
+  InfoRegularIcon,
+  WarningRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Component, createElement, memo, useMemo, useState } from "react"
 import { ChatCenteredTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCenteredText"
-import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
 import { LightbulbIcon } from "@phosphor-icons/react/dist/ssr/Lightbulb"
-import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
 import { WarningOctagonIcon } from "@phosphor-icons/react/dist/ssr/WarningOctagon"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import {
@@ -66,10 +68,10 @@ const SHIKI_THEME: ["github-light", "github-dark"] = [
 
 /** GitHub's own five alert kinds; the colours live in styles/markdown.css. */
 const ALERTS: Record<string, { label: string; Icon: IconComponent }> = {
-  note: { label: "Note", Icon: InfoIcon },
+  note: { label: "Note", Icon: InfoRegularIcon },
   tip: { label: "Tip", Icon: LightbulbIcon },
   important: { label: "Important", Icon: ChatCenteredTextIcon },
-  warning: { label: "Warning", Icon: WarningIcon },
+  warning: { label: "Warning", Icon: WarningRegularIcon },
   caution: { label: "Caution", Icon: WarningOctagonIcon },
 }
 

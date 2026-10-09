@@ -28,7 +28,7 @@ export function TablePagination({
   const end = Math.min(page * pageSize, total)
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-default px-4 py-3 text-xs text-secondary">
+    <div className="flex flex-wrap items-center justify-between gap-space-3 border-t border-default px-space-4 py-space-3 text-xs text-secondary">
       <span>
         {start.toLocaleString("en-US")}–{end.toLocaleString("en-US")} of{" "}
         {total.toLocaleString("en-US")}
