@@ -1188,11 +1188,11 @@ def test_pending_cost_marks_latest_reply_until_cost_arrives(
     [
         ("<@UBOT> /model:perf please continue", False, True),
         ("<@UBOT> `/model:perf` please continue", False, False),
-        ("<@UBOT> please /model:perf continue", False, False),
+        ("<@UBOT> please continue /model:perf", False, True),
         ("<@UBOT> /model:perf please continue", True, False),
     ],
 )
-async def test_performance_directive_switches_only_right_after_mention(
+async def test_performance_directive_switches_unless_quoted(
     monkeypatch: pytest.MonkeyPatch,
     fake_store,
     registry_db,

@@ -1,17 +1,22 @@
 """Everything a person types into a Slack message for Open SWE, parsed in one place.
 
 Routing decides whether a message is addressed to Open SWE first; a command never
-makes it so. Commands are the first unquoted words after this bot's mention, or
-the first words of the message, in any order:
+makes it so. An action (`/btw`, `/breakout`, `/breakout:web`) is one of the first
+unquoted words after this bot's mention, or of the message, and the rest of the
+message is its argument:
 
-    @Open SWE /model:perf /workspace:infra fix the flaky test
     @Open SWE /breakout #eng investigate this
     @Open SWE /btw how does thread routing work?
 
-Options (`/model:perf…`, e.g. `/model:performance`, and `/workspace:<name>`) may accompany at most one action
-(`/btw`, `/breakout`, `/breakout:web`), and the rest of the message is the
-argument. The legacy `workspace:<name>` and `env:<name>` tags, without the slash,
-are still accepted anywhere in the message.
+Options (`/model:perf…`, e.g. `/model:performance`, and `/workspace:<name>`) count
+anywhere outside quotes, so `/model:perf` in backticks or quotation marks is just
+text:
+
+    @Open SWE /model:perf /workspace:infra fix the flaky test
+    @Open SWE fix the flaky test /model:perf
+
+The legacy `workspace:<name>` and `env:<name>` tags, without the slash, are still
+accepted anywhere in the message.
 """
 
 import re
@@ -35,6 +40,7 @@ _QUOTED = re.compile(
     re.MULTILINE,
 )
 _WORD = re.compile(r"\s*(\S+)")
+_TOKEN = re.compile(r"\S+")
 _WORKSPACE_OPTION = re.compile(r"/workspace:([A-Za-z0-9][A-Za-z0-9._-]*)", re.IGNORECASE)
 _LEGACY_WORKSPACE_TAG = re.compile(
     r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)", re.IGNORECASE
@@ -67,6 +73,7 @@ class ParsedSlackMessage:
             ),
             cls(text=text, argument=text.strip()),
         )
+        parsed = cls._with_options(parsed, masked)
         return parsed if parsed.workspace else cls._with_legacy_workspace_tag(parsed, masked)
 
     @classmethod
@@ -96,27 +103,25 @@ class ParsedSlackMessage:
             return None
 
     @classmethod
+    def _is_performance_option(cls, word: str) -> bool:
+        return word.lower().startswith(PERFORMANCE_MODEL)
+
+    @classmethod
+    def _workspace_option(cls, word: str) -> str | None:
+        option = _WORKSPACE_OPTION.fullmatch(word)
+        return cls._workspace_slug(option[1]) if option else None
+
+    @classmethod
     def _leading_commands(
         cls, text: str, masked: str, mention_start: int, anchor: int
     ) -> Self | None:
         action: SlackAction | None = None
-        workspace: str | None = None
-        performance_span: Span | None = None
-        workspace_span: Span | None = None
         position = anchor
         while word := _WORD.match(masked, position):
             token = word[1].lower()
             if action is None and token in SlackAction:
                 action = SlackAction(token)
-            elif performance_span is None and token.startswith(PERFORMANCE_MODEL):
-                performance_span = word.span(1)
-            elif (
-                workspace is None
-                and (option := _WORKSPACE_OPTION.fullmatch(word[1]))
-                and (workspace := cls._workspace_slug(option[1]))
-            ):
-                workspace_span = word.span(1)
-            else:
+            elif not (cls._is_performance_option(token) or cls._workspace_option(word[1])):
                 break
             position = word.end()
         if position == anchor:
@@ -124,12 +129,26 @@ class ParsedSlackMessage:
         return cls(
             text=text,
             action=action,
-            performance_model=performance_span is not None,
-            workspace=workspace,
             prior_text=text[:mention_start].strip(),
             argument=text[position:].strip(),
             argument_start=position,
+        )
+
+    @classmethod
+    def _with_options(cls, parsed: Self, masked: str) -> Self:
+        performance_span: Span | None = None
+        workspace: str | None = None
+        workspace_span: Span | None = None
+        for word in _TOKEN.finditer(masked):
+            if performance_span is None and cls._is_performance_option(word[0]):
+                performance_span = word.span()
+            elif workspace is None and (workspace := cls._workspace_option(word[0])):
+                workspace_span = word.span()
+        return replace(
+            parsed,
+            performance_model=performance_span is not None,
             performance_span=performance_span,
+            workspace=workspace,
             workspace_span=workspace_span,
         )
 
