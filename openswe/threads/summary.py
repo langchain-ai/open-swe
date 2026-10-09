@@ -35,6 +35,8 @@ from openswe.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SOURCE = "dashboard"
+# Set on a thread the upload_session tool reserved until `oswe upload` seeds it.
+SESSION_UPLOAD_PENDING_KEY = "session_upload_pending"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
@@ -163,6 +165,9 @@ def _assert_thread_postable(
     metadata: Mapping[str, Any], login: str, email: str | None = None
 ) -> None:
     _assert_thread_promptable(metadata, login)
+    # A run here would start without the history `oswe upload` is about to seed.
+    if metadata.get(SESSION_UPLOAD_PENDING_KEY) is True:
+        raise HTTPException(409, "this thread is waiting for its session upload")
     if (metadata.get("admin_thread") is True or _is_automation_thread(metadata)) and not is_admin(
         email, login=login
     ):

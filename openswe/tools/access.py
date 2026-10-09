@@ -149,6 +149,15 @@ def direct_user_run(cfg: RunConfig) -> bool:
     )
 
 
+def external_caller_run(cfg: RunConfig) -> bool:
+    """Whether a signed-in person called this tool over MCP, outside any thread.
+
+    Every graph run carries a thread id, so only the MCP server builds such a config;
+    the results go back to that person alone, as in a private thread they own.
+    """
+    return cfg.source == "mcp" and not cfg.thread_id
+
+
 async def _metadata(thread_id: str | None) -> dict[str, object]:
     if not thread_id:
         return {}
@@ -225,6 +234,17 @@ async def resolve_access(cfg: RunConfig | None = None, *, login: str | None = No
     """Resolve the current run's access from its config and saved thread metadata."""
     cfg = cfg or configurable()
     login = login or cfg.github_login
+    if external_caller_run(cfg):
+        admin = bool(login) and await actor_is_admin(cfg, login=login)
+        return Access(
+            private=True,
+            owner=bool(login),
+            admin=admin,
+            admin_thread=admin and cfg.admin_thread is True,
+            admin_surface=admin and is_private_admin_surface(cfg),
+            sole=bool(login),
+            direct=bool(login),
+        )
     metadata = await _metadata(cfg.thread_id)
     try:
         scope = _ThreadScope.model_validate(metadata)
