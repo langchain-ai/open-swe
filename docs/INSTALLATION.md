@@ -177,6 +177,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
         ],
         "scopes": {
             "bot": [
+                "reactions:read",
                 "reactions:write",
                 "commands",
                 "app_mentions:read",
@@ -209,7 +210,9 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
                 "channel_archive",
                 "message.channels",
                 "message.im",
-                "message.mpim"
+                "message.mpim",
+                "reaction_added",
+                "reaction_removed"
             ]
         },
         "interactivity": {
