@@ -111,8 +111,8 @@ class _State:
 
 
 @_one_at_a_time
-async def show_chunk(number: int | None = None) -> dict[str, Any]:
-    """Implement the `show_chunk` tool."""
+async def walkthrough_show_chunk(number: int | None = None) -> dict[str, Any]:
+    """Implement the `walkthrough_show_chunk` tool."""
     try:
         state = await _State.load()
     except GuideUnavailableError as exc:
@@ -124,7 +124,7 @@ async def show_chunk(number: int | None = None) -> dict[str, Any]:
         error = (
             f"there is no chunk {number}"
             if number is not None
-            else "no planned chunk is left for the reader; place the next one with `plan_chunk`"
+            else "no planned chunk is left for the reader; place the next one with `walkthrough_plan_chunk`"
         )
         return {"success": False, "error": error, **state.report()}
     if not state.reader.remaining(chunk.lines):
@@ -133,8 +133,10 @@ async def show_chunk(number: int | None = None) -> dict[str, Any]:
 
 
 @_one_at_a_time
-async def show_lines(title: str, show: list[FileRanges], explanation: str) -> dict[str, Any]:
-    """Implement the `show_lines` tool."""
+async def walkthrough_show_lines(
+    title: str, show: list[FileRanges], explanation: str
+) -> dict[str, Any]:
+    """Implement the `walkthrough_show_lines` tool."""
     try:
         state = await _State.load()
         left = set(state.reader.remaining(state.reader.unseen))
@@ -157,8 +159,8 @@ async def show_lines(title: str, show: list[FileRanges], explanation: str) -> di
 
 
 @_one_at_a_time
-async def order_chunks(chunks: list[int]) -> dict[str, Any]:
-    """Implement the `order_chunks` tool."""
+async def walkthrough_order_chunks(chunks: list[int]) -> dict[str, Any]:
+    """Implement the `walkthrough_order_chunks` tool."""
     try:
         state = await _State.load()
     except GuideUnavailableError as exc:
@@ -172,8 +174,8 @@ async def order_chunks(chunks: list[int]) -> dict[str, Any]:
 
 
 @_one_at_a_time
-async def show_other() -> dict[str, Any]:
-    """Implement the `show_other` tool."""
+async def walkthrough_show_other() -> dict[str, Any]:
+    """Implement the `walkthrough_show_other` tool."""
     try:
         state = await _State.load()
     except GuideUnavailableError as exc:
@@ -183,15 +185,15 @@ async def show_other() -> dict[str, Any]:
     if reasons := state.reader.unfinished(state.ctx.unplanned, other=False):
         return {"success": False, "error": "; ".join(reasons), **state.report()}
     if not state.reader.other_pending:
-        return state.report(note="Other has nothing left for the reader; call `end_walkthrough`")
+        return state.report(note="Other has nothing left for the reader; call `walkthrough_end`")
     return await state.post(state.reader.show_other())
 
 
 @_one_at_a_time
-async def skip_changes(
+async def walkthrough_skip_changes(
     reason: str, chunks: list[int] | None = None, include_other: bool = False
 ) -> dict[str, Any]:
-    """Implement the `skip_changes` tool."""
+    """Implement the `walkthrough_skip_changes` tool."""
     try:
         state = await _State.load()
     except GuideUnavailableError as exc:
@@ -235,14 +237,14 @@ async def _plan(
 
 
 @_one_at_a_time
-async def plan_chunk(
+async def walkthrough_plan_chunk(
     title: str,
     show: list[FileRanges],
     explanation: str,
     other: list[FileRanges] | None = None,
     after: int | None = None,
 ) -> dict[str, Any]:
-    """Implement the `plan_chunk` tool."""
+    """Implement the `walkthrough_plan_chunk` tool."""
     return await _plan(
         lambda ctx: ctx.workspace.plan_chunk(
             title=title, show=show, explanation=explanation, other=other, after=after
@@ -251,20 +253,22 @@ async def plan_chunk(
 
 
 @_one_at_a_time
-async def move_to_other(files: list[FileRanges], restore: bool = False) -> dict[str, Any]:
-    """Implement the `move_to_other` tool."""
+async def walkthrough_move_to_other(
+    files: list[FileRanges], restore: bool = False
+) -> dict[str, Any]:
+    """Implement the `walkthrough_move_to_other` tool."""
     return await _plan(lambda ctx: ctx.workspace.move_to_other(files, restore=restore))
 
 
 @_one_at_a_time
-async def describe_other(summary: str) -> dict[str, Any]:
-    """Implement the `describe_other` tool."""
+async def walkthrough_describe_other(summary: str) -> dict[str, Any]:
+    """Implement the `walkthrough_describe_other` tool."""
     return await _plan(lambda ctx: ctx.workspace.describe_other(summary))
 
 
 @_one_at_a_time
-async def end_walkthrough(message: str = "", archive: bool = False) -> dict[str, Any]:
-    """Implement the `end_walkthrough` tool."""
+async def walkthrough_end(message: str = "", archive: bool = False) -> dict[str, Any]:
+    """Implement the `walkthrough_end` tool."""
     try:
         state = await _State.load()
     except GuideUnavailableError as exc:
@@ -315,14 +319,14 @@ def walkthrough_tools(mode: GuideMode) -> list[Callable[..., Awaitable[Any]]]:
         else [approve_pull_request]
     )
     return [
-        show_chunk,
-        show_lines,
-        order_chunks,
-        show_other,
-        skip_changes,
-        plan_chunk,
-        move_to_other,
-        describe_other,
-        end_walkthrough,
+        walkthrough_show_chunk,
+        walkthrough_show_lines,
+        walkthrough_order_chunks,
+        walkthrough_show_other,
+        walkthrough_skip_changes,
+        walkthrough_plan_chunk,
+        walkthrough_move_to_other,
+        walkthrough_describe_other,
+        walkthrough_end,
         *closing,
     ]

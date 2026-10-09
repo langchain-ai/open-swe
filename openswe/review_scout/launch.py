@@ -31,7 +31,7 @@ class _ScoutRun(BaseModel):
     metadata: dict[str, object] = {}
 
 
-_PLAN_CHUNK_TOOL = "plan_chunk"
+_PLAN_CHUNK_TOOL = "walkthrough_plan_chunk"
 
 
 _RECENT_ACTIONS = 5

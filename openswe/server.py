@@ -334,7 +334,14 @@ STOP_SUMMARY_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(
     {"delete", "edit_file", "execute", "task", "write_file"}
 )
 # Each posts to the reader and ends the walkthrough's turn as surely as a final reply.
-GUIDE_REPLY_TOOLS = frozenset({"show_chunk", "show_lines", "show_other", "end_walkthrough"})
+GUIDE_REPLY_TOOLS = frozenset(
+    {
+        "walkthrough_show_chunk",
+        "walkthrough_show_lines",
+        "walkthrough_show_other",
+        "walkthrough_end",
+    }
+)
 # A `/oswe` request has a channel but no Slack thread, so only the tools that act
 # on one are out of reach. Everything else, writes included, stays available.
 SLACK_ASK_EXCLUDED_TOOLS = DEEP_AGENT_EXCLUDED_TOOLS | frozenset(

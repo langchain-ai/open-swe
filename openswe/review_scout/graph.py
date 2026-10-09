@@ -56,7 +56,11 @@ from openswe.runtime import (
     graph_loaded_for_execution,
 )
 from openswe.sandboxes.repo_prep import prepare_review_repo
-from openswe.tools.plan_walkthrough import describe_other, move_to_other, plan_chunk
+from openswe.tools.plan_walkthrough import (
+    walkthrough_describe_other,
+    walkthrough_move_to_other,
+    walkthrough_plan_chunk,
+)
 from openswe.tools.record_human_input import record_human_input
 from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
@@ -281,7 +285,12 @@ async def get_review_scout(config: RunnableConfig) -> Pregel:
         model=model,
         system_prompt="",
         tools=apply_tool_descriptions(
-            [plan_chunk, move_to_other, describe_other, record_human_input]
+            [
+                walkthrough_plan_chunk,
+                walkthrough_move_to_other,
+                walkthrough_describe_other,
+                record_human_input,
+            ]
         ),
         backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
         middleware=cast(

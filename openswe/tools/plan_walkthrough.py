@@ -32,14 +32,14 @@ async def _planned(workspace: PlanWorkspace, **result: object) -> dict[str, Any]
     return {"success": True, **result, "plan": workspace.status().model_dump()}
 
 
-async def plan_chunk(
+async def walkthrough_plan_chunk(
     title: str,
     show: list[FileRanges],
     explanation: str,
     other: list[FileRanges] | None = None,
     after: int | None = None,
 ) -> dict[str, Any]:
-    """Implement the `plan_chunk` tool."""
+    """Implement the `walkthrough_plan_chunk` tool."""
     try:
         workspace = await _workspace()
         number = await workspace.plan_chunk(
@@ -50,8 +50,10 @@ async def plan_chunk(
     return await _planned(workspace, chunk=number)
 
 
-async def move_to_other(files: list[FileRanges], restore: bool = False) -> dict[str, Any]:
-    """Implement the `move_to_other` tool."""
+async def walkthrough_move_to_other(
+    files: list[FileRanges], restore: bool = False
+) -> dict[str, Any]:
+    """Implement the `walkthrough_move_to_other` tool."""
     try:
         workspace = await _workspace()
         await workspace.move_to_other(files, restore=restore)
@@ -60,8 +62,8 @@ async def move_to_other(files: list[FileRanges], restore: bool = False) -> dict[
     return await _planned(workspace)
 
 
-async def describe_other(summary: str) -> dict[str, Any]:
-    """Implement the `describe_other` tool."""
+async def walkthrough_describe_other(summary: str) -> dict[str, Any]:
+    """Implement the `walkthrough_describe_other` tool."""
     try:
         workspace = await _workspace()
         await workspace.describe_other(summary)

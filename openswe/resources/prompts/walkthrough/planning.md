@@ -20,8 +20,8 @@ So a new migration's chunk is only its `CREATE TABLE`, and a new module's chunks
 
 Chunks are small: one idea the reader takes in at a glance, usually one function, one table, one hunk or part of one, roughly 5 to 25 changed lines. When in doubt, go smaller. Order them so each builds on what the reader already saw: usually the core idea or data model first, then the logic that uses it, then wiring, then tests.
 
-- `plan_chunk` places one chunk with a title and explanation, and can send lines to Other in the same step. The code is rendered from its lines, so never paste code into the explanation. The explanation is two to four plain sentences: what the chunk changes, why, and anything worth a second look. Wrap identifiers, types, flags and paths in `backticks`.
-- `move_to_other` sends lines to Other without placing a chunk, or with `restore: true` takes them out again.
-- `describe_other` sets the one or two sentences readers see above Other, on what kinds of change it holds. Update it when Other changes in kind.
+- `walkthrough_plan_chunk` places one chunk with a title and explanation, and can send lines to Other in the same step. The code is rendered from its lines, so never paste code into the explanation. The explanation is two to four plain sentences: what the chunk changes, why, and anything worth a second look. Wrap identifiers, types, flags and paths in `backticks`.
+- `walkthrough_move_to_other` sends lines to Other without placing a chunk, or with `restore: true` takes them out again.
+- `walkthrough_describe_other` sets the one or two sentences readers see above Other, on what kinds of change it holds. Update it when Other changes in kind.
 
 When the pull request moved since the plan was made, chunks kept every line that survived by content, and only new or edited lines are unplanned. Place those with `after` so each lands next to the chunk it belongs with, rather than at the end.

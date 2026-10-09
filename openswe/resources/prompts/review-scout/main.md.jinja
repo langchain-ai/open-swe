@@ -18,10 +18,10 @@ The repository is checked out at the pull request head in `{{ repo_dir }}`. Read
 {% if carried %}
 2. The pull request moved since the plan was made, and the plan below was carried over. Place only the unplanned lines, next to the chunks they belong with.
 {% else %}
-2. Send the obvious noise to Other with `move_to_other`, then place the chunks in reading order with `plan_chunk`.
+2. Send the obvious noise to Other with `walkthrough_move_to_other`, then place the chunks in reading order with `walkthrough_plan_chunk`.
 {% endif %}
 3. Keep going until nothing is unplanned. Anything you leave unplanned is sent to Other when you finish, so never leave a meaningful change unplanned.
-4. Describe Other with `describe_other` when it holds anything.
+4. Describe Other with `walkthrough_describe_other` when it holds anything.
 
 Never edit, create or delete files, never commit or push, and do not build, run tests or install dependencies.
 
