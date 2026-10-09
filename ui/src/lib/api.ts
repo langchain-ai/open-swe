@@ -702,8 +702,6 @@ export interface ReposPayload {
   repositories: Array<Repository>
 }
 
-export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
-
 /** What a positive approval assessment does; `null` is the `dry_run` default. */
 export type ReviewApprovalMode = "off" | "dry_run" | "approve"
 
@@ -715,16 +713,8 @@ export interface ReviewStyle {
   full_name: string
   owner?: string
   name?: string
-  status: ReviewStyleStatus
   custom_prompt: string | null
   approval_mode?: ReviewApprovalMode | null
-  analysis_summary: string | null
-  top_reviewers: Array<string>
-  prs_sampled: number
-  reviews_sampled: number
-  analysis_thread_id: string | null
-  analysis_run_id: string | null
-  error: string | null
   created_by?: string
   created_at?: string
   updated_at?: string
@@ -1498,20 +1488,6 @@ export const api = {
   getApprovalsFile: (full_name: string) =>
     request<ApprovalsFileStatus>(
       `/review-styles/${encodeURIComponent(full_name)}/approvals-file`
-    ),
-  analyzeReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/analyze`,
-      {
-        method: "POST",
-      }
-    ),
-  cancelReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/cancel`,
-      {
-        method: "POST",
-      }
     ),
   deleteReviewStyle: (full_name: string) =>
     request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
