@@ -594,12 +594,7 @@ async def decline(request: HumanReviewRequest, user: User | None, reason: str) -
         return Outcome("Link your Open SWE account before declining a review.")
     if request.state != "open":
         return Outcome("This review request is no longer open.")
-    dropped = await drop_picks(
-        request,
-        {user.id},
-        f"You declined the review of {request.pull_request.url}: {reason}.",
-        expired=True,
-    )
+    dropped = await drop_picks(request, {user.id}, None, expired=True)
     if not dropped:
         return Outcome("This reviewer pick is no longer pending for you.")
     logger.info(

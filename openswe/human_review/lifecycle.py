@@ -862,11 +862,12 @@ async def _release_picks(
 async def _close_pick(
     request: HumanReviewRequest, participant: HumanReviewParticipant, text: str
 ) -> None:
-    """Say on their pick's DM why it ended, which does not notify; DM ``text`` when there is none."""
+    """Say on a pending pick's DM why it ended, which does not notify; otherwise DM ``text``."""
     slack_user_id = participant.user.slack_user_id
     if not slack_user_id:
         return
-    message = participant.pick_message
+    # Someone who accepted may be partway through the review, so they get a notification.
+    message = participant.pick_message if participant.decision != "review" else None
     if message is not None and await message.show(text):
         await note_for_concierge(
             slack_user_id,
@@ -889,11 +890,16 @@ async def _close_pick(
 
 
 async def drop_picks(
-    request: HumanReviewRequest, user_ids: set[UUID], message: str, *, expired: bool = False
+    request: HumanReviewRequest,
+    user_ids: set[UUID],
+    message: str | None,
+    *,
+    expired: bool = False,
 ) -> list[HumanReviewParticipant]:
     """Withdraw pending picks of ``user_ids`` from the card and GitHub, and tell each ``message``.
 
-    An ``expired`` pick stays on the request so it is never picked for it again.
+    An ``expired`` pick stays on the request so it is never picked for it again. Without a
+    ``message`` nobody is told, for a pick the person ended themselves.
     """
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None:
@@ -925,7 +931,8 @@ async def drop_picks(
                 "expired": expired,
             },
         )
-        await _close_pick(request, pick, message)
+        if message is not None:
+            await _close_pick(request, pick, message)
     current = await HumanReviewRequest.get(request.id)
     if current is not None and current.state == "open":
         await refresh_card(current)
