@@ -1,4 +1,4 @@
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { CaretDownIcon } from "@langchain/macaw-components/icons"
 
 /** Trailing caret on the composer's dropdown triggers (run target, repo, branch). */
 export function ComposerControlChevron() {

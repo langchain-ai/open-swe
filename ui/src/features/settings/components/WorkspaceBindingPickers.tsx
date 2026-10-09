@@ -1,6 +1,6 @@
+import { GlobeRegularIcon } from "@langchain/macaw-components/icons"
 import { useMemo } from "react"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
-import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
 
@@ -153,7 +153,7 @@ export function SlackChannelPicker({
         icon: channel.is_private ? (
           <LockSimpleIcon size={14} weight="regular" />
         ) : channel.is_ext_shared ? (
-          <GlobeIcon size={14} weight="regular" />
+          <GlobeRegularIcon size={14} />
         ) : (
           <HashIcon size={14} weight="regular" />
         ),

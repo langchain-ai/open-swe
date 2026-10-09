@@ -1,3 +1,7 @@
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery } from "@tanstack/react-query"
 import { Fragment, useState } from "react"
@@ -11,8 +15,6 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
 import { ClockCountdownIcon } from "@phosphor-icons/react/dist/ssr/ClockCountdown"
 import { SortAscendingIcon } from "@phosphor-icons/react/dist/ssr/SortAscending"

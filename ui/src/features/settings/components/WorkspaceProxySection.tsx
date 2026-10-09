@@ -1,3 +1,4 @@
+import { InfoRegularIcon } from "@langchain/macaw-components/icons"
 import { useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
@@ -5,7 +6,6 @@ import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
-import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
 
 import { SettingsSection } from "@/components/AppShell"
 import { api, type JsonValue, type WorkspaceRecord } from "@/lib/api"
@@ -27,7 +27,7 @@ function FieldHelp({
         className="ml-space-1 inline-flex align-middle text-icon-secondary hover:text-icon-primary"
         onClick={(event) => event.preventDefault()}
       >
-        <InfoIcon aria-hidden="true" size={14} weight="regular" />
+        <InfoRegularIcon aria-hidden="true" size={14} />
       </span>
     </Tooltip>
   )

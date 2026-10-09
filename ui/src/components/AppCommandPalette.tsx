@@ -1,3 +1,7 @@
+import {
+  LaptopRegularIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   Command,
@@ -17,8 +21,6 @@ import { Spinner } from "@langchain/macaw-components/Spinner"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { CommandIcon } from "@phosphor-icons/react/dist/ssr/Command"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
-import { LaptopIcon } from "@phosphor-icons/react/dist/ssr/Laptop"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 
@@ -284,10 +286,9 @@ export function AppCommandPalette({
             autoFocus
             className="h-12 shrink-0 rounded-none border-0 border-b border-default bg-transparent px-space-4 focus-within:border-default"
             leftDecorator={
-              <MagnifyingGlassIcon
+              <MagnifyingGlassRegularIcon
                 className="text-icon-secondary"
                 size={16}
-                weight="regular"
               />
             }
             onValueChange={setQuery}
@@ -322,7 +323,7 @@ export function AppCommandPalette({
                         result.kind === "command"
                           ? CommandIcon
                           : result.kind === "local-thread"
-                            ? LaptopIcon
+                            ? LaptopRegularIcon
                             : result.kind === "pull-request"
                               ? GitPullRequestIcon
                               : ChatCircleIcon

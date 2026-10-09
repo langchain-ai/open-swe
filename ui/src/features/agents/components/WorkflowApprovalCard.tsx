@@ -1,7 +1,7 @@
+import { WarningRegularIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
-import { WarningIcon } from "@phosphor-icons/react/dist/ssr/Warning"
 import { useMemo } from "react"
 
 import type { WorkflowPushApproval } from "@/features/agents/lib/types"
@@ -108,9 +108,8 @@ export function WorkflowApprovalCard({
             )}
 
             <div className="mt-3 flex gap-3 border-l-2 border-warning bg-warning p-3">
-              <WarningIcon
+              <WarningRegularIcon
                 size={16}
-                weight="regular"
                 className="mt-0.5 shrink-0 text-icon-warning"
               />
               <div>

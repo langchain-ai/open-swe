@@ -1,11 +1,13 @@
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
-import { ArrowDownIcon } from "@phosphor-icons/react/dist/ssr/ArrowDown"
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
@@ -303,7 +305,7 @@ export function OpenPullRequests({
             <Input
               size="sm"
               className="min-w-40 flex-1"
-              leftIcon={MagnifyingGlassIcon}
+              leftIcon={MagnifyingGlassRegularIcon}
               aria-label="Search pull requests"
               placeholder="Search title, description, or PR number…"
               value={search}

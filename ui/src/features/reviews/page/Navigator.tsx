@@ -1,13 +1,15 @@
+import {
+  CaretDownIcon,
+  CheckIcon,
+  MagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { Input } from "@langchain/macaw-components/Input"
 import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/ssr/FolderSimple"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -252,7 +254,7 @@ function FileFilter() {
   return (
     <Input
       size="sm"
-      leftIcon={MagnifyingGlassIcon}
+      leftIcon={MagnifyingGlassRegularIcon}
       aria-label="Filter files"
       placeholder="Filter files"
       debounceMs={0}

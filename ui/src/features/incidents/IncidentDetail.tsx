@@ -1,3 +1,9 @@
+import {
+  ArrowLeftIcon,
+  ArrowUpIcon,
+  CheckIcon,
+  FileMagnifyingGlassRegularIcon,
+} from "@langchain/macaw-components/icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
@@ -17,13 +23,9 @@ import {
 import { Text } from "@langchain/macaw-components/Text"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
-import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowUp"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { ChecksIcon } from "@phosphor-icons/react/dist/ssr/Checks"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
-import { FileMagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/FileMagnifyingGlass"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import { PauseIcon } from "@phosphor-icons/react/dist/ssr/Pause"
 import { PlayIcon } from "@phosphor-icons/react/dist/ssr/Play"
@@ -331,7 +333,7 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
                   ) : (
                     <EmptyState
                       size="sm"
-                      icon={FileMagnifyingGlassIcon}
+                      icon={FileMagnifyingGlassRegularIcon}
                       title="No findings yet"
                       description="Findings appear here after the first pass."
                     />

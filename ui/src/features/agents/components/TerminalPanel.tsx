@@ -1,14 +1,13 @@
+import { PlusIcon, XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
-import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 import { SquareSplitHorizontalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitHorizontal"
 import { SquareSplitVerticalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitVertical"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useEffect, useRef, useState } from "react"
 
 import type { TerminalGroupsController } from "@/features/agents/lib/terminalGroups"
@@ -17,6 +16,10 @@ import type { TerminalSplitDirection } from "@/features/agents/lib/terminalState
 import { MAX_TERMINALS_PER_GROUP } from "@/features/agents/lib/terminalState"
 import { cn } from "@/lib/utils"
 import { useAttachedTerminal } from "@/features/agents/lib/terminalSession"
+import type {
+  GhosttyColor,
+  GhosttyTheme,
+} from "@/features/agents/terminal/ghostty/core"
 import { GhosttyTerminalSurface } from "@/features/agents/terminal/ghostty/surface"
 
 interface TerminalPanelProps {
@@ -42,21 +45,38 @@ interface TerminalViewportProps {
   restartRequest: number
 }
 
-function terminalTheme() {
-  const dark = document.documentElement.classList.contains("dark")
-  return dark
-    ? {
-        background: { r: 10, g: 10, b: 10 },
-        foreground: { r: 245, g: 245, b: 245 },
-        cursor: { r: 180, g: 203, b: 255 },
-        selectionBackground: "rgba(180, 203, 255, 0.25)",
-      }
-    : {
-        background: { r: 253, g: 253, b: 253 },
-        foreground: { r: 39, g: 39, b: 42 },
-        cursor: { r: 38, g: 56, b: 78 },
-        selectionBackground: "rgba(37, 63, 99, 0.2)",
-      }
+const ANSI_TOKENS = [
+  "syntax-comment",
+  "text-error-secondary",
+  "syntax-string",
+  "syntax-constant",
+  "syntax-keyword",
+  "syntax-function",
+  "syntax-type",
+  "syntax-plain",
+]
+
+function terminalTheme(): GhosttyTheme {
+  const styles = getComputedStyle(document.documentElement)
+  const context = document.createElement("canvas").getContext("2d")
+  const token = (name: string): GhosttyColor => {
+    if (context) context.fillStyle = styles.getPropertyValue(`--${name}`)
+    const hex = Number.parseInt(String(context?.fillStyle).slice(1), 16) || 0
+    return { r: hex >> 16, g: (hex >> 8) & 255, b: hex & 255 }
+  }
+  const ansi = ANSI_TOKENS.map(token)
+  return {
+    background: token("bg-surface-level-1"),
+    foreground: token("text-primary"),
+    cursor: token("icon-brand"),
+    selectionBackground: styles.getPropertyValue("--bg-brand-subtle"),
+    ansi: [
+      ...ansi,
+      token("syntax-operator"),
+      ...ansi.slice(1, 7),
+      token("text-primary"),
+    ],
+  }
 }
 
 function TerminalViewport({

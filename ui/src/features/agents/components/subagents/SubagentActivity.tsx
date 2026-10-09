@@ -1,6 +1,5 @@
+import { CheckIcon, XIcon } from "@langchain/macaw-components/icons"
 import { useToolCalls } from "@langchain/react"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"

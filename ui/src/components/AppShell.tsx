@@ -1,7 +1,9 @@
+import {
+  ArrowLeftIcon,
+  CaretRightIcon,
+} from "@langchain/macaw-components/icons"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
-import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { Link, Navigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 

@@ -1,5 +1,5 @@
+import { CheckIcon } from "@langchain/macaw-components/icons"
 import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
-import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 

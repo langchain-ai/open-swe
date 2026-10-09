@@ -1,10 +1,10 @@
+import { ClockCounterClockwiseRegularIcon } from "@langchain/macaw-components/icons"
 import { Link } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ClockCounterClockwise"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
 import type { AgentStatus, AgentThread } from "@/features/agents/lib/types"
@@ -68,7 +68,7 @@ export function AutomationRuns({
   if (runs.length === 0) {
     return (
       <EmptyState
-        icon={ClockCounterClockwiseIcon}
+        icon={ClockCounterClockwiseRegularIcon}
         title="No automation runs yet."
         className="rounded-xl border border-dashed border-default"
       />
