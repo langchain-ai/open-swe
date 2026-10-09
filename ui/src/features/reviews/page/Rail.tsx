@@ -29,6 +29,7 @@ import {
   type PullRequestRef,
 } from "./queries"
 import { useReviewPage, type RailTab } from "./store"
+import { ASK_SELECTION_SHORTCUT } from "./useDiffKeys"
 
 const TABS: ReadonlyArray<RailTab> = ["chat", "discussion"]
 
@@ -115,7 +116,7 @@ function ChatStarters({ pr }: { pr: PullRequestRef }) {
   const status = useReviewStatus(pr).data
   const open = useOpenConversations(pr)?.threads.length ?? 0
   const askInChat = useReviewPage((state) => state.askInChat)
-  const askShortcut = useShortcutLabel("mod+l")
+  const askShortcut = useShortcutLabel(ASK_SELECTION_SHORTCUT)
   const bugs = detail ? openFindingCounts(detail.findings).bugs : 0
   const starters = [
     "Walk me through this pull request: what changed, and why?",

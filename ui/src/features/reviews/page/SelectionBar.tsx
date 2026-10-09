@@ -6,6 +6,7 @@ import { useEffect, useReducer } from "react"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { readDiffSelection } from "@/features/agents/utils/diffSelection"
 import { AgentMark } from "./AgentMark"
+import { ASK_SELECTION_SHORTCUT } from "./useDiffKeys"
 
 export interface TextSelection {
   path: string
@@ -56,7 +57,7 @@ export function SelectionBar({
   onAsk: () => void
   onComment: () => void
 }) {
-  const askShortcut = useShortcutLabel("mod+l")
+  const askShortcut = useShortcutLabel(ASK_SELECTION_SHORTCUT)
   // Placement reads the live layout, so a scroll or resize only needs a re-render.
   const [, follow] = useReducer((frame: number) => frame + 1, 0)
   useEffect(() => {
