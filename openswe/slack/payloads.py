@@ -297,7 +297,8 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
-    pr_url: str = ""
+    kind: str = ""
+    subject: str = ""
 
 
 class SlackViewSubmission(SlackPayload):

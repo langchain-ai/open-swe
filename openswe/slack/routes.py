@@ -18,6 +18,7 @@ from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
+from openswe.slack import suggested_actions
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -998,8 +999,8 @@ async def slack_interactivity(
             return await expedited_review.handle_button(interaction, button, background_tasks)
         if button.type == human_review.BUTTON_TYPE:
             return await human_review.handle_button(interaction, button, background_tasks)
-        if button.type == review_offer.BUTTON_TYPE:
-            return await review_offer.handle_button(interaction, button, background_tasks)
+        if button.type == suggested_actions.BUTTON_TYPE:
+            return await suggested_actions.handle_button(interaction, button, background_tasks)
 
         if button.type == act_as.BUTTON_TYPE:
             return await act_as.handle_button(interaction, button, background_tasks)

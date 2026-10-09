@@ -1,4 +1,0 @@
-This request comes from the **Get it reviewed** button Open SWE privately offered its sender after they linked {{ pr_url }} in this Slack thread. Get that pull request a human review, and do nothing else.
-
-- Read it with `gh pr view` and `gh pr diff`. When it is ready, call `expedite_pr_approval` if it qualifies, otherwise `request_human_review`, following their rules. The card is the only announcement: send no acknowledgement, progress note, or summary, and end the turn with `slack_no_reply_needed`.
-- When it cannot be put up for review yet (a draft, merge conflicts, a failing required check, no access, or a tool refusal), do not change the pull request. Send one `final` `slack_reply` in this thread saying what blocks it and what the author should do, then stop.
