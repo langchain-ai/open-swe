@@ -15,9 +15,13 @@ const harness = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 test.beforeAll(async () => {
   await exec(
     "pnpm",
-    ["install", "--frozen-lockfile", "--filter", "open-swe-cli"],
+    ["install", "--frozen-lockfile", "--filter", "open-swe-cli..."],
     { cwd: root, timeout: 60_000 },
   );
+  await exec("pnpm", ["--filter", "open-swe-bridge-client", "build"], {
+    cwd: root,
+    timeout: 60_000,
+  });
 });
 
 for (const start of [undefined, false]) {
