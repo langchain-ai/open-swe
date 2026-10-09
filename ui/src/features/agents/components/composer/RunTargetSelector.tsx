@@ -102,13 +102,23 @@ export function RunTargetSelector({
   onChange,
 }: {
   value: RunTarget
-  onChange: (value: RunTarget) => void
+  /** Omitted while the target can't change. */
+  onChange?: (value: RunTarget) => void
 }) {
+  const current = (
+    <>
+      <TriggerIcon icon={value === "local" ? LaptopIcon : CloudIcon} />
+      <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+    </>
+  )
+  if (!onChange)
+    return (
+      <span className="flex items-center gap-1 text-secondary">{current}</span>
+    )
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className={TRIGGER_CLASS_NAME}>
-        <TriggerIcon icon={value === "local" ? LaptopIcon : CloudIcon} />
-        <span>{value === "local" ? "This Mac" : "Cloud"}</span>
+        {current}
         <ComposerControlChevron />
       </DropdownMenuTrigger>
       <DropdownMenuContent

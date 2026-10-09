@@ -701,12 +701,9 @@ export const ChatComposer = memo(function ChatComposer({
     [addFiles]
   )
 
-  const targetControls = (onRepoChange ||
-    onRunTargetChange ||
-    onWorkspaceChange ||
-    (runTarget === "local" && onSelectLocalRepoBranch)) && (
+  const targetControls = (onRepoChange || runTarget || onWorkspaceChange) && (
     <>
-      {runTarget && onRunTargetChange && (
+      {runTarget && (
         <RunTargetSelector onChange={onRunTargetChange} value={runTarget} />
       )}
       {runTarget !== "local" && onWorkspaceChange && (
