@@ -98,7 +98,9 @@ test.describe("my pull requests", () => {
     await expect(card(page, theirs)).toHaveCount(0);
     await search.blur();
     await page.keyboard.press("Control+k");
-    await page.getByRole("combobox").fill("aardvark");
+    await page
+      .getByPlaceholder("Search commands, threads, and pull requests…")
+      .fill("aardvark");
     const result = page.getByRole("option", {
       name: /Improve deployment reliability/,
     });
