@@ -22,7 +22,7 @@ from openswe.github.repo_files import RepoSettings
 from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
-from openswe.human_review.standard import Origin, RequestResult, request_review
+from openswe.human_review.standard import Origin, RequestResult, request_review, review_blockers
 from openswe.slack.client import GitHubPrRef
 from openswe.users import User
 
@@ -144,6 +144,7 @@ def _pr_ref(owner: str, repo: str, number: int) -> GitHubPrRef:
 
 class HumanReviewAvailability(BaseModel):
     available: bool
+    blockers: list[str] = []
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/human-review")
@@ -159,7 +160,13 @@ async def api_human_review_availability(
             raise HTTPException(404, "Pull request is unavailable")
         settings = await RepoSettings.fetch(pull.repo, ref=sha)
         channel = await settings.channel_for_pr(pull)
-    return HumanReviewAvailability(available=bool(channel))
+        if await HumanReviewRequest.active_for(owner, repo, number) is not None:
+            blockers: list[str] | None = []
+        else:
+            blockers = await review_blockers(pull)
+    if blockers is None:
+        raise HTTPException(503, "GitHub was unavailable while checking the pull request")
+    return HumanReviewAvailability(available=bool(channel), blockers=blockers)
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/human-review")

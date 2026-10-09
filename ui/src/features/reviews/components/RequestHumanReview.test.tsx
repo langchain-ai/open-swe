@@ -7,6 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { afterEach, expect, it, vi } from "vitest"
 import { api, type OpenPullRequest } from "@/lib/api"
 import { RequestHumanReview } from "./RequestHumanReview"
@@ -53,6 +54,7 @@ const pr: OpenPullRequest = {
 it("requires a chosen channel when the repository has no review destination", async () => {
   vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
     available: false,
+    blockers: [],
   })
   const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
     success: true,
@@ -75,20 +77,27 @@ it("requires a chosen channel when the repository has no review destination", as
   await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
 })
 
-it.each([
-  { mergeable: false },
-  { mergeState: "dirty" },
-  { ci: "failing" as const },
-  { draft: true },
-  { state: "closed" as const },
-])("hides the button when the request would be refused: %o", (change) => {
+it("disables the button and explains why when the request would be refused", async () => {
   vi.spyOn(api, "humanReviewAvailability").mockResolvedValue({
     available: true,
+    blockers: ["it has merge conflicts"],
   })
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <RequestHumanReview pr={{ ...pr, ...change }} />
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
     </QueryClientProvider>
   )
-  expect(screen.queryByRole("button")).toBeNull()
+  const info = await screen.findByRole("button", {
+    name: "Why a review can't be requested",
+  })
+  const button = screen.getByRole("button", { name: "Request review in Slack" })
+  expect(button.hasAttribute("disabled")).toBe(true)
+  fireEvent.click(info)
+  expect(
+    await screen.findByText(
+      "A review can't be requested yet: it has merge conflicts."
+    )
+  ).toBeTruthy()
 })
