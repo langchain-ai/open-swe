@@ -1,4 +1,4 @@
-Show the reader one chunk you picked just now, with a "Looks good" button, and optionally send other lines to Other in the same step.
+Show the reader one chunk you picked just now, with a "Next" button, and optionally send other lines to Other in the same step.
 
 - `title`: roughly 4-10 words naming the chunk, identifiers in `backticks`.
 - `show`: the chunk's lines, per `path`: `added` as inclusive `[start, end]` ranges of head line numbers and `deleted` as ranges of merge-base line numbers, as the pull request's `git diff` hunk headers number them. A range may span lines that are unchanged or already dealt with; only the lines still left in it are shown, and every range must hold at least one.

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from openswe.api_keys.deps import ADMIN_KEY_DEP
 from openswe.api_keys.models import MAX_EXPIRY_DAYS, NAME_MAX_CHARS, ApiKey, ApiKeyStatus
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import session_user_id
 from openswe.users.models import User
 from openswe.workspaces.store import WORKSPACES
@@ -84,6 +85,7 @@ async def key_view(key: ApiKey) -> ApiKeyView:
 
 
 @router.post("", status_code=201)
+@audit_endpoint
 async def api_create_api_key(
     body: ApiKeyCreate,
     admin: dict[str, Any] = ADMIN_KEY_DEP,
@@ -120,6 +122,7 @@ async def api_list_api_keys(
 
 
 @router.delete("/{key_id}", status_code=204)
+@audit_endpoint
 async def api_revoke_api_key(
     key_id: str,
     admin: dict[str, Any] = ADMIN_KEY_DEP,

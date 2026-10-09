@@ -14,7 +14,7 @@ from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
 from openswe.review_guide.advance import advance
-from openswe.review_guide.buttons import LOOKS_GOOD
+from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.slack import webhook as service
@@ -65,6 +65,7 @@ from openswe.slack.thread_feedback import (
 )
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
+from openswe.utils.message_commands import PERFORMANCE_COMMAND, find_message_command
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -555,11 +556,17 @@ async def slack_webhook(
     explicit_mention = bool(
         event.type == "app_mention" or (bot_user_id and f"<@{bot_user_id}>" in text)
     )
+    performance_requested = bool(
+        not is_message_update
+        and allowed_bot is None
+        and find_message_command(PERFORMANCE_COMMAND, text)
+    )
     leading_mention = re.match(r"\s*<@([^>]+)>", text)
     if (
         not in_code_channel
         and not in_dm_channel
         and allowed_bot is None
+        and not performance_requested
         and leading_mention
         and leading_mention.group(1) != bot_user_id
     ):
@@ -591,6 +598,7 @@ async def slack_webhook(
         )
     if not (
         explicit_mention
+        or performance_requested
         or is_message_update
         or in_code_channel
         or (
@@ -1069,11 +1077,11 @@ async def slack_interactivity(
         )
         if not thread_id:
             return ignored("Slack thread is not associated")
-        # A review guide's "Looks good" is recorded by the server, never by the model, and
+        # A review guide's "Next" is recorded by the server, never by the model, and
         # only for the person being walked through: approval marks their lines as reviewed.
         guide = (
             await ReviewGuideSession.for_channel(channel_id)
-            if in_code_channel and response == LOOKS_GOOD
+            if in_code_channel and response in NEXT_LABELS
             else None
         )
         if guide is not None:

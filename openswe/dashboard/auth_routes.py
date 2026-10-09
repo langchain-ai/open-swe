@@ -119,7 +119,6 @@ async def auth_dev_login(redirect_to: str | None = None) -> Response:
         raise HTTPException(503, f"gh CLI unavailable: {exc}") from exc
 
     await enforce_github_login_gate(credentials.login)
-    await upsert_access_token(credentials.login, credentials.email, credentials.token)
     signed_in = await User.sign_in(
         "github",
         credentials.external_id,
@@ -128,6 +127,7 @@ async def auth_dev_login(redirect_to: str | None = None) -> Response:
         display_name=credentials.display_name,
         avatar_url=credentials.avatar_url,
     )
+    await upsert_access_token(credentials.login, credentials.email, credentials.token)
     session_jwt = issue_session(
         login=credentials.login,
         email=credentials.email or None,
@@ -170,8 +170,8 @@ async def auth_callback(request: Request, code: str, state: str) -> Response:
 
     await enforce_github_login_gate(login)
 
-    await upsert_access_token_from_github_response(login, email or "", token_data)
     user_id = await _signed_in_user_id(user, email)
+    await upsert_access_token_from_github_response(login, email or "", token_data)
 
     if handoff is not None:
         # Desktop login runs in the user's own browser, so the session belongs to

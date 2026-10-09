@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
+import { Switch } from "@langchain/macaw-components/Switch"
 
 import { SettingsRow } from "@/components/AppShell"
-import { Switch } from "@/components/ui/switch"
 import type { ProfileUpdate } from "@/lib/api"
 import { useOptions, usePatchProfile, useProfile } from "@/lib/profile"
 
@@ -53,9 +53,10 @@ export function ProfileSwitchRow({
       control={
         <Switch
           id={field}
+          aria-label={label}
           checked={profile?.[field] ?? fallback}
           disabled={!ready}
-          onCheckedChange={(value) => save({ [field]: value })}
+          onChange={(value) => save({ [field]: value })}
         />
       }
     />

@@ -3,20 +3,9 @@
 from dataclasses import dataclass
 
 from openswe.expedited_review.reviews import settings_hint
-from openswe.github.app import (
-    get_github_app_installation_id_for_repo,
-    get_github_app_installation_token,
-)
-from openswe.github.ci import has_repo_write_permission
+from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.users import User
-
-
-async def repo_token(owner: str, repo: str) -> str | None:
-    installation_id = await get_github_app_installation_id_for_repo(owner, repo)
-    if installation_id is None:
-        return None
-    return await get_github_app_installation_token(installation_id=installation_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,11 +44,11 @@ async def resolve_writer(request: HumanReviewRequest, user: User | None) -> Part
         return linked
     login = linked.github_login
     pr = request.pull_request
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
+    try:
+        async with GitHubClient.as_app(pr.owner, pr.repo) as github:
+            can_write = await github.repo(pr.owner, pr.repo).can_write(login)
+    except GitHubAppUnavailable:
         return Outcome("Open SWE cannot reach this repository's GitHub App installation.")
-    if not await has_repo_write_permission(
-        owner=pr.owner, repo=pr.repo, username=login, token=token
-    ):
+    if not can_write:
         return Outcome(f"@{login} does not have write access to {pr.owner}/{pr.repo}.")
     return linked

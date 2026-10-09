@@ -126,7 +126,7 @@ def _statuses(session: _Session) -> list[tuple[str, str]]:
     return [(g.title, g.status) for g in session.walk.groups]
 
 
-async def test_looks_good_approves_and_shows_the_next_prepared_chunk_without_a_turn(
+async def test_next_approves_and_shows_the_next_prepared_chunk_without_a_turn(
     session: _Session,
 ) -> None:
     await advance_module.advance("C1", "1.0")
@@ -140,7 +140,7 @@ async def test_looks_good_approves_and_shows_the_next_prepared_chunk_without_a_t
     advance_module.dispatch_guide_run.assert_not_awaited()
 
 
-async def test_looks_good_with_nothing_prepared_approves_then_hands_the_guide_a_turn(
+async def test_next_with_nothing_prepared_approves_then_hands_the_guide_a_turn(
     session: _Session,
 ) -> None:
     session.walk.keep_queue([])
@@ -154,7 +154,7 @@ async def test_looks_good_with_nothing_prepared_approves_then_hands_the_guide_a_
     assert dispatch.await_args.kwargs["approve_ts"] == ""
 
 
-async def test_looks_good_during_a_turn_is_recorded_when_its_own_turn_starts(
+async def test_next_during_a_turn_is_recorded_when_its_own_turn_starts(
     session: _Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     running = advance_module._Run(run_id="r1")

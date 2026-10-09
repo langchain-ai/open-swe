@@ -1,14 +1,16 @@
-import { useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-
-import { api } from "@/lib/api"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Button } from "@langchain/macaw-components/Button"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import { Input } from "@langchain/macaw-components/Input"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover"
+} from "@langchain/macaw-components/Popover"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
+
+import { api } from "@/lib/api"
 
 export function PullRequestLabels({
   owner,
@@ -55,7 +57,7 @@ export function PullRequestLabels({
       {labels.data?.selected.map((label) => (
         <span
           key={label.name}
-          className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs"
+          className="inline-flex items-center gap-1 rounded-full border border-default px-2 py-0.5 text-xs"
           title={label.description ?? undefined}
         >
           <span
@@ -66,25 +68,25 @@ export function PullRequestLabels({
         </span>
       ))}
       <Popover>
-        <PopoverTrigger
-          render={
-            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" />
-          }
-        >
-          Labels
+        <PopoverTrigger asChild>
+          <Button size="xs" color="secondary" variant="plain">
+            Labels
+          </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-72 p-2">
+        <PopoverContent align="start" className="w-72 p-space-2">
           <Input
+            size="sm"
+            leftIcon={MagnifyingGlassIcon}
             aria-label="Search labels"
             placeholder="Search labels…"
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={setSearch}
           />
           {labels.isPending && (
-            <p className="p-2 text-xs text-muted-foreground">Loading labels…</p>
+            <p className="p-2 text-xs text-secondary">Loading labels…</p>
           )}
           {labels.error && (
-            <p role="alert" className="p-2 text-xs text-destructive">
+            <p role="alert" className="p-2 text-xs text-error-secondary">
               {labels.error.message}
             </p>
           )}
@@ -98,29 +100,29 @@ export function PullRequestLabels({
                   (item) => item.name === label.name
                 )
                 return (
-                  <label
+                  <Checkbox
                     key={label.name}
-                    className="flex cursor-pointer items-center gap-2 rounded p-2 text-xs hover:bg-muted"
+                    containerClassName="rounded-sm p-space-2 hover:bg-elevated-hover"
                     title={label.description ?? undefined}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      disabled={change.isPending}
-                      onChange={() =>
-                        change.mutate({ name: label.name, selected: !selected })
-                      }
-                    />
-                    <span
-                      className="size-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: `#${label.color}` }}
-                    />
-                    {label.name}
-                  </label>
+                    checked={selected}
+                    disabled={change.isPending}
+                    onCheckedChange={() =>
+                      change.mutate({ name: label.name, selected: !selected })
+                    }
+                    label={
+                      <span className="flex items-center gap-space-2 text-xs">
+                        <span
+                          className="size-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: `#${label.color}` }}
+                        />
+                        {label.name}
+                      </span>
+                    }
+                  />
                 )
               })}
             {labels.data?.available.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">
+              <p className="p-2 text-xs text-secondary">
                 No repository labels.
               </p>
             )}

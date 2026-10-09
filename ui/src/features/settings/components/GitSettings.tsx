@@ -1,14 +1,9 @@
+import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { Input } from "@langchain/macaw-components/Input"
+import { Select } from "@langchain/macaw-components/Select"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
@@ -41,28 +36,50 @@ function TextSettingRow({
   description: string
   placeholder: string
 }) {
-  const { profile, ready, save } = useProfileSettings()
+  const { profile, ready } = useProfileSettings()
   return (
     <SettingsRow
       label={label}
       description={description}
       htmlFor={field}
       control={
-        <Input
+        <TextSettingInput
           // Remount once the profile loads so the field shows the saved value.
           key={`${ready}`}
-          id={field}
-          className="w-56"
+          field={field}
+          saved={profile?.[field] ?? null}
           placeholder={placeholder}
-          defaultValue={profile?.[field] ?? ""}
-          disabled={!ready}
-          onBlur={(event) => {
-            const value = event.target.value.trim() || null
-            if (value !== (profile?.[field] ?? null))
-              save({ [field]: value } satisfies Partial<ProfileUpdate>)
-          }}
         />
       }
+    />
+  )
+}
+
+function TextSettingInput({
+  field,
+  saved,
+  placeholder,
+}: {
+  field: TextField
+  saved: string | null
+  placeholder: string
+}) {
+  const { ready, save } = useProfileSettings()
+  const [draft, setDraft] = useState(saved ?? "")
+  return (
+    <Input
+      id={field}
+      size="md"
+      className="w-56"
+      placeholder={placeholder}
+      value={draft}
+      onChange={setDraft}
+      disabled={!ready}
+      onBlur={() => {
+        const value = draft.trim() || null
+        if (value !== saved)
+          save({ [field]: value } satisfies Partial<ProfileUpdate>)
+      }}
     />
   )
 }
@@ -115,7 +132,7 @@ export function GitSettings() {
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
                 disabled={!ready}
-                triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-1.5 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
                 dropdownClassName="w-56"
               />
             </div>
@@ -154,24 +171,13 @@ export function GitSettings() {
           description="Whether Open SWE Review runs on draft pull requests you open."
           control={
             <Select
-              items={draftReviewItems}
+              aria-label="Review my drafts"
+              options={draftReviewItems}
               value={toChoice(profile?.review_draft_prs)}
-              onValueChange={(v) =>
-                save({ review_draft_prs: CHOICES[v as DraftReviewChoice] })
-              }
+              onChange={(v) => v && save({ review_draft_prs: CHOICES[v] })}
               disabled={!ready}
-            >
-              <SelectTrigger className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {draftReviewItems.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              triggerClassName="w-48"
+            />
           }
         />
       </SettingsSection>

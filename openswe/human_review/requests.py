@@ -28,6 +28,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.expedited_review.eligibility import ExcludedHunk
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.slack.client import lookup_slack_thread_id
@@ -94,6 +95,8 @@ class HumanReviewRequest(Base):
         ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
     diff_fingerprint: Mapped[str] = mapped_column(server_default="", default="")
+    # Hunks the agent left off an expedited card as qualifying under the target repo's APPROVALS.md.
+    excluded_hunks: Mapped[list[ExcludedHunk]] = mapped_column(JSONB, default_factory=list)
     tldr: Mapped[str] = mapped_column(server_default="", default="")
     state: Mapped[RequestState] = mapped_column(Text, default="open")
     detail: Mapped[str] = mapped_column(server_default="", default="")

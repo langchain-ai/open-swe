@@ -14,11 +14,15 @@ from fastapi import HTTPException
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.expedited_review.channels import sendable_channel, still_internal
-from openswe.expedited_review.eligibility import fetch_changed_files, fingerprint_matches
+from openswe.expedited_review.eligibility import ChangedFile, fingerprint_matches
 from openswe.expedited_review.reviews import github_token_hint, submit_approval
-from openswe.github.ci import fetch_pr
+from openswe.github.http import (
+    GitHubAppUnavailable,
+    GitHubClient,
+    GitHubSignInRequired,
+    or_none,
+)
 from openswe.github.pull_request_actions import MarkReadyAction, act_on_pull_request
-from openswe.github.pull_requests import PullRequestPayload
 from openswe.human_review.clicks import answer_click
 from openswe.human_review.lifecycle import (
     broadcast_card,
@@ -32,7 +36,6 @@ from openswe.human_review.people import (
     Outcome,
     Participant,
     linked_participant,
-    repo_token,
     resolve_writer,
 )
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
@@ -116,15 +119,14 @@ async def _submit_review(approval: HumanReviewRequest, voter_user_id: UUID) -> s
     """
     pr = approval.pull_request
     unavailable = "GitHub was unavailable, so Open SWE will submit your review when it merges."
-    token = await repo_token(pr.owner, pr.repo)
-    if token is None:
+    try:
+        async with GitHubClient.as_app(pr.owner, pr.repo) as github:
+            pull = github.repo(pr.owner, pr.repo).pull_request(pr.number)
+            head_sha = await or_none(pull.head_sha())
+            files = await ChangedFile.of_pull(pull)
+    except GitHubAppUnavailable:
         return unavailable
-    payload = await fetch_pr(owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token)
-    files = await fetch_changed_files(
-        owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token
-    )
-    head_sha = PullRequestPayload.model_validate(payload).head_sha if payload else ""
-    if not head_sha or files is None:
+    if head_sha is None or files is None:
         return unavailable
     if not fingerprint_matches(files, approval.diff_fingerprint):
         return "A later commit changed the diff on this card, so no review was submitted."
@@ -146,23 +148,22 @@ async def _mark_ready(approval: HumanReviewRequest, *, voter: Participant) -> Ou
     """Undraft the PR as its author, then open the card for approval."""
     if not approval.awaiting_ready:
         return Outcome("This pull request is already ready for review.", dm_card_success=True)
-    token = await get_valid_access_token(voter.github_login)
-    if not token:
+    pr = approval.pull_request
+    try:
+        async with GitHubClient.as_user(voter.github_login) as github:
+            pull = github.repo(pr.owner, pr.repo).pull_request(pr.number)
+            payload = await or_none(pull.pull())
+            if payload is None:
+                return Outcome("Could not read the pull request; try confirming again.")
+            if payload.get("draft"):
+                await act_on_pull_request(pull, MarkReadyAction(action="mark-ready"))
+    except GitHubSignInRequired:
         return Outcome(
             f"Open SWE has no GitHub token for @{voter.github_login}, so it cannot mark the "
             f"pull request ready. {github_token_hint()}"
         )
-    pr = approval.pull_request
-    payload = await fetch_pr(owner=pr.owner, repo=pr.repo, pr_number=pr.number, token=token)
-    if payload is None:
-        return Outcome("Could not read the pull request; try confirming again.")
-    if PullRequestPayload.model_validate(payload).draft:
-        try:
-            await act_on_pull_request(
-                pr.owner, pr.repo, pr.number, MarkReadyAction(action="mark-ready"), token
-            )
-        except HTTPException as exc:
-            return Outcome(f"GitHub did not mark the pull request ready: {exc.detail}")
+    except HTTPException as exc:
+        return Outcome(f"GitHub did not mark the pull request ready: {exc.detail}")
     async with HumanReviewRequest.locked(approval.id) as (_, row):
         if row is None or row.state != "open":
             return Outcome("This expedited review closed before it was marked ready.")

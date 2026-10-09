@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import Response
 
+from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.schedules.store import (
     ScheduleCreateBody,
@@ -27,6 +28,7 @@ async def api_list_schedules(
 
 
 @router.post("/schedules")
+@audit_endpoint
 async def api_create_schedule(
     body: ScheduleCreateBody,
     admin: dict[str, Any] = ADMIN_DEP,
@@ -37,6 +39,7 @@ async def api_create_schedule(
 
 
 @router.patch("/schedules/{schedule_id}")
+@audit_endpoint
 async def api_update_schedule(
     schedule_id: str,
     body: ScheduleUpdateBody,
@@ -52,6 +55,7 @@ async def api_update_schedule(
 
 
 @router.post("/schedules/{schedule_id}/trigger")
+@audit_endpoint
 async def api_trigger_schedule(
     schedule_id: str,
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -60,6 +64,7 @@ async def api_trigger_schedule(
 
 
 @router.delete("/schedules/{schedule_id}")
+@audit_endpoint
 async def api_delete_schedule(
     schedule_id: str,
     _admin: dict[str, Any] = ADMIN_DEP,

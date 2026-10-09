@@ -1,14 +1,14 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react"
+import { Input } from "@langchain/macaw-components/Input"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ListBulletsIcon } from "@phosphor-icons/react/dist/ssr/ListBullets"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
+import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import {
   FileTree,
   useFileTree,
   useFileTreeSelection,
 } from "@pierre/trees/react"
-import {
-  ListBulletsIcon,
-  MagnifyingGlassIcon,
-  TreeViewIcon,
-} from "@phosphor-icons/react"
+import { memo, useCallback, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 
 import type {
@@ -17,12 +17,6 @@ import type {
   GitStatusEntry,
 } from "@pierre/trees"
 import type { ReviewDiffFile } from "@/lib/api"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   TREE_UNSAFE_CSS,
   treeThemeStyle,
@@ -75,8 +69,8 @@ function OverviewRow({
       className={cn(
         "flex w-full items-start gap-2 border-l-2 px-3 py-1.5 text-left text-xs leading-5 transition-colors",
         active
-          ? "border-primary bg-sidebar-row-hover font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:bg-sidebar-row-hover"
+          ? "border-brand bg-selected font-medium text-primary"
+          : "border-transparent text-secondary hover:bg-surface-level-2-hover"
       )}
     >
       Overview
@@ -91,7 +85,7 @@ export function ReviewSidebarPanel({ data }: { data: ReviewSidebarData }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col pb-2">
       <div className="px-4 py-1">
-        <span className="text-[10px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+        <span className="text-[10px] font-medium tracking-wide text-tertiary uppercase">
           {data.title}
         </span>
       </div>
@@ -143,7 +137,7 @@ function ReviewViewTabs({
     <div
       role="tablist"
       aria-label="Sidebar view"
-      className="mx-3 mb-1 flex border-b border-border"
+      className="mx-3 mb-1 flex border-b border-default"
     >
       <ReviewViewTab
         active={view === "ai"}
@@ -151,7 +145,7 @@ function ReviewViewTabs({
         count={stepCount}
         onClick={() => onChange("ai")}
       >
-        <ListBulletsIcon className="size-3.5" />
+        <ListBulletsIcon weight="regular" className="size-3.5" />
       </ReviewViewTab>
       <ReviewViewTab
         active={view === "files"}
@@ -159,7 +153,7 @@ function ReviewViewTabs({
         count={fileCount}
         onClick={() => onChange("files")}
       >
-        <TreeViewIcon className="size-3.5" />
+        <TreeViewIcon weight="regular" className="size-3.5" />
       </ReviewViewTab>
     </div>
   )
@@ -185,18 +179,16 @@ function ReviewViewTab({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-1.5 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
         active
-          ? "border-primary font-medium text-foreground"
-          : "border-transparent text-muted-foreground hover:text-foreground"
+          ? "border-brand font-medium text-primary"
+          : "border-transparent text-secondary hover:text-primary"
       )}
     >
       {children}
       {label}
       {count !== null && (
-        <span className="text-[11px] text-muted-foreground/70 tabular-nums">
-          {count}
-        </span>
+        <span className="text-xxs text-tertiary tabular-nums">{count}</span>
       )}
     </button>
   )
@@ -234,7 +226,7 @@ export function renderInlineCode(text: string): Array<ReactNode> {
       return (
         <code
           key={i}
-          className="rounded bg-accent px-1 py-0.5 font-mono text-[0.9em] text-primary"
+          className="rounded bg-surface-level-1-hover px-1 py-0.5 font-mono text-[0.9em] text-brand-primary"
         >
           {part.slice(1, -1)}
         </code>
@@ -282,17 +274,17 @@ const ReviewGroupRow = memo(function ReviewGroupRow({
       className={cn(
         "flex cursor-pointer items-start gap-2 border-l-2 px-3 py-1.5 text-left transition-colors",
         active
-          ? "border-primary bg-sidebar-row-hover"
-          : "border-transparent hover:bg-sidebar-row-hover"
+          ? "border-brand bg-selected"
+          : "border-transparent hover:bg-surface-level-2-hover"
       )}
     >
-      <span className="mt-px shrink-0 text-[11px] font-medium text-muted-foreground/70 tabular-nums">
+      <span className="mt-px shrink-0 text-xxs font-medium text-tertiary tabular-nums">
         {group.index}.
       </span>
       <span
         className={cn(
           "min-w-0 text-xs leading-5",
-          active ? "font-medium text-foreground" : "text-muted-foreground"
+          active ? "font-medium text-primary" : "text-secondary"
         )}
       >
         {title}
@@ -364,18 +356,14 @@ function ReviewFileTreeExplorer({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="px-3 pt-1 pb-1.5">
-        <InputGroup>
-          <InputGroupAddon>
-            <MagnifyingGlassIcon />
-          </InputGroupAddon>
-          <InputGroupInput
-            type="search"
-            aria-label="Filter files"
-            placeholder="Filter files"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-          />
-        </InputGroup>
+        <Input
+          size="sm"
+          leftIcon={MagnifyingGlassIcon}
+          aria-label="Filter files"
+          placeholder="Filter files"
+          value={filter}
+          onChange={setFilter}
+        />
       </div>
       <div className="min-h-0 flex-1">
         <FileTree
@@ -386,7 +374,7 @@ function ReviewFileTreeExplorer({
               ...treeThemeStyle(),
               // Must stay opaque: the tree's truncation marker ("…") paints
               // this color behind itself to hide the overflowing filename.
-              "--trees-theme-sidebar-bg": "var(--sidebar)",
+              "--trees-theme-sidebar-bg": "var(--bg-surface-level-2)",
             } as React.CSSProperties
           }
         />

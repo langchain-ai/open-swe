@@ -47,7 +47,7 @@ export function PullRequestActions({
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       {outcome && (
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-secondary">
           {outcomeLabels[outcome]} · leaves the list on the next refresh
         </span>
       )}
@@ -88,7 +88,7 @@ export function PullRequestActions({
           />
         )}
         {pr.missingChecks.length > 0 && (
-          <span className="text-xs text-amber-700 dark:text-amber-400">
+          <span className="text-xs text-warning-secondary">
             Merge blocked: {pr.missingChecks.join(", ")} never reported
           </span>
         )}

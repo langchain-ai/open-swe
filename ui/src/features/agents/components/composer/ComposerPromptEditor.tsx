@@ -13,6 +13,9 @@ import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary"
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin"
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin"
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
+import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import {
   $applyNodeReplacement,
   $createLineBreakNode,
@@ -34,7 +37,6 @@ import {
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
 } from "lexical"
-import { File as FileIcon, Hash } from "lucide-react"
 
 import { SkillBadge } from "../SkillBadge"
 import { splitPromptIntoSegments } from "./composerMentions"
@@ -47,7 +49,6 @@ import type {
   SerializedLexicalNode,
   Spread,
 } from "lexical"
-import { Tooltip, TooltipPopup, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export type ComposerCommandKey =
@@ -66,7 +67,7 @@ export interface ComposerPromptEditorHandle {
 
 const EMPTY_SKILL_NAMES = new Set<string>()
 const MENTION_CHIP_CLASS_NAME =
-  "inline-flex max-w-full select-none items-center gap-1 rounded-md border border-border/70 bg-accent/40 px-1.5 py-px align-middle text-[12px] font-medium leading-[1.1] text-foreground"
+  "inline-flex max-w-full select-none items-center gap-1 rounded-md border border-subtle bg-surface-level-1-hover/40 px-1.5 py-px align-middle text-xxs font-medium leading-[1.1] text-primary"
 
 type SerializedComposerMentionNode = Spread<
   { path: string; source: string; type: "composer-mention"; version: 1 },
@@ -80,27 +81,25 @@ type SerializedComposerSkillNode = Spread<
 
 function ComposerMentionChip({ path }: { path: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            className={MENTION_CHIP_CLASS_NAME}
-            contentEditable={false}
-            spellCheck={false}
-          >
-            <FileIcon className="size-3.5 shrink-0 opacity-70" aria-hidden />
-            <span className="truncate leading-tight select-none">
-              {basenameOfPath(path)}
-            </span>
-          </span>
-        }
-      />
-      <TooltipPopup
-        className="max-w-[30rem] leading-tight break-words whitespace-normal"
-        side="top"
+    <Tooltip
+      side="top"
+      title={path}
+      tooltipClassName="max-w-[30rem] break-words text-primary"
+    >
+      <span
+        className={MENTION_CHIP_CLASS_NAME}
+        contentEditable={false}
+        spellCheck={false}
       >
-        {path}
-      </TooltipPopup>
+        <FileIcon
+          aria-hidden
+          className="size-3.5 shrink-0 opacity-70"
+          weight="regular"
+        />
+        <span className="truncate leading-tight select-none">
+          {basenameOfPath(path)}
+        </span>
+      </span>
     </Tooltip>
   )
 }
@@ -328,7 +327,11 @@ class ComposerChannelNode extends DecoratorNode<React.ReactElement> {
         spellCheck={false}
         title={this.__channelId}
       >
-        <Hash className="size-3.5 shrink-0 opacity-70" aria-hidden />
+        <HashIcon
+          aria-hidden
+          className="size-3.5 shrink-0 opacity-70"
+          weight="regular"
+        />
         <span className="truncate leading-tight select-none">
           {this.__name}
         </span>
@@ -754,7 +757,7 @@ function ComposerPromptEditorInner({
             aria-label="Message"
             aria-placeholder={placeholder}
             className={cn(
-              "block max-h-50 w-full overflow-y-auto bg-transparent text-[14px] leading-relaxed break-words whitespace-pre-wrap text-foreground focus:outline-none",
+              "block max-h-50 w-full overflow-y-auto bg-transparent text-[14px] leading-relaxed break-words whitespace-pre-wrap text-primary focus:outline-none",
               className
             )}
             data-testid="composer-editor"
@@ -763,7 +766,7 @@ function ComposerPromptEditorInner({
           />
         }
         placeholder={
-          <div className="pointer-events-none absolute inset-0 text-[14px] leading-relaxed text-muted-foreground/60">
+          <div className="pointer-events-none absolute inset-0 text-[14px] leading-relaxed text-placeholder">
             {placeholder}
           </div>
         }

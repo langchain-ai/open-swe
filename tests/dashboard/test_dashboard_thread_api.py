@@ -9,7 +9,7 @@ from uuid import UUID, uuid7
 import pytest
 from fastapi import HTTPException
 
-from openswe.dashboard import deps
+from openswe.dashboard import deps, profiles
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
     WorkspaceSettingsUpdate,
@@ -1251,7 +1251,7 @@ async def test_branch_diff_rejects_an_unsafe_branch_name(monkeypatch) -> None:
         "branch_name": "../../etc/passwd",
     }
     patch_thread_module(monkeypatch, "_readable_thread_metadata", AsyncMock(return_value=metadata))
-    patch_thread_module(monkeypatch, "_github_token_for_login", AsyncMock(return_value="token"))
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="token"))
     build_compare = AsyncMock()
     patch_thread_module(monkeypatch, "build_compare_diff_files", build_compare)
 

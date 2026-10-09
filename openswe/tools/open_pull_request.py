@@ -13,6 +13,7 @@ from langgraph_sdk import get_client
 
 from openswe.act_as.gate import require_consent
 from openswe.analytics.usage import record_agent_pr_usage
+from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
     PrAuthorNotAParticipant,
     pr_author_login,
@@ -35,6 +36,7 @@ from openswe.slack.code_channels import (
     set_context_bar,
     set_view,
 )
+from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
@@ -716,7 +718,16 @@ async def _record_pr_telemetry(
             await _record_pr_opened_feedback(
                 thread_id, pr_url=pr_url if isinstance(pr_url, str) else ""
             )
-        if isinstance(thread_id, str) and thread_id:
+        if (
+            isinstance(thread_id, str)
+            and thread_id
+            and not (
+                cfg.slack_thread
+                and is_concierge_thread(
+                    cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts
+                )
+            )
+        ):
             repo_private = None
             base_repo = details.get("base", {}).get("repo")
             if isinstance(base_repo, dict) and isinstance(base_repo.get("private"), bool):
@@ -1202,6 +1213,7 @@ async def _open_pull_request(
         )
 
 
+@audit_tool()
 async def open_pull_request(
     owner: str,
     repo: str,
@@ -1237,8 +1249,17 @@ def _ref_name(pr: dict[str, Any], side: str) -> str:
     return ref if isinstance(ref, str) else ""
 
 
+@audit_tool()
 async def link_pull_request(pr_url: str, resolves_thread: bool = False) -> dict[str, Any]:
     """Implement the `link_pull_request` tool."""
+    cfg = RunConfig.from_runtime()
+    if cfg.slack_thread and is_concierge_thread(
+        cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts
+    ):
+        return {
+            "success": False,
+            "error": "PRs cannot be attached to concierge DM threads. Start a separate thread for PR work.",
+        }
     ref = parse_github_pr_url(pr_url)
     if ref is None:
         return {"success": False, "error": f"Not a GitHub pull request URL: {pr_url}"}

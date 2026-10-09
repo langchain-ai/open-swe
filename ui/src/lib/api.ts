@@ -51,7 +51,30 @@ export interface AuditLog {
         after: boolean | number | "[REDACTED]" | null
       }
     > | null
+    expedited_exclusions: ExpeditedExclusions | null
   }
+}
+
+export interface ExpeditedExclusions {
+  pull_request_id: string | null
+  base_sha: string
+  head_sha: string
+  approvals_md_sha256: string
+  requested: {
+    path: string
+    hunks: number[]
+    guideline: string
+    reason: string
+  }[]
+  hunks: {
+    path: string
+    digest: string
+    header: string
+    additions: number
+    deletions: number
+    guideline: string
+    reason: string
+  }[]
 }
 
 export interface AuditLogsPage {
@@ -1033,6 +1056,7 @@ export interface OpenPullRequest {
   repo: string
   number: number
   title: string
+  state: "open" | "closed" | "merged"
   draft: boolean | null
   additions: number | null
   deletions: number | null
@@ -1041,6 +1065,8 @@ export interface OpenPullRequest {
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
+  /** Each reviewer's standing review; null when the reviews could not be read. */
+  reviewers: PullRequestReviewer[] | null
   // Branch protection still wants an approval this PR does not have.
   reviewRequired: boolean
   statusAvailable: boolean
@@ -1055,6 +1081,13 @@ export interface OpenPullRequest {
   // null when the review threads could not be read, which is not the same
   // answer as none being unresolved.
   unresolvedThreads: number | null
+}
+
+export interface PullRequestReviewer {
+  login: string
+  avatarUrl: string | null
+  /** A comment never replaces an earlier approval or change request. */
+  state: "approved" | "changes_requested" | "dismissed" | "commented"
 }
 
 export type MergeMethod = "squash" | "merge" | "rebase"
@@ -1829,7 +1862,7 @@ export const api = {
     request<OpenPullRequestsPayload>(
       `${scope === "review-assigned" ? "/review-assignments" : "/pull-requests"}?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=${scope}`
     ),
-  myPullRequestDetails: (repo: string, number: number) =>
+  pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
   fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
     pullRequestThread(pr.repo, pr.number, {
