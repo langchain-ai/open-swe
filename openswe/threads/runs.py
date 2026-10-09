@@ -141,14 +141,6 @@ class DashboardImageBody(BaseModel):
     file_name: str | None = Field(default=None, alias="fileName")
 
 
-class ThreadMessageBody(BaseModel):
-    content: str = Field(default="", max_length=20_000)
-    images: list[DashboardImageBody] = Field(default_factory=list)
-    model_id: str | None = None
-    effort: str | None = None
-    client_message_id: uuid.UUID | None = None
-
-
 class ThreadRenameBody(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 

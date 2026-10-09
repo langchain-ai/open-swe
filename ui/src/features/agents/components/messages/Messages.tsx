@@ -34,16 +34,25 @@ function QueuedMessages({
     <div className="mb-3 space-y-2" data-testid="queued-messages">
       {queuedMessages.map((message, index) => {
         const imageCount = message.images?.length ?? 0
-        const statusLabel =
-          index === 0
+        const statusLabel = message.waitsForAgent
+          ? "Held for the agent. It reads this before its next step, and it starts no run of its own."
+          : index === 0
             ? "Sends when the run ends. Send now, or Enter on an empty composer, steers the run with it instead."
             : "Waits for the message ahead of it."
+        const status = message.waitsForAgent
+          ? "Waiting for the agent"
+          : "Queued"
+        const actionable =
+          (onSteer || onRemove) &&
+          message.mine !== false &&
+          !message.waitsForAgent
         return (
           <div
             key={message.id}
             className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-surface-level-2 px-space-3 py-space-2 text-sm text-primary shadow-sm"
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
+            data-waits-for-agent={message.waitsForAgent ? "true" : undefined}
           >
             {message.content && (
               <div className="break-words whitespace-pre-wrap">
@@ -59,13 +68,14 @@ function QueuedMessages({
               <span
                 className="inline-flex h-6 items-center gap-space-1"
                 title={statusLabel}
-                aria-label={`Queued. ${statusLabel}`}
+                aria-label={`${status}. ${statusLabel}`}
               >
                 <ClockIcon size={14} weight="regular" aria-hidden />
-                Queued
+                {status}
                 <span className="ml-space-1 size-1.5 animate-status-pulse rounded-full bg-current" />
               </span>
-              {(onSteer || onRemove) && message.mine !== false && (
+              {message.sender && <span>from {message.sender}</span>}
+              {actionable && (
                 <div className="ml-auto flex items-center gap-0.5">
                   {onSteer && (
                     <IconButton
