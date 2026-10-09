@@ -99,7 +99,7 @@ function GeneralSection({
         workspaces={workspaces}
         channelLabel={channelLabel}
       />
-      <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-space-2 border-t border-default px-space-4 py-space-3">
         {rebuildStatus}
         {error && (
           <p role="alert" className="text-xs text-error-secondary">

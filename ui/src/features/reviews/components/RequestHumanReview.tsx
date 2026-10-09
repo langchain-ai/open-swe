@@ -64,7 +64,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
         : "Request review in Slack"
   return (
     <span
-      className="inline-flex items-center gap-2"
+      className="inline-flex items-center gap-space-2"
       onClick={(event) => event.stopPropagation()}
       title={blocked ?? undefined}
     >

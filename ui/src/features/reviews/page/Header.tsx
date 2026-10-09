@@ -98,7 +98,7 @@ export function Header({
       data-desktop-drag-region=""
       className={cn(
         // Top-aligned at 8px so the first row lines up with the app's floating sidebar button.
-        "flex shrink-0 items-start gap-3 border-b border-default bg-surface-level-1 pt-2 pr-3 pb-2.5",
+        "flex shrink-0 items-start gap-space-3 border-b border-default bg-surface-level-1 pt-space-2 pr-space-3 pb-space-2",
         leftInset
       )}
     >
@@ -123,10 +123,10 @@ export function Header({
         onClick={toggleNavigator}
       />
       <div className="min-w-0 flex-1">
-        <div className="flex min-h-7 min-w-0 items-center gap-2">
+        <div className="flex min-h-7 min-w-0 items-center gap-space-2">
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
           {live && status ? (
-            <span className="flex shrink-0 items-center gap-1 max-sm:[&>*:not(:first-child)]:hidden">
+            <span className="flex shrink-0 items-center gap-space-1 max-sm:[&>*:not(:first-child)]:hidden">
               {statusLabels(status).map((label) => (
                 <StatusPill key={label} status={label} size="xs" />
               ))}
@@ -149,7 +149,7 @@ export function Header({
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
             )
           )}
-          <h1 className="min-w-0 truncate text-[15px] leading-6 font-semibold tracking-[-0.01em] max-sm:line-clamp-2 max-sm:text-[14px] max-sm:leading-5 max-sm:whitespace-normal">
+          <h1 className="min-w-0 truncate text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:line-clamp-2 max-sm:text-sm max-sm:leading-5 max-sm:whitespace-normal">
             <a
               href={githubUrl}
               target="_blank"
@@ -160,7 +160,7 @@ export function Header({
                 aria-label="GitHub"
                 size={16}
                 weight="regular"
-                className="mr-1.5 inline align-[-3px] text-icon-secondary max-sm:hidden"
+                className="mr-space-1 inline align-[-3px] text-icon-secondary max-sm:hidden"
               />
               {detail?.pr.title ?? `${pr.owner}/${pr.repo}`}
               <span className="font-normal text-secondary"> #{pr.number}</span>
@@ -173,7 +173,7 @@ export function Header({
             <p
               inert={carrying}
               className={cn(
-                "col-start-1 row-start-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-secondary transition-[opacity,translate] duration-200 ease-out motion-reduce:transition-none",
+                "col-start-1 row-start-1 flex min-w-0 items-center gap-space-2 overflow-hidden text-xs text-secondary transition-[opacity,translate] duration-normal ease-out motion-reduce:transition-none",
                 carrying && "-translate-y-1 opacity-0"
               )}
             >
@@ -203,7 +203,7 @@ export function Header({
                 href={githubUrls.branch(pr, detail.pr.base_ref)}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 rounded bg-surface-level-3 px-1 py-px font-mono text-[11px] hover:text-primary"
+                className="shrink-0 rounded-sm bg-surface-level-3 px-space-1 py-px font-mono text-xxs hover:text-primary"
               >
                 {detail.pr.base_ref}
               </a>
@@ -214,10 +214,13 @@ export function Header({
                 onClick={() =>
                   copyText(detail.pr.head_ref, "Copied the branch name")
                 }
-                className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-1 rounded bg-surface-level-3 px-1 py-px font-mono text-[11px] hover:text-primary max-xl:hidden"
+                className="group/branch flex max-w-[32ch] min-w-[8ch] items-center gap-space-1 rounded-sm bg-surface-level-3 px-space-1 py-px font-mono text-xxs hover:text-primary max-xl:hidden"
               >
                 <span className="truncate">{detail.pr.head_ref}</span>
-                <CopyIcon className="size-3 shrink-0 opacity-0 group-hover/branch:opacity-100" />
+                <CopyIcon
+                  className="size-3 shrink-0 opacity-0 group-hover/branch:opacity-100"
+                  weight="regular"
+                />
               </button>
               <button
                 type="button"
@@ -225,7 +228,7 @@ export function Header({
                 onClick={() =>
                   firstEntry && jumpTo({ kind: "entry", id: firstEntry.id })
                 }
-                className="hidden shrink-0 rounded px-0.5 font-mono tabular-nums hover:bg-surface-level-1-hover lg:inline"
+                className="hidden shrink-0 rounded-sm px-0.5 font-mono tabular-nums hover:bg-surface-level-1-hover lg:inline"
               >
                 <span className="text-success-secondary">
                   +{detail.pr.additions}
@@ -252,7 +255,7 @@ export function Header({
                 inert={!carrying}
                 onClick={() => jumpTo({ kind: "top" })}
                 className={cn(
-                  "group col-start-1 row-start-1 flex min-w-0 items-center gap-2 justify-self-start rounded px-0.5 text-left text-xs transition-[opacity,translate] duration-200 ease-out hover:bg-surface-level-1-hover motion-reduce:transition-none",
+                  "group col-start-1 row-start-1 flex min-w-0 items-center gap-space-2 justify-self-start rounded-sm px-0.5 text-left text-xs transition-[opacity,translate] duration-normal ease-out hover:bg-surface-level-1-hover motion-reduce:transition-none",
                   !carrying && "translate-y-1 opacity-0"
                 )}
               >
@@ -271,10 +274,10 @@ export function Header({
             )}
           </div>
         ) : (
-          <Skeleton className="mt-1 h-3.5 w-80 max-w-full max-sm:hidden" />
+          <Skeleton className="mt-space-1 h-3.5 w-80 max-w-full max-sm:hidden" />
         )}
       </div>
-      <div className="flex h-7 shrink-0 items-center gap-3">
+      <div className="flex h-7 shrink-0 items-center gap-space-3">
         {carrying && current?.status && (
           <div className="max-lg:hidden">
             <NextStepAction
@@ -290,7 +293,7 @@ export function Header({
             type="button"
             onClick={jumpToUnviewed}
             title="Go to the next file you haven't viewed"
-            className="hidden shrink-0 items-center gap-2 rounded-md px-2 py-1 text-xs text-secondary tabular-nums hover:bg-surface-level-1-hover hover:text-primary md:flex"
+            className="hidden shrink-0 items-center gap-space-2 rounded-md px-space-2 py-space-1 text-xs text-secondary tabular-nums hover:bg-surface-level-1-hover hover:text-primary md:flex"
           >
             <ProgressRing value={viewedCount / files.length} />
             {viewedCount}/{files.length} viewed
@@ -380,7 +383,7 @@ function ProgressRing({ value }: { value: number }) {
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={circumference * (1 - value)}
-        className="transition-[stroke-dashoffset] duration-300"
+        className="transition-[stroke-dashoffset] duration-slow"
       />
     </svg>
   )

@@ -74,7 +74,7 @@ describe("WorkflowApprovalCard", () => {
     renderCard({ threadId: "thread-1", pollWhileActive: true })
 
     const group = screen.getByTestId("workflow-approval-group")
-    expect(group.className).toContain("mt-4")
+    expect(group.className).toContain("mt-space-4")
     expect(
       screen.getByText("Confirm GitHub Actions workflow changes")
     ).toBeTruthy()

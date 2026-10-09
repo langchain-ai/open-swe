@@ -59,12 +59,12 @@ export function ToolResult({
 }: ToolCallMessagePartProps) {
   return (
     <details
-      className={`my-2 rounded-xl border p-3 text-sm ${isError ? "border-error text-error-secondary" : "border-default"}`}
+      className={`my-space-2 rounded-xl border p-space-3 text-sm ${isError ? "border-error text-error-secondary" : "border-default"}`}
       open={isError || undefined}
     >
       <summary className="cursor-pointer font-medium">
         {toolName}{" "}
-        <span className="ml-2 text-xs text-secondary">
+        <span className="ml-space-2 text-xs text-secondary">
           {isError
             ? "Failed"
             : status.type === "running"
@@ -72,11 +72,11 @@ export function ToolResult({
               : "Complete"}
         </span>
       </summary>
-      <pre className="mt-2 max-h-48 overflow-auto text-xs whitespace-pre-wrap">
+      <pre className="mt-space-2 max-h-48 overflow-auto text-xs whitespace-pre-wrap">
         {JSON.stringify(args, null, 2)}
       </pre>
       {result !== undefined && (
-        <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-surface-level-2 p-3 text-xs whitespace-pre-wrap">
+        <pre className="mt-space-2 max-h-80 overflow-auto rounded-lg bg-surface-level-2 p-space-3 text-xs whitespace-pre-wrap">
           {outputText(result)}
         </pre>
       )}
@@ -117,7 +117,7 @@ function SubagentTool(props: ToolCallMessagePartProps) {
   const subagents = useLangChainSubagents()
   const target = subagents.get(props.toolCallId)
   return (
-    <details className="my-2 rounded-xl border border-default p-3 text-sm">
+    <details className="my-space-2 rounded-xl border border-default p-space-3 text-sm">
       <summary className="cursor-pointer">
         Subagent:{" "}
         {typeof props.args.description === "string"
@@ -125,7 +125,7 @@ function SubagentTool(props: ToolCallMessagePartProps) {
           : props.toolName}
       </summary>
       {stream && target ? (
-        <div className="mt-3 max-h-96 overflow-auto">
+        <div className="mt-space-3 max-h-96 overflow-auto">
           <SubagentTranscript
             stream={stream}
             target={target}
@@ -195,7 +195,7 @@ export function AssistantMessage() {
   return (
     <MessagePrimitive.Root
       data-message-id={id}
-      className={`group/message my-6 min-w-0 ${role === "user" ? "ml-auto max-w-[85%] rounded-2xl bg-surface-level-2 px-4 py-3" : "w-full leading-7"}`}
+      className={`group/message my-space-5 min-w-0 ${role === "user" ? "ml-auto max-w-[85%] rounded-xl bg-surface-level-2 px-space-4 py-space-3" : "w-full leading-7"}`}
     >
       <MessagePrimitive.GroupedParts groupBy={groupActivity}>
         {({ part, children }) => {
@@ -204,28 +204,30 @@ export function AssistantMessage() {
             const reading = part.type.startsWith("group-read:")
             const path = part.type.slice(part.type.indexOf(":") + 1)
             return (
-              <details className="my-2 rounded-xl border border-default p-3 text-sm">
+              <details className="my-space-2 rounded-xl border border-default p-space-3 text-sm">
                 <summary className="cursor-pointer font-medium break-all">
                   {reading ? "Read" : "Edit"} {path} · {part.indices.length}{" "}
                   calls
                   {part.status.type === "running" && (
-                    <span className="ml-2 text-xs text-secondary">Running</span>
+                    <span className="ml-space-2 text-xs text-secondary">
+                      Running
+                    </span>
                   )}
                 </summary>
-                <div className="mt-3 space-y-3">{children}</div>
+                <div className="mt-space-3 space-y-space-3">{children}</div>
               </details>
             )
           }
           switch (part.type) {
             case "group-activity":
               return (
-                <details className="my-3 rounded-xl border border-default p-3 text-sm text-secondary">
+                <details className="my-space-3 rounded-xl border border-default p-space-3 text-sm text-secondary">
                   <summary className="cursor-pointer">
                     {part.status.type === "running"
                       ? "Working…"
                       : "Show activity"}
                   </summary>
-                  <div className="mt-3 space-y-3">{children}</div>
+                  <div className="mt-space-3 space-y-space-3">{children}</div>
                 </details>
               )
             case "text":
@@ -241,7 +243,7 @@ export function AssistantMessage() {
               return (
                 <div
                   data-testid="reasoning"
-                  className="border-l-2 border-default pl-3 whitespace-pre-wrap"
+                  className="border-l-2 border-default pl-space-3 whitespace-pre-wrap"
                 >
                   {part.text}
                 </div>
@@ -253,7 +255,7 @@ export function AssistantMessage() {
                 <img
                   src={part.image}
                   alt={part.filename ?? "Attached image"}
-                  className="my-2 max-h-72 rounded-xl"
+                  className="my-space-2 max-h-72 rounded-xl"
                 />
               )
             case "file":
@@ -272,7 +274,7 @@ export function AssistantMessage() {
         }}
       </MessagePrimitive.GroupedParts>
       {role === "assistant" && (
-        <ActionBarPrimitive.Root className="mt-2">
+        <ActionBarPrimitive.Root className="mt-space-2">
           <ActionBarPrimitive.Copy asChild>
             <IconButton
               icon={CopyIcon}

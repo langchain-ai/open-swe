@@ -85,12 +85,12 @@ export function SelectionBar({
       data-add-to-chat
       onPointerDown={(event) => event.stopPropagation()}
       style={{ left: position.left, top: position.top }}
-      className="fixed z-50 flex items-center gap-0.5 rounded-lg border border-subtle bg-elevated p-0.5 font-sans text-xs shadow-md"
+      className="fixed z-selection-action-bar flex items-center gap-0.5 rounded-lg border border-subtle bg-elevated p-0.5 font-sans text-xs shadow-md"
     >
       <button
         type="button"
         onClick={onAsk}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 font-medium hover:bg-elevated-hover"
+        className="flex items-center gap-space-2 rounded-md px-space-2 py-space-1 font-medium hover:bg-elevated-hover"
       >
         <AgentMark />
         Ask Open SWE
@@ -99,9 +99,9 @@ export function SelectionBar({
       <button
         type="button"
         onClick={onComment}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-elevated-hover"
+        className="flex items-center gap-space-2 rounded-md px-space-2 py-space-1 hover:bg-elevated-hover"
       >
-        <ChatTextIcon className="size-3.5" />
+        <ChatTextIcon className="size-3.5" weight="regular" />
         Comment
       </button>
     </div>

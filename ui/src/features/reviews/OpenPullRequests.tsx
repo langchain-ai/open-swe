@@ -3,6 +3,8 @@ import {
   ArrowUpIcon,
   MagnifyingGlassRegularIcon,
 } from "@langchain/macaw-components/icons"
+import { Spinner } from "@langchain/macaw-components/Spinner"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
@@ -204,7 +206,7 @@ export function OpenPullRequests({
     !query.isFetching &&
     !detailsLoading &&
     visible.length === filtered.length ? (
-      <div className="py-4 text-center">
+      <div className="py-space-4 text-center">
         <Button
           variant="underlined"
           onClick={() => onFiltersChange({ github: true, pr: undefined })}
@@ -249,11 +251,11 @@ export function OpenPullRequests({
       {/* Both columns grow from a zero basis, so opening a preview animates the
           list across rather than resizing it in place. */}
       <div
-        className="flex min-h-0 min-w-0 flex-col transition-[flex-grow] duration-300 ease-out"
+        className="flex min-h-0 min-w-0 flex-col transition-[flex-grow] duration-slow ease-out"
         style={{ flexGrow: 1, flexBasis: 0 }}
       >
         <section
-          className="mt-4 flex min-h-0 flex-1 flex-col gap-3"
+          className="mt-space-4 flex min-h-0 flex-1 flex-col gap-space-3"
           aria-label={
             scope === "mine"
               ? "My open pull requests"
@@ -261,7 +263,7 @@ export function OpenPullRequests({
           }
         >
           {scope !== "mine" && (
-            <div className="flex items-center gap-2 text-xs text-secondary">
+            <div className="flex items-center gap-space-2 text-xs text-secondary">
               <span>
                 {scope === "review-assigned"
                   ? "Assigned to you by Open SWE"
@@ -280,7 +282,7 @@ export function OpenPullRequests({
               )}
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-space-2">
             <div className="w-56 shrink-0">
               <Typeahead
                 multiple
@@ -429,7 +431,7 @@ export function OpenPullRequests({
           ) : incomplete ? (
             <p
               role="status"
-              className="rounded-lg border border-default bg-surface-level-1 px-4 py-12 text-center text-xs text-warning-secondary"
+              className="rounded-lg border border-default bg-surface-level-1 px-space-4 py-space-8 text-center text-xs text-warning-secondary"
             >
               GitHub&rsquo;s pull request search timed out, and the partial
               answer it returned would have hidden most of your PRs. Filter by
@@ -439,20 +441,32 @@ export function OpenPullRequests({
             latest && (
               <>
                 {visible.length === 0 ? (
-                  <div className="rounded-lg border border-default bg-surface-level-1 px-4 py-12 text-center text-xs text-secondary">
-                    {detailsLoading ||
-                    query.isFetchingNextPage ||
-                    descriptionSearch.isSearching
-                      ? "Loading matching PRs…"
-                      : all.length
-                        ? "No PRs match these filters."
-                        : scope === "mine"
-                          ? "No open PRs found."
-                          : scope === "review-assigned"
-                            ? "No Open SWE assignments. You’re all caught up."
-                            : "No pending GitHub review requests."}
-                    {githubLink}
-                  </div>
+                  detailsLoading ||
+                  query.isFetchingNextPage ||
+                  descriptionSearch.isSearching ? (
+                    <div
+                      role="status"
+                      aria-label="Loading matching PRs"
+                      className="flex justify-center rounded-lg border border-default py-space-8"
+                    >
+                      <Spinner size="sm" />
+                    </div>
+                  ) : (
+                    <EmptyState
+                      size="sm"
+                      className="rounded-lg border border-default py-space-8"
+                      title={
+                        all.length
+                          ? "No PRs match these filters"
+                          : scope === "mine"
+                            ? "No open PRs found"
+                            : scope === "review-assigned"
+                              ? "No Open SWE assignments. You’re all caught up."
+                              : "No pending GitHub review requests"
+                      }
+                      action={githubLink || undefined}
+                    />
+                  )
                 ) : (
                   <PullRequestList
                     rows={visible}
@@ -469,7 +483,7 @@ export function OpenPullRequests({
                     {card}
                   </PullRequestList>
                 )}
-                <div className="flex items-center gap-3 text-xs text-secondary">
+                <div className="flex items-center gap-space-3 text-xs text-secondary">
                   <span>
                     {visible.length} of {filtered.length}
                     {query.hasNextPage ? "+" : ""} PRs
@@ -491,11 +505,11 @@ export function OpenPullRequests({
       </div>
 
       <div
-        className="flex min-h-0 min-w-0 overflow-hidden transition-[flex-grow] duration-300 ease-out"
+        className="flex min-h-0 min-w-0 overflow-hidden transition-[flex-grow] duration-slow ease-out"
         style={{ flexGrow: selectedRow ? 2.2 : 0, flexBasis: 0 }}
       >
         {selectedRow && (
-          <div className="flex min-h-0 w-full min-w-[420px] pt-4 pl-5">
+          <div className="flex min-h-0 w-full min-w-[420px] pt-space-4 pl-space-4">
             <PullRequestDetail
               key={selected}
               pr={selectedRow}

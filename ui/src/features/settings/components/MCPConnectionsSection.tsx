@@ -353,15 +353,15 @@ export function MCPConnectionsSection({
       id={editorId}
       className={
         draft.existing
-          ? "space-y-4 border-t border-default p-space-4"
-          : "space-y-4 rounded-md border border-default p-space-4"
+          ? "space-y-space-4 border-t border-default p-space-4"
+          : "space-y-space-4 rounded-md border border-default p-space-4"
       }
       onSubmit={(event) => {
         event.preventDefault()
         void save(false)
       }}
     >
-      <fieldset disabled={busy} className="space-y-4">
+      <fieldset disabled={busy} className="space-y-space-4">
         {error && (
           <p role="alert" className="text-sm text-error-secondary">
             {error}
@@ -398,7 +398,7 @@ export function MCPConnectionsSection({
           value={draft.url}
           onChange={(url) => setDraft({ ...draft, url })}
         />
-        <div className="space-y-1">
+        <div className="space-y-space-1">
           <span className="block text-sm font-medium text-primary">
             Transport
           </span>
@@ -412,7 +412,7 @@ export function MCPConnectionsSection({
             }
           />
         </div>
-        <div className="space-y-1">
+        <div className="space-y-space-1">
           <span className="block text-sm font-medium text-primary">
             Authentication
           </span>
@@ -454,7 +454,7 @@ export function MCPConnectionsSection({
             onChange={(oauth) => setDraft({ ...draft, oauth })}
           />
         )}
-        <div className="space-y-2">
+        <div className="space-y-space-2">
           <p className="text-sm font-medium text-primary">
             {draft.oauth ? "Additional headers" : "Authentication headers"}
           </p>
@@ -466,7 +466,7 @@ export function MCPConnectionsSection({
           {!replaceHeaders ? (
             <>
               {savedHeaders && (
-                <div className="space-y-2" data-dd-privacy="hidden">
+                <div className="space-y-space-2" data-dd-privacy="hidden">
                   {Object.entries(savedHeaders).map(([name, value]) => (
                     <Input
                       key={name}
@@ -578,7 +578,7 @@ export function MCPConnectionsSection({
             </>
           )}
         </div>
-        <div className="space-y-2">
+        <div className="space-y-space-2">
           <p className="text-sm font-medium text-primary">Allowed tools</p>
           <p className="text-xs text-secondary">
             Discover tools, review the selection, then save. All discovered
@@ -630,7 +630,7 @@ export function MCPConnectionsSection({
                 aria-label="Available tools"
                 tabIndex={0}
                 hidden={!toolsExpanded}
-                className="max-h-80 space-y-3 overflow-y-auto overscroll-contain rounded-md border border-default p-space-3"
+                className="max-h-80 space-y-space-3 overflow-y-auto overscroll-contain rounded-md border border-default p-space-3"
               >
                 {toolNames.map((name) => (
                   <label
@@ -707,8 +707,8 @@ export function MCPConnectionsSection({
   ) : null
 
   return (
-    <SettingsSection title="MCP servers" description={description}>
-      <div className="space-y-4 p-space-4">
+    <SettingsSection title="MCP Servers" description={description}>
+      <div className="space-y-space-4 p-space-4">
         {connections.isLoading && (
           <p className="text-sm text-secondary">Loading connections…</p>
         )}

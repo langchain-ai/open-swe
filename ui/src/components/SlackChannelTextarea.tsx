@@ -145,7 +145,7 @@ export function SlackChannelTextarea({
         <div
           role="listbox"
           aria-label="Slack channels"
-          className="absolute top-full left-0 z-50 mt-space-1 w-full max-w-sm overflow-hidden rounded-lg border border-default bg-elevated p-space-1 text-primary shadow-md"
+          className="absolute top-full left-0 z-popover mt-space-1 w-full max-w-sm overflow-hidden rounded-lg border border-default bg-elevated p-space-1 text-primary shadow-md"
         >
           {matches.map((channel) => (
             <button

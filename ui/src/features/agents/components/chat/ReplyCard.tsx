@@ -152,7 +152,7 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
   const isLinear = chunk.toolKind === "linear"
   return (
     <div className="min-w-0 px-space-1 py-0.5">
-      <div className="mb-space-1 flex items-center gap-1.5 text-xxs text-secondary">
+      <div className="mb-space-1 flex items-center gap-space-2 text-xxs text-secondary">
         {isLinear ? (
           <ChatCircleIcon size={12} weight="regular" aria-hidden />
         ) : (

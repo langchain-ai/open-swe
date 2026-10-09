@@ -231,7 +231,7 @@ function TerminalViewport({
     >
       <div ref={mountRef} className="h-full w-full overflow-hidden" />
       {selection && (
-        <div className="absolute right-2 bottom-2 z-10 flex items-center gap-0.5 rounded-md border border-default bg-elevated p-0.5 shadow-sm">
+        <div className="absolute right-2 bottom-2 z-floating-bar flex items-center gap-0.5 rounded-md border border-default bg-elevated p-0.5 shadow-sm">
           {onAddToChat && (
             <Button
               size="xs"
@@ -260,13 +260,13 @@ function TerminalViewport({
         </div>
       )}
       {target.kind === "cloud" && state.status === "starting" && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-md border border-default bg-surface-level-1/95 px-2 py-1 text-xs text-secondary shadow-sm">
+        <div className="absolute top-2 left-2 flex items-center gap-space-2 rounded-md border border-default bg-surface-level-1/95 px-space-2 py-space-1 text-xs text-secondary shadow-sm">
           <Spinner size="xxs" />
           {state.buffer ? "Reconnecting…" : "Connecting…"}
         </div>
       )}
       {(error || state.error) && (
-        <div className="absolute inset-x-2 top-2 rounded-md border border-error bg-surface-level-1/95 px-3 py-2 text-xs text-error-secondary shadow-sm">
+        <div className="absolute inset-x-2 top-2 rounded-md border border-error bg-surface-level-1/95 px-space-3 py-space-2 text-xs text-error-secondary shadow-sm">
           {error ?? state.error}
         </div>
       )}
@@ -381,7 +381,7 @@ export function TerminalPanel({
       data-hotkeys="ignore"
     >
       {terminals.error && (
-        <div className="absolute inset-x-2 top-2 z-10 rounded-md border border-error bg-surface-level-1/95 px-3 py-2 text-xs text-error-secondary shadow-sm">
+        <div className="absolute inset-x-2 top-2 z-floating-bar rounded-md border border-error bg-surface-level-1/95 px-space-3 py-space-2 text-xs text-error-secondary shadow-sm">
           {terminals.error}
         </div>
       )}

@@ -9,7 +9,7 @@ export const Route = createFileRoute("/admin_/audit-logs")({
   component: () => (
     <SettingsPage
       adminOnly
-      title="Audit logs"
+      title="Audit Logs"
       description="Inspect recorded API and agent-tool activity across this installation."
       className="max-w-6xl"
     >

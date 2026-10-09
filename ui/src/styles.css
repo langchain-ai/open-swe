@@ -11,7 +11,7 @@
 
 @import "@langchain/macaw-components/styles.css";
 @import "tailwindcss";
-@config "../tailwind.config.cjs";
+@config "../tailwind.config.mjs";
 @import "./styles/agents.css";
 @import "./styles/markdown.css";
 @source "../node_modules/streamdown/dist/*.js";
