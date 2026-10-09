@@ -54,11 +54,7 @@ from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.users import User, persist_display_name
 from openswe.utils.json_types import as_json_object
 from openswe.utils.langsmith import create_langsmith_feedback, get_langsmith_trace_url
-from openswe.utils.message_commands import (
-    PERFORMANCE_COMMAND,
-    find_message_command,
-    remove_message_command,
-)
+from openswe.utils.message_commands import PERFORMANCE_MODEL
 from openswe.utils.thread_ops import (
     langgraph_client as get_langgraph_client,
 )
@@ -981,14 +977,12 @@ async def _process_slack_mention_impl(
         or "(no text in mention)"
     )
     performance_command = (
-        find_message_command(PERFORMANCE_COMMAND, clean_text)
+        PERFORMANCE_MODEL.parse(clean_text, bot_user_id, common.SLACK_BOT_USERNAME)
         if not message_update and allowed_bot is None and not concierge_mode
         else None
     )
     if performance_command:
-        clean_text = (
-            remove_message_command(clean_text, performance_command) or "(no text in mention)"
-        )
+        clean_text = performance_command.without_command or "(no text in mention)"
     is_first_mention = not await common.thread_exists(thread_id)
     # A `workspace:<name>` (or legacy `env:<name>`) tag on the message that opens
     # a thread is one input to which workspace its sandbox boots from — resolved

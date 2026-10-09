@@ -24,7 +24,7 @@ from openswe.slack.move import move_slack_thread
 from openswe.slack.request import SlackRequest
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.message_commands import parse_mention_command
+from openswe.utils.message_commands import BREAKOUT, BREAKOUT_WEB
 from openswe.utils.thread_ops import langgraph_client
 from openswe.webhooks import common
 from openswe.workspaces.store import parse_workspace_tag
@@ -48,15 +48,12 @@ class BreakoutCommand:
         cls, text: str, bot_user_id: str, *, command: Literal["breakout", "web"] = "breakout"
     ) -> BreakoutCommand | None:
         """Parse a command immediately after the bot mention, or a bare command."""
-        parsed = parse_mention_command(
-            text,
-            "/breakout" if command == "breakout" else "/breakout:web",
-            bot_user_id,
-            common.SLACK_BOT_USERNAME,
+        parsed = (BREAKOUT if command == "breakout" else BREAKOUT_WEB).parse(
+            text, bot_user_id, common.SLACK_BOT_USERNAME
         )
         if parsed is None:
             return None
-        rest, prior_text = parsed
+        rest, prior_text = parsed.argument, parsed.prior_text
         if command == "web":
             return cls(instruction=rest, prior_text=prior_text)
         parts = rest.split(maxsplit=1)
