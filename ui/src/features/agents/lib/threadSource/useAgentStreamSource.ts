@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react"
 import { useSubmissionQueue } from "@langchain/react"
 
-import { latestContextTokens } from "@/features/agents/lib/contextUsage"
+import { latestContextUsage } from "@/features/agents/lib/contextUsage"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { queueEntryToTurn } from "@/features/agents/lib/queuedMessages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
@@ -84,8 +84,8 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     [trackRunAcceptance, stream]
   )
 
-  const contextTokens = useMemo(
-    () => latestContextTokens(stream.messages),
+  const contextUsage = useMemo(
+    () => latestContextUsage(stream.messages),
     [stream.messages]
   )
 
@@ -106,7 +106,7 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     isOffloading: stream.isOffloading,
     routed: stream.routed,
     connection,
-    contextTokens,
+    contextUsage,
     startRun,
     stop,
     hasOlder: false,

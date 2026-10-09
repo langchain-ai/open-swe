@@ -1,10 +1,8 @@
-import {
-  CheckCircleIcon,
-  ClockIcon,
-  EyeIcon,
-  ProhibitIcon,
-  XCircleIcon,
-} from "@phosphor-icons/react"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
+import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
+import { ProhibitIcon } from "@phosphor-icons/react/dist/ssr/Prohibit"
+import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 import type { ReactNode } from "react"
 
 import { usePullRequestStatus } from "@/features/reviews/lib/usePullRequestStatus"
@@ -18,27 +16,27 @@ const STATES: Record<
   approved: {
     label: "Approved",
     icon: <CheckCircleIcon weight="fill" />,
-    className: "text-emerald-600 dark:text-emerald-400",
+    className: "text-success-secondary",
   },
   changes_requested: {
     label: "Requested changes",
     icon: <XCircleIcon weight="fill" />,
-    className: "text-destructive",
+    className: "text-error-secondary",
   },
   commented: {
     label: "Commented",
     icon: <EyeIcon />,
-    className: "text-muted-foreground",
+    className: "text-secondary",
   },
   dismissed: {
     label: "Review dismissed",
     icon: <ProhibitIcon />,
-    className: "text-muted-foreground",
+    className: "text-secondary",
   },
   requested: {
     label: "Awaiting review",
     icon: <ClockIcon />,
-    className: "text-muted-foreground",
+    className: "text-secondary",
   },
 }
 
@@ -69,7 +67,7 @@ export function ReviewersSection({
     <section className="px-3 py-3">
       <h3 className="mb-2 text-xs font-medium">Reviewers</h3>
       {rows.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">None</p>
+        <p className="text-[11px] text-secondary">None</p>
       ) : (
         <div className="space-y-1">
           {rows.map((row) => {
@@ -86,7 +84,7 @@ export function ReviewersSection({
                     className="size-4 rounded-full"
                   />
                 ) : (
-                  <span className="size-4 rounded-full bg-muted" />
+                  <span className="size-4 rounded-full bg-surface-level-2" />
                 )}
                 <span className="min-w-0 flex-1 truncate">{row.login}</span>
                 <span

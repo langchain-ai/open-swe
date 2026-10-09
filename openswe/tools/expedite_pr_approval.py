@@ -1,15 +1,21 @@
 """Tool that posts a Slack approval card for a tiny pull request."""
 
+import hashlib
 from collections.abc import Mapping
 from typing import Any, Literal
+from uuid import UUID
 
 from langgraph.config import get_config
 
+from openswe.audit_logs.context import current_audit_log
+from openswe.audit_logs.models import ExpeditedExclusions
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.eligibility import (
     MAX_CHANGED_LINES,
     ChangedFile,
+    ExcludedHunk,
+    Exclusion,
     Ineligible,
     assess_eligibility,
     fingerprint_matches,
@@ -22,10 +28,11 @@ from openswe.github.token import resolve_github_token
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import summary_line
+from openswe.review.approvals import APPROVALS_PATH, fetch_approvals_md
 from openswe.run_config import RunConfig
 from openswe.slack.cards import run_slack_location
 from openswe.slack.channels import SlackChannel
-from openswe.slack.client import parse_github_pr_url
+from openswe.slack.client import GitHubPrRef, parse_github_pr_url
 from openswe.slack.http import SlackRequestError
 from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.users import User
@@ -68,12 +75,56 @@ async def _discard(approval: HumanReviewRequest) -> None:
             await session.delete(row)
 
 
+async def _resolve_exclusions(
+    excluded: list[Exclusion],
+    files: list[ChangedFile],
+    pr_ref: GitHubPrRef,
+    payload: PullRequestPayload,
+    token: str,
+) -> list[ExcludedHunk]:
+    """Resolve against the target repository's APPROVALS.md at the base commit, and audit them."""
+    approvals = await fetch_approvals_md(pr_ref.owner, pr_ref.repo, payload.base_sha, token=token)
+    if approvals is None:
+        raise ValueError(
+            f"Nothing can be excluded: `{pr_ref.owner}/{pr_ref.repo}` has no `{APPROVALS_PATH}` "
+            "at the pull request's base commit."
+        )
+    audited = ExpeditedExclusions(
+        base_sha=payload.base_sha,
+        head_sha=payload.head_sha,
+        approvals_md_sha256=hashlib.sha256(approvals.encode()).hexdigest(),
+        requested=excluded,
+    )
+    entry = current_audit_log.get()
+    if entry is not None:
+        entry.enrichments.expedited_exclusions = audited
+        stored = await PullRequest.get(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        if stored is not None:
+            _audit_pull_request(stored.id)
+    unique: dict[tuple[str, str, str], ExcludedHunk] = {}
+    for exclusion in excluded:
+        for hunk in exclusion.resolve(files):
+            unique.setdefault((hunk["path"], hunk["header"], hunk["digest"]), hunk)
+    audited.hunks = list(unique.values())
+    return audited.hunks
+
+
+def _audit_pull_request(pull_request_id: UUID) -> None:
+    """The row may first exist once the card is saved, so the audit entry learns its id then."""
+    entry = current_audit_log.get()
+    if entry is None or entry.enrichments.expedited_exclusions is None:
+        return
+    entry.enrichments.expedited_exclusions.pull_request_id = pull_request_id
+    entry.enrichments.resource_ids = [str(pull_request_id)]
+
+
 @audit_tool()
 async def expedite_pr_approval(
     pr_url: str,
     action: Literal["start", "cancel"] = "start",
     channel: str = "",
     inline_summary: str = "",
+    excluded: list[Exclusion] | None = None,
 ) -> dict[str, Any]:
     """Implement the `expedite_pr_approval` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -140,16 +191,23 @@ async def expedite_pr_approval(
 
     if files is None:
         return _failure("Could not read the pull request's changed files")
-    verdict = assess_eligibility(files)
+    payload = PullRequestPayload.model_validate(pr)
+    exclusions: list[ExcludedHunk] = []
+    if excluded:
+        try:
+            exclusions = await _resolve_exclusions(excluded, files, pr_ref, payload, token)
+        except ValueError as exc:
+            return _failure(str(exc))
+    verdict = assess_eligibility(files, exclusions)
     if isinstance(verdict, Ineligible):
         return _failure(
             f"Not eligible for expedited review: {verdict.reason}. "
-            f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests, and "
-            "every one of those files has to have a readable text diff. Test files are "
-            "not counted. Ask for a normal review."
+            f"Eligible changes touch at most {MAX_CHANGED_LINES} lines outside tests and "
+            "exclusions, and every one of those files has to have a readable text diff. Test "
+            f"files are not counted, and `excluded` leaves out hunks that qualify under the "
+            f"target repository's `{APPROVALS_PATH}`. Otherwise ask for a normal review."
         )
 
-    payload = PullRequestPayload.model_validate(pr)
     if await User.for_login("github", payload.author) is None:
         return _failure("Expedited review is only available for PRs authored by Open SWE users.")
     settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo)
@@ -171,7 +229,13 @@ async def expedite_pr_approval(
         displaced, active = active, None
     if active is not None and active.thread_id and active.thread_id != thread_id:
         return _failure("This pull request's expedited review belongs to another agent thread")
-    if active is not None and fingerprint_matches(files, active.diff_fingerprint):
+    if (
+        active is not None
+        and fingerprint_matches(files, active.diff_fingerprint)
+        and {(e["path"], e["digest"]) for e in active.excluded_hunks}
+        == {(e["path"], e["digest"]) for e in exclusions}
+    ):
+        _audit_pull_request(active.pull_request_id)
         if active.awaiting_ready and not payload.draft:
             updated = await HumanReviewRequest.transition(
                 active.id, expected=("open",), awaiting_ready=False
@@ -217,6 +281,7 @@ async def expedite_pr_approval(
     pull_request.author_github_id = payload.author_id
     pull_request = await pull_request.save()
     pull_request = await pull_request.link_thread(thread_id, source="expedited_review")
+    _audit_pull_request(pull_request.id)
     # One open request per PR, so the displaced one closes before this row is written;
     # it is reopened below if the expedited card cannot be posted.
     if displaced is not None and (
@@ -229,6 +294,7 @@ async def expedite_pr_approval(
         head_sha=head_sha,
         kind="expedited",
         diff_fingerprint=verdict.fingerprint,
+        excluded_hunks=exclusions,
         tldr=summary_line(inline_summary),
         slack_channel_choices=broadcast_choice,
         awaiting_ready=payload.draft,
@@ -278,6 +344,8 @@ async def expedite_pr_approval(
         "head_sha": head_sha,
         "changed_lines": verdict.changed_lines,
         "test_lines": verdict.test_lines,
+        "generated_lines": verdict.generated_lines,
+        "excluded_lines": verdict.excluded_lines,
         "slack_channel_id": channel_id,
         "next": readiness_warning
         or _next_step(

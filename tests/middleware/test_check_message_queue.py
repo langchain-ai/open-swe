@@ -10,13 +10,6 @@ from openswe.middleware.check_message_queue import (
 )
 
 
-class _GraphStore:
-    """The graph's LangGraph Store, which this middleware only reads auto-fix events from."""
-
-    async def aget(self, namespace: tuple[str, ...], key: str) -> None:
-        return None
-
-
 def _envelope(message: dict) -> str:
     """The message's envelope text, whether its content is a string or blocks."""
     content = message["content"]
@@ -25,13 +18,10 @@ def _envelope(message: dict) -> str:
     return "".join(block["text"] for block in content if block.get("type") == "text")
 
 
-async def _run(store: _GraphStore, state: dict[str, Any]) -> dict[str, Any] | None:
-    with (
-        patch(
-            "openswe.middleware.check_message_queue.get_config",
-            return_value={"configurable": {"thread_id": "thread-1"}},
-        ),
-        patch("openswe.middleware.check_message_queue.get_store", return_value=store),
+async def _run(state: dict[str, Any]) -> dict[str, Any] | None:
+    with patch(
+        "openswe.middleware.check_message_queue.get_config",
+        return_value={"configurable": {"thread_id": "thread-1"}},
     ):
         return await check_message_queue_before_model.abefore_model(
             cast(LinearNotifyState, state), MagicMock()
@@ -54,7 +44,7 @@ async def test_check_message_queue_announces_the_move_to_web_only_once(registry_
         },
     )
 
-    result = await _run(_GraphStore(), {"messages": [], "reply_surface": "web"})
+    result = await _run({"messages": [], "reply_surface": "web"})
 
     assert result is not None
     envelopes = [_envelope(message) for message in result["messages"]]
@@ -81,7 +71,7 @@ async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
             side_effect=build_and_queue,
         ),
     ):
-        result = await _run(_GraphStore(), {"messages": []})
+        result = await _run({"messages": []})
 
     assert result is not None
     assert "first" in _envelope(result["messages"][-1])

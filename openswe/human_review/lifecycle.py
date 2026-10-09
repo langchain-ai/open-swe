@@ -23,7 +23,7 @@ from openswe.expedited_review.channels import (
     still_internal,
 )
 from openswe.expedited_review.diff_image import render_diff_png
-from openswe.expedited_review.eligibility import ChangedFile
+from openswe.expedited_review.eligibility import ChangedFile, ExpeditedDiff
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
     latest_review_states,
@@ -114,7 +114,7 @@ class ReviewCard:
 
     async def _diff_image_id(self, files: list[ChangedFile]) -> str | None:
         """A hosted-but-unposted PNG of the diff, which the card renders inline."""
-        shown, _ = ChangedFile.split(files)
+        shown = ExpeditedDiff(files, self.request.excluded_hunks).shown
         if not shown:
             return None
         approval_id = str(self.request.id)

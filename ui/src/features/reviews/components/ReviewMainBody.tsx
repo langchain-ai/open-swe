@@ -1,3 +1,39 @@
+import { Avatar } from "@langchain/macaw-components/Avatar"
+import { Button } from "@langchain/macaw-components/Button"
+import { Checkbox } from "@langchain/macaw-components/Checkbox"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Kbd } from "@langchain/macaw-components/Kbd"
+import { Pane } from "@langchain/macaw-components/Pane"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Spinner } from "@langchain/macaw-components/Spinner"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { BugBeetleIcon } from "@phosphor-icons/react/dist/ssr/BugBeetle"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
+import { CircleIcon } from "@phosphor-icons/react/dist/ssr/Circle"
+import { CodeIcon } from "@phosphor-icons/react/dist/ssr/Code"
+import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
+import { FlagIcon } from "@phosphor-icons/react/dist/ssr/Flag"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { InfoIcon } from "@phosphor-icons/react/dist/ssr/Info"
+import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
+import { ListBulletsIcon } from "@phosphor-icons/react/dist/ssr/ListBullets"
+import { ListChecksIcon } from "@phosphor-icons/react/dist/ssr/ListChecks"
+import { ListNumbersIcon } from "@phosphor-icons/react/dist/ssr/ListNumbers"
+import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
+import { QuotesIcon } from "@phosphor-icons/react/dist/ssr/Quotes"
+import { RowsIcon } from "@phosphor-icons/react/dist/ssr/Rows"
+import { SquareSplitHorizontalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitHorizontal"
+import { TextBIcon } from "@phosphor-icons/react/dist/ssr/TextB"
+import { TextHIcon } from "@phosphor-icons/react/dist/ssr/TextH"
+import { TextItalicIcon } from "@phosphor-icons/react/dist/ssr/TextItalic"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
+import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 import {
   type CommittedDiffSelection,
   readDiffSelection,
@@ -16,36 +52,7 @@ import {
   useRef,
   useState,
 } from "react"
-import {
-  ArrowClockwiseIcon,
-  ArrowSquareOutIcon,
-  BugBeetleIcon,
-  CaretDownIcon,
-  ChatCircleIcon,
-  CheckCircleIcon,
-  CheckIcon,
-  CircleIcon,
-  CircleNotchIcon,
-  CodeIcon,
-  CopyIcon,
-  FlagIcon,
-  InfoIcon,
-  LinkIcon,
-  ListBulletsIcon,
-  ListChecksIcon,
-  ListNumbersIcon,
-  PencilSimpleIcon,
-  QuotesIcon,
-  RowsIcon,
-  SquareSplitHorizontalIcon,
-  TextBIcon,
-  TextHIcon,
-  TextItalicIcon,
-  XCircleIcon,
-  XIcon,
-} from "@phosphor-icons/react"
 import { Link } from "@tanstack/react-router"
-import { IoLogoGithub } from "react-icons/io5"
 import { toast } from "sonner"
 import {
   FileDiff,
@@ -54,7 +61,6 @@ import {
   WorkerPoolContextProvider,
   useVirtualizer,
 } from "@pierre/diffs/react"
-import type { Icon } from "@phosphor-icons/react"
 import type {
   FileDiff as CoreFileDiff,
   DiffLineAnnotation,
@@ -125,10 +131,6 @@ import {
   useDiffOptions,
   warmDiffHighlighter,
 } from "@/features/agents/utils/diffUtils"
-import { Button, IconButton } from "@/components/ui/button"
-import { Sheet, SheetPopup } from "@/components/ui/sheet"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
 import { api, reviewImageProxyUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
@@ -374,15 +376,15 @@ function sumStats(files: Array<ResolvedGroupFile>) {
 }
 
 const GROUP_STYLES = {
-  bug: { label: "Bug", className: "text-destructive", Icon: BugBeetleIcon },
+  bug: { label: "Bug", className: "text-error-secondary", Icon: BugBeetleIcon },
   investigate: {
     label: "Investigate",
-    className: "text-amber-500",
+    className: "text-warning-secondary",
     Icon: FlagIcon,
   },
   informational: {
     label: "Informational",
-    className: "text-muted-foreground",
+    className: "text-secondary",
     Icon: InfoIcon,
   },
 } as const
@@ -1363,21 +1365,22 @@ function ReviewBodyInner({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="relative flex min-h-0 min-w-0 flex-1">
           {!embedded && (
-            <div className="hidden w-72 shrink-0 flex-col border-r border-border bg-background lg:flex">
+            <div className="hidden w-72 shrink-0 flex-col border-r border-default bg-surface-level-1 lg:flex">
               <ReviewSidebarPanel data={sidebarData} />
             </div>
           )}
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {embedded && (
-              <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-3">
-                <button
-                  type="button"
+              <div className="flex h-9 shrink-0 items-center justify-end border-b border-default px-3">
+                <Button
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
+                  leftDecorator={ArrowSquareOutIcon}
                   onClick={onExpand}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  <ArrowSquareOutIcon className="size-3" />
                   Open full review
-                </button>
+                </Button>
               </div>
             )}
             <WorkerPoolContextProvider
@@ -1435,8 +1438,8 @@ function ReviewBodyInner({
                 )}
                 <div
                   className={cn(
-                    "mt-4 rounded-lg border border-border p-4",
-                    embedded ? "bg-card" : "bg-card"
+                    "mt-4 rounded-lg border border-default p-4",
+                    "bg-surface-level-1"
                   )}
                 >
                   {detail.pr.body ? (
@@ -1446,7 +1449,7 @@ function ReviewBodyInner({
                       enlargeImages
                     />
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-secondary">
                       This PR has no description.
                     </p>
                   )}
@@ -1474,7 +1477,7 @@ function ReviewBodyInner({
                         />
                       )}
                       {linesLeft !== null && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-secondary">
                           {linesLeft === 0
                             ? "All lines reviewed"
                             : `${linesLeft} lines left`}
@@ -1492,14 +1495,14 @@ function ReviewBodyInner({
                     </div>
                   </div>
                   {diffFiles && diffFiles.length < detail.pr.changed_files && (
-                    <p className="mb-2 text-xs text-muted-foreground">
+                    <p className="mb-2 text-xs text-secondary">
                       Showing {diffFiles.length} of {detail.pr.changed_files}{" "}
                       changed files.{" "}
                       <a
                         href={`${detail.url}/files`}
                         target="_blank"
                         rel="noreferrer"
-                        className="underline underline-offset-2 hover:text-foreground"
+                        className="underline underline-offset-2 hover:text-primary"
                       >
                         See every file on GitHub
                       </a>
@@ -1508,9 +1511,7 @@ function ReviewBodyInner({
                   {!diffFiles ? (
                     <Skeleton className="h-64 w-full" />
                   ) : diffFiles.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      No diff available.
-                    </p>
+                    <p className="text-xs text-secondary">No diff available.</p>
                   ) : view === "ai" && groupedView ? (
                     <div className="space-y-6">
                       {groupedView.map((group) => (
@@ -1546,21 +1547,32 @@ function ReviewBodyInner({
           (wide ? (
             sidePanel("inline")
           ) : (
-            <Sheet open={sidePanelOpen} onOpenChange={setSidePanelOpen}>
+            <>
               {!sidePanelOpen && (
                 <Button
-                  variant="outline"
+                  size="md"
+                  color="secondary"
+                  variant="outlined"
+                  leftDecorator={ChatCircleIcon}
                   className="fixed right-4 bottom-4 z-30 shadow-md"
                   onClick={() => setSidePanelOpen(true)}
                 >
-                  <ChatCircleIcon />
                   Info &amp; chat
                 </Button>
               )}
-              <SheetPopup side="right" keepMounted>
+              <Pane
+                open={sidePanelOpen}
+                onClose={() => setSidePanelOpen(false)}
+                title="Info & chat"
+                className="flex min-h-0 p-0"
+                dialogStyle={{
+                  marginLeft: "auto",
+                  width: "min(28rem, calc(100vw - 3rem))",
+                }}
+              >
                 {sidePanel("sheet")}
-              </SheetPopup>
-            </Sheet>
+              </Pane>
+            </>
           ))}
       </div>
     </ExpandedFindingContext.Provider>
@@ -1570,7 +1582,7 @@ function ReviewBodyInner({
 function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
   const { recent } = progress
   return (
-    <div className="mt-2 text-xs text-muted-foreground">
+    <div className="mt-2 text-xs text-secondary">
       <p>
         {progress.steps} step{progress.steps === 1 ? "" : "s"} committed
       </p>
@@ -1581,14 +1593,11 @@ function ScoutProgressPreview({ progress }: { progress: ScoutProgress }) {
             return (
               <li
                 key={index}
-                className={cn(
-                  "flex min-w-0 gap-2",
-                  current && "text-foreground"
-                )}
+                className={cn("flex min-w-0 gap-2", current && "text-primary")}
               >
                 <span className="shrink-0">
                   {current ? (
-                    <CircleNotchIcon className="inline size-3 animate-spin" />
+                    <Spinner size="xxs" className="inline-flex" />
                   ) : (
                     "·"
                   )}
@@ -1619,7 +1628,7 @@ function ScoutThreadLink({
       to="/agents/$threadId"
       params={{ threadId }}
       className={cn(
-        "inline-block text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline",
+        "inline-block text-xs text-secondary underline-offset-2 hover:text-primary hover:underline",
         className
       )}
     >
@@ -1678,13 +1687,16 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
     detail.walkthrough_scout_thread_id,
   ])
   return (
-    <div className="mt-4 flex items-center gap-4 rounded-lg border border-primary/40 bg-primary/5 p-4">
-      <ListNumbersIcon className="size-6 shrink-0 text-primary" />
+    <div className="mt-4 flex items-center gap-4 rounded-lg border border-brand-subtle bg-brand-muted p-4">
+      <ListNumbersIcon
+        weight="regular"
+        className="size-6 shrink-0 text-icon-brand"
+      />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">
           {running ? "Building the walkthrough…" : "Read this PR step by step"}
         </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p className="mt-0.5 text-xs text-secondary">
           {running
             ? "The review scout is ordering the changes into narrated steps. This takes a few minutes; the page updates on its own."
             : "The review scout orders the changes into narrated steps and moves mechanical edits to the end."}
@@ -1693,7 +1705,7 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
           <ScoutProgressPreview progress={detail.walkthrough_progress} />
         )}
         {failureSummary && (
-          <p className="mt-1.5 text-xs break-words text-destructive">
+          <p className="mt-1.5 text-xs break-words text-error-secondary">
             Last attempt failed: {failureSummary}
           </p>
         )}
@@ -1704,12 +1716,13 @@ function WalkthroughCallout({ detail }: { detail: ReviewDetail }) {
           />
         )}
       </div>
-      <Button size="lg" onClick={() => scout.mutate(detail)} disabled={running}>
-        {running ? (
-          <CircleNotchIcon className="animate-spin" />
-        ) : (
-          <ListNumbersIcon />
-        )}
+      <Button
+        size="md"
+        leftDecorator={running ? undefined : ListNumbersIcon}
+        loading={running}
+        onClick={() => scout.mutate(detail)}
+        disabled={running}
+      >
         {running ? "Building…" : "Build walkthrough"}
       </Button>
     </div>
@@ -1724,21 +1737,19 @@ function DiffStyleToggle({
   onChange: (value: DiffStyle) => void
 }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+    <div className="flex items-center gap-0.5 rounded-md border border-default p-0.5">
       <DiffStyleButton
         active={value === "unified"}
         label="Unified view"
+        icon={RowsIcon}
         onClick={() => onChange("unified")}
-      >
-        <RowsIcon className="size-3.5" />
-      </DiffStyleButton>
+      />
       <DiffStyleButton
         active={value === "split"}
         label="Split view"
+        icon={SquareSplitHorizontalIcon}
         onClick={() => onChange("split")}
-      >
-        <SquareSplitHorizontalIcon className="size-3.5" />
-      </DiffStyleButton>
+      />
     </div>
   )
 }
@@ -1746,28 +1757,24 @@ function DiffStyleToggle({
 function DiffStyleButton({
   active,
   label,
+  icon,
   onClick,
-  children,
 }: {
   active: boolean
   label: string
+  icon: IconComponent
   onClick: () => void
-  children: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
+    <IconButton
+      icon={icon}
+      label={label}
+      size="xs"
+      color="secondary"
+      variant={active ? "normal" : "plain"}
       aria-pressed={active}
-      title={label}
-      className={cn(
-        "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
-        active ? "bg-muted text-foreground" : "hover:text-foreground"
-      )}
-    >
-      {children}
-    </button>
+      onClick={onClick}
+    />
   )
 }
 
@@ -1798,22 +1805,22 @@ function GroupHeader({ group }: { group: ResolvedGroup }) {
   )
   return (
     <>
-      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-border bg-background">
-        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-accent text-[11px] font-medium text-muted-foreground">
+      <div className="sticky top-0 z-[5] flex h-9 items-center gap-2 border-b border-default bg-surface-level-1">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded bg-surface-level-1-hover text-[11px] font-medium text-secondary">
           {group.index}
         </span>
         <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h3>
         <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
           {group.additions > 0 && (
-            <span className="text-emerald-500">+{group.additions}</span>
+            <span className="text-success-secondary">+{group.additions}</span>
           )}
           {group.deletions > 0 && (
-            <span className="text-red-500">-{group.deletions}</span>
+            <span className="text-error-secondary">-{group.deletions}</span>
           )}
         </span>
       </div>
       {summary && (
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-secondary">
           <Markdown content={summary} />
         </div>
       )}
@@ -2093,12 +2100,11 @@ const FileDiffCard = memo(function FileDiffCard({
   return (
     <div
       ref={sectionRef}
-      className="-mx-3 scroll-mt-4 overflow-clip border-y border-border sm:mx-0 sm:rounded-lg sm:border"
+      className="-mx-3 scroll-mt-4 overflow-clip border-y border-default sm:mx-0 sm:rounded-lg sm:border"
     >
       <div
         className={cn(
-          // accent is translucent; the background underlay keeps code from showing through.
-          "sticky z-[5] flex items-center gap-2 bg-[linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--background),var(--background))] px-3 py-2 text-xs",
+          "sticky z-[5] flex items-center gap-2 bg-surface-level-1-hover px-3 py-2 text-xs",
           belowStepHeader ? "top-9" : "top-0"
         )}
       >
@@ -2108,6 +2114,7 @@ const FileDiffCard = memo(function FileDiffCard({
           className="inline-flex min-w-0 items-center gap-2 text-left"
         >
           <CaretDownIcon
+            weight="regular"
             className={cn(
               "size-3 transition-transform",
               !expanded && "-rotate-90"
@@ -2116,40 +2123,32 @@ const FileDiffCard = memo(function FileDiffCard({
           <span className="truncate font-mono font-medium">{file.path}</span>
         </button>
         <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px]">
-          <span className="text-emerald-500">+{additions}</span>
-          <span className="text-red-500">-{deletions}</span>
+          <span className="text-success-secondary">+{additions}</span>
+          <span className="text-error-secondary">-{deletions}</span>
         </span>
         {findings.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-amber-500">
-            <FlagIcon className="size-3" />
+          <span className="inline-flex items-center gap-1 text-[11px] text-warning-secondary">
+            <FlagIcon weight="regular" className="size-3" />
             {findings.length}
           </span>
         )}
-        <label className="ml-auto inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className="sr-only sm:not-sr-only">Mark as viewed</span>
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={viewed}
-            onClick={() => onToggleViewed(file.path)}
-            className={cn(
-              "flex size-4 items-center justify-center rounded border border-border",
-              viewed && "bg-foreground text-background"
-            )}
-          >
-            {viewed && <CheckIcon className="size-3" />}
-          </button>
-        </label>
+        <Checkbox
+          checked={viewed}
+          onCheckedChange={() => onToggleViewed(file.path)}
+          label="Mark as viewed"
+          containerClassName="ml-auto shrink-0 flex-row-reverse gap-1.5"
+          labelClassName="sr-only text-[11px] text-secondary sm:not-sr-only"
+        />
       </div>
       {expanded &&
         (file.unrenderable || file.patch === null ? (
-          <div className="bg-card p-4 text-center text-xs text-muted-foreground/70">
+          <div className="bg-surface-level-1 p-4 text-center text-xs text-tertiary">
             Binary or large file — diff not shown.
           </div>
         ) : (
           <div
             {...lineSelection.wrapperProps}
-            className="overflow-x-auto bg-card font-mono text-[11px] leading-5"
+            className="overflow-x-auto bg-surface-level-1 font-mono text-[11px] leading-5"
           >
             {fileDiff ? (
               <FileDiff<ReviewAnnotation>
@@ -2189,9 +2188,7 @@ const FileDiffCard = memo(function FileDiffCard({
           className="inline-flex items-center gap-1.5 px-2 py-1 font-sans text-[11px] font-medium"
         >
           Add to Chat
-          <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
-            ⌘L
-          </kbd>
+          <Kbd>⌘L</Kbd>
         </button>
       </DiffSelectionPopover>
     </div>
@@ -2287,7 +2284,7 @@ function applyMarkdownAction(
 interface ToolbarItem {
   action: MarkdownAction
   label: string
-  Icon: Icon
+  Icon: IconComponent
 }
 
 // Grouped to match GitHub's comment toolbar (format group, then list group).
@@ -2356,71 +2353,60 @@ function CommentComposer({
       textarea.setSelectionRange(next.start, next.end)
     })
   }
-  const tabClass = (active: boolean) =>
-    cn(
-      "rounded px-2 py-0.5 text-[11px]",
-      active
-        ? "bg-accent font-medium text-foreground"
-        : "text-muted-foreground hover:text-foreground"
-    )
   return (
     <div className="px-2 py-1 font-sans">
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
-          <ChatCircleIcon className="size-3 text-muted-foreground" />
+      <div className="overflow-hidden rounded-md border border-default bg-surface-level-1">
+        <div className="flex items-center gap-1.5 border-b border-default px-2 py-1 text-[11px]">
+          <ChatCircleIcon
+            weight="regular"
+            className="size-3 text-icon-secondary"
+          />
           <span className="font-medium">
             Add a comment on line {commentRangeLabel(range)}
           </span>
           <IconButton
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Close comment"
+            icon={XIcon}
+            label="Close comment"
+            size="xs"
+            color="secondary"
+            variant="plain"
             className="ml-auto"
             onClick={onClose}
-          >
-            <XIcon />
-          </IconButton>
+          />
         </div>
         {
           <>
-            <div className="flex items-center gap-1 border-b border-border px-1.5 py-1">
-              <button
-                type="button"
-                onClick={() => setMode("write")}
-                aria-selected={mode === "write"}
-                className={tabClass(mode === "write")}
-              >
-                Write
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("preview")}
-                aria-selected={mode === "preview"}
-                className={tabClass(mode === "preview")}
-              >
-                Preview
-              </button>
+            <div className="flex items-center gap-1 border-b border-default px-1.5 py-1">
+              {(["write", "preview"] as const).map((tab) => (
+                <Button
+                  key={tab}
+                  size="xs"
+                  color="secondary"
+                  variant={mode === tab ? "normal" : "plain"}
+                  aria-selected={mode === tab}
+                  onClick={() => setMode(tab)}
+                >
+                  {tab === "write" ? "Write" : "Preview"}
+                </Button>
+              ))}
               {mode === "write" && (
                 <div className="ml-auto flex items-center gap-0.5">
                   {MARKDOWN_TOOLBAR.map((group, groupIndex) => (
                     <Fragment key={group[0]?.action ?? groupIndex}>
                       {groupIndex > 0 && (
-                        <span className="mx-0.5 h-4 w-px bg-border" />
+                        <span className="mx-0.5 h-4 w-px bg-surface-level-4" />
                       )}
                       {group.map(({ action, label, Icon }) => (
                         <IconButton
                           key={action}
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={label}
-                          title={label}
+                          icon={Icon}
+                          label={label}
+                          size="sm"
+                          color="secondary"
+                          variant="plain"
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => applyAction(action)}
-                        >
-                          <Icon className="size-4" />
-                        </IconButton>
+                        />
                       ))}
                     </Fragment>
                   ))}
@@ -2431,8 +2417,9 @@ function CommentComposer({
               {mode === "write" ? (
                 <Textarea
                   ref={textareaRef}
+                  size="md"
                   value={value}
-                  onChange={(event) => setValue(event.target.value)}
+                  onChange={setValue}
                   onKeyDown={(event) => {
                     if (
                       (event.metaKey || event.ctrlKey) &&
@@ -2447,42 +2434,39 @@ function CommentComposer({
                   }}
                   placeholder="Leave a comment…"
                   rows={3}
-                  className="resize-y text-xs"
                 />
               ) : (
-                <div className="min-h-16 rounded-md border border-input bg-input/20 px-2 py-2 text-xs">
+                <div className="min-h-16 rounded-md border border-default bg-surface-level-2 px-2 py-2 text-xs">
                   {value.trim() ? (
                     <Markdown content={value} />
                   ) : (
-                    <span className="text-muted-foreground">
-                      Nothing to preview
-                    </span>
+                    <span className="text-secondary">Nothing to preview</span>
                   )}
                 </div>
               )}
               {mutation.isError && (
-                <p className="mt-1.5 text-[11px] text-destructive">
+                <p className="mt-1.5 text-[11px] text-error-secondary">
                   {mutation.error instanceof Error
                     ? mutation.error.message
                     : "Failed to add the comment"}
                 </p>
               )}
               <div className="mt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
+                <Button
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
                   onClick={onClose}
-                  className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
                 >
                   Cancel
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  size="xs"
                   onClick={submit}
                   disabled={!value.trim() || mutation.isPending}
-                  className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
                 >
                   {mutation.isPending ? "Adding…" : "Add review comment"}
-                </button>
+                </Button>
               </div>
             </div>
           </>
@@ -2575,20 +2559,17 @@ function InlineComment({
       ref={(node) => registerAnnotation(`comment:${comment.id}`, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-border bg-card">
-        <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[11px]">
-          {comment.author_avatar_url ? (
-            <img
-              src={comment.author_avatar_url}
-              alt=""
-              className="size-4 shrink-0 rounded-full"
-            />
-          ) : (
-            <span className="size-4 shrink-0 rounded-full bg-muted" />
-          )}
+      <div className="overflow-hidden rounded-md border border-default bg-surface-level-1">
+        <div className="flex items-center gap-1.5 border-b border-default px-2 py-1 text-[11px]">
+          <Avatar
+            size="xs"
+            shape="circle"
+            label={comment.author}
+            imageUrl={comment.author_avatar_url || undefined}
+          />
           <span className="font-medium">{comment.author}</span>
           {comment.line !== null && (
-            <span className="font-mono text-muted-foreground">
+            <span className="font-mono text-secondary">
               {sideLabel}
               {comment.line}
             </span>
@@ -2596,41 +2577,40 @@ function InlineComment({
           <div className="ml-auto flex items-center gap-0.5">
             {editable && !editing && (
               <IconButton
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label="Edit comment"
+                icon={PencilSimpleIcon}
+                label="Edit comment"
+                size="xs"
+                color="secondary"
+                variant="plain"
                 onClick={() => setEditing(true)}
-              >
-                <PencilSimpleIcon />
-              </IconButton>
+              />
             )}
-            <a
-              href={comment.html_url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="View on GitHub"
-              title="View on GitHub"
-              className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-            >
-              <IoLogoGithub className="size-3" />
-            </a>
             <IconButton
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Close comment"
-              onClick={onClose}
+              asChild
+              icon={GithubLogoIcon}
+              label="View on GitHub"
+              size="xs"
+              color="secondary"
+              variant="plain"
             >
-              <XIcon />
+              <a href={comment.html_url} target="_blank" rel="noreferrer" />
             </IconButton>
+            <IconButton
+              icon={XIcon}
+              label="Close comment"
+              size="xs"
+              color="secondary"
+              variant="plain"
+              onClick={onClose}
+            />
           </div>
         </div>
         {editing ? (
           <div className="p-2">
             <Textarea
+              size="md"
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={setDraft}
               onKeyDown={(event) => {
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                   event.preventDefault()
@@ -2641,31 +2621,30 @@ function InlineComment({
                 }
               }}
               rows={3}
-              className="resize-y text-xs"
               autoFocus
             />
             <div className="mt-2 flex items-center justify-end gap-2">
-              <button
-                type="button"
+              <Button
+                size="xs"
+                color="secondary"
+                variant="outlined"
                 onClick={cancel}
-                className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
               >
                 Cancel
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="xs"
                 onClick={submit}
                 disabled={
                   !draft.trim() || draft.trim() === body || mutation.isPending
                 }
-                className="rounded bg-foreground px-2 py-1 text-[11px] font-medium text-background disabled:opacity-50"
               >
                 {mutation.isPending ? "Saving…" : "Save"}
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
-          <div className="px-3 py-2.5 text-xs text-muted-foreground">
+          <div className="px-3 py-2.5 text-xs text-secondary">
             <Markdown content={body} />
           </div>
         )}
@@ -2689,7 +2668,7 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
       ref={(node) => registerAnnotation(finding.id, node)}
       className="px-2 py-1 font-sans"
     >
-      <div className="overflow-hidden rounded-md border border-border bg-card">
+      <div className="overflow-hidden rounded-md border border-default bg-surface-level-1">
         <button
           type="button"
           onClick={() => toggle(finding)}
@@ -2697,18 +2676,22 @@ function InlineFinding({ finding }: { finding: ReviewFinding }) {
           aria-label={`${expanded ? "Collapse" : "Expand"} finding: ${finding.title}`}
           className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px]"
         >
-          <Icon className={cn("size-3 shrink-0", style.className)} />
+          <Icon
+            weight="regular"
+            className={cn("size-3 shrink-0", style.className)}
+          />
           <span className={cn("font-medium", style.className)}>
             {style.label}
           </span>
-          <span className="min-w-0 flex-1 truncate text-foreground">
+          <span className="min-w-0 flex-1 truncate text-primary">
             {finding.title}
           </span>
           {finding.outdated && <Badgeish>Outdated</Badgeish>}
           {finding.status !== "open" && <Badgeish>{finding.status}</Badgeish>}
           <CaretDownIcon
+            weight="regular"
             className={cn(
-              "size-3 shrink-0 text-muted-foreground transition-transform",
+              "size-3 shrink-0 text-icon-secondary transition-transform",
               !expanded && "-rotate-90"
             )}
           />
@@ -2744,34 +2727,35 @@ function FindingDetails({
   }
 
   return (
-    <div className="border-t border-border px-3 py-2.5 font-sans">
-      <div className="text-xs text-muted-foreground">
+    <div className="border-t border-default px-3 py-2.5 font-sans">
+      <div className="text-xs text-secondary">
         <Markdown content={finding.description} />
       </div>
       {finding.resolution_note && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        <p className="mt-2 text-[11px] text-secondary">
           Resolution: {finding.resolution_note}
         </p>
       )}
       <div className="mt-2.5 flex items-center gap-2">
-        <button
-          type="button"
+        <Button
+          size="xs"
+          color="secondary"
+          variant="outlined"
+          leftDecorator={copied ? CheckIcon : CopyIcon}
           onClick={copy}
-          className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
         >
-          <CopyIcon className="size-3" />
           {copied ? "Copied" : "Copy"}
-        </button>
+        </Button>
         {githubUrl && (
-          <a
-            href={githubUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            leftDecorator={GithubLogoIcon}
+            as={<a href={githubUrl} target="_blank" rel="noreferrer" />}
           >
-            <IoLogoGithub className="size-3" />
             View on GitHub
-          </a>
+          </Button>
         )}
       </div>
     </div>
@@ -2780,7 +2764,7 @@ function FindingDetails({
 
 function Badgeish({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground capitalize">
+    <span className="rounded border border-default px-1.5 py-0.5 text-[10px] text-secondary capitalize">
       {children}
     </span>
   )
@@ -2867,8 +2851,8 @@ function ReviewPanelResizeHandle({
       className={cn(
         "absolute inset-y-0 left-0 z-20 w-1 cursor-col-resize touch-none select-none",
         "after:absolute after:inset-y-0 after:left-0 after:w-px after:bg-transparent after:transition-colors",
-        "hover:after:bg-border",
-        dragging && "after:bg-border"
+        "hover:after:bg-surface-level-4",
+        dragging && "after:bg-surface-level-4"
       )}
     />
   )
@@ -2948,29 +2932,25 @@ function SidePanel({
       <aside
         className={cn(
           "flex h-full w-full flex-col overflow-y-auto",
-          layout === "inline" && "border-l border-border"
+          layout === "inline" && "border-l border-default"
         )}
       >
-        <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-1 border-b border-default px-3 py-2">
           {(
             [
               ["info", "Info"],
               ["chat", "Chat"],
             ] as const
           ).map(([id, label]) => (
-            <button
+            <Button
               key={id}
-              type="button"
+              color="secondary"
+              variant={tab === id ? "normal" : "plain"}
+              aria-pressed={tab === id}
               onClick={() => onTabChange(id)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-xs transition-colors",
-                tab === id
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-muted/50"
-              )}
             >
               {label}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -2982,7 +2962,7 @@ function SidePanel({
             reviewed={detail.status === "idle"}
           />
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-default">
             <section className="px-3 py-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium">
@@ -2994,17 +2974,18 @@ function SidePanel({
                         ? "Not analyzed yet"
                         : "PR analysis complete"}
                 </span>
-                <button
-                  type="button"
+                <Button
+                  size="xs"
+                  color="secondary"
+                  variant="outlined"
+                  leftDecorator={ArrowClockwiseIcon}
                   onClick={() => reReview.mutate(detail)}
                   disabled={reReview.isPending || detail.status === "running"}
-                  className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
-                  <ArrowClockwiseIcon className="size-3" />
                   {detail.status === "none" ? "Review" : "Re-review"}
-                </button>
+                </Button>
               </div>
-              <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+              <div className="mt-2 space-y-1 text-[11px] text-secondary">
                 <div>
                   {detail.status === "none"
                     ? "Head commit"
@@ -3013,7 +2994,7 @@ function SidePanel({
                 </div>
                 {detail.watch && <div>Watching for new pushes</div>}
                 {detail.status === "error" && detail.review_error && (
-                  <div className="break-words text-destructive">
+                  <div className="break-words text-error-secondary">
                     {detail.review_error}
                   </div>
                 )}
@@ -3050,13 +3031,14 @@ function SidePanel({
               onFindingClick={onFindingClick}
               action={
                 detail.findings.length > 0 ? (
-                  <button
-                    type="button"
+                  <Button
+                    size="xs"
+                    color="secondary"
+                    variant="outlined"
                     onClick={onMarkAllRead}
-                    className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
                   >
                     Mark all as read
-                  </button>
+                  </Button>
                 ) : null
               }
             />
@@ -3094,7 +3076,7 @@ function FindingSection({
   onFindingClick,
   action,
 }: {
-  icon: (typeof GROUP_STYLES)["bug"]["Icon"]
+  icon: IconComponent
   label: string
   emptyLabel: string
   findings: Array<ReviewFinding>
@@ -3113,11 +3095,12 @@ function FindingSection({
           onClick={() => setCollapsed((v) => !v)}
           className="inline-flex items-center gap-1.5 font-medium"
         >
-          <HeaderIcon className="size-3.5" />
+          <HeaderIcon weight="regular" className="size-3.5" />
           {label}
           <CaretDownIcon
+            weight="regular"
             className={cn(
-              "size-3 text-muted-foreground transition-transform",
+              "size-3 text-icon-secondary transition-transform",
               collapsed && "-rotate-90"
             )}
           />
@@ -3126,7 +3109,7 @@ function FindingSection({
       </div>
       {!collapsed &&
         (findings.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">{emptyLabel}</p>
+          <p className="text-[11px] text-secondary">{emptyLabel}</p>
         ) : (
           <div className="space-y-0.5">
             {findings.map((finding) => {
@@ -3140,8 +3123,8 @@ function FindingSection({
                 <div
                   key={finding.id}
                   className={cn(
-                    "rounded-md border border-transparent transition-colors hover:border-border hover:bg-muted/40",
-                    expanded && "border-border bg-muted/40",
+                    "rounded-md border border-transparent transition-colors hover:border-default hover:bg-surface-level-1-hover",
+                    expanded && "border-default bg-surface-level-1-hover",
                     muted && !expanded && "opacity-50"
                   )}
                 >
@@ -3153,16 +3136,17 @@ function FindingSection({
                   >
                     <span className="flex items-start gap-1.5 text-xs">
                       <Icon
+                        weight="regular"
                         className={cn(
                           "mt-0.5 size-3.5 shrink-0",
                           style.className
                         )}
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="line-clamp-1 font-medium text-foreground">
+                        <span className="line-clamp-1 font-medium text-primary">
                           {finding.title || finding.description}
                         </span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
                           <span className={style.className}>{style.label}</span>
                           <span className="truncate font-mono">
                             {findingAnchorLabel(finding)}
@@ -3178,8 +3162,9 @@ function FindingSection({
                       </span>
                       {!anchored && (
                         <CaretDownIcon
+                          weight="regular"
                           className={cn(
-                            "mt-0.5 size-3 shrink-0 text-muted-foreground transition-transform",
+                            "mt-0.5 size-3 shrink-0 text-icon-secondary transition-transform",
                             !expanded && "-rotate-90"
                           )}
                         />
@@ -3203,7 +3188,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
     <section className="px-3 py-3">
       <h3 className="mb-2 text-xs font-medium">Checks</h3>
       {checks.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">No checks reported.</p>
+        <p className="text-[11px] text-secondary">No checks reported.</p>
       ) : (
         <div className="max-h-56 space-y-1 overflow-y-auto">
           {checks.map((check, index) =>
@@ -3213,7 +3198,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
                 href={check.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                className="flex items-center gap-1.5 text-[11px] text-secondary hover:text-primary"
               >
                 <CheckStatusIcon check={check} />
                 <span className="truncate">{check.name}</span>
@@ -3221,7 +3206,7 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
             ) : (
               <span
                 key={`${check.name}-${index}`}
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                className="flex items-center gap-1.5 text-[11px] text-secondary"
               >
                 <CheckStatusIcon check={check} />
                 <span className="truncate">{check.name}</span>
@@ -3237,16 +3222,34 @@ function ChecksSection({ checks }: { checks: Array<ReviewCheckRun> }) {
 function CheckStatusIcon({ check }: { check: ReviewCheckRun }) {
   if (check.status !== "completed") {
     return (
-      <CircleIcon className="size-3.5 shrink-0 animate-pulse text-amber-500" />
+      <CircleIcon
+        weight="regular"
+        className="size-3.5 shrink-0 animate-pulse text-status-yellow"
+      />
     )
   }
   if (check.conclusion === "success" || check.conclusion === "neutral") {
-    return <CheckCircleIcon className="size-3.5 shrink-0 text-emerald-500" />
+    return (
+      <CheckCircleIcon
+        weight="regular"
+        className="size-3.5 shrink-0 text-status-green"
+      />
+    )
   }
   if (check.conclusion === "skipped") {
-    return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
+    return (
+      <CircleIcon
+        weight="regular"
+        className="size-3.5 shrink-0 text-icon-secondary"
+      />
+    )
   }
-  return <XCircleIcon className="size-3.5 shrink-0 text-red-500" />
+  return (
+    <XCircleIcon
+      weight="regular"
+      className="size-3.5 shrink-0 text-status-red"
+    />
+  )
 }
 
 function PeopleSection({
@@ -3260,7 +3263,7 @@ function PeopleSection({
     <section className="px-3 py-3">
       <h3 className="mb-2 text-xs font-medium">{title}</h3>
       {people.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">None</p>
+        <p className="text-[11px] text-secondary">None</p>
       ) : (
         <div className="space-y-1">
           {people.map((person) => (
@@ -3268,15 +3271,12 @@ function PeopleSection({
               key={person.login}
               className="flex items-center gap-2 text-[11px]"
             >
-              {person.avatar_url ? (
-                <img
-                  src={person.avatar_url}
-                  alt=""
-                  className="size-4 rounded-full"
-                />
-              ) : (
-                <span className="size-4 rounded-full bg-muted" />
-              )}
+              <Avatar
+                size="xs"
+                shape="circle"
+                label={person.login}
+                imageUrl={person.avatar_url || undefined}
+              />
               {person.login}
             </div>
           ))}
