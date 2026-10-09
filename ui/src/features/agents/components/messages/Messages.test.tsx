@@ -11,6 +11,8 @@ import {
 } from "@tanstack/react-router"
 
 import { HumanMessage } from "@langchain/core/messages"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 
 import { Messages } from "./Messages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
@@ -31,6 +33,12 @@ vi.mock("@/features/agents/components/WorkflowApprovalCard", () => ({
 }))
 
 afterEach(() => cleanup())
+
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={new QueryClient()}>
+    {children}
+  </QueryClientProvider>
+)
 
 describe("Messages", () => {
   it("renders attributed task activity with safe expandable details", async () => {
@@ -175,7 +183,8 @@ describe("Messages", () => {
             ],
           },
         ]}
-      />
+      />,
+      { wrapper }
     )
 
     const reply = screen.getByText("On it!")
@@ -215,7 +224,8 @@ describe("Messages", () => {
             ],
           },
         ]}
-      />
+      />,
+      { wrapper }
     )
 
     const reply = screen.getByText("On it!")
