@@ -10,7 +10,7 @@ from typing import Final, override
 from key_value.aio.stores.base import BaseStore, ManagedEntry
 
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import delete_value, get_value, put_value
+from openswe.store import delete_value, get_value, put_expiring_value, put_value
 
 _NAMESPACE: Final = ("mcp_server_oauth",)
 
@@ -37,14 +37,13 @@ class SealedStore(BaseStore):
     async def _put_managed_entry(
         self, *, collection: str, key: str, managed_entry: ManagedEntry
     ) -> None:
-        sealed = encrypt_token(self._serialization_adapter.dump_json(managed_entry))
+        namespace = self._namespace(collection)
+        value = {"sealed": encrypt_token(self._serialization_adapter.dump_json(managed_entry))}
         ttl = managed_entry.ttl
-        await put_value(
-            self._namespace(collection),
-            key,
-            {"sealed": sealed},
-            ttl_minutes=math.ceil(ttl / 60) if ttl is not None else None,
-        )
+        if ttl is None:
+            await put_value(namespace, key, value)
+        else:
+            await put_expiring_value(namespace, key, value, ttl_minutes=math.ceil(ttl / 60))
 
     @override
     async def _delete_managed_entry(self, *, key: str, collection: str) -> bool:
