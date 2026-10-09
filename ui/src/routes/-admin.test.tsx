@@ -88,6 +88,7 @@ describe("UsersSection", () => {
       user_id: String(index),
       github_login: `user-${index}`,
       display_name: "",
+      avatar_url: "",
       email: `user-${index}@example.com`,
       slack_user_id: null,
       is_admin: false,
@@ -117,9 +118,7 @@ describe("UsersSection", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Next" }))
     expect(await screen.findByText("Page 2 of 3")).toBeTruthy()
     fireEvent.click(screen.getByRole("combobox", { name: "Rows per page" }))
-    fireEvent.keyDown(await screen.findByRole("option", { name: "25" }), {
-      key: "Enter",
-    })
+    fireEvent.click(await screen.findByRole("option", { name: "25" }))
     expect(await screen.findByText("1–25 of 30")).toBeTruthy()
     expect(screen.getByText("Page 1 of 2")).toBeTruthy()
 

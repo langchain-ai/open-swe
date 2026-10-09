@@ -1,7 +1,10 @@
+from unittest.mock import AsyncMock
+
+import httpx2
 import pytest
 from fastapi import HTTPException
 
-from agent.review.reviews import (
+from openswe.review.reviews import (
     _ALLOWED_IMAGE_CONTENT_TYPES,
     _image_request_headers,
     _is_allowed_image_url,
@@ -47,18 +50,38 @@ def test_image_content_type_allowlist_excludes_svg():
     assert "image/png" in _ALLOWED_IMAGE_CONTENT_TYPES
 
 
-async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
-    async def fake_github_get(path, token, **kwargs):
-        return {"body": "see ![diagram](https://x.githubusercontent.com/a.png)"}
+async def test_label_write_requires_repository_access(monkeypatch):
+    from openswe.review.labels import LabelChange
+    from openswe.review.routes import api_change_pull_request_label
 
-    monkeypatch.setattr("agent.review.reviews._github_get", fake_github_get)
+    async def deny_access(user_id: str, repo: str) -> None:
+        raise HTTPException(403, "Repository access denied")
+
+    monkeypatch.setattr("openswe.review.routes.require_repo_access_for_user", deny_access)
+    with pytest.raises(HTTPException) as exc:
+        await api_change_pull_request_label(
+            "acme", "private", 7, LabelChange(name="bug", selected=True), {"sub": "user"}
+        )
+    assert exc.value.status_code == 403
+
+
+async def test_require_image_in_pr_rejects_unreferenced_url(monkeypatch):
+    pull = httpx2.Response(
+        200,
+        json={"body": "see ![diagram](https://x.githubusercontent.com/a.png)"},
+        request=httpx2.Request("GET", "https://api.github.com"),
+    )
+    monkeypatch.setattr(
+        "openswe.github.app.get_github_app_installation_token", AsyncMock(return_value="tok")
+    )
+    monkeypatch.setattr("openswe.github.http.github_request", AsyncMock(return_value=pull))
 
     # A URL not present in the PR body (cross-repo IDOR attempt) is rejected.
     with pytest.raises(HTTPException) as exc:
         await _require_image_in_pr(
-            "acme", "repo", 7, "https://x.githubusercontent.com/other-repo.png", "tok"
+            "acme", "repo", 7, "https://x.githubusercontent.com/other-repo.png"
         )
     assert exc.value.status_code == 403
 
     # A URL actually embedded in the PR body is allowed.
-    await _require_image_in_pr("acme", "repo", 7, "https://x.githubusercontent.com/a.png", "tok")
+    await _require_image_in_pr("acme", "repo", 7, "https://x.githubusercontent.com/a.png")

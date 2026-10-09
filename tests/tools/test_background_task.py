@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from agent.tools.background_task import background_task
-from agent.workspaces import refresh
-from agent.workspaces.store import RefreshStep, Workspace
+from openswe.tools.background_task import background_task
+from openswe.workspaces import refresh
+from openswe.workspaces.store import RefreshStep, Workspace
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ def admin(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Workspace refreshes are admin-only, so most of these run as one."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = cast(RunnableConfig, {"configurable": {"github_login": "ramonn"}})
-    with patch("agent.run_config.get_config", return_value=config):
+    with patch("openswe.run_config.get_config", return_value=config):
         yield
 
 
@@ -24,7 +24,7 @@ def admin(monkeypatch: pytest.MonkeyPatch) -> Any:
 def member(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = cast(RunnableConfig, {"configurable": {"github_login": "someone-else"}})
-    with patch("agent.run_config.get_config", return_value=config):
+    with patch("openswe.run_config.get_config", return_value=config):
         yield
 
 
@@ -92,7 +92,7 @@ async def test_one_provider_failing_does_not_blank_the_listing(admin: Any) -> No
     with (
         _store(_running()),
         patch(
-            "agent.tools.background_execute.task_list",
+            "openswe.tools.background_execute.task_list",
             new_callable=AsyncMock,
             side_effect=RuntimeError("No sandbox is bound to this thread"),
         ),
@@ -134,7 +134,7 @@ async def test_a_non_admin_lists_only_their_own_commands(member: Any) -> None:
     with (
         _store(_running()),
         patch(
-            "agent.tools.background_execute.task_list",
+            "openswe.tools.background_execute.task_list",
             new_callable=AsyncMock,
             return_value=[{"task_id": "cmd-1", "kind": "sandbox_command", "status": "running"}],
         ),

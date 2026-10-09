@@ -6,6 +6,7 @@ import {
   type ThreadMessage,
 } from "@assistant-ui/react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { create } from "zustand"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { ReposPayload } from "@/lib/api"
@@ -54,10 +55,12 @@ function Harness({ initialRepo }: { initialRepo?: string | null }) {
     onNew: vi.fn(),
   })
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <Composer initialRepo={initialRepo} />
-      <Configuration />
-    </AssistantRuntimeProvider>
+    <TooltipProvider>
+      <AssistantRuntimeProvider runtime={runtime}>
+        <Composer initialRepo={initialRepo} />
+        <Configuration />
+      </AssistantRuntimeProvider>
+    </TooltipProvider>
   )
 }
 

@@ -3,17 +3,17 @@
   "python_version": "3.14",
   "api_version": "0.13.3",
   "graphs": {
-    "agent": "agent.graphs.agent:traced_agent"
+    "agent": "openswe.graphs.agent:traced_agent"
   },
   "dependencies": [
     "."
   ],
   "auth": {
-    "path": "agent.local_auth:auth",
+    "path": "openswe.local_auth:auth",
     "disable_studio_auth": true
   },
   "checkpointer": {
-    "path": "agent.local_checkpointer.create_checkpointer"
+    "path": "openswe.local_checkpointer.create_checkpointer"
   },
   "http": {
     "disable_ui": true

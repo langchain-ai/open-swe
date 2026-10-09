@@ -1,7 +1,7 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 
 import { AppShell } from "@/components/AppShell"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { WorkspaceSettingsPanel } from "@/features/settings/components/WorkspaceSettings"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -23,7 +23,7 @@ function WorkspaceSettingsPage() {
 
   if (session.isLoading) {
     return (
-      <main className="p-6">
+      <main className="p-space-6">
         <Skeleton className="h-40 w-full" />
       </main>
     )

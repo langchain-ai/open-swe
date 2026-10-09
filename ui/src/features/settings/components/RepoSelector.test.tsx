@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { RepoSelector } from "./RepoSelector"
 import { useRecentRepos } from "@/lib/recentRepos"
 
@@ -46,7 +47,7 @@ function Picker({ multiple = false }: { multiple?: boolean }) {
 }
 
 it("persists only five unique selections and keeps multi-select open without auto-selecting", async () => {
-  render(<Picker multiple />)
+  render(<Picker multiple />, { wrapper: TooltipProvider })
   fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
   for (const repo of repos)
     fireEvent.click(
@@ -74,7 +75,7 @@ it("auto-selects the latest available repo and respects an explicit clear", asyn
   useRecentRepos.setState({
     byAccount: { "alice:github": ["org/missing", "org/c"] },
   })
-  render(<Picker />)
+  render(<Picker />, { wrapper: TooltipProvider })
   fireEvent.click(await screen.findByRole("button", { name: "org/c" }))
   fireEvent.click(await screen.findByRole("button", { name: "No repository" }))
   await waitFor(() =>
@@ -131,7 +132,8 @@ it("never offers archived choices or an archive toggle by default", async () => 
         },
       ]}
       onRepoChange={vi.fn()}
-    />
+    />,
+    { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
   expect(await screen.findByText("org/active")).toBeTruthy()
@@ -159,7 +161,8 @@ it("hides archives even in search until opted in, without clearing the selection
       ]}
       selectedRepo="org/legacy"
       onRepoChange={onRepoChange}
-    />
+    />,
+    { wrapper: TooltipProvider }
   )
   fireEvent.click(screen.getByRole("button", { name: "org/legacy" }))
   expect(

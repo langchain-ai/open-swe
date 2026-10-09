@@ -2,14 +2,17 @@ import { Link } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
+import { Avatar } from "@langchain/macaw-components/Avatar"
+import { Badge } from "@langchain/macaw-components/Badge"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
+import { Input } from "@langchain/macaw-components/Input"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Switch } from "@langchain/macaw-components/Switch"
 
 import type { AdminUser } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { TablePagination } from "@/components/TablePagination"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import {
   useAdminCancelAgentThread,
@@ -84,23 +87,29 @@ export function SlackIntegrationSection({
         control={
           <Switch
             id="slack-code-channels"
+            aria-label="Slack Code Channels"
             checked={enabled}
-            onCheckedChange={setCodeChannelsEnabled}
+            onChange={setCodeChannelsEnabled}
           />
         }
       />
-      <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
+      <div className="flex flex-col gap-space-3 px-space-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8">
         <div className="flex flex-col gap-1">
-          <span className="text-sm/none font-medium text-foreground">
+          <span className="text-sm/none font-medium text-primary">
             App manifest
           </span>
-          <span className="text-xs/relaxed text-muted-foreground">
+          <span className="text-xs/relaxed text-secondary">
             {placeholdersRemain
               ? "Copy the selected manifest, replace its remaining <…> placeholders, then paste it into your Slack app settings and reinstall the app."
               : "Copy the selected manifest — its URLs are filled in from this deployment — then paste it into your Slack app settings and reinstall the app."}
           </span>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void copyManifest()}>
+        <Button
+          size="xs"
+          color="secondary"
+          variant="outlined"
+          onClick={() => void copyManifest()}
+        >
           {copyState === "copied"
             ? "Copied"
             : copyState === "failed"
@@ -143,14 +152,19 @@ export function RunningAgentsSection() {
       title="Running agents"
       description="Workspace-wide active threads. Killing a thread requests interruption of all pending and running runs without deleting its history."
     >
-      <div className="flex flex-col gap-3 p-4">
+      <div className="flex flex-col gap-space-3 p-space-4">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
-            {running.length} running
-          </span>
+          {threads.isFetching ? (
+            <Skeleton className="h-4 w-16" />
+          ) : (
+            <span className="text-xs text-secondary">
+              {running.length} running
+            </span>
+          )}
           <Button
-            size="sm"
-            variant="outline"
+            size="xs"
+            color="secondary"
+            variant="outlined"
             onClick={() => void threads.refetch()}
             disabled={threads.isFetching}
           >
@@ -165,38 +179,44 @@ export function RunningAgentsSection() {
             {running.map((thread) => (
               <div
                 key={thread.id}
-                className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-b-0"
+                className="flex items-center justify-between gap-space-3 border-b border-default py-space-2 last:border-b-0"
               >
                 <Link
                   to="/agents/$threadId"
                   params={{ threadId: thread.id }}
                   className="min-w-0 flex-1 hover:underline"
                 >
-                  <p className="truncate text-xs font-medium text-foreground">
+                  <p className="truncate text-xs font-medium text-primary">
                     {thread.title}
                   </p>
-                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  <p className="truncate font-mono text-xxs text-secondary">
                     {thread.repoFullName || "no repo"} · {thread.id}
                   </p>
+                  <p className="text-xxs text-secondary">
+                    Thread started{" "}
+                    <time dateTime={new Date(thread.createdAt).toISOString()}>
+                      {new Date(thread.createdAt).toLocaleString(undefined, {
+                        timeZoneName: "short",
+                      })}
+                    </time>
+                  </p>
                 </Link>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => kill(thread)}
-                >
+                <Button size="xs" color="error" onClick={() => kill(thread)}>
                   Kill
                 </Button>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">No running agents.</p>
+          <p className="text-xs text-secondary">No running agents.</p>
         )}
 
         {threads.error && (
-          <p className="text-xs text-destructive">{threads.error.message}</p>
+          <Banner intent="error" title="Could not load running agents.">
+            {threads.error.message}
+          </Banner>
         )}
-        {message && <p className="text-xs text-muted-foreground">{message}</p>}
+        {message && <p className="text-xs text-secondary">{message}</p>}
       </div>
     </SettingsSection>
   )
@@ -242,20 +262,23 @@ export function TriggerReviewSection() {
       title="Trigger a review"
       description="Manually start an Open SWE Review run on a pull request. The repository must be enabled for review."
     >
-      <div className="flex flex-col gap-2 p-4">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-space-2 p-space-4">
+        <div className="flex items-center gap-space-2">
           <Input
+            aria-label="Pull request URL"
+            size="sm"
             className="flex-1"
             placeholder="https://github.com/owner/repo/pull/123"
             value={url}
-            onChange={(e) => {
-              setUrl(e.target.value)
+            onChange={(value) => {
+              setUrl(value)
               setMessage(null)
               setError(null)
             }}
           />
           <Button
             size="sm"
+            color="primary"
             onClick={() => trigger.mutate()}
             disabled={!parsed || trigger.isPending}
           >
@@ -263,12 +286,12 @@ export function TriggerReviewSection() {
           </Button>
         </div>
         {url.trim() && !parsed && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             Enter a full PR URL like https://github.com/owner/repo/pull/123
           </p>
         )}
         {message && parsed && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-secondary">
             {message}{" "}
             <Link
               to="/agents/reviews/$owner/$repo/$number"
@@ -277,13 +300,13 @@ export function TriggerReviewSection() {
                 repo: parsed.repo,
                 number: String(parsed.number),
               }}
-              className="underline hover:text-foreground"
+              className="underline hover:text-primary"
             >
               View review
             </Link>
           </p>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-xs text-error-secondary">{error}</p>}
       </div>
     </SettingsSection>
   )
@@ -309,13 +332,14 @@ export function UsersSection({ enabled }: { enabled: boolean }) {
       title="Users"
       description="Everyone who has signed in with GitHub, and the Slack account each has connected from their own settings."
     >
-      <div className="flex flex-col gap-3 p-4">
+      <div className="flex flex-col gap-space-3 p-space-4">
         <Input
           aria-label="Search users"
+          size="md"
           placeholder="Search by name, GitHub login, email, or Slack ID…"
           value={search}
-          onChange={(event) => {
-            setSearch(event.target.value)
+          onChange={(value) => {
+            setSearch(value)
             setPage(1)
           }}
         />
@@ -323,32 +347,41 @@ export function UsersSection({ enabled }: { enabled: boolean }) {
           {users.isLoading ? (
             <Skeleton className="h-32" />
           ) : users.isError ? (
-            <p role="alert" className="text-xs text-destructive">
-              Could not load users. Please try again.
-            </p>
+            <div role="alert">
+              <Banner
+                intent="error"
+                title="Could not load users. Please try again."
+              />
+            </div>
           ) : !items.length ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-secondary">
               {query ? "No users match your search." : "No users yet."}
             </p>
           ) : (
             items.map((user: AdminUser) => (
               <div
                 key={user.user_id}
-                className="flex items-center justify-between gap-2 border-b border-border py-1.5 text-xs last:border-b-0"
+                className="flex items-center justify-between gap-space-2 border-b border-default py-1.5 text-xs last:border-b-0"
               >
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium">
+                <Avatar
+                  size="sm"
+                  shape="circle"
+                  label={user.github_login || user.display_name || user.user_id}
+                  imageUrl={user.avatar_url ?? undefined}
+                />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-medium text-primary">
                     {user.github_login || user.display_name || user.user_id}
                   </span>
-                  <span className="truncate text-xs text-muted-foreground">
+                  <span className="truncate text-xs text-secondary">
                     {user.email}
                     {user.slack_user_id ? ` · Slack ${user.slack_user_id}` : ""}
                   </span>
                 </div>
                 {user.is_admin && (
-                  <span className="text-[10px] font-medium text-muted-foreground">
+                  <Badge color="secondary" size="xxs">
                     Admin
-                  </span>
+                  </Badge>
                 )}
               </div>
             ))

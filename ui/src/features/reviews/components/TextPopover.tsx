@@ -1,14 +1,12 @@
-import { useState, type ReactElement } from "react"
-
-import { Button } from "@/components/ui/button"
+import { Button } from "@langchain/macaw-components/Button"
 import {
   Popover,
-  PopoverDescription,
-  PopoverPopup,
-  PopoverTitle,
+  PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover"
-import { Textarea } from "@/components/ui/textarea"
+} from "@langchain/macaw-components/Popover"
+import { Text } from "@langchain/macaw-components/Text"
+import { Textarea } from "@langchain/macaw-components/Textarea"
+import { useState, type ReactElement } from "react"
 
 /**
  * A trigger that opens an anchored popover asking for optional text before acting.
@@ -41,17 +39,24 @@ export function TextPopover({
   }
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={trigger} />
-      <PopoverPopup align="end" className="w-80 max-w-[calc(100vw-2rem)]">
-        <PopoverTitle className="text-xs">{title}</PopoverTitle>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent
+        align="end"
+        aria-label={title}
+        className="w-80 max-w-[calc(100vw-2rem)]"
+      >
+        <Text as="h2" variant="sm" weight="semibold">
+          {title}
+        </Text>
         {description && (
-          <PopoverDescription className="mt-1">
+          <Text variant="xs" color="secondary" className="mt-space-1">
             {description}
-          </PopoverDescription>
+          </Text>
         )}
         <Textarea
+          size="md"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={setText}
           onKeyDown={(event) => {
             if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
               event.preventDefault()
@@ -60,18 +65,23 @@ export function TextPopover({
           }}
           placeholder={placeholder}
           rows={3}
-          className="mt-2 resize-y text-xs"
+          className="mt-space-2"
           autoFocus
         />
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={() => setOpen(false)}>
+        <div className="mt-space-2 flex items-center justify-end gap-space-2">
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            onClick={() => setOpen(false)}
+          >
             Cancel
           </Button>
-          <Button size="sm" onClick={submit}>
+          <Button size="xs" onClick={submit}>
             {submitLabel}
           </Button>
         </div>
-      </PopoverPopup>
+      </PopoverContent>
     </Popover>
   )
 }
