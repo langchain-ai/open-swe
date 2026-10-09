@@ -1,4 +1,3 @@
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -7,6 +6,7 @@ import pytest
 from mcp.types import CallToolResult, TextContent, Tool
 
 from openswe.mcp import MCPConnection, runtime
+from tests.mcp_helpers import fake_mcp_server
 
 
 def record(name="linear", **fields):
@@ -40,22 +40,11 @@ def remote(monkeypatch):
             for name in record.allowed_tools
         ]
 
-    class Session:
-        def __init__(self, url):
-            self.url = url
-
-        async def initialize(self):
-            pass
-
-        async def call_tool(self, name, arguments, **kwargs):
-            return CallToolResult(content=[TextContent(type="text", text=self.url)])
-
-    @asynccontextmanager
-    async def session(connection, **kwargs):
-        yield Session(connection["url"])
+    async def call(transport, name, arguments):
+        return CallToolResult(content=[TextContent(type="text", text=transport.url)])
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
-    monkeypatch.setattr("langchain_mcp_adapters.tools.create_session", session)
+    fake_mcp_server(monkeypatch, call=call)
 
 
 async def test_sources_combine_distinct_connections_and_replace_matching_names(remote):

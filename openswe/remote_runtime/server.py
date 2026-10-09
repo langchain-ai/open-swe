@@ -10,14 +10,18 @@ from it, never from arguments.
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from functools import cache
-from typing import Final, Literal, NamedTuple
+from typing import Final, Literal, NamedTuple, override
 
-from mcp import types
-from mcp.server.lowlevel import Server
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_request
+from fastmcp.server.providers import Provider
+from fastmcp.tools import Tool
+from fastmcp.tools import ToolResult as MCPToolResult
+from fastmcp.utilities.components import FastMCPComponent
+from mcp.types import TextContent
 from pydantic import BaseModel, JsonValue
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -47,7 +51,7 @@ Hook = Callable[[RemoteRun, str], Awaitable[JsonValue]]
 
 
 class Catalog(NamedTuple):
-    tools: Callable[[], list[types.Tool]]
+    tools: Callable[[], Sequence[Tool]]
     call: Call
     hook: Hook
 
@@ -57,12 +61,10 @@ def _catalogs() -> Mapping[str, Catalog]:
     # The webapp must not import the agent stack at startup.
     from openswe.remote_runtime import reviewer
 
-    def tools() -> list[types.Tool]:
+    def tools() -> list[Tool]:
         return [
-            types.Tool(
-                name=spec["name"],
-                description=spec["description"],
-                inputSchema=spec["parameters"],
+            _CatalogTool(
+                name=spec["name"], description=spec["description"], parameters=spec["parameters"]
             )
             for spec in reviewer.served_tools()
         ]
@@ -86,40 +88,45 @@ def _scope_run(scope: Scope) -> RemoteRun:
     return run
 
 
-def _verified_run(server: Server[object, Request]) -> tuple[RemoteRun, Catalog]:
-    request = server.request_context.request
-    if request is None:
-        raise PermissionError("The call carried no verified run")
-    run = _scope_run(request.scope)
+def _verified_run() -> tuple[RemoteRun, Catalog]:
+    run = _scope_run(get_http_request().scope)
     return run, _catalog(run)
 
 
-def build_server() -> Server[object, Request]:
-    server: Server[object, Request] = Server(_SERVER_NAME)
-
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        _, catalog = _verified_run(server)
-        return catalog.tools()
-
-    @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict[str, JsonValue]) -> types.CallToolResult:
-        run, catalog = _verified_run(server)
+class _CatalogTool(Tool):
+    @override
+    async def run(self, arguments: dict[str, JsonValue]) -> MCPToolResult:
+        run, catalog = _verified_run()
         try:
-            result = await catalog.call(run, name, arguments)
+            result = await catalog.call(run, self.name, arguments)
         except Exception:
             logger.exception(
                 "Remote runtime call failed",
-                extra={"tool_name": name, "thread_id": run.thread_id},
+                extra={"tool_name": self.name, "thread_id": run.thread_id},
             )
             raise
         text = result.content if isinstance(result.content, str) else json.dumps(result.content)
-        return types.CallToolResult(
-            content=[types.TextContent(type="text", text=text)],
-            isError=result.status == "error",
+        return MCPToolResult(
+            content=[TextContent(type="text", text=text)], is_error=result.status == "error"
         )
 
-    return server
+
+class _CatalogProvider(Provider):
+    """The tools of the catalog the request's verified run token was signed for."""
+
+    @override
+    async def _list_tools(self) -> Sequence[Tool]:
+        _, catalog = _verified_run()
+        return catalog.tools()
+
+    @override
+    async def get_tasks(self) -> Sequence[FastMCPComponent]:
+        # Startup asks outside any request; no catalog tool runs as a background task.
+        return []
+
+
+def build_server() -> FastMCP:
+    return FastMCP(_SERVER_NAME, providers=[_CatalogProvider()])
 
 
 async def _hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
@@ -182,15 +189,13 @@ class Mount(NamedTuple):
 
     app: ASGIApp
     hooks: ASGIApp
-    lifespan: Callable[[], AbstractAsyncContextManager[None]]
+    lifespan: Callable[[], AbstractAsyncContextManager[object]]
 
 
 def build_mount() -> Mount:
-    manager = StreamableHTTPSessionManager(
-        app=build_server(), event_store=None, json_response=True, stateless=True
-    )
+    app = build_server().http_app(path=PATH, json_response=True, stateless_http=True)
     return Mount(
-        app=RunTokenMiddleware(manager.handle_request),
+        app=RunTokenMiddleware(app),
         hooks=RunTokenMiddleware(_hook_endpoint),
-        lifespan=manager.run,
+        lifespan=lambda: app.lifespan(app),
     )

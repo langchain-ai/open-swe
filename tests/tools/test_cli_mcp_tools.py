@@ -1,16 +1,16 @@
 """CLI MCP reuses the Python tool contract and rechecks caller permissions."""
 
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from mcp.types import Tool
-from pydantic import ValidationError
+from mcp.types import CallToolResult, TextContent, Tool
+from pydantic import JsonValue, ValidationError
 
 from openswe.mcp import MCPConnection, runtime
 from openswe.mcp.cli_tools import CLIArguments, cli_mcp_invoke, cli_mcp_tools
 from openswe.tools.access import Access
+from tests.mcp_helpers import Transport, fake_mcp_server
 
 
 @pytest.mark.asyncio
@@ -109,23 +109,13 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
     async def discover(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
         return [Tool(name="search", inputSchema={"type": "object"})]
 
-    @asynccontextmanager
-    async def session(connection: dict[str, object], **kwargs: object):
-        class RemoteSession:
-            async def initialize(self) -> None:
-                return None
-
-            async def call_tool(self, name: str, arguments: dict[str, object], **kwargs: object):
-                from mcp.types import CallToolResult, TextContent
-
-                return CallToolResult(
-                    content=[TextContent(type="text", text=str(connection["url"]))]
-                )
-
-        yield RemoteSession()
+    async def call(
+        transport: Transport, name: str, arguments: dict[str, JsonValue]
+    ) -> CallToolResult:
+        return CallToolResult(content=[TextContent(type="text", text=transport.url)])
 
     monkeypatch.setattr(runtime, "_discover_tools", discover)
-    monkeypatch.setattr("langchain_mcp_adapters.tools.create_session", session)
+    fake_mcp_server(monkeypatch, call=call)
     alice = {"sub": "alice"}
     bob = {"sub": "bob"}
     alice_tools = await cli_mcp_tools(alice)

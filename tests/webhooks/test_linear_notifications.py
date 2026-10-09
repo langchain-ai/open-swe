@@ -1,5 +1,4 @@
 import asyncio
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +14,7 @@ from openswe.mcp import MCPConnectionUpdate, runtime
 from openswe.mcp import workspace as workspace_mcps
 from openswe.middleware import sandbox_circuit_breaker
 from openswe.run_config import RunConfig
+from tests.mcp_helpers import Transport, fake_mcp_server
 
 
 @dataclass
@@ -22,15 +22,13 @@ class LinearMCP:
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     is_error: bool = False
 
-    async def initialize(self) -> None:
-        pass
-
     async def call_tool(
-        self, name: str, arguments: dict[str, Any], **kwargs: Any
+        self, transport: Transport, name: str, arguments: dict[str, Any]
     ) -> CallToolResult:
+        assert transport.url == "https://mcp.linear.app/mcp"
         self.calls.append((name, arguments))
         return CallToolResult(
-            isError=self.is_error,
+            is_error=self.is_error,
             content=[TextContent(type="text", text="rejected" if self.is_error else "created")],
         )
 
@@ -59,13 +57,7 @@ async def linear_mcp(fake_store, monkeypatch: pytest.MonkeyPatch, comment_tool: 
     )
     monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[definition]))
     remote = LinearMCP()
-
-    @asynccontextmanager
-    async def session(connection, **kwargs):
-        assert connection["url"] == "https://mcp.linear.app/mcp"
-        yield remote
-
-    monkeypatch.setattr("langchain_mcp_adapters.tools.create_session", session)
+    fake_mcp_server(monkeypatch, call=lambda *call: remote.call_tool(*call))
     return remote
 
 
@@ -235,7 +227,7 @@ async def test_notification_times_out_without_retrying(
     monkeypatch.setattr(notifications.asyncio, "timeout", lambda _: deadline)
     calls = []
 
-    async def never_finishes(name, arguments, **kwargs):
+    async def never_finishes(transport, name, arguments):
         calls.append((name, arguments))
         deadline.reschedule(asyncio.get_running_loop().time())
         await asyncio.Event().wait()
