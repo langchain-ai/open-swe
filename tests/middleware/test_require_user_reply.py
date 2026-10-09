@@ -74,12 +74,11 @@ class TestRequireUserReplyMiddleware:
         _assert_nudged(result, 1)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("tool_name", ["slack_reply", "request_service_connection"])
-    async def test_lets_the_turn_end_once_the_reply_tool_ran(self, tool_name: str) -> None:
+    async def test_lets_the_turn_end_once_the_reply_tool_ran(self) -> None:
         result = await _middleware().aafter_model(
             _state(
                 HumanMessage(content="what is up"),
-                _call(tool_name, "call-1", response_type="final"),
+                _call(TOOL, "call-1", response_type="final"),
                 _result("call-1"),
                 AIMessage(content="done"),
             ),
@@ -140,12 +139,26 @@ class TestRequireUserReplyMiddleware:
             _assert_nudged(result, 1)
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("tool_name", ["slack_reply", "request_service_connection"])
-    async def test_a_reply_slack_rejected_does_not_count(self, tool_name: str) -> None:
+    async def test_a_tool_that_posts_to_the_person_also_ends_the_turn(self) -> None:
+        state = _state(
+            HumanMessage(content="looks good"),
+            _call("show_chunk", "call-1", title="Next"),
+            _result("call-1"),
+            AIMessage(content=""),
+        )
+
+        assert await _middleware(replies=frozenset({"show_chunk"})).aafter_model(
+            state, _runtime()
+        ) == {"reply_nudges": 0}
+        _assert_nudged(await _middleware().aafter_model(state, _runtime()), 1)
+
+    @pytest.mark.asyncio
+    async def test_a_reply_slack_rejected_does_not_count(self) -> None:
+
         result = await _middleware().aafter_model(
             _state(
                 HumanMessage(content="what is up"),
-                _call(tool_name, "call-1", response_type="final"),
+                _call(TOOL, "call-1", response_type="final"),
                 _result("call-1", success=False),
                 AIMessage(content="I could not post that"),
             ),

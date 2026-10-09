@@ -29,6 +29,9 @@ from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)
 
+# Tools that post a card as the turn's final Slack reply.
+_CARD_TOOLS = frozenset({"connect_managed_tools"})
+
 ReplySurface = Literal["slack", "web"]
 
 SLACK_REPLY_SURFACE: ReplySurface = "slack"
@@ -107,12 +110,15 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         *,
         initial_surface: ReplySurface,
         max_retries: int = 2,
+        replies: frozenset[str] = frozenset(),
     ) -> None:
         super().__init__()
         self._tool_name = tool_name
         self._no_reply_tool_name = no_reply_tool_name
         self._initial_surface = initial_surface
         self._max_retries = max_retries
+        # Other tools whose successful call answers the person, such as a walkthrough's chunk.
+        self._replies = replies
 
     def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:  # noqa: ARG002
         # Resolved fresh every run: the surface a previous run ended on says
@@ -121,8 +127,10 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
 
     def _discharges_turn(self, call: Mapping[str, Any]) -> bool:
         name = call.get("name")
-        if name == self._no_reply_tool_name or (
-            self._tool_name == "slack_reply" and name == "request_service_connection"
+        if (
+            name == self._no_reply_tool_name
+            or name in self._replies
+            or (self._tool_name == "slack_reply" and name in _CARD_TOOLS)
         ):
             return True
         # An acknowledgement is not an answer, and the Slack prompt orders one

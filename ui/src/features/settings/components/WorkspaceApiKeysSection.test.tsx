@@ -92,6 +92,6 @@ it("requires confirmation to revoke and keeps failures recoverable", async () =>
   fireEvent.click(screen.getByRole("button", { name: "Revoke key" }))
   await screen.findAllByText("Request failed")
   fireEvent.click(screen.getByRole("button", { name: "Revoke key" }))
-  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   expect(revoke).toHaveBeenCalledTimes(2)
 })

@@ -1,5 +1,5 @@
+import { Button } from "@langchain/macaw-components/Button"
 import { useEffect, useState } from "react"
-import { Button } from "@/components/ui/button"
 
 export function LoadError({
   error,
@@ -28,19 +28,22 @@ export function LoadError({
       role="alert"
       className="flex min-w-0 flex-1 items-center justify-center p-6"
     >
-      <div className="w-full max-w-lg space-y-4 rounded-xl border bg-card p-6">
+      <div className="w-full max-w-lg space-y-4 rounded-xl border border-default bg-surface-level-1 p-6">
         <h1 className="text-lg font-semibold">{title}</h1>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-secondary">
           Try again. If this keeps happening, share the page URL and the details
           below with your workspace admin.
         </p>
-        <pre className="max-h-48 overflow-auto rounded-md bg-muted p-3 text-xs break-all whitespace-pre-wrap">
+        <pre className="max-h-48 overflow-auto rounded-md bg-surface-level-2 p-3 text-xs break-all whitespace-pre-wrap">
           {details}
         </pre>
-        <div className="flex gap-2">
-          <Button onClick={retry}>Try again</Button>
+        <div className="flex gap-space-2">
+          <Button color="primary" onClick={retry}>
+            Try again
+          </Button>
           <Button
-            variant="outline"
+            color="secondary"
+            variant="outlined"
             onClick={() => window.location.assign(import.meta.env.BASE_URL)}
           >
             Back to home

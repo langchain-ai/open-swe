@@ -28,6 +28,10 @@ from openswe.input_messages import (
     system_introduction,
 )
 from openswe.prompts import prompt
+from openswe.remote_runtime.client import (
+    RemoteRuntimeConfigurationError,
+    remote_runtime_client,
+)
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
@@ -264,6 +268,7 @@ async def trigger_pr_review_from_ref(
     github_user_id: int | None = None,
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
+    use_mda: bool = False,
 ) -> dict[str, Any]:
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
 
@@ -278,7 +283,25 @@ async def trigger_pr_review_from_ref(
     if not pr_metadata:
         return {"success": False, "error": "Could not fetch pull request metadata"}
 
+    if pr_metadata.get("draft"):
+        return {
+            "success": False,
+            "error": f"{pr_ref.url} is a draft. " + prompt("tools/human-review-blocked"),
+        }
+
     repo_private = common.repo_private_from_pr_metadata(pr_metadata)
+    if use_mda and repo_private is not False:
+        return {
+            "success": False,
+            "error": "Managed Deep Agents reviews support only public repositories",
+        }
+    if use_mda:
+        try:
+            mda_client = remote_runtime_client("reviewer")
+        except RemoteRuntimeConfigurationError as exc:
+            return {"success": False, "error": str(exc)}
+        if mda_client is None:
+            return {"success": False, "error": "No Managed Deep Agents reviewer is configured"}
     repo_id = common.repo_id_from_pr_metadata(pr_metadata)
     app_token, app_token_expires_at = await common.reviewer_token_for_repo(
         repo_config,
@@ -336,7 +359,9 @@ async def trigger_pr_review_from_ref(
         token=app_token,
     )
 
-    prompt = build_github_pr_review_prompt(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+    review_prompt = build_github_pr_review_prompt(
+        repo_config, pr_ref.number, pr_url, base_sha, head_sha
+    )
     configurable = await common.build_reviewer_configurable(
         source=source,
         github_login=github_login,
@@ -358,13 +383,13 @@ async def trigger_pr_review_from_ref(
     review_input = (
         _github_human_run_input(
             github_login,
-            prompt,
+            review_prompt,
             user_id=github_user_id,
             data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha),
         )
         if github_login
         else _github_webhook_run_input(
-            prompt, data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
+            review_prompt, data=_pr_data(repo_config, pr_ref.number, pr_url, base_sha, head_sha)
         )
     )
     run = await common.dispatch_agent_run(
@@ -377,6 +402,7 @@ async def trigger_pr_review_from_ref(
         assistant_id="reviewer",
         metadata=common.AGENT_VERSION_METADATA,
         client=langgraph_client,
+        use_mda=use_mda,
     )
     await common.store_current_reviewer_run_id(thread_id, run)
     return {"success": True, "queued": False, "thread_id": thread_id, "pr_url": pr_url}
