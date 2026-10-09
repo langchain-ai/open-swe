@@ -98,7 +98,7 @@ HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 _DECLINED_MARKER = "declined the review of"
 _PICK_REQUEST = "reviewer for it"
-_SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
+_SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this conversation")
 
 # The spec seeds config.py (VALUE_1..VALUE_30) and CHANGELOG.md on main. Drawn:
 # greet.py and config.py's VALUE_2 hunk, four lines. Excluded: 40 more.
